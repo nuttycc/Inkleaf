@@ -5,6 +5,11 @@ import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.exio.comicreader.data.ComicRepository
+import com.exio.comicreader.data.CoverAspect
+import com.exio.comicreader.data.CoverCrop
+import com.exio.comicreader.data.GridColumnsMode
+import com.exio.comicreader.data.ShelfLayoutSettings
+import com.exio.comicreader.data.ShelfSettingsRepository
 import com.exio.comicreader.data.db.ComicEntity
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,10 +27,30 @@ data class ScanState(
 
 class ShelfViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = ComicRepository(app)
+    private val settingsRepo = ShelfSettingsRepository(app)
 
     /** 书架列表：数据库一变自动推送 */
     val comics: StateFlow<List<ComicEntity>> = repo.observeAll()
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+
+    /**
+     * 排版设置。initial 给默认构造的设置对象：DataStore 首次发射前
+     * 网格就有合法参数可用，且默认值与"从未写入"的语义一致，不会闪变
+     */
+    val layoutSettings: StateFlow<ShelfLayoutSettings> = settingsRepo.settings
+        .stateIn(viewModelScope, SharingStarted.Lazily, ShelfLayoutSettings())
+
+    fun setColumns(value: GridColumnsMode) {
+        viewModelScope.launch { settingsRepo.setColumns(value) }
+    }
+
+    fun setAspect(value: CoverAspect) {
+        viewModelScope.launch { settingsRepo.setAspect(value) }
+    }
+
+    fun setCrop(value: CoverCrop) {
+        viewModelScope.launch { settingsRepo.setCrop(value) }
+    }
 
     private val _scanState = MutableStateFlow(ScanState())
     val scanState: StateFlow<ScanState> = _scanState.asStateFlow()

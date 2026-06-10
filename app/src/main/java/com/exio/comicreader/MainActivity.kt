@@ -4,6 +4,9 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -45,7 +48,16 @@ class MainActivity : ComponentActivity() {
             ComicReaderTheme {
                 val navController = rememberNavController()
 
-                NavHost(navController = navController, startDestination = ShelfRoute) {
+                // Navigation 默认转场是 700ms 交叉淡化，偏慢（黑色阅读页
+                // 淡出时残影明显）；统一换成 250ms
+                NavHost(
+                    navController = navController,
+                    startDestination = ShelfRoute,
+                    enterTransition = { fadeIn(tween(250)) },
+                    exitTransition = { fadeOut(tween(250)) },
+                    popEnterTransition = { fadeIn(tween(250)) },
+                    popExitTransition = { fadeOut(tween(250)) },
+                ) {
                     composable<ShelfRoute> {
                         ShelfScreen(
                             onOpenComic = { id -> navController.navigate(ReaderRoute(id)) },

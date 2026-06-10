@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -30,7 +31,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -47,15 +52,21 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
+import com.exio.comicreader.R
+import com.exio.comicreader.data.CoverAspect
+import com.exio.comicreader.data.CoverCrop
+import com.exio.comicreader.data.GridColumnsMode
+import com.exio.comicreader.data.ShelfLayoutSettings
 import com.exio.comicreader.data.db.ComicEntity
 import java.io.File
 
-/** 首页书架：封面网格 + 目录扫描 + FAB 单文件添加 + 长按删除 */
+/** 首页书架：封面网格 + 目录扫描 + 排版抽屉 + FAB 单文件添加 + 长按删除 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ShelfScreen(
@@ -66,8 +77,10 @@ fun ShelfScreen(
 ) {
     val comics by viewModel.comics.collectAsStateWithLifecycle()
     val scanState by viewModel.scanState.collectAsStateWithLifecycle()
+    val layout by viewModel.layoutSettings.collectAsStateWithLifecycle()
 
     var pendingDelete by remember { mutableStateOf<ComicEntity?>(null) }
+    var showLayoutSheet by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
 
     val picker = rememberLauncherForActivityResult(
@@ -76,7 +89,6 @@ fun ShelfScreen(
         if (uri != null) viewModel.addComic(uri, onReady = onOpenComic)
     }
 
-    // 扫描错误 → Snackbar，一次性消费
     LaunchedEffect(scanState.message) {
         scanState.message?.let {
             snackbarHostState.showSnackbar(it)
@@ -90,13 +102,19 @@ fun ShelfScreen(
             TopAppBar(
                 title = { Text("我的书架") },
                 actions = {
+                    // core 图标集没有 Tune，用自建的矢量资源（res/drawable/ic_tune.xml）
+                    IconButton(onClick = { showLayoutSheet = true }) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_tune),
+                            contentDescription = "书架排版",
+                        )
+                    }
                     IconButton(
                         onClick = { viewModel.refresh() },
                         enabled = !scanState.isScanning,
                     ) {
                         Icon(Icons.Filled.Refresh, contentDescription = "重新扫描")
                     }
-                    // core 图标集里没有 Folder，用 List 表达"目录管理"
                     IconButton(onClick = onOpenFolders) {
                         Icon(Icons.AutoMirrored.Filled.List, contentDescription = "管理漫画库目录")
                     }
@@ -114,9 +132,10 @@ fun ShelfScreen(
             }
         },
     ) { innerPadding ->
-        Column(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+        Column(modifier = Modifier
+            .fillMaxSize()
+            .padding(innerPadding)) {
             if (scanState.isScanning) {
-                // 不定进度条：扫描总量未知，只表达"正在进行"
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
 
@@ -133,7 +152,10 @@ fun ShelfScreen(
                 }
             } else {
                 LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 110.dp),
+                    // 固定列数或按最小宽度自适应，由排版设置驱动
+                    columns = layout.columns.fixedCount
+                        ?.let { GridCells.Fixed(it) }
+                        ?: GridCells.Adaptive(minSize = 110.dp),
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(12.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -142,6 +164,8 @@ fun ShelfScreen(
                     items(comics, key = { it.id }) { comic ->
                         ComicCard(
                             comic = comic,
+                            aspect = layout.aspect.ratio,
+                            crop = layout.crop,
                             onClick = { onOpenComic(comic.id) },
                             onLongClick = { pendingDelete = comic },
                         )
@@ -151,8 +175,20 @@ fun ShelfScreen(
         }
     }
 
+    // 排版抽屉：抽屉只遮住屏幕下部，上方网格仍可见——点选即生效，
+    // 网格当场变化就是"实时预览"
+    if (showLayoutSheet) {
+        ModalBottomSheet(onDismissRequest = { showLayoutSheet = false }) {
+            LayoutSheetContent(
+                settings = layout,
+                onColumnsChange = viewModel::setColumns,
+                onAspectChange = viewModel::setAspect,
+                onCropChange = viewModel::setCrop,
+            )
+        }
+    }
+
     pendingDelete?.let { comic ->
-        // 扫描来源的条目（文件还在时）删了下次扫描会重新出现，要提前说明
         val rescanHint = if (comic.folderId != null && !comic.isMissing) {
             "\n注意：该漫画来自库目录，重新扫描后会再次出现。"
         } else {
@@ -175,15 +211,98 @@ fun ShelfScreen(
     }
 }
 
+/** 排版抽屉内容：三组单选（列数 / 封面比例 / 封面填充） */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LayoutSheetContent(
+    settings: ShelfLayoutSettings,
+    onColumnsChange: (GridColumnsMode) -> Unit,
+    onAspectChange: (CoverAspect) -> Unit,
+    onCropChange: (CoverCrop) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .navigationBarsPadding()
+            .padding(bottom = 16.dp),
+    ) {
+        Text(text = "书架排版", style = MaterialTheme.typography.titleLarge)
+
+        SheetSectionLabel("列数")
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            GridColumnsMode.entries.forEachIndexed { index, mode ->
+                SegmentedButton(
+                    selected = settings.columns == mode,
+                    onClick = { onColumnsChange(mode) },
+                    shape = SegmentedButtonDefaults.itemShape(index, GridColumnsMode.entries.size),
+                ) {
+                    Text(mode.fixedCount?.toString() ?: "自适应")
+                }
+            }
+        }
+
+        SheetSectionLabel("封面比例")
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            CoverAspect.entries.forEachIndexed { index, aspect ->
+                SegmentedButton(
+                    selected = settings.aspect == aspect,
+                    onClick = { onAspectChange(aspect) },
+                    shape = SegmentedButtonDefaults.itemShape(index, CoverAspect.entries.size),
+                ) {
+                    Text(
+                        when (aspect) {
+                            CoverAspect.STANDARD -> "2:3 标准"
+                            CoverAspect.BOOK -> "3:4 图书"
+                            CoverAspect.SQUARE -> "1:1 方形"
+                        }
+                    )
+                }
+            }
+        }
+
+        SheetSectionLabel("封面填充")
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            CoverCrop.entries.forEachIndexed { index, crop ->
+                SegmentedButton(
+                    selected = settings.crop == crop,
+                    onClick = { onCropChange(crop) },
+                    shape = SegmentedButtonDefaults.itemShape(index, CoverCrop.entries.size),
+                ) {
+                    Text(
+                        when (crop) {
+                            CoverCrop.CROP -> "裁剪填充"
+                            CoverCrop.TOP_CROP -> "顶部裁剪"
+                            CoverCrop.CONTAIN -> "完整显示"
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SheetSectionLabel(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 20.dp, bottom = 8.dp),
+    )
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ComicCard(
     comic: ComicEntity,
+    aspect: Float,
+    crop: CoverCrop,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    // 失效条目整体淡化；角标保持完全不透明所以放在淡化层之外
     val contentAlpha = if (comic.isMissing) 0.45f else 1f
 
     Column(
@@ -194,12 +313,14 @@ private fun ComicCard(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(0.7f)
+                .aspectRatio(aspect)
                 .clip(RoundedCornerShape(8.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant),
         ) {
             Box(
-                modifier = Modifier.fillMaxSize().alpha(contentAlpha),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .alpha(contentAlpha),
                 contentAlignment = Alignment.Center,
             ) {
                 val coverFile = comic.coverPath?.let(::File)?.takeIf { it.exists() }
@@ -207,7 +328,15 @@ private fun ComicCard(
                     AsyncImage(
                         model = coverFile,
                         contentDescription = comic.title,
-                        contentScale = ContentScale.Crop,
+                        // 填充方式是纯显示期行为：换设置不需要重新生成封面文件
+                        contentScale = when (crop) {
+                            CoverCrop.CONTAIN -> ContentScale.Fit
+                            else -> ContentScale.Crop
+                        },
+                        alignment = when (crop) {
+                            CoverCrop.TOP_CROP -> Alignment.TopCenter
+                            else -> Alignment.Center
+                        },
                         modifier = Modifier.fillMaxSize(),
                     )
                 } else {

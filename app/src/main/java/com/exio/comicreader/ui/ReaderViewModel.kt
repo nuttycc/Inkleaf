@@ -16,7 +16,11 @@ import kotlinx.coroutines.launch
 sealed interface ReaderUiState {
     data object Loading : ReaderUiState
     data class Error(val message: String) : ReaderUiState
-    data class Ready(val book: ComicBook, val startPage: Int) : ReaderUiState
+    data class Ready(
+        val book: ComicBook,
+        val startPage: Int,
+        val title: String,
+    ) : ReaderUiState
 }
 
 /**
@@ -51,6 +55,7 @@ class ReaderViewModel(
                     book = opened,
                     // 原文件可能被换成页数更少的版本，夹紧防止越界
                     startPage = comic.lastReadPage.coerceIn(0, opened.pageCount - 1),
+                    title = comic.title,
                 )
             } catch (e: ComicOpenException) {
                 ReaderUiState.Error(e.message ?: "打开失败")
