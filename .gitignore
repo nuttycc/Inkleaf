@@ -1,12 +1,8 @@
 *.iml
 .gradle
 /local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
+# IDE 个人工作区状态：频繁自动变化且只对本机有意义，整目录不入库
+/.idea/
 .DS_Store
 /build
 /captures

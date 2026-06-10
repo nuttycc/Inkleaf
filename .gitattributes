@@ -1,0 +1,4 @@
+# 行尾规范化：WSL（LF）与 Windows Android Studio（CRLF）交替编辑会产生
+# 整文件的幻影 diff。统一存储与签出为 LF；Windows 批处理脚本必须 CRLF。
+* text=auto eol=lf
+*.bat text eol=crlf
