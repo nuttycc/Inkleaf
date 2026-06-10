@@ -16,14 +16,17 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -41,6 +44,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -71,7 +75,7 @@ import java.io.File
 @Composable
 fun ShelfScreen(
     onOpenComic: (Long) -> Unit,
-    onOpenFolders: () -> Unit,
+    onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: ShelfViewModel = viewModel(),
 ) {
@@ -115,8 +119,9 @@ fun ShelfScreen(
                     ) {
                         Icon(Icons.Filled.Refresh, contentDescription = "重新扫描")
                     }
-                    IconButton(onClick = onOpenFolders) {
-                        Icon(Icons.AutoMirrored.Filled.List, contentDescription = "管理漫画库目录")
+                    // 目录管理已收进设置页（设置 → 漫画库目录）
+                    IconButton(onClick = onOpenSettings) {
+                        Icon(Icons.Filled.Settings, contentDescription = "设置")
                     }
                 },
             )
@@ -178,7 +183,12 @@ fun ShelfScreen(
     // 排版抽屉：抽屉只遮住屏幕下部，上方网格仍可见——点选即生效，
     // 网格当场变化就是"实时预览"
     if (showLayoutSheet) {
-        ModalBottomSheet(onDismissRequest = { showLayoutSheet = false }) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { showLayoutSheet = false },
+            sheetState = sheetState,
+            contentWindowInsets = { WindowInsets(0, 0, 0, 0) }
+        ) {
             LayoutSheetContent(
                 settings = layout,
                 onColumnsChange = viewModel::setColumns,
@@ -224,6 +234,7 @@ private fun LayoutSheetContent(
     Column(
         modifier = modifier
             .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp)
             .navigationBarsPadding()
             .padding(bottom = 16.dp),
