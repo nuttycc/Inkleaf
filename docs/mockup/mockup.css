@@ -1,0 +1,269 @@
+/* ============================================================
+   ComicReader Mockup 共享样式库
+   ------------------------------------------------------------
+   所有 mockup 页面通过 <link rel="stylesheet" href="mockup.css">
+   引用。组织结构：
+     1. 设计令牌（M3 浅色配色，:root CSS 变量）
+     2. 画布与页面排版（深色底、frame 网格、标题/说明）
+     3. 手机外框 + 状态栏
+     4. 通用组件（顶栏 / 图标按钮 / FAB / 列表项 / 底部抽屉 / 分段按钮）
+     5. 书架专用（网格 / 卡片 / 封面占位）
+     6. 阅读页专用（漫画页示意 / 工具栏 / 滑杆 / 点按区标注）
+   页面特有的微调写在各自 HTML 的小型 <style> 里，勿改这里。
+   ============================================================ */
+
+/* ---- 1. 设计令牌：Material 3 浅色（默认紫色种子，与 App 主题一致） ---- */
+:root {
+  --primary: #6650a4;
+  --on-primary: #ffffff;
+  --primary-container: #EADDFF;
+  --on-primary-container: #21005D;
+  --secondary-container: #E8DEF8;
+  --on-secondary-container: #1D192B;
+  --surface: #FEF7FF;
+  --surface-container: #F3EDF7;
+  --surface-container-high: #ECE6F0;
+  --surface-variant: #E7E0EC;
+  --on-surface: #1D1B20;
+  --on-surface-variant: #49454F;
+  --outline: #79747E;
+  --outline-variant: #CAC4D0;
+  --error-container: #F9DEDC;
+  --on-error-container: #410E0B;
+  --scrim: rgba(0,0,0,0.45);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* ---- 2. 画布与页面排版 ---- */
+body {
+  background: #1a1a1f;
+  font-family: "Segoe UI", Roboto, "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  color: #ddd;
+  padding: 32px 24px 64px;
+}
+
+.page-header { max-width: 1200px; margin: 0 auto 28px; }
+.page-header h1 { font-size: 22px; font-weight: 600; color: #fff; }
+.page-header p  { font-size: 13px; color: #999; margin-top: 6px; line-height: 1.7; }
+.page-header .tag {
+  display: inline-block; background: #6650a4; color: #fff;
+  font-size: 11px; padding: 2px 10px; border-radius: 10px; margin-right: 8px;
+}
+
+.frames { display: flex; flex-wrap: wrap; gap: 36px; justify-content: center; }
+
+.frame-wrap { width: 360px; }
+.frame-wrap .caption { margin-top: 12px; }
+.frame-wrap .caption h2 { font-size: 15px; color: #fff; font-weight: 600; }
+.frame-wrap .caption p  { font-size: 12px; color: #888; margin-top: 4px; line-height: 1.7; }
+/* 屏幕 ID 徽章：每屏的稳定引用名，讨论/锚点共用 */
+.caption .sid {
+  font-family: Consolas, "JetBrains Mono", monospace;
+  font-size: 12px; font-weight: 600;
+  background: #2a2a33; color: #c9b8ff;
+  padding: 2px 8px; border-radius: 6px; margin-right: 8px;
+}
+/* 标注里的跳转链接（指向其它 mockup 页 / 设计变体） */
+.caption a, .alt-links a { color: #c9b8ff; text-decoration: none; border-bottom: 1px dotted #6650a4; }
+.caption .alt-links { margin-top: 6px; font-size: 12px; color: #888; }
+
+.legend { max-width: 1200px; margin: 40px auto 0; font-size: 12px; color: #777; line-height: 1.9; }
+.legend code { background: #2a2a33; padding: 1px 6px; border-radius: 4px; color: #c9b8ff; }
+
+/* ---- 3. 手机外框：412×892 dp，按 360px 宽等比缩放 ---- */
+.phone {
+  width: 360px; height: 780px;
+  border-radius: 28px;
+  border: 6px solid #000;
+  overflow: hidden;
+  position: relative;
+  background: var(--surface);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.55);
+  font-size: 14px;
+  color: var(--on-surface);
+  display: flex; flex-direction: column;
+}
+.phone.dark { background: #000; color: #fff; }
+
+.statusbar {
+  height: 28px; flex: none;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 16px; font-size: 11px; font-weight: 600;
+  color: var(--on-surface);
+}
+.statusbar .right { letter-spacing: 2px; }
+.phone.dark .statusbar { color: #fff; }
+/* 沉浸态：状态栏隐藏但保留占位高度 */
+.statusbar.hidden { visibility: hidden; }
+
+/* ---- 4. 通用组件 ---- */
+.topbar {
+  height: 56px; flex: none;
+  display: flex; align-items: center;
+  padding: 0 6px 0 16px;
+  background: var(--surface);
+}
+.topbar .title { font-size: 19px; flex: 1; }
+.topbar .nav-icon { width: 44px; margin-left: -10px; flex: none; }
+
+.icon-btn {
+  width: 44px; height: 44px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%; color: var(--on-surface-variant);
+}
+.icon-btn svg { width: 22px; height: 22px; fill: currentColor; }
+
+.fab {
+  position: absolute; right: 16px; bottom: 24px;
+  width: 56px; height: 56px; border-radius: 16px;
+  background: var(--primary-container); color: var(--on-primary-container);
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+}
+.fab svg { width: 24px; height: 24px; fill: currentColor; }
+
+.list-item {
+  display: flex; align-items: center; gap: 16px;
+  padding: 12px 8px 12px 16px; min-height: 64px;
+}
+.list-item .texts { flex: 1; }
+.list-item .headline { font-size: 15px; }
+.list-item .support  { font-size: 13px; color: var(--on-surface-variant); margin-top: 2px; }
+
+/* 底部抽屉 ModalBottomSheet */
+.sheet-scrim { position: absolute; inset: 0; background: var(--scrim); z-index: 5; }
+.sheet {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 6;
+  background: var(--surface-container);
+  border-radius: 28px 28px 0 0;
+  padding: 10px 16px 28px;
+}
+.drag-handle {
+  width: 32px; height: 4px; border-radius: 2px;
+  background: var(--outline-variant); margin: 6px auto 14px;
+}
+.sheet h3 { font-size: 19px; font-weight: 500; }
+.sec-label {
+  font-size: 11px; color: var(--on-surface-variant);
+  margin: 18px 0 8px; font-weight: 600;
+}
+
+/* SegmentedButton 单选行 */
+.seg-row { display: flex; width: 100%; }
+.seg {
+  flex: 1; height: 38px;
+  border: 1px solid var(--outline);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12.5px; color: var(--on-surface);
+  border-left-width: 0;
+}
+.seg:first-child { border-left-width: 1px; border-radius: 19px 0 0 19px; }
+.seg:last-child { border-radius: 0 19px 19px 0; }
+.seg.on { background: var(--secondary-container); color: var(--on-secondary-container); font-weight: 600; }
+.seg.on::before { content: "✓"; font-size: 11px; margin-right: 5px; }
+
+/* ---- 5. 书架专用 ---- */
+.shelf-body { flex: 1; overflow: hidden; padding: 12px; }
+.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+
+.card { display: flex; flex-direction: column; }
+.cover {
+  aspect-ratio: 0.7;
+  border-radius: 8px;
+  background: var(--surface-variant);
+  position: relative; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+}
+.cover .ph-letter { font-size: 32px; color: var(--on-surface-variant); font-weight: 400; }
+.cover-inner { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+.card .name {
+  font-size: 12px; margin-top: 5px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.card .progress { font-size: 10.5px; color: var(--on-surface-variant); margin-top: 1px; }
+.card.missing .cover-inner, .card.missing .name, .card.missing .progress { opacity: 0.45; }
+.badge-missing {
+  position: absolute; top: 4px; right: 4px;
+  background: var(--error-container); color: var(--on-error-container);
+  font-size: 9px; padding: 2px 5px; border-radius: 4px; z-index: 2;
+}
+
+/* 假封面：渐变占位 + 左下标题 */
+.art {
+  width: 100%; height: 100%;
+  display: flex; align-items: flex-end; padding: 8px;
+  color: rgba(255,255,255,.92); font-weight: 700; font-size: 13px; line-height: 1.3;
+  text-shadow: 0 1px 3px rgba(0,0,0,.5);
+}
+.art-1 { background: linear-gradient(160deg,#3b2667,#bc78ec); }
+.art-2 { background: linear-gradient(160deg,#0f2027,#2c5364 60%,#4ca1af); }
+.art-3 { background: linear-gradient(160deg,#aa076b,#61045f); }
+.art-4 { background: linear-gradient(160deg,#e96443,#904e95); }
+.art-5 { background: linear-gradient(160deg,#136a8a,#267871); }
+.art-6 { background: linear-gradient(160deg,#b79891,#94716b); }
+.art-7 { background: linear-gradient(160deg,#414345,#232526); }
+
+/* ---- 6. 阅读页专用 ---- */
+.reader-page {
+  flex: 1; position: relative; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* 模拟一页漫画：留白 + 分镜框 */
+.comic-art {
+  width: 86%; aspect-ratio: 0.68; background: #f5f1e8;
+  border-radius: 2px;
+  display: grid; grid-template-rows: 1.2fr 1fr 0.8fr; gap: 6px; padding: 8px;
+}
+.panel { background: linear-gradient(135deg,#d8d2c4,#bdb5a2); border: 2px solid #2a2a2a; border-radius: 2px; position: relative; }
+.panel.split { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; background: none; border: none; }
+.panel.split > div { background: linear-gradient(135deg,#cfc8b8,#a89f8a); border: 2px solid #2a2a2a; border-radius: 2px; }
+.bubble {
+  position: absolute; top: 8px; right: 10px;
+  width: 38%; aspect-ratio: 1.1; background: #fff; border: 2px solid #2a2a2a;
+  border-radius: 50%;
+}
+
+.page-chip {
+  position: absolute; bottom: 22px; left: 50%; transform: translateX(-50%);
+  background: rgba(0,0,0,0.5); color: #fff;
+  font-size: 12px; padding: 4px 12px; border-radius: 12px;
+}
+
+/* 点按区示意（设计标注层，真实 UI 不显示） */
+.tap-zones { position: absolute; inset: 0; display: flex; pointer-events: none; }
+.tap-zones > div {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  font-size: 11px; color: rgba(255,255,255,0.55);
+  border-right: 1px dashed rgba(255,255,255,0.18);
+}
+.tap-zones > div:last-child { border-right: none; }
+
+/* 阅读工具栏（黑色 65% 半透明覆盖层） */
+.reader-topbar {
+  position: absolute; top: 0; left: 0; right: 0; z-index: 4;
+  background: rgba(0,0,0,0.65);
+  padding: 28px 8px 6px;  /* 含状态栏高度 */
+  display: flex; align-items: center; gap: 4px; color: #fff;
+}
+.reader-topbar .icon-btn { color: #fff; }
+.reader-topbar .rtitle { flex: 1; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.reader-topbar .rpage { font-size: 12px; padding: 0 12px; }
+
+.reader-bottombar {
+  position: absolute; bottom: 0; left: 0; right: 0; z-index: 4;
+  background: rgba(0,0,0,0.65);
+  padding: 10px 20px 30px;  /* 含手势条高度 */
+  color: #fff; text-align: center;
+}
+.reader-bottombar .rpage { font-size: 12px; margin-bottom: 8px; }
+
+/* 跳页滑杆（静态：fill 宽度与 thumb 的 left 用行内样式按页码比例给值） */
+.slider { position: relative; height: 20px; display: flex; align-items: center; }
+.slider .track { width: 100%; height: 4px; border-radius: 2px; background: rgba(208,188,255,0.35); }
+.slider .fill  { position: absolute; left: 0; width: 38%; height: 4px; border-radius: 2px; background: #D0BCFF; }
+.slider .thumb {
+  position: absolute; left: 38%; transform: translateX(-50%);
+  width: 18px; height: 18px; border-radius: 50%; background: #D0BCFF;
+}

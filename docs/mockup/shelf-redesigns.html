@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ComicReader Mockup · 书架重设计（两版新方案）</title>
+<link rel="stylesheet" href="mockup.css">
+<style>
+  /* ============ 本页专用样式（书架重设计） ============ */
+
+  /* ---------- 方案 A：氛围沉浸 ---------- */
+  .ambient-phone { background: #141218; color: #E6E0E9; }
+
+  /* 弥散氛围背景：模拟从当前封面 Palette 取色后的大半径模糊 */
+  .ambient-hero {
+    position: relative; flex: none;
+    padding: 36px 20px 24px;
+    background:
+      radial-gradient(120% 90% at 20% 0%,  rgba(44,83,100,0.95) 0%, rgba(44,83,100,0) 60%),
+      radial-gradient(100% 80% at 90% 10%, rgba(76,161,175,0.55) 0%, rgba(76,161,175,0) 65%),
+      radial-gradient(140% 100% at 50% 100%, rgba(15,32,39,0.9) 0%, rgba(20,18,24,1) 80%);
+  }
+  .ambient-hero .overline {
+    font-size: 11px; letter-spacing: 2px; color: rgba(230,224,233,0.7);
+    margin-bottom: 14px;
+  }
+  .hero-row { display: flex; gap: 18px; align-items: flex-end; }
+  .hero-cover {
+    width: 132px; aspect-ratio: 0.7; border-radius: 14px; overflow: hidden;
+    box-shadow: 0 14px 36px rgba(0,0,0,0.6);
+    flex: none;
+  }
+  .hero-cover .art { font-size: 15px; }
+  .hero-info { flex: 1; padding-bottom: 4px; }
+  .hero-info .htitle { font-size: 20px; font-weight: 700; line-height: 1.35; }
+  .hero-info .hmeta  { font-size: 12px; color: rgba(230,224,233,0.7); margin-top: 6px; }
+  .hero-progress { margin-top: 12px; height: 4px; border-radius: 2px; background: rgba(255,255,255,0.18); }
+  .hero-progress .fill { width: 12%; height: 100%; border-radius: 2px; background: #4ca1af; }
+  .btn-continue {
+    display: inline-flex; align-items: center; gap: 6px;
+    margin-top: 16px; height: 40px; padding: 0 20px;
+    background: #E6E0E9; color: #141218;
+    border-radius: 20px; font-size: 13px; font-weight: 600;
+  }
+  .btn-continue svg { width: 16px; height: 16px; fill: currentColor; }
+  .hero-actions {
+    position: absolute; top: 30px; right: 10px; display: flex;
+  }
+  .hero-actions .icon-btn { color: rgba(230,224,233,0.85); }
+
+  .ambient-body { flex: 1; overflow: hidden; padding-top: 18px; }
+  .sec-head {
+    display: flex; align-items: baseline; padding: 0 20px; margin-bottom: 10px;
+  }
+  .sec-head .stitle { font-size: 15px; font-weight: 600; flex: 1; }
+  .sec-head .more { font-size: 12px; color: #4ca1af; }
+
+  /* M3 multi-browse Carousel：大-中-小 不等宽，统一大圆角 */
+  .carousel { display: flex; gap: 8px; padding: 0 20px; overflow: hidden; }
+  .car-item { border-radius: 20px; overflow: hidden; position: relative; aspect-ratio: unset; flex: none; height: 170px; }
+  .car-item .art { font-size: 12px; }
+  .car-lg { width: 124px; }
+  .car-md { width: 96px; }
+  .car-sm { width: 56px; }
+  .car-sm .art { color: transparent; }   /* 收窄的 peek 项不显示文字（M3 Carousel 行为） */
+  .car-item .car-label {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    padding: 22px 10px 8px; font-size: 11px; color: #fff;
+    background: linear-gradient(transparent, rgba(0,0,0,0.7));
+  }
+
+  .ambient-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 0 20px; }
+  .ambient-grid .cover { border-radius: 14px; }
+  .ambient-grid .name { color: #E6E0E9; }
+  .ambient-grid .progress { color: rgba(230,224,233,0.6); }
+
+  /* ---------- 方案 B：检索工作台 ---------- */
+  /* M3 SearchBar */
+  .search-bar {
+    margin: 8px 16px 4px; height: 48px; border-radius: 24px;
+    background: var(--surface-container-high);
+    display: flex; align-items: center; gap: 12px; padding: 0 8px 0 16px;
+    color: var(--on-surface-variant); font-size: 14px;
+  }
+  .search-bar svg { width: 20px; height: 20px; fill: currentColor; flex: none; }
+  .search-bar .hint { flex: 1; }
+
+  /* FilterChip 行 */
+  .chips { display: flex; gap: 8px; padding: 10px 16px 6px; }
+  .chip {
+    height: 30px; padding: 0 14px; border-radius: 8px;
+    border: 1px solid var(--outline-variant);
+    display: flex; align-items: center; gap: 5px;
+    font-size: 12.5px; color: var(--on-surface-variant);
+  }
+  .chip.on {
+    background: var(--secondary-container); color: var(--on-secondary-container);
+    border-color: transparent; font-weight: 600;
+  }
+  .chip.on::before { content: "✓"; font-size: 11px; }
+  .chip .count { font-size: 10.5px; opacity: 0.7; }
+
+  /* 瀑布流：两列、封面原始比例、卡内信息 */
+  .staggered { flex: 1; overflow: hidden; padding: 8px 16px 0; display: flex; gap: 12px; }
+  .stag-col { flex: 1; display: flex; flex-direction: column; gap: 12px; }
+  .stag-card { border-radius: 14px; overflow: hidden; position: relative; background: var(--surface-variant); }
+  .stag-card .art { font-size: 13px; }
+  .stag-card .scrim {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    padding: 26px 10px 8px;
+    background: linear-gradient(transparent, rgba(0,0,0,0.72));
+    color: #fff;
+  }
+  .stag-card .scrim .t { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .stag-card .scrim .pbar { margin-top: 6px; height: 3px; border-radius: 1.5px; background: rgba(255,255,255,0.3); }
+  .stag-card .scrim .pbar .fill { height: 100%; border-radius: 1.5px; background: #D0BCFF; }
+  .stag-card.missing { opacity: 0.5; }
+
+  /* 底部 NavigationBar */
+  .navbar {
+    flex: none; height: 72px; background: var(--surface-container);
+    display: flex; align-items: center; padding-bottom: 6px;
+  }
+  .nav-item { flex: 1; text-align: center; font-size: 11px; color: var(--on-surface-variant); }
+  .nav-item .pill {
+    width: 56px; height: 30px; border-radius: 15px; margin: 0 auto 4px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .nav-item svg { width: 22px; height: 22px; fill: currentColor; }
+  .nav-item.on { color: var(--on-surface); font-weight: 600; }
+  .nav-item.on .pill { background: var(--secondary-container); color: var(--on-secondary-container); }
+
+  /* 下拉刷新指示器（PullToRefreshBox 的示意） */
+  .ptr {
+    position: absolute; top: 64px; left: 50%; transform: translateX(-50%); z-index: 3;
+    width: 36px; height: 36px; border-radius: 50%;
+    background: var(--surface-container-high);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .ptr svg { width: 20px; height: 20px; fill: var(--primary); }
+
+  /* 特性标注表 */
+  .feat { margin-top: 8px; border-left: 2px solid #4a4458; padding-left: 10px; }
+  .feat li { font-size: 11.5px; color: #9a93a5; line-height: 1.8; list-style: none; }
+  .feat li b { color: #c9b8ff; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<div class="page-header">
+  <h1><span class="tag">重设计</span>书架 · 两版新方案（对照基线 <a href="v1-current.html#shelf" style="color:#c9b8ff;">v1 #shelf</a>）</h1>
+  <p>
+    两版都是「重新设计」而非「微调」：方案 A 把书架从"文件管理器"变成"在读的那本书的舞台"；
+    方案 B 把书架变成"可检索、可过滤的内容工作台"。各自押注不同的现代 Android 能力，可整版采纳，也可拆组件混搭。
+  </p>
+</div>
+
+<div class="frames">
+
+  <!-- ════════════ #shelf-ambient 方案 A：氛围沉浸 ════════════ -->
+  <div class="frame-wrap" id="shelf-ambient">
+    <div class="phone ambient-phone">
+      <!-- edge-to-edge：状态栏直接压在氛围色上 -->
+      <div style="position:absolute; top:8px; left:22px; right:22px; display:flex; justify-content:space-between; font-size:11px; font-weight:600; color:rgba(230,224,233,.9); z-index:9;">
+        <span>12:30</span><span style="letter-spacing:2px;">▮▮ ▲ 86%</span>
+      </div>
+
+      <div class="ambient-hero">
+        <div class="hero-actions">
+          <div class="icon-btn"><svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7 14 5 12 5 9.5S7 5 9.5 5 14 7 14 9.5 12 14 9.5 14z"/></svg></div>
+          <div class="icon-btn"><svg viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg></div>
+        </div>
+
+        <div class="overline">继续阅读</div>
+        <div class="hero-row">
+          <div class="hero-cover"><div class="art art-2">海风<br>物语</div></div>
+          <div class="hero-info">
+            <div class="htitle">海风物语</div>
+            <div class="hmeta">读到 12 / 96 页 · 昨天</div>
+            <div class="hero-progress"><div class="fill"></div></div>
+            <div class="btn-continue">
+              <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+              继续阅读
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="ambient-body">
+        <div class="sec-head"><div class="stitle">最近添加</div><div class="more">全部</div></div>
+        <div class="carousel">
+          <div class="car-item car-lg"><div class="art art-1">深空航线</div><div class="car-label">深空航线 第01卷</div></div>
+          <div class="car-item car-lg"><div class="art art-5">机械之心</div><div class="car-label">机械之心 短篇集</div></div>
+          <div class="car-item car-md"><div class="art art-3">夜行侦探</div><div class="car-label">夜行侦探</div></div>
+          <div class="car-item car-sm"><div class="art art-6">古都食记</div></div>
+        </div>
+
+        <div class="sec-head" style="margin-top:18px;"><div class="stitle">全部 · 56 本</div><div class="more">管理</div></div>
+        <div class="ambient-grid">
+          <div class="card"><div class="cover"><div class="cover-inner"><div class="art art-4">荒原<br>之子</div></div></div><div class="name">荒原之子 v02</div><div class="progress">88 / 210</div></div>
+          <div class="card"><div class="cover"><div class="cover-inner"><div class="art art-7">黑白<br>短篇</div></div></div><div class="name">黑白短篇合集</div><div class="progress">未读</div></div>
+          <div class="card"><div class="cover"><div class="cover-inner"><span class="ph-letter">星</span></div></div><div class="name">星层旅人 第03卷</div><div class="progress">未读</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="caption">
+      <h2><span class="sid">#shelf-ambient</span>方案 A · 氛围沉浸</h2>
+      <p>书架即"正在读的那本书"：顶部 Hero 区用当前封面的取色弥散做背景，一键续读；下面才是收藏。没有 TopAppBar，全屏 edge-to-edge。</p>
+      <ul class="feat">
+        <li><b>Palette 取色</b>：androidx.palette 从封面提主色 → Hero 渐变背景（DB 加 coverColor 列，生成封面时顺手算）</li>
+        <li><b>M3 Carousel</b>：material3 1.3+ 的 HorizontalMultiBrowseCarousel，大-中-小 peek 布局</li>
+        <li><b>edge-to-edge</b>：内容绘到状态栏后面（Android 15 起强制），WindowInsets 只给文字让位</li>
+        <li><b>动效预留</b>：封面 → 阅读页可做 SharedTransition（Compose 1.7+ SharedTransitionLayout）</li>
+        <li>取舍：信息密度低、强依赖"有封面"；搜索/管理入口收进右上角菜单</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ════════════ #shelf-hub 方案 B：检索工作台 ════════════ -->
+  <div class="frame-wrap" id="shelf-hub">
+    <div class="phone">
+      <div class="statusbar"><span>12:30</span><span class="right">▮▮ ▲ 86%</span></div>
+
+      <div class="search-bar">
+        <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7 14 5 12 5 9.5S7 5 9.5 5 14 7 14 9.5 12 14 9.5 14z"/></svg>
+        <span class="hint">搜索书名…</span>
+        <div class="icon-btn"><svg viewBox="0 0 24 24"><path d="M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z"/></svg></div>
+      </div>
+
+      <div class="chips">
+        <div class="chip on">全部 <span class="count">56</span></div>
+        <div class="chip">在读 <span class="count">7</span></div>
+        <div class="chip">未读 <span class="count">31</span></div>
+        <div class="chip">失效 <span class="count">2</span></div>
+      </div>
+
+      <!-- 下拉刷新指示器（替代顶栏 Refresh 按钮） -->
+      <div class="ptr"><svg viewBox="0 0 24 24"><path d="M17.65 6.35A7.96 7.96 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg></div>
+
+      <div class="staggered">
+        <div class="stag-col">
+          <div class="stag-card" style="aspect-ratio:0.66;">
+            <div class="art art-1">深空航线</div>
+            <div class="scrim"><div class="t">深空航线 第01卷</div><div class="pbar"><div class="fill" style="width:19%;"></div></div></div>
+          </div>
+          <div class="stag-card" style="aspect-ratio:0.78;">
+            <div class="art art-3">夜行侦探</div>
+            <div class="scrim"><div class="t">夜行侦探 完全版</div><div class="pbar"><div class="fill" style="width:0%;"></div></div></div>
+          </div>
+          <div class="stag-card" style="aspect-ratio:0.62;">
+            <div class="art art-5">机械之心</div>
+            <div class="scrim"><div class="t">机械之心 短篇集</div><div class="pbar"><div class="fill" style="width:7%;"></div></div></div>
+          </div>
+        </div>
+        <div class="stag-col">
+          <div class="stag-card" style="aspect-ratio:0.72;">
+            <div class="art art-2">海风物语</div>
+            <div class="scrim"><div class="t">海风物语</div><div class="pbar"><div class="fill" style="width:12%;"></div></div></div>
+          </div>
+          <div class="stag-card missing" style="aspect-ratio:0.7;">
+            <div class="badge-missing">已失效</div>
+            <div class="art art-4">荒原之子</div>
+            <div class="scrim"><div class="t">荒原之子 v02</div><div class="pbar"><div class="fill" style="width:42%;"></div></div></div>
+          </div>
+          <div class="stag-card" style="aspect-ratio:1.0;">
+            <div class="art art-6">古都食记</div>
+            <div class="scrim"><div class="t">古都食记</div><div class="pbar"><div class="fill" style="width:16%;"></div></div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="navbar">
+        <div class="nav-item on">
+          <div class="pill"><svg viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9H9V9h10v2zm-4 4H9v-2h6v2zm4-8H9V5h10v2z"/></svg></div>
+          书架
+        </div>
+        <div class="nav-item">
+          <div class="pill"><svg viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg></div>
+          库目录
+        </div>
+        <div class="nav-item">
+          <div class="pill"><svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.61 3.61 0 0 1 8.4 12c0-1.98 1.62-3.6 3.6-3.6s3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg></div>
+          设置
+        </div>
+      </div>
+    </div>
+    <div class="caption">
+      <h2><span class="sid">#shelf-hub</span>方案 B · 检索工作台</h2>
+      <p>书多了以后的形态：搜索 + 状态过滤 + 瀑布流（封面原始比例不裁剪，信息叠在卡内）。顶栏图标堆改为底部导航三页签，刷新改下拉手势。</p>
+      <ul class="feat">
+        <li><b>SearchBar</b>：material3 自带组件，点开变全屏搜索态（Room 加 LIKE 查询即可）</li>
+        <li><b>FilterChip</b>：在读/未读/失效 过滤——数据全在 ComicEntity 里，纯查询变化</li>
+        <li><b>LazyVerticalStaggeredGrid</b>：foundation 自带瀑布流；需 DB 存封面宽高比（生成封面时已知）</li>
+        <li><b>PullToRefreshBox</b>：material3 1.3+ 下拉刷新，替代顶栏 Refresh 按钮</li>
+        <li><b>NavigationBar</b>：底导替代"图标都挤在顶栏"，库目录/设置升级为一级页面</li>
+        <li>取舍：底导占掉 80dp 高度；瀑布流两列下单屏可见本数少于三列网格</li>
+      </ul>
+    </div>
+  </div>
+
+</div>
+
+<div class="legend">
+  两案可混搭：例如 方案 B 的骨架（搜索/过滤/底导）+ 方案 A 的"继续阅读" Hero 压缩成列表顶部一张横幅卡。
+  共享组件样式来自 <code>mockup.css</code>，本页特有样式（氛围背景 / Carousel / 瀑布流 / 底导）写在页内 <code>&lt;style&gt;</code>，定稿后再下沉到共享库。
+</div>
+
+</body>
+</html>
