@@ -7,15 +7,21 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import com.exio.comicreader.data.ComicBook
+import com.exio.comicreader.data.ThemeSettingsRepository
 import com.exio.comicreader.ui.FoldersScreen
 import com.exio.comicreader.ui.ReaderScreen
+import com.exio.comicreader.ui.SettingsScreen
 import com.exio.comicreader.ui.ShelfScreen
 import com.exio.comicreader.ui.theme.ComicReaderTheme
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.Serializable
 import java.io.File
 
@@ -32,6 +38,9 @@ data class ReaderRoute(val comicId: Long)
 @Serializable
 data object FoldersRoute
 
+@Serializable
+data object SettingsRoute
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -44,8 +53,19 @@ class MainActivity : ComponentActivity() {
             File(cacheDir, ComicBook.CACHE_FILE_NAME).delete()
         }
 
+        val themeRepo = ThemeSettingsRepository(this)
+        // 同步读一次主题作为初始值：DataStore 是异步 Flow，若用默认值起步，
+        // 第一帧会先渲染默认主题、下一帧才换成用户主题（冷启动闪色）。
+        // 首读是毫秒级小文件 IO，这是少数 runBlocking 合理的场景
+        val initialTheme = runBlocking { themeRepo.settings.first() }
+
         setContent {
-            ComicReaderTheme {
+            // 主题状态活在 NavHost 之上（影响所有页面，与导航平级）：
+            // 设置页写入 DataStore → 这条 Flow 发新值 → 全 App 同帧换色
+            val themeSettings by themeRepo.settings
+                .collectAsStateWithLifecycle(initialValue = initialTheme)
+
+            ComicReaderTheme(settings = themeSettings) {
                 val navController = rememberNavController()
 
                 // Navigation 默认转场是 700ms 交叉淡化，偏慢（黑色阅读页
@@ -61,7 +81,7 @@ class MainActivity : ComponentActivity() {
                     composable<ShelfRoute> {
                         ShelfScreen(
                             onOpenComic = { id -> navController.navigate(ReaderRoute(id)) },
-                            onOpenFolders = { navController.navigate(FoldersRoute) },
+                            onOpenSettings = { navController.navigate(SettingsRoute) },
                         )
                     }
                     composable<ReaderRoute> { entry ->
@@ -69,6 +89,12 @@ class MainActivity : ComponentActivity() {
                         ReaderScreen(
                             comicId = route.comicId,
                             onBack = { navController.popBackStack() },
+                        )
+                    }
+                    composable<SettingsRoute> {
+                        SettingsScreen(
+                            onBack = { navController.popBackStack() },
+                            onOpenFolders = { navController.navigate(FoldersRoute) },
                         )
                     }
                     composable<FoldersRoute> {
