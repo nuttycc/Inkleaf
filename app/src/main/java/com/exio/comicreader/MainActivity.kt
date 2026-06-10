@@ -7,7 +7,11 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -68,39 +72,44 @@ class MainActivity : ComponentActivity() {
             ComicReaderTheme(settings = themeSettings) {
                 val navController = rememberNavController()
 
-                // Navigation 默认转场是 700ms 交叉淡化，偏慢（黑色阅读页
-                // 淡出时残影明显）；统一换成 250ms
-                NavHost(
-                    navController = navController,
-                    startDestination = ShelfRoute,
-                    enterTransition = { fadeIn(tween(250)) },
-                    exitTransition = { fadeOut(tween(250)) },
-                    popEnterTransition = { fadeIn(tween(250)) },
-                    popExitTransition = { fadeOut(tween(250)) },
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
                 ) {
-                    composable<ShelfRoute> {
-                        ShelfScreen(
-                            onOpenComic = { id -> navController.navigate(ReaderRoute(id)) },
-                            onOpenSettings = { navController.navigate(SettingsRoute) },
-                        )
-                    }
-                    composable<ReaderRoute> { entry ->
-                        val route = entry.toRoute<ReaderRoute>()
-                        ReaderScreen(
-                            comicId = route.comicId,
-                            onBack = { navController.popBackStack() },
-                        )
-                    }
-                    composable<SettingsRoute> {
-                        SettingsScreen(
-                            onBack = { navController.popBackStack() },
-                            onOpenFolders = { navController.navigate(FoldersRoute) },
-                        )
-                    }
-                    composable<FoldersRoute> {
-                        FoldersScreen(
-                            onBack = { navController.popBackStack() },
-                        )
+                    // Navigation 默认转场是 700ms 交叉淡化，偏慢（黑色阅读页
+                    // 淡出时残影明显）；统一换成 250ms
+                    NavHost(
+                        navController = navController,
+                        startDestination = ShelfRoute,
+                        enterTransition = { fadeIn(tween(250)) },
+                        exitTransition = { fadeOut(tween(250)) },
+                        popEnterTransition = { fadeIn(tween(250)) },
+                        popExitTransition = { fadeOut(tween(250)) },
+                    ) {
+                        composable<ShelfRoute> {
+                            ShelfScreen(
+                                onOpenComic = { id -> navController.navigate(ReaderRoute(id)) },
+                                onOpenSettings = { navController.navigate(SettingsRoute) },
+                            )
+                        }
+                        composable<ReaderRoute> { entry ->
+                            val route = entry.toRoute<ReaderRoute>()
+                            ReaderScreen(
+                                comicId = route.comicId,
+                                onBack = { navController.popBackStack() },
+                            )
+                        }
+                        composable<SettingsRoute> {
+                            SettingsScreen(
+                                onBack = { navController.popBackStack() },
+                                onOpenFolders = { navController.navigate(FoldersRoute) },
+                            )
+                        }
+                        composable<FoldersRoute> {
+                            FoldersScreen(
+                                onBack = { navController.popBackStack() },
+                            )
+                        }
                     }
                 }
             }
