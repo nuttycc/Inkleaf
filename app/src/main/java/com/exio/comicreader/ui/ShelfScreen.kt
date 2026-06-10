@@ -59,9 +59,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
@@ -90,16 +90,18 @@ fun ShelfScreen(
     var showLayoutSheet by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
 
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
+    // Activity 级别的生命周期监听：ON_START 只在冷启动和从后台恢复时触发，
+    // 应用内页面导航（如从设置页返回）不会触发，避免不必要的重复扫描
+    val activity = LocalContext.current as androidx.activity.ComponentActivity
+    DisposableEffect(activity) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_START) {
                 viewModel.refresh()
             }
         }
-        lifecycleOwner.lifecycle.addObserver(observer)
+        activity.lifecycle.addObserver(observer)
         onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
+            activity.lifecycle.removeObserver(observer)
         }
     }
 

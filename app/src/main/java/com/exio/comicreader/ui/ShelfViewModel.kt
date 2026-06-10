@@ -58,8 +58,7 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app) {
     private var scanJob: Job? = null
     private var coverJob: Job? = null
 
-
-    /** 手动/自动刷新入口；Job.isActive 一行实现"扫描中不重复扫" */
+    /** 自动刷新入口；Job.isActive 一行实现"扫描中不重复扫" */
     fun refresh() {
         if (scanJob?.isActive == true) return
         scanJob = viewModelScope.launch {
