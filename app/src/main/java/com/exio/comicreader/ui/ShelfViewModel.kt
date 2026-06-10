@@ -2,7 +2,11 @@ package com.exio.comicreader.ui
 
 import android.app.Application
 import android.net.Uri
+import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.viewModelScope
 import com.exio.comicreader.data.ComicRepository
 import com.exio.comicreader.data.CoverAspect
@@ -25,7 +29,7 @@ data class ScanState(
     val message: String? = null,
 )
 
-class ShelfViewModel(app: Application) : AndroidViewModel(app) {
+class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycleObserver {
     private val repo = ComicRepository(app)
     private val settingsRepo = ShelfSettingsRepository(app)
 
@@ -58,15 +62,30 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app) {
     private var scanJob: Job? = null
     private var coverJob: Job? = null
 
+    /** 上次发起扫描的时刻（elapsedRealtime：单调时钟，不受用户改系统时间影响） */
+    private var lastScanAt = 0L
+
     init {
-        // 进入书架自动扫一次。注意 ViewModel 的生命周期：从阅读页返回时
-        // 本 VM 还活着，init 不会重跑——只有冷启动/重新进入才触发
+        // 进程级生命周期：ON_START 只在"App 从后台回到前台"时发生——
+        // 页面导航、旋转屏幕、弹对话框都不影响进程状态，不会误触发。
+        // 注册时 Lifecycle 会把当前状态回放给新观察者（进程此刻已是
+        // STARTED），onStart 随注册立即执行一次，冷启动首扫由同一条
+        // 路径覆盖——不再需要单独的 init { refresh() }
+        ProcessLifecycleOwner.get().lifecycle.addObserver(this)
+    }
+
+    /** App 回到前台（含冷启动）：自动同步书架 */
+    override fun onStart(owner: LifecycleOwner) {
+        // 冷却窗口：快速切出去看一眼通知再回来，不值得全量遍历目录树；
+        // 真正去文件管理器增删文件的往返一般超过这个间隔
+        if (SystemClock.elapsedRealtime() - lastScanAt < SCAN_COOLDOWN_MS) return
         refresh()
     }
 
     /** 手动/自动刷新入口；Job.isActive 一行实现"扫描中不重复扫" */
     fun refresh() {
         if (scanJob?.isActive == true) return
+        lastScanAt = SystemClock.elapsedRealtime()
         scanJob = viewModelScope.launch {
             _scanState.value = ScanState(isScanning = true)
             val result = repo.syncAllFolders()
@@ -99,5 +118,17 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app) {
 
     fun deleteComic(comic: ComicEntity) {
         viewModelScope.launch { repo.deleteComic(comic) }
+    }
+
+    /**
+     * 观察者持有 this，而 ProcessLifecycleOwner 是进程级单例：
+     * 不在这里移除，VM 会被它一直引用——内存泄漏
+     */
+    override fun onCleared() {
+        ProcessLifecycleOwner.get().lifecycle.removeObserver(this)
+    }
+
+    companion object {
+        private const val SCAN_COOLDOWN_MS = 10_000L
     }
 }
