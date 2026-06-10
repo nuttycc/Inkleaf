@@ -58,11 +58,6 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app) {
     private var scanJob: Job? = null
     private var coverJob: Job? = null
 
-    init {
-        // 进入书架自动扫一次。注意 ViewModel 的生命周期：从阅读页返回时
-        // 本 VM 还活着，init 不会重跑——只有冷启动/重新进入才触发
-        refresh()
-    }
 
     /** 手动/自动刷新入口；Job.isActive 一行实现"扫描中不重复扫" */
     fun refresh() {
