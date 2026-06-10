@@ -4,44 +4,68 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.tooling.preview.Preview
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import androidx.navigation.toRoute
+import com.exio.comicreader.data.ComicBook
+import com.exio.comicreader.ui.FoldersScreen
+import com.exio.comicreader.ui.ReaderScreen
+import com.exio.comicreader.ui.ShelfScreen
 import com.exio.comicreader.ui.theme.ComicReaderTheme
+import kotlinx.serialization.Serializable
+import java.io.File
+
+/**
+ * 类型安全路由：路由就是普通数据类（类比 react-router 的 path + params，
+ * 但参数有编译期类型保障）。@Serializable 让编译器生成参数的编解码器。
+ */
+@Serializable
+data object ShelfRoute
+
+@Serializable
+data class ReaderRoute(val comicId: Long)
+
+@Serializable
+data object FoldersRoute
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        // 只在冷启动时清理残留的 zip 副本。旋转屏幕也会重新走 onCreate
+        // （此时 savedInstanceState != null），而存活的 ReaderViewModel
+        // 可能正持有这个文件——不能删
+        if (savedInstanceState == null) {
+            File(cacheDir, ComicBook.CACHE_FILE_NAME).delete()
+        }
+
         setContent {
             ComicReaderTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    Greeting(
-                        name = "Android",
-                        modifier = Modifier.padding(innerPadding)
-                    )
+                val navController = rememberNavController()
+
+                NavHost(navController = navController, startDestination = ShelfRoute) {
+                    composable<ShelfRoute> {
+                        ShelfScreen(
+                            onOpenComic = { id -> navController.navigate(ReaderRoute(id)) },
+                            onOpenFolders = { navController.navigate(FoldersRoute) },
+                        )
+                    }
+                    composable<ReaderRoute> { entry ->
+                        val route = entry.toRoute<ReaderRoute>()
+                        ReaderScreen(
+                            comicId = route.comicId,
+                            onBack = { navController.popBackStack() },
+                        )
+                    }
+                    composable<FoldersRoute> {
+                        FoldersScreen(
+                            onBack = { navController.popBackStack() },
+                        )
+                    }
                 }
             }
         }
-    }
-}
-
-@Composable
-fun Greeting(name: String, modifier: Modifier = Modifier) {
-    Text(
-        text = "Hello $name!",
-        modifier = modifier
-    )
-}
-
-@Preview(showBackground = true)
-@Composable
-fun GreetingPreview() {
-    ComicReaderTheme {
-        Greeting("Android")
     }
 }
