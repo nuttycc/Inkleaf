@@ -161,8 +161,8 @@ fun SettingsScreen(
                 supportingContent = {
                     Text(
                         "当前占用 ${formatBytes(cacheUsage)} · " +
-                            cacheLimitSummary(cacheLimit, cacheBudgetBytes) +
-                            "\n超出上限自动清理最久未读的书，不影响你的原文件"
+                                cacheLimitSummary(cacheLimit, cacheBudgetBytes) +
+                                "\n超出上限自动清理最久未读的书，不影响你的原文件"
                     )
                 },
                 trailingContent = {
@@ -282,6 +282,7 @@ private fun formatBytes(bytes: Long): String = when {
             "%.1f GB".format(bytes / (1024f * 1024f * 1024f))
         }
     }
+
     else -> "${bytes shr 20} MB"
 }
 

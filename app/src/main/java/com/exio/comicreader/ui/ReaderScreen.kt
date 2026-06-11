@@ -501,7 +501,8 @@ private fun FilmstripRow(
                 // 目标在当前视野的右侧则从左侧一屏外滑入，反之亦然，
                 // 保证动画方向与跳转方向一致
                 val jumpForward = currentPage > (visibleItems.firstOrNull()?.index ?: 0)
-                val approach = if (jumpForward) currentPage - visibleCount else currentPage + visibleCount
+                val approach =
+                    if (jumpForward) currentPage - visibleCount else currentPage + visibleCount
                 listState.scrollToItem(approach.coerceIn(0, pageCount - 1), centerOffset)
                 listState.animateScrollToItem(currentPage, centerOffset)
             }
