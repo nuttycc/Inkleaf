@@ -21,7 +21,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
-import com.exio.comicreader.data.ComicBook
+import com.exio.comicreader.data.ReaderCache
 import com.exio.comicreader.data.ThemeSettings
 import com.exio.comicreader.data.ThemeSettingsRepository
 import com.exio.comicreader.ui.FoldersScreen
@@ -33,7 +33,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
-import java.io.File
 
 /**
  * 类型安全路由：路由就是普通数据类（类比 react-router 的 path + params，
@@ -59,12 +58,13 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // 只在冷启动时清理残留的 zip 副本。旋转屏幕也会重新走 onCreate
-        // （此时 savedInstanceState != null），而存活的 ReaderViewModel
-        // 可能正持有这个文件——不能删。删文件是磁盘 IO，扔到 IO 线程
+        // 只在冷启动时清理：旧版固定名副本 + 上次进程被杀留下的过期半成品。
+        // 旋转屏幕也会重新走 onCreate（此时 savedInstanceState != null），
+        // 而存活的 ReaderViewModel 可能正持有缓存文件——不能清。
+        // 注意按书持久化的副本是有意保留的，这里不会动它们
         if (savedInstanceState == null) {
             lifecycleScope.launch(Dispatchers.IO) {
-                File(cacheDir, ComicBook.CACHE_FILE_NAME).delete()
+                ReaderCache.cleanupOnColdStart(this@MainActivity)
             }
         }
 

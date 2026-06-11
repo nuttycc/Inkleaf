@@ -87,10 +87,11 @@ class ComicRepository(context: Context) {
         }
     }
 
-    /** 从书架移除单本：删记录 + 删封面 + 释放权限（不动用户的原文件） */
+    /** 从书架移除单本：删记录 + 删封面 + 删磁盘缓存 + 释放权限（不动用户的原文件） */
     suspend fun deleteComic(comic: ComicEntity) {
         dao.deleteById(comic.id)
         comic.coverPath?.let { File(it).delete() }
+        ReaderCache.wipeBook(appContext, comic.id)
         runCatching {
             appContext.contentResolver.releasePersistableUriPermission(
                 Uri.parse(comic.uri), Intent.FLAG_GRANT_READ_URI_PERMISSION
@@ -131,6 +132,7 @@ class ComicRepository(context: Context) {
     suspend fun removeFolder(folder: LibraryFolderEntity) {
         dao.getByFolderId(folder.id).forEach { comic ->
             comic.coverPath?.let { File(it).delete() }
+            ReaderCache.wipeBook(appContext, comic.id)
         }
         dao.deleteByFolderId(folder.id)
         folderDao.deleteById(folder.id)

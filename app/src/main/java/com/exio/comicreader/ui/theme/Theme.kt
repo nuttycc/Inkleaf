@@ -21,7 +21,8 @@ import com.materialkolor.rememberDynamicColorScheme
  *
  * 整套 ColorScheme 是种子色的纯函数——存储里只有种子，30+ 个色彩角色
  * 由 material-kolor 在运行时按 M3 调色算法生成（自动满足对比度要求）。
- * 注意阅读页（ReaderScreen）刻意不消费这里的颜色：沉浸阅读永远黑底白字。
+ * 注意阅读页（ReaderScreen）基底不消费这里的颜色（沉浸阅读永远黑底白字），
+ * 仅强调色（胶片高亮、滑杆填充）取自主题，并做了黑底亮度兜底。
  */
 @Composable
 fun ComicReaderTheme(

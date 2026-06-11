@@ -10,9 +10,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -24,6 +27,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -31,15 +36,22 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.exio.comicreader.data.CacheLimit
 import com.exio.comicreader.data.DarkMode
 import com.exio.comicreader.data.ThemeSeed
 
@@ -53,6 +65,12 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = viewModel(),
 ) {
     val theme by viewModel.theme.collectAsStateWithLifecycle()
+    val cacheLimit by viewModel.cacheLimit.collectAsStateWithLifecycle()
+    val cacheUsage by viewModel.cacheUsageBytes.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val cacheBudgetBytes = remember(cacheLimit, context) { cacheLimit.bytes(context) }
+    val autoCacheBudgetBytes = remember(context) { CacheLimit.AUTO.bytes(context) }
+    var showCacheLimitSheet by remember { mutableStateOf(false) }
 
     Scaffold(
         modifier = modifier,
@@ -122,6 +140,25 @@ fun SettingsScreen(
                 }
             }
 
+            SectionLabel("存储")
+            ListItem(
+                headlineContent = { Text("漫画缓存上限") },
+                supportingContent = {
+                    Text(
+                        "当前占用 ${formatBytes(cacheUsage)} · " +
+                            cacheLimitSummary(cacheLimit, cacheBudgetBytes) +
+                            "\n超出上限自动清理最久未读的书，不影响你的原文件"
+                    )
+                },
+                trailingContent = {
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                    )
+                },
+                modifier = Modifier.clickable { showCacheLimitSheet = true },
+            )
+
             SectionLabel("漫画库")
             ListItem(
                 headlineContent = { Text("漫画库目录") },
@@ -136,6 +173,65 @@ fun SettingsScreen(
             )
         }
     }
+
+    if (showCacheLimitSheet) {
+        val cacheLimitSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { showCacheLimitSheet = false },
+            sheetState = cacheLimitSheetState,
+        ) {
+            CacheLimitSheetContent(
+                selected = cacheLimit,
+                autoBudgetBytes = autoCacheBudgetBytes,
+                onSelect = { limit ->
+                    viewModel.setCacheLimit(limit)
+                    showCacheLimitSheet = false
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun CacheLimitSheetContent(
+    selected: CacheLimit,
+    autoBudgetBytes: Long,
+    onSelect: (CacheLimit) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .selectableGroup()
+            .navigationBarsPadding()
+            .padding(bottom = 12.dp),
+    ) {
+        Text(
+            text = "漫画缓存上限",
+            style = MaterialTheme.typography.titleLarge,
+            modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+        )
+
+        CacheLimit.entries.forEach { limit ->
+            ListItem(
+                headlineContent = { Text(limit.label) },
+                supportingContent = {
+                    Text(cacheLimitDescription(limit, autoBudgetBytes))
+                },
+                leadingContent = {
+                    RadioButton(
+                        selected = selected == limit,
+                        onClick = null,
+                    )
+                },
+                modifier = Modifier.selectable(
+                    selected = selected == limit,
+                    onClick = { onSelect(limit) },
+                    role = Role.RadioButton,
+                ),
+            )
+        }
+    }
 }
 
 @Composable
@@ -147,6 +243,33 @@ private fun SectionLabel(text: String) {
         modifier = Modifier.padding(start = 16.dp, top = 20.dp, bottom = 4.dp),
     )
 }
+
+/** 整 GB 不补 .0；非整 GB 保留一位小数，以下取整 MB */
+private fun formatBytes(bytes: Long): String = when {
+    bytes >= 1L shl 30 -> {
+        val gb = 1L shl 30
+        if (bytes % gb == 0L) {
+            "${bytes / gb} GB"
+        } else {
+            "%.1f GB".format(bytes / (1024f * 1024f * 1024f))
+        }
+    }
+    else -> "${bytes shr 20} MB"
+}
+
+private fun cacheLimitSummary(limit: CacheLimit, budgetBytes: Long): String =
+    if (limit == CacheLimit.AUTO) {
+        "${limit.label}（约 ${formatBytes(budgetBytes)}）"
+    } else {
+        "上限 ${limit.label}"
+    }
+
+private fun cacheLimitDescription(limit: CacheLimit, autoBudgetBytes: Long): String =
+    if (limit == CacheLimit.AUTO) {
+        "${limit.description}，当前约 ${formatBytes(autoBudgetBytes)}"
+    } else {
+        limit.description
+    }
 
 /** 圆形种子色卡：选中态 = 主题色描边 + 白色对勾（所有内置种子都偏深，白勾可读） */
 @Composable
