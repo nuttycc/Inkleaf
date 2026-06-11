@@ -12,5 +12,6 @@ local.properties
 /docs/
 
 /.gemini/
+/.claude/
 /AGENTS.md
 /CLAUDE.md
