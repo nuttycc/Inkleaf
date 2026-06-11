@@ -1,6 +1,8 @@
 package com.exio.comicreader.ui
 
 import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -41,6 +43,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,14 +58,14 @@ import com.exio.comicreader.data.CacheLimit
 import com.exio.comicreader.data.DarkMode
 import com.exio.comicreader.data.ThemeSeed
 
-/** 设置页：主题（种子色卡 / 深浅模式 / 壁纸取色）+ 漫画库入口 */
+/** 设置页：主题（种子色卡 / 深浅模式 / 壁纸取色）+ 漫画库目录管理 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
-    onOpenFolders: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: SettingsViewModel = viewModel(),
+    foldersViewModel: FoldersViewModel = viewModel(),
 ) {
     val theme by viewModel.theme.collectAsStateWithLifecycle()
     val cacheLimit by viewModel.cacheLimit.collectAsStateWithLifecycle()
@@ -71,6 +74,18 @@ fun SettingsScreen(
     val cacheBudgetBytes = remember(cacheLimit, context) { cacheLimit.bytes(context) }
     val autoCacheBudgetBytes = remember(context) { CacheLimit.AUTO.bytes(context) }
     var showCacheLimitSheet by remember { mutableStateOf(false) }
+    // rememberSaveable：目录选择器是外部全屏 Activity，期间进程可能被杀；
+    // 重建后 sheet 必须恢复打开，选择结果才有处展示
+    var showFoldersSheet by rememberSaveable { mutableStateOf(false) }
+
+    // OpenDocumentTree：系统目录选择器，授权的是整棵子树。launcher 放在
+    // 屏幕层级（而非 sheet 内容里）——进程被杀重建后它随设置页立即重新
+    // 注册，暂存在 ActivityResultRegistry 里的结果才投递得出去
+    val treePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) foldersViewModel.addFolder(uri)
+    }
 
     Scaffold(
         modifier = modifier,
@@ -169,7 +184,7 @@ fun SettingsScreen(
                         contentDescription = null,
                     )
                 },
-                modifier = Modifier.clickable(onClick = onOpenFolders),
+                modifier = Modifier.clickable { showFoldersSheet = true },
             )
         }
     }
@@ -187,6 +202,19 @@ fun SettingsScreen(
                     viewModel.setCacheLimit(limit)
                     showCacheLimitSheet = false
                 },
+            )
+        }
+    }
+
+    if (showFoldersSheet) {
+        val foldersSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { showFoldersSheet = false },
+            sheetState = foldersSheetState,
+        ) {
+            FoldersSheetContent(
+                onAddFolder = { treePicker.launch(null) },
+                viewModel = foldersViewModel,
             )
         }
     }

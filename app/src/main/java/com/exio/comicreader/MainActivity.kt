@@ -24,7 +24,6 @@ import androidx.navigation.toRoute
 import com.exio.comicreader.data.ReaderCache
 import com.exio.comicreader.data.ThemeSettings
 import com.exio.comicreader.data.ThemeSettingsRepository
-import com.exio.comicreader.ui.FoldersScreen
 import com.exio.comicreader.ui.ReaderScreen
 import com.exio.comicreader.ui.SettingsScreen
 import com.exio.comicreader.ui.ShelfScreen
@@ -43,9 +42,6 @@ data object ShelfRoute
 
 @Serializable
 data class ReaderRoute(val comicId: Long)
-
-@Serializable
-data object FoldersRoute
 
 @Serializable
 data object SettingsRoute
@@ -116,12 +112,6 @@ class MainActivity : ComponentActivity() {
                         }
                         composable<SettingsRoute> {
                             SettingsScreen(
-                                onBack = { navController.popBackStack() },
-                                onOpenFolders = { navController.navigate(FoldersRoute) },
-                            )
-                        }
-                        composable<FoldersRoute> {
-                            FoldersScreen(
                                 onBack = { navController.popBackStack() },
                             )
                         }

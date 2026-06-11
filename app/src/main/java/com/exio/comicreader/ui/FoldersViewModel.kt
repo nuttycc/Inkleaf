@@ -15,7 +15,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-/** 目录管理页的状态持有者 */
+/** 目录管理 sheet 的状态持有者（与 SettingsScreen 同生命周期） */
 class FoldersViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = ComicRepository(app)
 
