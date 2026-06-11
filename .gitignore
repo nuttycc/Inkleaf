@@ -1,7 +1,6 @@
 *.iml
 .gradle
 /local.properties
-# IDE 个人工作区状态：频繁自动变化且只对本机有意义，整目录不入库
 /.idea/
 .DS_Store
 /build
@@ -9,4 +8,9 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+/docs/
+
 /.gemini/
+/AGENTS.md
+/CLAUDE.md
