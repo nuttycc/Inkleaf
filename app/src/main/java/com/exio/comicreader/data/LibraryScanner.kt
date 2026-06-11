@@ -6,7 +6,6 @@ import android.provider.DocumentsContract
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
-import kotlin.coroutines.coroutineContext
 
 /**
  * 漫画库目录扫描器：输入一个目录树 Uri，输出其中所有 .cbz/.zip 文件。

@@ -84,7 +84,9 @@ fun FoldersScreen(
     ) { innerPadding ->
         if (folders.isEmpty()) {
             Box(
-                modifier = Modifier.fillMaxSize().padding(innerPadding),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
@@ -94,7 +96,11 @@ fun FoldersScreen(
                 )
             }
         } else {
-            LazyColumn(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+            ) {
                 items(folders, key = { it.folder.id }) { item ->
                     ListItem(
                         headlineContent = { Text(item.folder.displayName) },
@@ -117,8 +123,8 @@ fun FoldersScreen(
             text = {
                 Text(
                     "移除「${item.folder.displayName}」？\n\n" +
-                        "该目录扫描到的 ${item.comicCount} 本漫画及其阅读进度将一并移除。" +
-                        "原文件不会被删除，手动添加的漫画不受影响。"
+                            "该目录扫描到的 ${item.comicCount} 本漫画及其阅读进度将一并移除。" +
+                            "原文件不会被删除，手动添加的漫画不受影响。"
                 )
             },
             confirmButton = {

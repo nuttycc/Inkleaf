@@ -45,7 +45,7 @@ abstract class AppDatabase : RoomDatabase() {
                 // 索引名必须符合 Room 的命名格式 index_表名_列名，否则校验失败
                 db.execSQL(
                     "CREATE UNIQUE INDEX IF NOT EXISTS index_library_folders_treeUri " +
-                        "ON library_folders(treeUri)"
+                            "ON library_folders(treeUri)"
                 )
             }
         }

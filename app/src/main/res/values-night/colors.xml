@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 深色模式启动背景：近似 INK 种子深色 surface。
+         系统深色模式下冷启动不再闪白 -->
+    <color name="splash_background">#FF131314</color>
+</resources>

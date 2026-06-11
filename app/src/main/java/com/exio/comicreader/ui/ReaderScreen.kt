@@ -119,9 +119,11 @@ fun ReaderScreen(comicId: Long, onBack: () -> Unit, modifier: Modifier = Modifie
 
     // 整个阅读页（含 Loading/Error）统一黑底：从书架进入只有一次
     // 平滑的"渐入黑色"，不会出现 白→黑 的背景突变
-    Box(modifier = modifier
-        .fillMaxSize()
-        .background(Color.Black)) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Color.Black)
+    ) {
         Crossfade(targetState = viewModel.state, label = "reader-state") { s ->
             when (s) {
                 ReaderUiState.Loading -> LoadingView(Modifier.fillMaxSize())

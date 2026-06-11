@@ -2,4 +2,15 @@
 <resources>
 
     <style name="Theme.ComicReader" parent="android:Theme.Material.Light.NoActionBar" />
+
+    <!--
+        冷启动专用主题：从进程创建到 Compose 首帧之间，窗口展示这个
+        启动画面（背景色 + 应用图标），而不是裸的白色 windowBackground。
+        core-splashscreen 库统一了 API 31+（系统启动画面）和更低版本
+        （库自己绘制）的行为。installSplashScreen() 之后切到 postSplashScreenTheme
+    -->
+    <style name="Theme.ComicReader.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/splash_background</item>
+        <item name="postSplashScreenTheme">@style/Theme.ComicReader</item>
+    </style>
 </resources>

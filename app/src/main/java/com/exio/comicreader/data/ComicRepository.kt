@@ -14,7 +14,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.zip.ZipInputStream
-import kotlin.coroutines.coroutineContext
 
 /** 一次全库扫描的结果汇总 */
 data class ScanResult(
@@ -60,7 +59,12 @@ class ComicRepository(context: Context) {
 
         val now = System.currentTimeMillis()
         val id = dao.insert(
-            ComicEntity(uri = uri.toString(), title = guessTitle(uri), addedAt = now, lastReadAt = now)
+            ComicEntity(
+                uri = uri.toString(),
+                title = guessTitle(uri),
+                addedAt = now,
+                lastReadAt = now
+            )
         )
         return dao.getById(id)!!
     }

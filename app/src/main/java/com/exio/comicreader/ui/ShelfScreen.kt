@@ -132,9 +132,11 @@ fun ShelfScreen(
             }
         },
     ) { innerPadding ->
-        Column(modifier = Modifier
-            .fillMaxSize()
-            .padding(innerPadding)) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+        ) {
             if (scanState.isScanning) {
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }

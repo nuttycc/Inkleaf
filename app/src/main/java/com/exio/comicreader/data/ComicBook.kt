@@ -88,6 +88,7 @@ class ComicBook private constructor(
                     // 原文件被用户删除或移动
                     is FileNotFoundException ->
                         ComicOpenException("找不到原文件，可能已被移动或删除", e)
+
                     else -> ComicOpenException("打开漫画失败：${e.message}", e)
                 }
             }
