@@ -37,8 +37,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.exio.comicreader.R
 import com.exio.comicreader.data.db.FolderWithCount
 
 /** 目录列表区的三态：作为 Crossfade 的 key，列表内容增删不触发整区动画 */
@@ -80,11 +82,7 @@ fun FoldersSheetContent(
                 .animateContentSize()
                 .padding(bottom = 12.dp),
         ) {
-            Text(
-                text = "漫画库目录",
-                style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
-            )
+            StandardSheetTitle("漫画库目录")
 
             val list = folders
             val phase = when {
@@ -107,7 +105,7 @@ fun FoldersSheetContent(
                         text = "还没有库目录，添加一个漫画文件夹开始扫描",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                     )
 
                     FoldersPhase.CONTENT -> LazyColumn {
@@ -115,6 +113,13 @@ fun FoldersSheetContent(
                         items(list.orEmpty(), key = { it.folder.id }) { item ->
                             ListItem(
                                 headlineContent = { Text(item.folder.displayName) },
+                                leadingContent = {
+                                    Icon(
+                                        painterResource(R.drawable.ic_folder),
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                },
                                 supportingContent = {
                                     // 计数随扫描入库实时变化（刚添加的目录会从 0
                                     // 涨到 N）：淡入淡出把"跳变"软化成"更新"

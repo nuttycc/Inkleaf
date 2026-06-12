@@ -47,6 +47,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -150,6 +151,10 @@ fun ShelfScreen(
                         Icon(Icons.Filled.Settings, contentDescription = "设置")
                     }
                 },
+                // 透明底色：顶栏不保有独立主题色，换肤瞬切才不会被 M3 内部
+                // 弹簧拖慢（策略与前提见 Theme.kt 的换肤注释）。本屏内容不会
+                // 滚到顶栏底下；若将来加 scrollBehavior 需重新评估
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
             )
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -307,11 +312,7 @@ private fun AddSheetContent(
             .navigationBarsPadding()
             .padding(bottom = 12.dp),
     ) {
-        Text(
-            text = "添加漫画",
-            style = MaterialTheme.typography.titleLarge,
-            modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
-        )
+        StandardSheetTitle("添加漫画")
         ListItem(
             headlineContent = { Text("添加漫画目录") },
             supportingContent = { Text("选择文件夹建立漫画库，内容变化自动同步") },

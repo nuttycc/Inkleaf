@@ -47,6 +47,17 @@ fun DarkMode.isDarkTheme(): Boolean = when (this) {
  * 由 material-kolor 在运行时按 M3 调色算法生成（自动满足对比度要求）。
  * 注意阅读页（ReaderScreen）基底不消费这里的颜色（沉浸阅读永远黑底白字），
  * 仅强调色（胶片高亮、滑杆填充）取自主题，并做了黑底亮度兜底。
+ *
+ * ## 换肤策略：全树同帧瞬切
+ *
+ * 成立的前提是窗口内没有任何组件保有"自己的、被内部动画接管的主题色"。
+ * M3 的 TopAppBar 内部用关不掉的弹簧追 containerColor，瞬切时会比页面
+ * 慢半拍（顶部割裂闪烁）——因此各屏顶栏的底色一律设为透明（顶栏色
+ * surface 与背景 background 在 M3 配色里本就同值，透明不改变静止外观），
+ * 顶部条带显示的就是页面背景本身，与主体物理同色，割裂无从发生。
+ * 曾试过两条动画路线（整套 scheme 逐帧渐变 / 截图盖板交叉淡出），均
+ * 无法彻底消除割裂且引入额外开销，复盘见
+ * .agents/lessons/theme-switch-color-motion-desync.md
  */
 @Composable
 fun ComicReaderTheme(
@@ -76,7 +87,8 @@ fun ComicReaderTheme(
     }
 
     // 系统栏前景明暗要跟随"应用主题"而不是"系统深色模式"：
-    // 用户强制深色而系统是浅色时，不设置这里会出现深色图标压深色背景
+    // 用户强制深色而系统是浅色时，不设置这里会出现深色图标压深色背景。
+    // 与内容同帧翻转；图标自身的过渡动画由 SystemUI 掌控，App 管不到
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {

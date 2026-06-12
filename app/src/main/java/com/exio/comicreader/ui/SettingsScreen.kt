@@ -40,6 +40,7 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -108,6 +109,10 @@ fun SettingsScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 },
+                // 透明底色：顶栏不保有独立主题色，换肤瞬切才不会被 M3 内部
+                // 弹簧拖慢（策略与前提见 Theme.kt 的换肤注释）。本屏内容不会
+                // 滚到顶栏底下；若将来加 scrollBehavior 需重新评估
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
             )
         },
     ) { innerPadding ->
@@ -267,11 +272,7 @@ private fun CacheLimitSheetContent(
             .navigationBarsPadding()
             .padding(bottom = 12.dp),
     ) {
-        Text(
-            text = "漫画缓存上限",
-            style = MaterialTheme.typography.titleLarge,
-            modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
-        )
+        StandardSheetTitle("漫画缓存上限")
 
         CacheLimit.entries.forEach { limit ->
             ListItem(
