@@ -2,6 +2,7 @@ package com.exio.comicreader.ui
 
 import android.app.Activity
 import android.os.Build
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
@@ -70,6 +71,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -80,7 +82,9 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.exio.comicreader.R
 import com.exio.comicreader.data.ComicBook
+import com.exio.comicreader.data.db.FavoritePageEntity
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -90,10 +94,15 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 
 @Composable
-fun ReaderScreen(comicId: Long, onBack: () -> Unit, modifier: Modifier = Modifier) {
+fun ReaderScreen(
+    comicId: Long,
+    initialPage: Int? = null,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val viewModel: ReaderViewModel = viewModel {
         val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY]!!
-        ReaderViewModel(app, comicId)
+        ReaderViewModel(app, comicId, initialPage)
     }
 
     // 工具栏显隐提升到这一层：系统栏控制要在 Loading 阶段就生效，
@@ -101,7 +110,16 @@ fun ReaderScreen(comicId: Long, onBack: () -> Unit, modifier: Modifier = Modifie
     var showControls by remember { mutableStateOf(false) }
 
     val view = LocalView.current
+    val context = LocalContext.current
     val window = (view.context as? Activity)?.window
+
+    val favoriteMessage = viewModel.favoriteMessage
+    LaunchedEffect(favoriteMessage) {
+        favoriteMessage?.let {
+            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+            viewModel.consumeFavoriteMessage()
+        }
+    }
 
     // 统一的退出路径：先恢复系统栏、再 pop。
     // 若等离开组合后才恢复（onDispose），返回动画播完时 insets 才从 0 跳回，
@@ -162,7 +180,9 @@ fun ReaderScreen(comicId: Long, onBack: () -> Unit, modifier: Modifier = Modifie
                     title = s.title,
                     cacheKeyPrefix = "comic-$comicId",
                     thumbnails = viewModel.thumbnails,
+                    favoritePages = viewModel.favoritePages,
                     onNeedThumbnail = viewModel::requestThumbnail,
+                    onToggleFavorite = viewModel::toggleFavorite,
                     onPageChanged = viewModel::saveProgress,
                     onBack = exitReader,
                     showControls = showControls,
@@ -181,7 +201,9 @@ private fun ComicPager(
     title: String,
     cacheKeyPrefix: String,
     thumbnails: Map<Int, ImageBitmap>,
+    favoritePages: Map<Int, FavoritePageEntity>,
     onNeedThumbnail: (Int) -> Unit,
+    onToggleFavorite: (Int) -> Unit,
     onPageChanged: (Int) -> Unit,
     onBack: () -> Unit,
     showControls: Boolean,
@@ -254,7 +276,9 @@ private fun ComicPager(
         ReaderTopBar(
             visible = showControls,
             title = title,
+            isFavorite = favoritePages.containsKey(pagerState.currentPage),
             onBack = onBack,
+            onToggleFavorite = { onToggleFavorite(pagerState.currentPage) },
             modifier = Modifier.align(Alignment.TopCenter),
         )
 
@@ -274,7 +298,9 @@ private fun ComicPager(
 private fun ReaderTopBar(
     visible: Boolean,
     title: String,
+    isFavorite: Boolean,
     onBack: () -> Unit,
+    onToggleFavorite: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     AnimatedVisibility(
@@ -283,6 +309,7 @@ private fun ReaderTopBar(
         exit = slideOutVertically { -it } + fadeOut(),
         modifier = modifier,
     ) {
+        val accent = readerAccentColor()
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -304,12 +331,19 @@ private fun ReaderTopBar(
                 style = MaterialTheme.typography.titleMedium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                // fill = false：weight 只作为最大宽度约束（长书名仍能截断），
-                // 短书名不被拉伸成占满整行
                 modifier = Modifier
-                    .weight(1f, fill = false)
-                    .padding(end = 16.dp),
+                    .weight(1f)
+                    .padding(end = 8.dp),
             )
+            IconButton(onClick = onToggleFavorite) {
+                Icon(
+                    painter = painterResource(
+                        if (isFavorite) R.drawable.ic_favorite else R.drawable.ic_favorite_border
+                    ),
+                    contentDescription = if (isFavorite) "取消收藏本页" else "收藏本页",
+                    tint = if (isFavorite) accent else Color.White,
+                )
+            }
         }
     }
 }

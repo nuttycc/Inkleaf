@@ -90,6 +90,7 @@ private val COMIC_MIME_TYPES = arrayOf(
 @Composable
 fun ShelfScreen(
     onOpenComic: (Long) -> Unit,
+    onOpenFavorites: () -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: ShelfViewModel = viewModel(),
@@ -131,6 +132,12 @@ fun ShelfScreen(
             TopAppBar(
                 title = { Text("我的书架") },
                 actions = {
+                    IconButton(onClick = onOpenFavorites) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_favorite),
+                            contentDescription = "图片收藏",
+                        )
+                    }
                     // 添加是"必须但低频"的功能：顶栏小图标拿最低调的常驻位，
                     // 空书架时的主推入口是空状态里的按钮（渐进式显著度）。
                     // 点开走底部 sheet——与排版抽屉、目录管理同一套视觉语言
@@ -215,7 +222,7 @@ fun ShelfScreen(
                         // 固定列数或按最小宽度自适应，由排版设置驱动
                         columns = layout.columns.fixedCount
                             ?.let { GridCells.Fixed(it) }
-                            ?: GridCells.Adaptive(minSize = 110.dp),
+                            ?: GridCells.Adaptive(minSize = GridDefaults.AdaptiveMinCellWidth),
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(12.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),

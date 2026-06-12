@@ -16,7 +16,10 @@ import com.exio.comicreader.data.ComicBook
 import com.exio.comicreader.data.ComicOpenException
 import com.exio.comicreader.data.ComicRepository
 import com.exio.comicreader.data.Covers
+import com.exio.comicreader.data.FavoriteRepository
 import com.exio.comicreader.data.ReaderCache
+import com.exio.comicreader.data.db.ComicEntity
+import com.exio.comicreader.data.db.FavoritePageEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -45,8 +48,10 @@ sealed interface ReaderUiState {
 class ReaderViewModel(
     app: Application,
     private val comicId: Long,
+    private val initialPageOverride: Int? = null,
 ) : AndroidViewModel(app) {
     private val repo = ComicRepository(app)
+    private val favoriteRepo = FavoriteRepository(app)
 
     var state by mutableStateOf<ReaderUiState>(ReaderUiState.Loading)
         private set
@@ -63,23 +68,33 @@ class ReaderViewModel(
      * 超过 PREWARM_MAX_PAGES 的书不做全量预热（见 prewarmThumbnails）。
      */
     val thumbnails = mutableStateMapOf<Int, ImageBitmap>()
+    val favoritePages = mutableStateMapOf<Int, FavoritePageEntity>()
+
+    var favoriteMessage by mutableStateOf<String?>(null)
+        private set
 
     /** 正在加载中的页码集合，配合 Mutex 实现去重 */
     private val thumbInFlight = mutableSetOf<Int>()
     private val thumbMutex = Mutex()
+    private val favoriteInFlight = mutableSetOf<Int>()
 
     private var book: ComicBook? = null
+    private var comic: ComicEntity? = null
+    private var observedFavoriteSource: String? = null
 
     init {
         viewModelScope.launch {
             state = try {
                 val comic = repo.getComic(comicId)
                     ?: throw ComicOpenException("书架记录不存在")
+                this@ReaderViewModel.comic = comic
+                observeFavorites(comic.uri)
                 val opened = ComicBook.open(getApplication(), Uri.parse(comic.uri), comicId)
                 book = opened
                 // 首次打开回填页数和封面；Room Flow 会自动刷新书架
                 repo.backfillMetadata(comic, opened)
-                val startPage = comic.lastReadPage.coerceIn(0, opened.pageCount - 1)
+                val startPage = (initialPageOverride ?: comic.lastReadPage)
+                    .coerceIn(0, opened.pageCount - 1)
                 // 后台预热胶片缩略图：呼出工具栏时大概率已全部就绪
                 prewarmThumbnails(opened, startPage)
                 ReaderUiState.Ready(
@@ -96,6 +111,36 @@ class ReaderViewModel(
 
     fun saveProgress(page: Int) {
         viewModelScope.launch { repo.saveProgress(comicId, page) }
+    }
+
+    fun toggleFavorite(page: Int) {
+        if (page in favoriteInFlight) return
+        val opened = book ?: return
+        val source = comic ?: return
+        if (page !in 0 until opened.pageCount) return
+
+        viewModelScope.launch {
+            favoriteInFlight += page
+            try {
+                val existing = favoritePages[page]
+                if (existing != null) {
+                    favoriteRepo.remove(existing)
+                    favoriteMessage = "已取消收藏"
+                } else {
+                    val bytes = opened.loadPageBytes(page)
+                    favoriteRepo.addSnapshot(source, page, opened.pageCount, bytes)
+                    favoriteMessage = "已收藏"
+                }
+            } catch (e: Exception) {
+                favoriteMessage = e.message?.let { "收藏失败：$it" } ?: "收藏失败"
+            } finally {
+                favoriteInFlight -= page
+            }
+        }
+    }
+
+    fun consumeFavoriteMessage() {
+        favoriteMessage = null
     }
 
     /** 胶片格子按需请求缩略图：缓存已有或正在加载则直接返回（去重） */
@@ -115,6 +160,17 @@ class ReaderViewModel(
         viewModelScope.launch {
             for (page in startPage until book.pageCount) loadThumbnail(page)
             for (page in startPage - 1 downTo 0) loadThumbnail(page)
+        }
+    }
+
+    private fun observeFavorites(sourceUri: String) {
+        if (observedFavoriteSource == sourceUri) return
+        observedFavoriteSource = sourceUri
+        viewModelScope.launch {
+            favoriteRepo.observeForSource(sourceUri).collect { favorites ->
+                favoritePages.clear()
+                favorites.forEach { favoritePages[it.pageIndex] = it }
+            }
         }
     }
 

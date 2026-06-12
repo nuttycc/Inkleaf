@@ -25,6 +25,7 @@ import com.exio.comicreader.data.ComicRepository
 import com.exio.comicreader.data.ReaderCache
 import com.exio.comicreader.data.ThemeSettings
 import com.exio.comicreader.data.ThemeSettingsRepository
+import com.exio.comicreader.ui.FavoritesScreen
 import com.exio.comicreader.ui.ReaderScreen
 import com.exio.comicreader.ui.SettingsScreen
 import com.exio.comicreader.ui.ShelfScreen
@@ -42,7 +43,10 @@ import kotlinx.serialization.Serializable
 data object ShelfRoute
 
 @Serializable
-data class ReaderRoute(val comicId: Long)
+data class ReaderRoute(val comicId: Long, val initialPage: Int? = null)
+
+@Serializable
+data object FavoritesRoute
 
 @Serializable
 data object SettingsRoute
@@ -135,6 +139,7 @@ class MainActivity : ComponentActivity() {
                         composable<ShelfRoute> {
                             ShelfScreen(
                                 onOpenComic = { id -> navController.navigate(ReaderRoute(id)) },
+                                onOpenFavorites = { navController.navigate(FavoritesRoute) },
                                 onOpenSettings = { navController.navigate(SettingsRoute) },
                             )
                         }
@@ -142,7 +147,16 @@ class MainActivity : ComponentActivity() {
                             val route = entry.toRoute<ReaderRoute>()
                             ReaderScreen(
                                 comicId = route.comicId,
+                                initialPage = route.initialPage,
                                 onBack = { navController.popBackStack() },
+                            )
+                        }
+                        composable<FavoritesRoute> {
+                            FavoritesScreen(
+                                onBack = { navController.popBackStack() },
+                                onOpenComicPage = { id, page ->
+                                    navController.navigate(ReaderRoute(id, page))
+                                },
                             )
                         }
                         composable<SettingsRoute> {

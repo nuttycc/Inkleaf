@@ -17,13 +17,14 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  * 错误信息里列出期望/实际两份 schema，照着对差异即可修复。
  */
 @Database(
-    entities = [ComicEntity::class, LibraryFolderEntity::class],
-    version = 2,
+    entities = [ComicEntity::class, LibraryFolderEntity::class, FavoritePageEntity::class],
+    version = 3,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun comicDao(): ComicDao
     abstract fun libraryFolderDao(): LibraryFolderDao
+    abstract fun favoriteDao(): FavoriteDao
 
     companion object {
         /** v1 → v2：comics 加两列 + 新建 library_folders 表 */
@@ -50,6 +51,33 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** v2 -> v3：新增跨书籍的页面收藏表 */
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """CREATE TABLE IF NOT EXISTS favorite_pages (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        sourceComicId INTEGER NOT NULL,
+                        sourceUri TEXT NOT NULL,
+                        sourceTitle TEXT NOT NULL,
+                        pageIndex INTEGER NOT NULL,
+                        pageCount INTEGER NOT NULL,
+                        imagePath TEXT NOT NULL,
+                        thumbnailPath TEXT,
+                        addedAt INTEGER NOT NULL
+                    )"""
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS index_favorite_pages_sourceUri_pageIndex " +
+                            "ON favorite_pages(sourceUri, pageIndex)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_favorite_pages_sourceComicId " +
+                            "ON favorite_pages(sourceComicId)"
+                )
+            }
+        }
+
         @Volatile
         private var instance: AppDatabase? = null
 
@@ -62,7 +90,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "comic_reader.db",
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .build()
                     .also { instance = it }
             }
