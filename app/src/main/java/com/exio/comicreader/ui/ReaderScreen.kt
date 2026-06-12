@@ -638,13 +638,18 @@ private fun ComicPage(
     }
 
     Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        val pageBytes = bytes
+        var imageReady by remember(page, pageBytes) { mutableStateOf(false) }
+
         // 垫底层：远跳到未加载页时，原图要经历 zip 解压 + 解码（几十到
         // 几百毫秒），期间这层保证屏幕有内容、消除黑屏闪烁。
         // 关键是重度模糊：直接放大的低清图"看得出是糊图"，很难看；
         // 模糊成只剩色调和明暗的色彩氛围，读作有意的过渡效果。
+        // 原图加载完成后移除垫底层，避免在 Fit 留白处形成持久光晕。
         // blur 依赖 RenderEffect（API 31+），更低版本宁可黑屏也不展示糊图
         val canBlur = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
-        if (thumbnail != null && canBlur) {
+        val showBlurPlaceholder = !imageReady && thumbnail != null && canBlur
+        if (showBlurPlaceholder) {
             Image(
                 bitmap = thumbnail,
                 contentDescription = null,
@@ -655,10 +660,9 @@ private fun ComicPage(
             )
         }
 
-        val pageBytes = bytes
         if (pageBytes == null) {
             // 没有模糊垫底（预热未到/系统不支持）才显示转圈
-            if (thumbnail == null || !canBlur) {
+            if (!showBlurPlaceholder) {
                 DelayedSpinner(showDelay = 200.milliseconds)
             }
         } else {
@@ -666,12 +670,14 @@ private fun ComicPage(
                 model = ImageRequest.Builder(context)
                     .data(ByteBuffer.wrap(pageBytes))
                     .memoryCacheKey("$cacheKeyPrefix#$page")
-                    // 原图淡入盖过模糊垫底层，"由雾化变清晰"过渡柔和；
+                    // 原图短淡入，避免加载完成时硬切；
                     // 内存缓存命中时 Coil 自动跳过淡入，翻回已读页无延迟感
                     .crossfade(150)
                     .build(),
                 contentDescription = "第 ${page + 1} 页",
                 contentScale = ContentScale.Fit,
+                onSuccess = { imageReady = true },
+                onError = { imageReady = true },
                 modifier = Modifier.fillMaxSize(),
             )
         }
