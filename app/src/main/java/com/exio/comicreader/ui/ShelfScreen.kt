@@ -2,8 +2,11 @@ package com.exio.comicreader.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -27,11 +30,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
@@ -43,7 +47,9 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.rememberBottomSheetState
+import androidx.compose.material3.SheetValue
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -54,6 +60,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -69,7 +76,17 @@ import com.exio.comicreader.data.ShelfLayoutSettings
 import com.exio.comicreader.data.db.ComicEntity
 import java.io.File
 
-/** 首页书架：封面网格 + 目录扫描 + 排版抽屉 + FAB 单文件添加 + 长按删除 */
+/** 书架内容区的三态：作为 Crossfade 的 key，列表内容增删不触发整区动画 */
+private enum class ShelfPhase { LOADING, EMPTY, CONTENT }
+
+/** 单本漫画选择器接受的 MIME 类型（顶栏菜单和空状态按钮共用） */
+private val COMIC_MIME_TYPES = arrayOf(
+    "application/zip",
+    "application/x-cbz",
+    "application/octet-stream",
+)
+
+/** 首页书架：封面网格 + 目录扫描 + 排版抽屉 + 顶栏添加菜单 + 长按删除 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ShelfScreen(
@@ -92,6 +109,16 @@ fun ShelfScreen(
         if (uri != null) viewModel.addComic(uri, onReady = onOpenComic)
     }
 
+    // OpenDocumentTree：系统目录选择器。launcher 挂屏幕层级而非菜单内容里：
+    // 选目录期间本进程可能被杀，结果只会投递给重建后立即重新注册的接收器
+    val treePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) viewModel.addFolder(uri)
+    }
+
+    var showAddSheet by remember { mutableStateOf(false) }
+
     LaunchedEffect(scanState.message) {
         scanState.message?.let {
             snackbarHostState.showSnackbar(it)
@@ -105,6 +132,12 @@ fun ShelfScreen(
             TopAppBar(
                 title = { Text("我的书架") },
                 actions = {
+                    // 添加是"必须但低频"的功能：顶栏小图标拿最低调的常驻位，
+                    // 空书架时的主推入口是空状态里的按钮（渐进式显著度）。
+                    // 点开走底部 sheet——与排版抽屉、目录管理同一套视觉语言
+                    IconButton(onClick = { showAddSheet = true }) {
+                        Icon(Icons.Filled.Add, contentDescription = "添加漫画")
+                    }
                     // core 图标集没有 Tune，用自建的矢量资源（res/drawable/ic_tune.xml）
                     IconButton(onClick = { showLayoutSheet = true }) {
                         Icon(
@@ -122,55 +155,79 @@ fun ShelfScreen(
             )
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
-        floatingActionButton = {
-            FloatingActionButton(onClick = {
-                picker.launch(
-                    arrayOf("application/zip", "application/x-cbz", "application/octet-stream")
-                )
-            }) {
-                Icon(Icons.Filled.Add, contentDescription = "添加单个漫画文件")
-            }
-        },
     ) { innerPadding ->
-        Column(
+        // 下拉刷新指示器只跟随"手动"刷新：自动扫描保持完全静默，
+        // 结果通过网格的 item 级增删自然呈现
+        PullToRefreshBox(
+            isRefreshing = scanState.isScanning && scanState.isManual,
+            onRefresh = { viewModel.refresh(manual = true) },
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
+                .padding(innerPadding),
         ) {
-            if (scanState.isScanning) {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            val list = comics
+            // Crossfade 的 key 用三态枚举而不是列表本身：扫描中增删条目
+            // 不触发动画（LazyGrid 自己按 item key 处理），只有
+            // 加载中/空/有内容 之间的切换才淡入淡出
+            val phase = when {
+                list == null -> ShelfPhase.LOADING
+                list.isEmpty() -> ShelfPhase.EMPTY
+                else -> ShelfPhase.CONTENT
             }
+            Crossfade(
+                targetState = phase,
+                animationSpec = tween(200),
+                label = "shelfPhase",
+            ) { current ->
+                when (current) {
+                    // Room 首批数据未到：留白（且通常被启动画面盖住）
+                    ShelfPhase.LOADING -> Box(modifier = Modifier.fillMaxSize())
+                    ShelfPhase.EMPTY -> Box(
+                        // 空状态本身不需要滚动，但下拉刷新手势靠嵌套滚动
+                        // 传递——没有可滚动子项时空书架就拉不动了
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState()),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        // 空书架时"添加"就是此刻的首要动作，给实体按钮；
+                        // 库建好后该动作降级回顶栏小图标（渐进式显著度）
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = "书架还是空的",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Button(onClick = { treePicker.launch(null) }) {
+                                Text("添加漫画目录")
+                            }
+                            TextButton(onClick = { picker.launch(COMIC_MIME_TYPES) }) {
+                                Text("或添加单本漫画")
+                            }
+                        }
+                    }
 
-            if (comics.isEmpty()) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = "书架还是空的\n右上角添加漫画库目录，或点 + 添加单个文件",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            } else {
-                LazyVerticalGrid(
-                    // 固定列数或按最小宽度自适应，由排版设置驱动
-                    columns = layout.columns.fixedCount
-                        ?.let { GridCells.Fixed(it) }
-                        ?: GridCells.Adaptive(minSize = 110.dp),
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    items(comics, key = { it.id }) { comic ->
-                        ComicCard(
-                            comic = comic,
-                            aspect = layout.aspect.ratio,
-                            crop = layout.crop,
-                            onClick = { onOpenComic(comic.id) },
-                            onLongClick = { pendingDelete = comic },
-                        )
+                    ShelfPhase.CONTENT -> LazyVerticalGrid(
+                        // 固定列数或按最小宽度自适应，由排版设置驱动
+                        columns = layout.columns.fixedCount
+                            ?.let { GridCells.Fixed(it) }
+                            ?: GridCells.Adaptive(minSize = 110.dp),
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        // 渐变期间旧分支仍在组合，list 可能已退回空——orEmpty 兜底
+                        items(list.orEmpty(), key = { it.id }) { comic ->
+                            ComicCard(
+                                comic = comic,
+                                aspect = layout.aspect.ratio,
+                                crop = layout.crop,
+                                onClick = { onOpenComic(comic.id) },
+                                onLongClick = { pendingDelete = comic },
+                            )
+                        }
                     }
                 }
             }
@@ -180,7 +237,11 @@ fun ShelfScreen(
     // 排版抽屉：抽屉只遮住屏幕下部，上方网格仍可见——点选即生效，
     // 网格当场变化就是"实时预览"
     if (showLayoutSheet) {
-        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        // enabledValues 不含 PartiallyExpanded = 旧 skipPartiallyExpanded = true
+        val sheetState = rememberBottomSheetState(
+            initialValue = SheetValue.Hidden,
+            enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
+        )
         ModalBottomSheet(
             onDismissRequest = { showLayoutSheet = false },
             sheetState = sheetState,
@@ -191,6 +252,29 @@ fun ShelfScreen(
                 onColumnsChange = viewModel::setColumns,
                 onAspectChange = viewModel::setAspect,
                 onCropChange = viewModel::setCrop,
+            )
+        }
+    }
+
+    // 添加入口的 sheet：与排版抽屉、目录管理共用同一套底部 sheet 语言
+    if (showAddSheet) {
+        val addSheetState = rememberBottomSheetState(
+            initialValue = SheetValue.Hidden,
+            enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
+        )
+        ModalBottomSheet(
+            onDismissRequest = { showAddSheet = false },
+            sheetState = addSheetState,
+        ) {
+            AddSheetContent(
+                onAddFolder = {
+                    showAddSheet = false
+                    treePicker.launch(null)
+                },
+                onAddFile = {
+                    showAddSheet = false
+                    picker.launch(COMIC_MIME_TYPES)
+                },
             )
         }
     }
@@ -214,6 +298,56 @@ fun ShelfScreen(
             dismissButton = {
                 TextButton(onClick = { pendingDelete = null }) { Text("取消") }
             },
+        )
+    }
+}
+
+/**
+ * 添加入口的 sheet 内容：两个动作行。sheet 行的宽度优势用来放说明文字——
+ * 把"目录 = 长期同步的库 / 单本 = 一次性导入"的本质差异讲清楚
+ */
+@Composable
+private fun AddSheetContent(
+    onAddFolder: () -> Unit,
+    onAddFile: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(bottom = 12.dp),
+    ) {
+        Text(
+            text = "添加漫画",
+            style = MaterialTheme.typography.titleLarge,
+            modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+        )
+        ListItem(
+            headlineContent = { Text("添加漫画目录") },
+            supportingContent = { Text("选择文件夹建立漫画库，内容变化自动同步") },
+            leadingContent = {
+                Icon(
+                    painterResource(R.drawable.ic_folder),
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            },
+            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            modifier = Modifier.clickable(onClick = onAddFolder),
+        )
+        ListItem(
+            headlineContent = { Text("添加单本漫画") },
+            supportingContent = { Text("导入单个文件，立即开始阅读") },
+            leadingContent = {
+                Icon(
+                    painterResource(R.drawable.ic_file),
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            },
+            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            modifier = Modifier.clickable(onClick = onAddFile),
         )
     }
 }

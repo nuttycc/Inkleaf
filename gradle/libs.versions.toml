@@ -9,6 +9,10 @@ lifecycleRuntimeKtx = "2.10.0"
 activityCompose = "1.13.0"
 kotlin = "2.4.0"
 composeBom = "2026.05.01"
+# 钉死策略：1.5.0-alpha21 越过 BOM（稳定版 1.4.0 不含 expressive 组件）。
+# 这批 API 已在 alpha18~21 间毕业，签名再变概率低；不追新 alpha，
+# 等 1.5.0 稳定版进 BOM 后删除此钉回归大部队
+material3 = "1.5.0-alpha21"
 coil = "2.7.0"
 roomRuntime = "2.8.4"
 navigationCommon = "2.9.8"
@@ -38,7 +42,7 @@ androidx-compose-ui-tooling = { group = "androidx.compose.ui", name = "ui-toolin
 androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
 androidx-compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest" }
 androidx-compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
-androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
+androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3", version.ref = "material3" }
 androidx-compose-material-icons-core = { group = "androidx.compose.material", name = "material-icons-core" }
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
 androidx-room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "roomRuntime" }

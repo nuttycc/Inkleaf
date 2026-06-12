@@ -1,5 +1,12 @@
 package com.exio.comicreader.ui
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,6 +41,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.exio.comicreader.data.db.FolderWithCount
 
+/** 目录列表区的三态：作为 Crossfade 的 key，列表内容增删不触发整区动画 */
+private enum class FoldersPhase { LOADING, EMPTY, CONTENT }
+
 /**
  * 漫画库目录管理（ModalBottomSheet 内容）：列表、添加、移除（级联删除该目录的书）。
  *
@@ -65,6 +75,9 @@ fun FoldersSheetContent(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                // sheet 高度随内容变（空状态 ↔ 列表、列表增删行）：
+                // 平滑过渡而不是跳变
+                .animateContentSize()
                 .padding(bottom = 12.dp),
         ) {
             Text(
@@ -73,28 +86,58 @@ fun FoldersSheetContent(
                 modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
             )
 
-            if (folders.isEmpty()) {
-                Text(
-                    text = "还没有库目录，添加一个漫画文件夹开始扫描",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
-                )
-            } else {
+            val list = folders
+            val phase = when {
+                list == null -> FoldersPhase.LOADING
+                list.isEmpty() -> FoldersPhase.EMPTY
+                else -> FoldersPhase.CONTENT
+            }
+            Crossfade(
+                targetState = phase,
+                animationSpec = tween(200),
+                label = "foldersPhase",
                 // weight(fill = false)：列表短则按内容收缩，长则只占剩余高度
                 // 并自行滚动，保证底部"添加目录"永远可见、不被顶出 sheet
-                LazyColumn(modifier = Modifier.weight(1f, fill = false)) {
-                    items(folders, key = { it.folder.id }) { item ->
-                        ListItem(
-                            headlineContent = { Text(item.folder.displayName) },
-                            supportingContent = { Text("${item.comicCount} 本漫画") },
-                            trailingContent = {
-                                IconButton(onClick = { pendingDelete = item }) {
-                                    Icon(Icons.Filled.Delete, contentDescription = "移除目录")
-                                }
-                            },
-                            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                        )
+                modifier = Modifier.weight(1f, fill = false),
+            ) { current ->
+                when (current) {
+                    // Room 首批数据未到：不渲染空状态文案，避免闪现
+                    FoldersPhase.LOADING -> Box(modifier = Modifier.fillMaxWidth())
+                    FoldersPhase.EMPTY -> Text(
+                        text = "还没有库目录，添加一个漫画文件夹开始扫描",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
+                    )
+
+                    FoldersPhase.CONTENT -> LazyColumn {
+                        // 渐变期间旧分支仍在组合，list 可能已变空——orEmpty 兜底
+                        items(list.orEmpty(), key = { it.folder.id }) { item ->
+                            ListItem(
+                                headlineContent = { Text(item.folder.displayName) },
+                                supportingContent = {
+                                    // 计数随扫描入库实时变化（刚添加的目录会从 0
+                                    // 涨到 N）：淡入淡出把"跳变"软化成"更新"
+                                    AnimatedContent(
+                                        targetState = item.comicCount,
+                                        transitionSpec = {
+                                            fadeIn(tween(150)) togetherWith fadeOut(tween(150))
+                                        },
+                                        label = "folderCount",
+                                    ) { count ->
+                                        Text("$count 本漫画")
+                                    }
+                                },
+                                trailingContent = {
+                                    IconButton(onClick = { pendingDelete = item }) {
+                                        Icon(Icons.Filled.Delete, contentDescription = "移除目录")
+                                    }
+                                },
+                                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                                // 新行插入/删除时其余行平滑让位，而不是瞬移
+                                modifier = Modifier.animateItem(),
+                            )
+                        }
                     }
                 }
             }

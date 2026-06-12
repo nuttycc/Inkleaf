@@ -4,9 +4,9 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedContentTransitionScope.SlideDirection
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -21,6 +21,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
+import com.exio.comicreader.data.ComicRepository
 import com.exio.comicreader.data.ReaderCache
 import com.exio.comicreader.data.ThemeSettings
 import com.exio.comicreader.data.ThemeSettingsRepository
@@ -46,6 +47,17 @@ data class ReaderRoute(val comicId: Long)
 @Serializable
 data object SettingsRoute
 
+/** 页面转场时长。全宽滑动的运动量大，350~450ms 区间体感比较合适 */
+private const val NAV_TRANSITION_MS = 400
+
+/**
+ * M3 emphasized 缓动：起步快、减速段长，比默认 FastOutSlowIn 的收尾
+ * 更舒展——同样时长下动画"可见的部分"更多，不会显得一闪而过
+ */
+private val NavEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
+
+private fun <T> navSpec() = tween<T>(NAV_TRANSITION_MS, easing = NavEasing)
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         // 必须在 super.onCreate 之前调用：它要接管系统启动画面（API 31+）
@@ -70,7 +82,17 @@ class MainActivity : ComponentActivity() {
         // 画面盖住了首帧之前的空窗，同样不闪默认色，但主线程零阻塞
         var initialTheme by mutableStateOf<ThemeSettings?>(null)
         lifecycleScope.launch { initialTheme = themeRepo.settings.first() }
-        splashScreen.setKeepOnScreenCondition { initialTheme == null }
+
+        // 同理预热书架首查：Room 单例在 splash 期间就打开数据库并跑完
+        // 首次查询，ShelfScreen 组合后自己的收集几乎立刻命中，
+        // "留白 → 网格"的切换被藏在启动画面背后。
+        // first() 对空表也会发射 emptyList，不存在挂死 splash 的风险
+        var shelfWarm by mutableStateOf(false)
+        lifecycleScope.launch {
+            ComicRepository(this@MainActivity).observeAll().first()
+            shelfWarm = true
+        }
+        splashScreen.setKeepOnScreenCondition { initialTheme == null || !shelfWarm }
 
         setContent {
             // 主题没读到前不组合内容：此时启动画面还在屏上，用户看不到空窗
@@ -87,15 +109,28 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    // Navigation 默认转场是 700ms 交叉淡化，偏慢（黑色阅读页
-                    // 淡出时残影明显）；统一换成 250ms
+                    // 全局转场：全宽水平推入——前进时新页从右侧整页滑入，
+                    // 旧页同步整页滑出，两页边贴边像传送带一样移过屏幕；
+                    // 返回时方向相反。刻意不加 fade：两页全程淡化会把滑动
+                    // 藏在透明度底下，看起来仍像交叉淡化（缺乏滑动感）。
+                    // 两页位移量相同、无重叠区，因此不依赖绘制层级，任意
+                    // 两页之间都成立：新增页面无需再配转场。
+                    // slideInto/OutOfContainer 按布局方向解析 Start/End，RTL 自适应
                     NavHost(
                         navController = navController,
                         startDestination = ShelfRoute,
-                        enterTransition = { fadeIn(tween(250)) },
-                        exitTransition = { fadeOut(tween(250)) },
-                        popEnterTransition = { fadeIn(tween(250)) },
-                        popExitTransition = { fadeOut(tween(250)) },
+                        enterTransition = {
+                            slideIntoContainer(SlideDirection.Start, navSpec())
+                        },
+                        exitTransition = {
+                            slideOutOfContainer(SlideDirection.Start, navSpec())
+                        },
+                        popEnterTransition = {
+                            slideIntoContainer(SlideDirection.End, navSpec())
+                        },
+                        popExitTransition = {
+                            slideOutOfContainer(SlideDirection.End, navSpec())
+                        },
                     ) {
                         composable<ShelfRoute> {
                             ShelfScreen(
@@ -112,6 +147,9 @@ class MainActivity : ComponentActivity() {
                         }
                         composable<SettingsRoute> {
                             SettingsScreen(
+                                // 复用顶层已收集的主题状态：进设置页首帧即真实值，
+                                // 不会出现开关从默认值滑到真实值的突变
+                                themeSettings = themeSettings,
                                 onBack = { navController.popBackStack() },
                             )
                         }

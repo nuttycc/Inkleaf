@@ -3,7 +3,7 @@ package com.exio.comicreader.ui.theme
 import android.app.Activity
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
@@ -14,7 +14,20 @@ import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import com.exio.comicreader.data.DarkMode
 import com.exio.comicreader.data.ThemeSettings
+import com.materialkolor.PaletteStyle
 import com.materialkolor.rememberDynamicColorScheme
+import android.graphics.Color as AndroidColor
+
+/**
+ * 自定义种子色的实际调色风格。复用 INK 预设的经验：低饱和的颜色
+ * （hex 输入进来的灰/米白等）必须走 Neutral，TonalSpot/Vibrant 会把
+ * 灰"提纯"成紫灰；有彩度的照用户选的浓淡档。
+ */
+fun customSeedStyle(argb: Long, preferred: PaletteStyle): PaletteStyle {
+    val hsv = FloatArray(3)
+    AndroidColor.colorToHSV(argb.toInt(), hsv)
+    return if (hsv[1] < 0.15f) PaletteStyle.Neutral else preferred
+}
 
 /**
  * 全 App 主题：由用户设置（种子色 + 深浅模式 + 壁纸取色）驱动。
@@ -35,12 +48,20 @@ fun ComicReaderTheme(
         DarkMode.DARK -> true
     }
 
-    val colorScheme = if (settings.useWallpaper && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        // Material You 壁纸取色：系统算好的 scheme，API 31+
-        val context = LocalContext.current
-        if (isDark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-    } else {
-        rememberDynamicColorScheme(
+    val colorScheme = when {
+        settings.useWallpaper && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+            // Material You 壁纸取色：系统算好的 scheme，API 31+
+            val context = LocalContext.current
+            if (isDark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        }
+
+        settings.useCustom && settings.customArgb != null -> rememberDynamicColorScheme(
+            seedColor = Color(settings.customArgb),
+            isDark = isDark,
+            style = customSeedStyle(settings.customArgb, settings.customStyle.style),
+        )
+
+        else -> rememberDynamicColorScheme(
             seedColor = Color(settings.seed.argb),
             isDark = isDark,
             style = settings.seed.style,
@@ -59,7 +80,9 @@ fun ComicReaderTheme(
         }
     }
 
-    MaterialTheme(
+    // MaterialExpressiveTheme：未显式传入的 token（形状/动效）取 expressive
+    // 默认值——菜单等组件的圆角、弹簧动效由此而来；色彩和字体仍是我们自己的
+    MaterialExpressiveTheme(
         colorScheme = colorScheme,
         typography = Typography,
         content = content,

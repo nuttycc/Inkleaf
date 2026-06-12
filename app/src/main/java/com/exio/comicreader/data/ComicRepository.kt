@@ -11,6 +11,8 @@ import com.exio.comicreader.data.db.LibraryFolderEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.zip.ZipInputStream
@@ -22,6 +24,12 @@ data class ScanResult(
     val restored: Int,
     val failedFolders: List<String>, // 无法访问的目录名
 )
+
+/** addFolderAndSync 的结果：目录是新加入的（携带首扫汇总）还是已存在 */
+sealed interface AddFolderOutcome {
+    data class Added(val scan: ScanResult) : AddFolderOutcome
+    data object Duplicate : AddFolderOutcome
+}
 
 /**
  * 业务数据的统一入口：ViewModel 不直接接触 DAO、文件系统和权限 API。
@@ -144,11 +152,28 @@ class ComicRepository(context: Context) {
     }
 
     /**
+     * 添加库目录的完整编排：插库 → 首扫 → 补封面。
+     * 收在数据层，让多个入口（书架 FAB 菜单、设置页目录管理）共享同一份
+     * 业务逻辑——入口可以有多个，编排只能有一份。
+     * SecurityException（树权限拿不到）原样上抛，由调用方提示用户
+     */
+    suspend fun addFolderAndSync(treeUri: Uri): AddFolderOutcome {
+        if (!addFolder(treeUri)) return AddFolderOutcome.Duplicate
+        val result = syncAllFolders()
+        backfillCovers()
+        return AddFolderOutcome.Added(result)
+    }
+
+    /**
      * 全库同步：对每个目录做"扫描结果 vs 数据库"的集合 diff，三分类处理。
      * 整个过程幂等（重复执行结果相同）——扫描中途被取消/杀进程都无害，
      * 下次重扫即可收敛到正确状态。
+     *
+     * 进程级锁串行化并发调用（Repository 随处构造，多个 ViewModel 可能
+     * 同时发起扫描）：两次扫描从同一快照各算一遍"新书"会重复插入；
+     * 排队的那次等到锁后跑的是无变化的空 diff，几乎零成本
      */
-    suspend fun syncAllFolders(): ScanResult {
+    suspend fun syncAllFolders(): ScanResult = syncMutex.withLock {
         var added = 0
         var markedMissing = 0
         var restored = 0
@@ -199,7 +224,7 @@ class ComicRepository(context: Context) {
                 restored += toRestore.size
             }
         }
-        return ScanResult(added, markedMissing, restored, failed)
+        ScanResult(added, markedMissing, restored, failed)
     }
 
     /**
@@ -243,5 +268,10 @@ class ComicRepository(context: Context) {
             ?: uri.lastPathSegment?.substringAfterLast('/')
             ?: "未命名漫画"
         name.substringBeforeLast('.')
+    }
+
+    companion object {
+        /** Repository 实例随处构造（自身无状态），扫描锁必须放进程级单例处 */
+        private val syncMutex = Mutex()
     }
 }

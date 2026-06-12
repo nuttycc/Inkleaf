@@ -2,16 +2,17 @@ package com.exio.comicreader.ui
 
 import android.app.Application
 import android.net.Uri
-import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.viewModelScope
+import com.exio.comicreader.data.AddFolderOutcome
 import com.exio.comicreader.data.ComicRepository
 import com.exio.comicreader.data.CoverAspect
 import com.exio.comicreader.data.CoverCrop
 import com.exio.comicreader.data.GridColumnsMode
+import com.exio.comicreader.data.ScanResult
 import com.exio.comicreader.data.ShelfLayoutSettings
 import com.exio.comicreader.data.ShelfSettingsRepository
 import com.exio.comicreader.data.db.ComicEntity
@@ -23,9 +24,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-/** 扫描状态：进行中 / 一次性提示消息（展示后清空） */
+/**
+ * 扫描状态：进行中（区分用户手动发起）/ 一次性提示消息（展示后清空）。
+ * isManual 决定 UI 表现：手动刷新有下拉指示器和结果反馈，自动扫描全静默
+ */
 data class ScanState(
     val isScanning: Boolean = false,
+    val isManual: Boolean = false,
     val message: String? = null,
 )
 
@@ -33,9 +38,13 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycle
     private val repo = ComicRepository(app)
     private val settingsRepo = ShelfSettingsRepository(app)
 
-    /** 书架列表：数据库一变自动推送 */
-    val comics: StateFlow<List<ComicEntity>> = repo.observeAll()
-        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+    /**
+     * 书架列表：数据库一变自动推送。
+     * null = Room 尚未发射首批数据；空列表 = 书架确实为空。
+     * 不能拿 emptyList() 当初始值——那会让 UI 在数据到达前先闪一帧空状态
+     */
+    val comics: StateFlow<List<ComicEntity>?> = repo.observeAll()
+        .stateIn(viewModelScope, SharingStarted.Lazily, null)
 
     /**
      * 排版设置。initial 给默认构造的设置对象：DataStore 首次发射前
@@ -62,9 +71,6 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycle
     private var scanJob: Job? = null
     private var coverJob: Job? = null
 
-    /** 上次发起扫描的时刻（elapsedRealtime：单调时钟，不受用户改系统时间影响） */
-    private var lastScanAt = 0L
-
     init {
         // 进程级生命周期：ON_START 只在"App 从后台回到前台"时发生——
         // 页面导航、旋转屏幕、弹对话框都不影响进程状态，不会误触发。
@@ -74,27 +80,29 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycle
         ProcessLifecycleOwner.get().lifecycle.addObserver(this)
     }
 
-    /** App 回到前台（含冷启动）：自动同步书架 */
+    /**
+     * App 回到前台（含冷启动）：自动同步书架。
+     * 不做冷却节流：扫描是每目录一次 IPC 的轻量遍历且全程静默，
+     * 而"刚去文件管理器改完文件切回来"恰恰是最该扫的时刻
+     */
     override fun onStart(owner: LifecycleOwner) {
-        // 冷却窗口：快速切出去看一眼通知再回来，不值得全量遍历目录树；
-        // 真正去文件管理器增删文件的往返一般超过这个间隔
-        if (SystemClock.elapsedRealtime() - lastScanAt < SCAN_COOLDOWN_MS) return
         refresh()
     }
 
     /** 手动/自动刷新入口；Job.isActive 一行实现"扫描中不重复扫" */
-    fun refresh() {
+    fun refresh(manual: Boolean = false) {
         if (scanJob?.isActive == true) return
-        lastScanAt = SystemClock.elapsedRealtime()
         scanJob = viewModelScope.launch {
-            _scanState.value = ScanState(isScanning = true)
+            _scanState.value = ScanState(isScanning = true, isManual = manual)
             val result = repo.syncAllFolders()
             _scanState.value = ScanState(
                 isScanning = false,
-                message = if (result.failedFolders.isNotEmpty()) {
-                    "无法访问目录：${result.failedFolders.joinToString("、")}，请检查或重新添加"
-                } else {
-                    null
+                message = when {
+                    result.failedFolders.isNotEmpty() ->
+                        "无法访问目录：${result.failedFolders.joinToString("、")}，请检查或重新添加"
+                    // 只有手动刷新才汇报变化；自动扫描静默，无变化也不打扰
+                    manual -> summarize(result)
+                    else -> null
                 },
             )
             // 扫描完在后台补封面（独立 Job：补封面期间不阻塞下一次刷新）
@@ -102,6 +110,16 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycle
                 coverJob = viewModelScope.launch { repo.backfillCovers() }
             }
         }
+    }
+
+    /** 手动刷新的结果反馈；书架无变化时返回 null（安静收起） */
+    private fun summarize(result: ScanResult): String? {
+        val parts = buildList {
+            if (result.added > 0) add("新增 ${result.added} 本")
+            if (result.markedMissing > 0) add("${result.markedMissing} 本失效")
+            if (result.restored > 0) add("恢复 ${result.restored} 本")
+        }
+        return if (parts.isEmpty()) null else parts.joinToString("，")
     }
 
     fun consumeMessage() {
@@ -116,6 +134,26 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycle
         }
     }
 
+    /**
+     * 从书架 FAB 菜单添加库目录。编排在 Repository（与设置页共享），
+     * 这里只把结果映射到 Snackbar：用户主动发起的操作必须有反馈，
+     * 即使"什么都没扫到"也要说一声，不能毫无动静
+     */
+    fun addFolder(uri: Uri) {
+        viewModelScope.launch {
+            val msg = try {
+                when (val outcome = repo.addFolderAndSync(uri)) {
+                    is AddFolderOutcome.Duplicate -> "该目录已在漫画库中"
+                    is AddFolderOutcome.Added ->
+                        summarize(outcome.scan) ?: "已添加目录，未发现漫画文件"
+                }
+            } catch (e: SecurityException) {
+                "无法获得该目录的持久访问权限"
+            }
+            _scanState.value = _scanState.value.copy(message = msg)
+        }
+    }
+
     fun deleteComic(comic: ComicEntity) {
         viewModelScope.launch { repo.deleteComic(comic) }
     }
@@ -126,9 +164,5 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycle
      */
     override fun onCleared() {
         ProcessLifecycleOwner.get().lifecycle.removeObserver(this)
-    }
-
-    companion object {
-        private const val SCAN_COOLDOWN_MS = 10_000L
     }
 }

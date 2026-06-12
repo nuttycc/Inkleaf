@@ -2,6 +2,7 @@ package com.exio.comicreader.data.db
 
 import androidx.room.Dao
 import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import kotlinx.coroutines.flow.Flow
 
@@ -41,7 +42,11 @@ interface ComicDao {
     @Query("SELECT * FROM comics WHERE folderId = :folderId")
     suspend fun getByFolderId(folderId: Long): List<ComicEntity>
 
-    @Insert
+    /**
+     * IGNORE：撞 uri 唯一索引时静默跳过该行而不是抛异常——
+     * 扫描不依赖返回值，让唯一索引成为真正的"兜底"而非崩溃点
+     */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertAll(comics: List<ComicEntity>)
 
     @Query("UPDATE comics SET isMissing = :missing WHERE id IN (:ids)")

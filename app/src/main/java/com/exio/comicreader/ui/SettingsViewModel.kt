@@ -5,10 +5,10 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.exio.comicreader.data.CacheLimit
 import com.exio.comicreader.data.CacheSettingsRepository
+import com.exio.comicreader.data.CustomStyle
 import com.exio.comicreader.data.DarkMode
 import com.exio.comicreader.data.ReaderCache
 import com.exio.comicreader.data.ThemeSeed
-import com.exio.comicreader.data.ThemeSettings
 import com.exio.comicreader.data.ThemeSettingsRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -20,16 +20,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * 设置页状态。注意：主题真正的"应用"发生在 MainActivity 顶层
- * （那里也订阅同一个 DataStore Flow）——这里只负责写入；
+ * 设置页状态。注意：主题状态的读取在 MainActivity 顶层（收集同一个
+ * DataStore Flow 后下传给 SettingsScreen）——这里只负责写入；
  * 写入后全 App 变色是同一条数据链路的自然结果，无需手动通知。
  */
 class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     private val themeRepo = ThemeSettingsRepository(app)
     private val cacheRepo = CacheSettingsRepository(app)
-
-    val theme: StateFlow<ThemeSettings> = themeRepo.settings
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ThemeSettings())
 
     val cacheLimit: StateFlow<CacheLimit> = cacheRepo.limit
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CacheLimit.AUTO)
@@ -44,6 +41,14 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setSeed(seed: ThemeSeed) {
         viewModelScope.launch { themeRepo.setSeed(seed) }
+    }
+
+    fun setCustomColor(argb: Long) {
+        viewModelScope.launch { themeRepo.setCustomColor(argb) }
+    }
+
+    fun setCustomStyle(style: CustomStyle) {
+        viewModelScope.launch { themeRepo.setCustomStyle(style) }
     }
 
     fun setDarkMode(mode: DarkMode) {
