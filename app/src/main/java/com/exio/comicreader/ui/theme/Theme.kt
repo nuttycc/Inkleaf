@@ -23,10 +23,21 @@ import android.graphics.Color as AndroidColor
  * （hex 输入进来的灰/米白等）必须走 Neutral，TonalSpot/Vibrant 会把
  * 灰"提纯"成紫灰；有彩度的照用户选的浓淡档。
  */
-fun customSeedStyle(argb: Long, preferred: PaletteStyle): PaletteStyle {
+private fun customSeedStyle(argb: Long, preferred: PaletteStyle): PaletteStyle {
     val hsv = FloatArray(3)
     AndroidColor.colorToHSV(argb.toInt(), hsv)
     return if (hsv[1] < 0.15f) PaletteStyle.Neutral else preferred
+}
+
+/**
+ * 深浅模式设置 → 当前是否应用深色主题（SYSTEM 跟随系统）。
+ * 主题生成和设置页的取色预览共用同一份判定，保证两处永远一致。
+ */
+@Composable
+fun DarkMode.isDarkTheme(): Boolean = when (this) {
+    DarkMode.SYSTEM -> isSystemInDarkTheme()
+    DarkMode.LIGHT -> false
+    DarkMode.DARK -> true
 }
 
 /**
@@ -42,11 +53,7 @@ fun ComicReaderTheme(
     settings: ThemeSettings = ThemeSettings(),
     content: @Composable () -> Unit,
 ) {
-    val isDark = when (settings.darkMode) {
-        DarkMode.SYSTEM -> isSystemInDarkTheme()
-        DarkMode.LIGHT -> false
-        DarkMode.DARK -> true
-    }
+    val isDark = settings.darkMode.isDarkTheme()
 
     val colorScheme = when {
         settings.useWallpaper && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {

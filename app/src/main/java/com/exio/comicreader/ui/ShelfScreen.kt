@@ -47,8 +47,6 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.rememberBottomSheetState
-import androidx.compose.material3.SheetValue
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -237,14 +235,9 @@ fun ShelfScreen(
     // 排版抽屉：抽屉只遮住屏幕下部，上方网格仍可见——点选即生效，
     // 网格当场变化就是"实时预览"
     if (showLayoutSheet) {
-        // enabledValues 不含 PartiallyExpanded = 旧 skipPartiallyExpanded = true
-        val sheetState = rememberBottomSheetState(
-            initialValue = SheetValue.Hidden,
-            enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
-        )
         ModalBottomSheet(
             onDismissRequest = { showLayoutSheet = false },
-            sheetState = sheetState,
+            sheetState = rememberExpandOnlySheetState(),
             contentWindowInsets = { WindowInsets(0, 0, 0, 0) }
         ) {
             LayoutSheetContent(
@@ -258,13 +251,9 @@ fun ShelfScreen(
 
     // 添加入口的 sheet：与排版抽屉、目录管理共用同一套底部 sheet 语言
     if (showAddSheet) {
-        val addSheetState = rememberBottomSheetState(
-            initialValue = SheetValue.Hidden,
-            enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
-        )
         ModalBottomSheet(
             onDismissRequest = { showAddSheet = false },
-            sheetState = addSheetState,
+            sheetState = rememberExpandOnlySheetState(),
         ) {
             AddSheetContent(
                 onAddFolder = {
@@ -465,7 +454,12 @@ private fun ComicCard(
                     .alpha(contentAlpha),
                 contentAlignment = Alignment.Center,
             ) {
-                val coverFile = comic.coverPath?.let(::File)?.takeIf { it.exists() }
+                // exists() 是磁盘 IO，不能在每次重组都跑——以 comic 行为 key
+                // 缓存判定结果：该行任何字段变化（进度更新、封面回填）都会
+                // 触发重查，封面"长出来"的刷新链路不受影响
+                val coverFile = remember(comic) {
+                    comic.coverPath?.let(::File)?.takeIf { it.exists() }
+                }
                 if (coverFile != null) {
                     AsyncImage(
                         model = coverFile,

@@ -73,9 +73,5 @@ class ShelfSettingsRepository(context: Context) {
         private val KEY_COLUMNS = stringPreferencesKey("grid_columns")
         private val KEY_ASPECT = stringPreferencesKey("cover_aspect")
         private val KEY_CROP = stringPreferencesKey("cover_crop")
-
-        /** 存储值可能损坏或来自删改过枚举的旧版本：解析失败一律回退默认值 */
-        private inline fun <reified T : Enum<T>> String?.toEnum(default: T): T =
-            this?.let { stored -> runCatching { enumValueOf<T>(stored) }.getOrNull() } ?: default
     }
 }

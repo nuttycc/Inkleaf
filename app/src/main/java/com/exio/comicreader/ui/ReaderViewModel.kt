@@ -15,6 +15,7 @@ import androidx.lifecycle.viewModelScope
 import com.exio.comicreader.data.ComicBook
 import com.exio.comicreader.data.ComicOpenException
 import com.exio.comicreader.data.ComicRepository
+import com.exio.comicreader.data.Covers
 import com.exio.comicreader.data.ReaderCache
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -146,9 +147,12 @@ class ReaderViewModel(
                 return
             }
 
-            // 二级：从 zip 解压原图并降采样解码，然后落盘供下次开书复用
+            // 二级：从 zip 解压原图并降采样解码，然后落盘供下次开书复用。
+            // RGB_565 每像素 2 字节，缩略图场景画质无损感、内存减半
             val bytes = opened.loadThumbnailPageBytes(page)
-            val decoded = decodeThumbnail(bytes) ?: return
+            val decoded = withContext(Dispatchers.Default) {
+                Covers.decodeSampled(bytes, THUMB_TARGET_WIDTH, Bitmap.Config.RGB_565)
+            } ?: return
             thumbnails[page] = decoded.asImageBitmap()
             withContext(Dispatchers.IO) {
                 // 落盘失败无所谓（磁盘满等）：缓存只是加速，下次重新解码
@@ -166,27 +170,6 @@ class ReaderViewModel(
             thumbMutex.withLock { thumbInFlight -= page }
         }
     }
-
-    /**
-     * 解码为迷你位图：同 Covers 的两步降采样套路（先读尺寸、再按
-     * inSampleSize 缩小解码），避免为一张 56dp 小图解出 23MB 的全尺寸位图。
-     * RGB_565 每像素 2 字节（无透明通道），缩略图场景画质无损感、内存减半。
-     */
-    private suspend fun decodeThumbnail(bytes: ByteArray): Bitmap? =
-        withContext(Dispatchers.Default) {
-            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-            if (bounds.outWidth <= 0) return@withContext null
-
-            var sampleSize = 1
-            while (bounds.outWidth / (sampleSize * 2) >= THUMB_TARGET_WIDTH) sampleSize *= 2
-
-            val opts = BitmapFactory.Options().apply {
-                inSampleSize = sampleSize
-                inPreferredConfig = Bitmap.Config.RGB_565
-            }
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
-        }
 
     /** Error 态的出口：从书架移除这条打不开的记录，完成后回调返回书架 */
     fun removeFromShelf(onDone: () -> Unit) {

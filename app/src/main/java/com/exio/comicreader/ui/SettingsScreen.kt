@@ -6,7 +6,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,12 +36,10 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SheetValue
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -65,6 +62,7 @@ import com.exio.comicreader.data.CustomStyle
 import com.exio.comicreader.data.DarkMode
 import com.exio.comicreader.data.ThemeSeed
 import com.exio.comicreader.data.ThemeSettings
+import com.exio.comicreader.ui.theme.isDarkTheme
 import com.materialkolor.hct.Hct
 
 /** 设置页：主题（种子色卡 / 深浅模式 / 壁纸取色）+ 漫画库目录管理 */
@@ -211,24 +209,15 @@ fun SettingsScreen(
     }
 
     if (showCustomColorSheet) {
-        val customColorSheetState = rememberBottomSheetState(
-            initialValue = SheetValue.Hidden,
-            enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
-        )
-        // 预览要和全 App 当前的深浅状态一致，复用 Theme.kt 的判定
-        val isDark = when (themeSettings.darkMode) {
-            DarkMode.SYSTEM -> isSystemInDarkTheme()
-            DarkMode.LIGHT -> false
-            DarkMode.DARK -> true
-        }
         ModalBottomSheet(
             onDismissRequest = { showCustomColorSheet = false },
-            sheetState = customColorSheetState,
+            sheetState = rememberExpandOnlySheetState(),
         ) {
             CustomColorSheetContent(
                 customArgb = themeSettings.customArgb,
                 customStyle = themeSettings.customStyle,
-                isDark = isDark,
+                // 预览要和全 App 当前的深浅状态一致，复用 Theme.kt 的判定
+                isDark = themeSettings.darkMode.isDarkTheme(),
                 onPickColor = viewModel::setCustomColor,
                 onPickStyle = viewModel::setCustomStyle,
             )
@@ -236,15 +225,9 @@ fun SettingsScreen(
     }
 
     if (showCacheLimitSheet) {
-        // enabledValues 不含 PartiallyExpanded = 旧 skipPartiallyExpanded = true：
-        // 内容不高，半展开态没有意义，一步到全展开
-        val cacheLimitSheetState = rememberBottomSheetState(
-            initialValue = SheetValue.Hidden,
-            enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
-        )
         ModalBottomSheet(
             onDismissRequest = { showCacheLimitSheet = false },
-            sheetState = cacheLimitSheetState,
+            sheetState = rememberExpandOnlySheetState(),
         ) {
             CacheLimitSheetContent(
                 selected = cacheLimit,
@@ -258,13 +241,9 @@ fun SettingsScreen(
     }
 
     if (showFoldersSheet) {
-        val foldersSheetState = rememberBottomSheetState(
-            initialValue = SheetValue.Hidden,
-            enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
-        )
         ModalBottomSheet(
             onDismissRequest = { showFoldersSheet = false },
-            sheetState = foldersSheetState,
+            sheetState = rememberExpandOnlySheetState(),
         ) {
             FoldersSheetContent(
                 onAddFolder = { treePicker.launch(null) },

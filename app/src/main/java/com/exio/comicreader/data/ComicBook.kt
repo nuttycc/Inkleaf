@@ -107,7 +107,7 @@ class ComicBook private constructor(
                     }
 
                     val pages = zipFile.entries().asSequence()
-                        .filter { !it.isDirectory && isComicPage(it.name) }
+                        .filter { !it.isDirectory && isImageEntry(it.name) }
                         .sortedWith { a, b -> naturalCompare(a.name, b.name) }
                         .toList()
 
@@ -176,8 +176,6 @@ class ComicBook private constructor(
                 throw e
             }
         }
-
-        private fun isComicPage(entryName: String): Boolean = isImageEntry(entryName)
 
         /** zip 条目是否是有效的漫画页图片（封面回填等场景也复用此判断） */
         fun isImageEntry(entryName: String): Boolean {

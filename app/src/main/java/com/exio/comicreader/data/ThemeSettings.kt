@@ -125,9 +125,5 @@ class ThemeSettingsRepository(context: Context) {
         private val KEY_CUSTOM_ARGB = longPreferencesKey("custom_argb")
         private val KEY_USE_CUSTOM = booleanPreferencesKey("use_custom")
         private val KEY_CUSTOM_STYLE = stringPreferencesKey("custom_style")
-
-        /** 存储值损坏或来自旧版枚举：回退默认 */
-        private inline fun <reified T : Enum<T>> String?.toEnum(default: T): T =
-            this?.let { stored -> runCatching { enumValueOf<T>(stored) }.getOrNull() } ?: default
     }
 }
