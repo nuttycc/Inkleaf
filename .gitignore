@@ -16,3 +16,4 @@ local.properties
 /AGENTS.md
 /CLAUDE.md
 /.agents/
+/skills-lock.json

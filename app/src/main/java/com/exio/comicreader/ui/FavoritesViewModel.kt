@@ -23,11 +23,15 @@ class FavoritesViewModel(app: Application) : AndroidViewModel(app) {
     var message by mutableStateOf<String?>(null)
         private set
 
-    fun removeFavorite(favorite: FavoritePageEntity, onDone: () -> Unit = {}) {
+    fun removeFavorite(
+        favorite: FavoritePageEntity,
+        showSuccessMessage: Boolean = true,
+        onDone: () -> Unit = {},
+    ) {
         viewModelScope.launch {
             try {
                 repo.remove(favorite)
-                message = "已取消收藏"
+                if (showSuccessMessage) message = "已取消收藏"
                 onDone()
             } catch (e: Exception) {
                 message = e.message?.let { "取消收藏失败：$it" } ?: "取消收藏失败"

@@ -7,24 +7,53 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedContentTransitionScope.SlideDirection
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.unit.dp
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.navigation.NavDestination
+import androidx.navigation.NavDestination.Companion.hasRoute
+import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import com.exio.comicreader.data.ComicRepository
 import com.exio.comicreader.data.ReaderCache
 import com.exio.comicreader.data.ThemeSettings
 import com.exio.comicreader.data.ThemeSettingsRepository
+import com.exio.comicreader.ui.FavoriteViewerScreen
 import com.exio.comicreader.ui.FavoritesScreen
 import com.exio.comicreader.ui.ReaderScreen
 import com.exio.comicreader.ui.SettingsScreen
@@ -49,10 +78,14 @@ data class ReaderRoute(val comicId: Long, val initialPage: Int? = null)
 data object FavoritesRoute
 
 @Serializable
+data class FavoriteViewerRoute(val favoriteId: Long)
+
+@Serializable
 data object SettingsRoute
 
 /** 页面转场时长。全宽滑动的运动量大，350~450ms 区间体感比较合适 */
 private const val NAV_TRANSITION_MS = 400
+private const val FAVORITES_RESULT_MESSAGE_KEY = "favorites_result_message"
 
 /**
  * M3 emphasized 缓动：起步快、减速段长，比默认 FastOutSlowIn 的收尾
@@ -61,6 +94,125 @@ private const val NAV_TRANSITION_MS = 400
 private val NavEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
 
 private fun <T> navSpec() = tween<T>(NAV_TRANSITION_MS, easing = NavEasing)
+
+private fun <T : Any> NavHostController.navigateTopLevel(route: T) {
+    navigate(route) {
+        popUpTo(graph.findStartDestination().id) {
+            saveState = true
+        }
+        launchSingleTop = true
+        restoreState = true
+    }
+}
+
+@Composable
+private fun ComicReaderBottomBar(
+    currentDestination: NavDestination?,
+    onOpenShelf: () -> Unit,
+    onSelectFavorites: () -> Unit,
+) {
+    val shelfSelected = currentDestination?.hasRoute<ShelfRoute>() == true
+    val favoritesSelected = currentDestination?.hasRoute<FavoritesRoute>() == true
+    if (!shelfSelected && !favoritesSelected) return
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface)
+            .navigationBarsPadding(),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            CompactBottomBarItem(
+                selected = shelfSelected,
+                onClick = {
+                    if (!shelfSelected) onOpenShelf()
+                },
+            ) { tint ->
+                Icon(
+                    Icons.Filled.Home,
+                    contentDescription = "书架",
+                    tint = tint,
+                )
+            }
+            CompactBottomBarPlaceholder(iconRes = R.drawable.ic_folder)
+            CompactBottomBarItem(
+                selected = favoritesSelected,
+                onClick = {
+                    if (!favoritesSelected) onSelectFavorites()
+                },
+            ) { tint ->
+                Icon(
+                    painter = painterResource(
+                        if (favoritesSelected) {
+                            R.drawable.ic_favorite
+                        } else {
+                            R.drawable.ic_favorite_border
+                        }
+                    ),
+                    contentDescription = "收藏",
+                    tint = tint,
+                )
+            }
+            CompactBottomBarPlaceholder(iconRes = R.drawable.ic_tune)
+        }
+    }
+}
+
+@Composable
+private fun RowScope.CompactBottomBarItem(
+    selected: Boolean,
+    onClick: () -> Unit,
+    icon: @Composable (Color) -> Unit,
+) {
+    val colors = MaterialTheme.colorScheme
+    val tint = if (selected) colors.onSecondaryContainer else colors.onSurfaceVariant
+    val indicatorColor = if (selected) colors.secondaryContainer else Color.Transparent
+
+    Box(
+        modifier = Modifier
+            .weight(1f)
+            .height(48.dp)
+            .selectable(
+                selected = selected,
+                onClick = onClick,
+                role = Role.Tab,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(width = 56.dp, height = 32.dp)
+                .clip(CircleShape)
+                .background(indicatorColor),
+            contentAlignment = Alignment.Center,
+        ) {
+            icon(tint)
+        }
+    }
+}
+
+@Composable
+private fun RowScope.CompactBottomBarPlaceholder(iconRes: Int) {
+    val tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.32f)
+
+    Box(
+        modifier = Modifier
+            .weight(1f)
+            .height(48.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            painter = painterResource(iconRes),
+            contentDescription = null,
+            tint = tint,
+        )
+    }
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -108,6 +260,8 @@ class MainActivity : ComponentActivity() {
 
             ComicReaderTheme(settings = themeSettings) {
                 val navController = rememberNavController()
+                val navBackStackEntry by navController.currentBackStackEntryAsState()
+                val currentDestination = navBackStackEntry?.destination
 
                 Surface(
                     modifier = Modifier.fillMaxSize(),
@@ -120,52 +274,94 @@ class MainActivity : ComponentActivity() {
                     // 两页位移量相同、无重叠区，因此不依赖绘制层级，任意
                     // 两页之间都成立：新增页面无需再配转场。
                     // slideInto/OutOfContainer 按布局方向解析 Start/End，RTL 自适应
-                    NavHost(
-                        navController = navController,
-                        startDestination = ShelfRoute,
-                        enterTransition = {
-                            slideIntoContainer(SlideDirection.Start, navSpec())
-                        },
-                        exitTransition = {
-                            slideOutOfContainer(SlideDirection.Start, navSpec())
-                        },
-                        popEnterTransition = {
-                            slideIntoContainer(SlideDirection.End, navSpec())
-                        },
-                        popExitTransition = {
-                            slideOutOfContainer(SlideDirection.End, navSpec())
-                        },
-                    ) {
-                        composable<ShelfRoute> {
-                            ShelfScreen(
-                                onOpenComic = { id -> navController.navigate(ReaderRoute(id)) },
-                                onOpenFavorites = { navController.navigate(FavoritesRoute) },
-                                onOpenSettings = { navController.navigate(SettingsRoute) },
-                            )
-                        }
-                        composable<ReaderRoute> { entry ->
-                            val route = entry.toRoute<ReaderRoute>()
-                            ReaderScreen(
-                                comicId = route.comicId,
-                                initialPage = route.initialPage,
-                                onBack = { navController.popBackStack() },
-                            )
-                        }
-                        composable<FavoritesRoute> {
-                            FavoritesScreen(
-                                onBack = { navController.popBackStack() },
-                                onOpenComicPage = { id, page ->
-                                    navController.navigate(ReaderRoute(id, page))
+                    Scaffold(
+                        modifier = Modifier.fillMaxSize(),
+                        containerColor = MaterialTheme.colorScheme.background,
+                        contentWindowInsets = WindowInsets(0),
+                        bottomBar = {
+                            ComicReaderBottomBar(
+                                currentDestination = currentDestination,
+                                onOpenShelf = { navController.navigateTopLevel(ShelfRoute) },
+                                onSelectFavorites = {
+                                    navController.navigateTopLevel(FavoritesRoute)
                                 },
                             )
-                        }
-                        composable<SettingsRoute> {
-                            SettingsScreen(
-                                // 复用顶层已收集的主题状态：进设置页首帧即真实值，
-                                // 不会出现开关从默认值滑到真实值的突变
-                                themeSettings = themeSettings,
-                                onBack = { navController.popBackStack() },
-                            )
+                        },
+                    ) { outerPadding ->
+                        NavHost(
+                            navController = navController,
+                            startDestination = ShelfRoute,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(outerPadding),
+                            enterTransition = {
+                                slideIntoContainer(SlideDirection.Start, navSpec())
+                            },
+                            exitTransition = {
+                                slideOutOfContainer(SlideDirection.Start, navSpec())
+                            },
+                            popEnterTransition = {
+                                slideIntoContainer(SlideDirection.End, navSpec())
+                            },
+                            popExitTransition = {
+                                slideOutOfContainer(SlideDirection.End, navSpec())
+                            },
+                        ) {
+                            composable<ShelfRoute> {
+                                ShelfScreen(
+                                    onOpenComic = { id -> navController.navigate(ReaderRoute(id)) },
+                                    onOpenSettings = { navController.navigate(SettingsRoute) },
+                                )
+                            }
+                            composable<ReaderRoute> { entry ->
+                                val route = entry.toRoute<ReaderRoute>()
+                                ReaderScreen(
+                                    comicId = route.comicId,
+                                    initialPage = route.initialPage,
+                                    onBack = { navController.popBackStack() },
+                                )
+                            }
+                            composable<FavoritesRoute> { entry ->
+                                val viewerMessage by entry.savedStateHandle
+                                    .getStateFlow<String?>(FAVORITES_RESULT_MESSAGE_KEY, null)
+                                    .collectAsStateWithLifecycle()
+                                FavoritesScreen(
+                                    onOpenFavorite = { id ->
+                                        navController.navigate(FavoriteViewerRoute(id))
+                                    },
+                                    viewerMessage = viewerMessage,
+                                    onViewerMessageConsumed = {
+                                        entry.savedStateHandle.set<String?>(
+                                            FAVORITES_RESULT_MESSAGE_KEY,
+                                            null,
+                                        )
+                                    },
+                                )
+                            }
+                            composable<FavoriteViewerRoute> { entry ->
+                                val route = entry.toRoute<FavoriteViewerRoute>()
+                                FavoriteViewerScreen(
+                                    favoriteId = route.favoriteId,
+                                    onBack = { navController.popBackStack() },
+                                    onOpenComicPage = { id, page ->
+                                        navController.navigate(ReaderRoute(id, page))
+                                    },
+                                    onExitWithMessage = { message ->
+                                        navController.previousBackStackEntry
+                                            ?.savedStateHandle
+                                            ?.set(FAVORITES_RESULT_MESSAGE_KEY, message)
+                                        navController.popBackStack()
+                                    },
+                                )
+                            }
+                            composable<SettingsRoute> {
+                                SettingsScreen(
+                                    // 复用顶层已收集的主题状态：进设置页首帧即真实值，
+                                    // 不会出现开关从默认值滑到真实值的突变
+                                    themeSettings = themeSettings,
+                                    onBack = { navController.popBackStack() },
+                                )
+                            }
                         }
                     }
                 }
