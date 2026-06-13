@@ -24,6 +24,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -50,7 +51,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
@@ -376,10 +376,7 @@ private fun SeedSwatch(
     }
 }
 
-/** 色相环 12 档采样，首尾同为红色保证渐变闭合/平滑 */
-private val HUE_STOPS = List(13) { Color.hsv((it * 30) % 360f, 1f, 1f) }
-
-/** 自定义色卡：未设置时显示色相环渐变示意"这里可以选任何颜色" */
+/** 自定义色卡：未设置时显示为中性的"添加颜色"入口，避免默认态抢主题色焦点 */
 @Composable
 private fun CustomSwatch(
     customArgb: Long?,
@@ -387,7 +384,7 @@ private fun CustomSwatch(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val rainbowBrush = remember { Brush.sweepGradient(HUE_STOPS) }
+    val colors = MaterialTheme.colorScheme
     Column(
         modifier = modifier.clickable(onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -400,7 +397,13 @@ private fun CustomSwatch(
                     if (customArgb != null) {
                         Modifier.background(Color(customArgb))
                     } else {
-                        Modifier.background(rainbowBrush)
+                        Modifier
+                            .background(colors.surfaceVariant)
+                            .border(
+                                width = 1.dp,
+                                color = colors.outline.copy(alpha = 0.45f),
+                                shape = CircleShape,
+                            )
                     }
                 )
                 .then(
@@ -417,6 +420,12 @@ private fun CustomSwatch(
                     Icons.Filled.Check,
                     contentDescription = "已选中",
                     tint = Color.White,
+                )
+            } else if (customArgb == null) {
+                Icon(
+                    Icons.Filled.Add,
+                    contentDescription = null,
+                    tint = colors.primary,
                 )
             }
         }
