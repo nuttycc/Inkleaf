@@ -88,7 +88,6 @@ import com.exio.comicreader.data.db.FavoritePageEntity
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import java.nio.ByteBuffer
 import kotlin.math.roundToInt
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
@@ -700,14 +699,17 @@ private fun ComicPage(
                 DelayedSpinner(showDelay = 200.milliseconds)
             }
         } else {
-            AsyncImage(
-                model = ImageRequest.Builder(context)
-                    .data(ByteBuffer.wrap(pageBytes))
+            val imageRequest = remember(context, pageBytes, cacheKeyPrefix, page) {
+                ImageRequest.Builder(context)
+                    .data(pageBytes)
                     .memoryCacheKey("$cacheKeyPrefix#$page")
                     // 原图短淡入，避免加载完成时硬切；
                     // 内存缓存命中时 Coil 自动跳过淡入，翻回已读页无延迟感
                     .crossfade(150)
-                    .build(),
+                    .build()
+            }
+            AsyncImage(
+                model = imageRequest,
                 contentDescription = "第 ${page + 1} 页",
                 contentScale = ContentScale.Fit,
                 onSuccess = { imageReady = true },
