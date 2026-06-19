@@ -62,7 +62,7 @@ class ComicRepository(context: Context) {
         }
 
         val uriString = uri.toString()
-        val fileKey = ComicIdentity.fileKey(uri)
+        val fileKey = withContext(Dispatchers.IO) { ComicIdentity.fileKey(appContext, uri) }
         return syncMutex.withLock {
             dao.getByFileKey(fileKey)?.let { return@withLock restoreIfMissing(it) }
             dao.getByUri(uriString)?.let { return@withLock restoreIfMissing(it) }

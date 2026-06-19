@@ -12,7 +12,8 @@ import kotlinx.coroutines.withContext
  * 只负责遍历文件系统，不接触数据库——diff 同步逻辑在 ComicRepository。
  */
 class LibraryScanner(context: Context) {
-    private val resolver = context.applicationContext.contentResolver
+    private val appContext = context.applicationContext
+    private val resolver = appContext.contentResolver
 
     data class ScannedFile(
         val uri: String,
@@ -62,7 +63,7 @@ class LibraryScanner(context: Context) {
                     found.add(
                         ScannedFile(
                             uri = fileUri.toString(),
-                            fileKey = ComicIdentity.fileKey(treeUri.authority, child.docId),
+                            fileKey = ComicIdentity.fileKey(appContext, fileUri),
                             displayName = child.name,
                         )
                     )
