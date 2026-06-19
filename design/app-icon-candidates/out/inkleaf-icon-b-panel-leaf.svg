@@ -1,0 +1,12 @@
+<svg aria-labelledby="title" height="108" role="img" viewBox="0 0 108 108" width="108"
+    xmlns="http://www.w3.org/2000/svg">
+    <title>Inkleaf app icon candidate Panel Leaf</title>
+    <rect fill="#16302B" height="108" rx="24" width="108" />
+    <rect fill="#F8F3E8" height="56" rx="10" width="56" x="26" y="26" />
+    <rect fill="#2F5D50" height="18" rx="3" width="20" x="33" y="33" />
+    <rect fill="#2F5D50" height="18" rx="3" width="18" x="57" y="33" />
+    <rect fill="#2F5D50" height="20" rx="3" width="18" x="33" y="55" />
+    <rect fill="#2F5D50" height="20" rx="3" width="20" x="55" y="55" />
+    <path d="M72 27C79 42 72 60 53 72C48 57 55 39 72 27Z" fill="#E2B84A" />
+    <path d="M55 69C61 57 66 45 71 32" stroke="#16302B" stroke-linecap="round" stroke-width="3" />
+</svg>

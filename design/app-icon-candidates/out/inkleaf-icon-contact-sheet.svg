@@ -1,0 +1,83 @@
+<svg height="220" viewBox="0 0 788 220" width="788" xmlns="http://www.w3.org/2000/svg">
+    <rect fill="#F5F6F8" height="220" width="788" />
+    <rect fill="#FFFFFF" height="148" rx="14" stroke="#DADDE3" width="124" x="24" y="24" />
+    <svg height="108" viewBox="0 0 108 108" width="108" x="44" y="36">
+        <rect fill="#F7F4EF" height="108" rx="24" width="108" />
+        <path d="M25 31h42c8 0 14 6 14 14v32H37c-7 0-12-5-12-12V31Z" fill="#D8E2D2" />
+        <path d="M29 27h39c7 0 12 5 12 12v36H40c-6 0-11-5-11-11V27Z" fill="#FFFFFF" />
+        <path d="M38 36h28" stroke="#18322F" stroke-linecap="round" stroke-width="4" />
+        <path d="M38 47h22" stroke="#18322F" stroke-linecap="round" stroke-width="4" />
+        <path
+            d="M61 74C77 61 78 44 70 34C53 40 43 51 42 69C49 66 55 64 62 61C57 66 53 70 49 75C53 76 57 76 61 74Z"
+            fill="#4A7C59" />
+        <path d="M47 72C55 62 63 52 70 38" stroke="#F7F4EF" stroke-linecap="round"
+            stroke-width="3" />
+    </svg>
+    <text fill="#30343B" font-family="Inter, Arial, sans-serif" font-size="12" text-anchor="middle" x="86"
+        y="162">Leaf Page
+    </text>
+
+    <rect fill="#FFFFFF" height="148" rx="14" stroke="#DADDE3" width="124" x="172" y="24" />
+    <svg height="108" viewBox="0 0 108 108" width="108" x="192" y="36">
+        <rect fill="#16302B" height="108" rx="24" width="108" />
+        <rect fill="#F8F3E8" height="56" rx="10" width="56" x="26" y="26" />
+        <rect fill="#2F5D50" height="18" rx="3" width="20" x="33" y="33" />
+        <rect fill="#2F5D50" height="18" rx="3" width="18" x="57" y="33" />
+        <rect fill="#2F5D50" height="20" rx="3" width="18" x="33" y="55" />
+        <rect fill="#2F5D50" height="20" rx="3" width="20" x="55" y="55" />
+        <path d="M72 27C79 42 72 60 53 72C48 57 55 39 72 27Z" fill="#E2B84A" />
+        <path d="M55 69C61 57 66 45 71 32" stroke="#16302B" stroke-linecap="round"
+            stroke-width="3" />
+    </svg>
+    <text fill="#30343B" font-family="Inter, Arial, sans-serif" font-size="12" text-anchor="middle" x="234"
+        y="162">Panel Leaf
+    </text>
+
+    <rect fill="#FFFFFF" height="148" rx="14" stroke="#DADDE3" width="124" x="320" y="24" />
+    <svg height="108" viewBox="0 0 108 108" width="108" x="340" y="36">
+        <rect fill="#EAF5F0" height="108" rx="24" width="108" />
+        <path d="M31 24h34l13 13v47H31V24Z" fill="#FFFFFF" />
+        <path d="M65 24v13h13" fill="#BFD8CF" />
+        <path d="M31 24h34l13 13v47H31V24Z" fill="none" stroke="#1F2D2B" stroke-linejoin="round"
+            stroke-width="5" />
+        <path d="M42 44h23" stroke="#1F2D2B" stroke-linecap="round" stroke-width="4" />
+        <path d="M42 56h17" stroke="#1F2D2B" stroke-linecap="round" stroke-width="4" />
+        <path
+            d="M61 79C73 69 74 56 68 48C55 53 48 62 47 76C52 74 56 72 61 70C57 74 54 77 51 81C55 82 58 82 61 79Z"
+            fill="#2F7F6F" />
+    </svg>
+    <text fill="#30343B" font-family="Inter, Arial, sans-serif" font-size="12" text-anchor="middle" x="382"
+        y="162">Folded Page
+    </text>
+
+    <rect fill="#FFFFFF" height="148" rx="14" stroke="#DADDE3" width="124" x="468" y="24" />
+    <svg height="108" viewBox="0 0 108 108" width="108" x="488" y="36">
+        <rect fill="#F8F1E7" height="108" rx="24" width="108" />
+        <path d="M54 21C69 39 78 51 78 65C78 79 68 88 54 88C40 88 30 79 30 65C30 51 39 39 54 21Z"
+            fill="#191B1F" />
+        <path d="M54 32C65 45 70 55 70 65C70 74 64 80 54 80C44 80 38 74 38 65C38 55 43 45 54 32Z"
+            fill="#D9CBB9" />
+        <path
+            d="M60 75C69 67 70 56 65 50C55 54 49 61 49 72C53 70 57 68 61 66C58 70 55 73 53 76C56 77 58 77 60 75Z"
+            fill="#5B7E60" />
+    </svg>
+    <text fill="#30343B" font-family="Inter, Arial, sans-serif" font-size="12" text-anchor="middle" x="530"
+        y="162">Ink Drop
+    </text>
+
+    <rect fill="#FFFFFF" height="148" rx="14" stroke="#DADDE3" width="124" x="616" y="24" />
+    <svg height="108" viewBox="0 0 108 108" width="108" x="636" y="36">
+        <rect fill="#202B38" height="108" rx="24" width="108" />
+        <path d="M25 72h58" stroke="#F7F0DF" stroke-linecap="round" stroke-width="7" />
+        <path d="M32 32h10v36H32V32Z" fill="#F7F0DF" />
+        <path d="M48 28h10v40H48V28Z" fill="#AEB7C2" />
+        <path d="M64 35h10v33H64V35Z" fill="#F7F0DF" />
+        <path d="M44 84C60 74 65 58 60 45C45 50 36 62 36 78C43 75 49 72 55 67C51 74 47 79 44 84Z"
+            fill="#79A36B" />
+        <path d="M39 79C47 69 53 59 59 47" stroke="#202B38" stroke-linecap="round"
+            stroke-width="3" />
+    </svg>
+    <text fill="#30343B" font-family="Inter, Arial, sans-serif" font-size="12" text-anchor="middle" x="678"
+        y="162">Shelf Mark
+    </text>
+</svg>

@@ -22,5 +22,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "ComicReader"
+rootProject.name = "Inkleaf"
 include(":app")

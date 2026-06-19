@@ -1,0 +1,12 @@
+<svg aria-labelledby="title" height="108" role="img" viewBox="0 0 108 108" width="108"
+    xmlns="http://www.w3.org/2000/svg">
+    <title>Inkleaf app icon candidate Shelf Mark</title>
+    <rect fill="#202B38" height="108" rx="24" width="108" />
+    <path d="M25 72h58" stroke="#F7F0DF" stroke-linecap="round" stroke-width="7" />
+    <path d="M32 32h10v36H32V32Z" fill="#F7F0DF" />
+    <path d="M48 28h10v40H48V28Z" fill="#AEB7C2" />
+    <path d="M64 35h10v33H64V35Z" fill="#F7F0DF" />
+    <path d="M44 84C60 74 65 58 60 45C45 50 36 62 36 78C43 75 49 72 55 67C51 74 47 79 44 84Z"
+        fill="#79A36B" />
+    <path d="M39 79C47 69 53 59 59 47" stroke="#202B38" stroke-linecap="round" stroke-width="3" />
+</svg>

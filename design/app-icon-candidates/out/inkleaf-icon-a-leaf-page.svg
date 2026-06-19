@@ -1,0 +1,13 @@
+<svg aria-labelledby="title" height="108" role="img" viewBox="0 0 108 108" width="108"
+    xmlns="http://www.w3.org/2000/svg">
+    <title>Inkleaf app icon candidate Leaf Page</title>
+    <rect fill="#F7F4EF" height="108" rx="24" width="108" />
+    <path d="M25 31h42c8 0 14 6 14 14v32H37c-7 0-12-5-12-12V31Z" fill="#D8E2D2" />
+    <path d="M29 27h39c7 0 12 5 12 12v36H40c-6 0-11-5-11-11V27Z" fill="#FFFFFF" />
+    <path d="M38 36h28" stroke="#18322F" stroke-linecap="round" stroke-width="4" />
+    <path d="M38 47h22" stroke="#18322F" stroke-linecap="round" stroke-width="4" />
+    <path
+        d="M61 74C77 61 78 44 70 34C53 40 43 51 42 69C49 66 55 64 62 61C57 66 53 70 49 75C53 76 57 76 61 74Z"
+        fill="#4A7C59" />
+    <path d="M47 72C55 62 63 52 70 38" stroke="#F7F4EF" stroke-linecap="round" stroke-width="3" />
+</svg>

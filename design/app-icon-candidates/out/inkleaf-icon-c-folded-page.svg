@@ -1,0 +1,14 @@
+<svg aria-labelledby="title" height="108" role="img" viewBox="0 0 108 108" width="108"
+    xmlns="http://www.w3.org/2000/svg">
+    <title>Inkleaf app icon candidate Folded Page</title>
+    <rect fill="#EAF5F0" height="108" rx="24" width="108" />
+    <path d="M31 24h34l13 13v47H31V24Z" fill="#FFFFFF" />
+    <path d="M65 24v13h13" fill="#BFD8CF" />
+    <path d="M31 24h34l13 13v47H31V24Z" fill="none" stroke="#1F2D2B" stroke-linejoin="round"
+        stroke-width="5" />
+    <path d="M42 44h23" stroke="#1F2D2B" stroke-linecap="round" stroke-width="4" />
+    <path d="M42 56h17" stroke="#1F2D2B" stroke-linecap="round" stroke-width="4" />
+    <path
+        d="M61 79C73 69 74 56 68 48C55 53 48 62 47 76C52 74 56 72 61 70C57 74 54 77 51 81C55 82 58 82 61 79Z"
+        fill="#2F7F6F" />
+</svg>
