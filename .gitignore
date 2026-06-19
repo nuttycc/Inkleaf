@@ -9,11 +9,14 @@
 .cxx
 local.properties
 
-/docs/
+docs/
 
-/.gemini/
-/.claude/
-/AGENTS.md
-/CLAUDE.md
-/.agents/
-/skills-lock.json
+AGENTS.md
+CLAUDE.md
+
+.gemini/
+.claude/
+.agents/
+.wiki/
+
+skills-lock.json
