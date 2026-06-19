@@ -11,14 +11,14 @@ import androidx.room.PrimaryKey
 @Entity(
     tableName = "favorite_pages",
     indices = [
-        Index(value = ["sourceUri", "pageIndex"], unique = true),
+        Index(value = ["sourceFileKey", "pageIndex"], unique = true),
         Index(value = ["sourceComicId"]),
     ],
 )
 data class FavoritePageEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val sourceComicId: Long,
-    val sourceUri: String,
+    val sourceFileKey: String,
     val sourceTitle: String,
     val pageIndex: Int,
     val pageCount: Int,

@@ -145,7 +145,12 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycle
                 when (val outcome = repo.addFolderAndSync(uri)) {
                     is AddFolderOutcome.Duplicate -> "该目录已在漫画库中"
                     is AddFolderOutcome.Added ->
-                        summarize(outcome.scan) ?: "已添加目录，未发现漫画文件"
+                        summarize(outcome.scan)
+                            ?: if (outcome.scan.alreadyInLibrary > 0) {
+                                "已添加目录，目录中的漫画已在书架"
+                            } else {
+                                "已添加目录，未发现漫画文件"
+                            }
                 }
             } catch (e: SecurityException) {
                 "无法获得该目录的持久访问权限"

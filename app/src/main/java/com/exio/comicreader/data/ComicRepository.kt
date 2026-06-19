@@ -22,6 +22,7 @@ data class ScanResult(
     val added: Int,
     val markedMissing: Int,
     val restored: Int,
+    val alreadyInLibrary: Int,
     val failedFolders: List<String>, // 无法访问的目录名
 )
 
@@ -60,21 +61,30 @@ class ComicRepository(context: Context) {
             )
         }
 
-        // 已知简化：同一文件经单文件选择和目录扫描会得到不同的 uri 字符串，
-        // 可能产生重复条目。干净的修法是按 DocumentsContract.getDocumentId
-        // 比对（两种 uri 解出的 documentId 相同），留作以后改进
-        dao.getByUri(uri.toString())?.let { return it }
+        val uriString = uri.toString()
+        val fileKey = ComicIdentity.fileKey(uri)
+        return syncMutex.withLock {
+            dao.getByFileKey(fileKey)?.let { return@withLock restoreIfMissing(it) }
+            dao.getByUri(uriString)?.let { return@withLock restoreIfMissing(it) }
 
-        val now = System.currentTimeMillis()
-        val id = dao.insert(
-            ComicEntity(
-                uri = uri.toString(),
-                title = guessTitle(uri),
-                addedAt = now,
-                lastReadAt = now
+            val now = System.currentTimeMillis()
+            val id = dao.insert(
+                ComicEntity(
+                    uri = uriString,
+                    fileKey = fileKey,
+                    title = guessTitle(uri),
+                    addedAt = now,
+                    lastReadAt = now,
+                )
             )
-        )
-        return dao.getById(id)!!
+            if (id != -1L) {
+                dao.getById(id)!!
+            } else {
+                dao.getByFileKey(fileKey)
+                    ?: dao.getByUri(uriString)
+                    ?: error("Comic insert conflicted but no existing row was found")
+            }
+        }
     }
 
     suspend fun saveProgress(id: Long, page: Int) {
@@ -177,11 +187,12 @@ class ComicRepository(context: Context) {
         var added = 0
         var markedMissing = 0
         var restored = 0
+        var alreadyInLibrary = 0
         val failed = mutableListOf<String>()
 
         for (folder in folderDao.getAll()) {
             val scanned = try {
-                scanner.scanFolder(Uri.parse(folder.treeUri))
+                scanner.scanFolder(Uri.parse(folder.treeUri)).distinctBy { it.fileKey }
             } catch (e: LibraryScanner.FolderAccessException) {
                 // 目录打不开：跳过 diff。绝不能当成"空目录"，
                 // 否则会把它的所有书误标为失效
@@ -190,41 +201,61 @@ class ComicRepository(context: Context) {
             }
 
             val existing = dao.getByFolderId(folder.id)
-            val scannedUris = scanned.map { it.uri }.toSet()
-            val existingUris = existing.map { it.uri }.toSet()
+            val scannedKeys = scanned.map { it.fileKey }.toSet()
+            val existingKeys = existing.map { it.fileKey }.toSet()
 
             // 1) 目录里有、库里没有 → 新书入库
-            val newFiles = scanned.filter { it.uri !in existingUris }
+            val candidateFiles = scanned.filter { it.fileKey !in existingKeys }
+            val knownComics = getComicsByFileKeys(candidateFiles.map { it.fileKey })
+            val knownKeys = knownComics.map { it.fileKey }.toSet()
+            val knownMissingIds = knownComics.filter { it.isMissing }.map { it.id }
+            if (knownMissingIds.isNotEmpty()) {
+                dao.setMissing(knownMissingIds, false)
+                restored += knownMissingIds.size
+            }
+            val newFiles = candidateFiles.filter { it.fileKey !in knownKeys }
+            alreadyInLibrary += candidateFiles.size - newFiles.size
             if (newFiles.isNotEmpty()) {
                 val now = System.currentTimeMillis()
-                dao.insertAll(
+                val insertedIds = dao.insertAll(
                     newFiles.map {
                         ComicEntity(
                             uri = it.uri,
+                            fileKey = it.fileKey,
                             title = it.displayName.substringBeforeLast('.'),
                             folderId = folder.id,
                             addedAt = now,
                         )
                     }
                 )
-                added += newFiles.size
+                added += insertedIds.count { it != -1L }
             }
 
             // 2) 库里有、目录里没有 → 标记失效（保留进度，文件回来可恢复）
-            val toMiss = existing.filter { !it.isMissing && it.uri !in scannedUris }.map { it.id }
+            val toMiss = existing
+                .filter { !it.isMissing && it.fileKey !in scannedKeys }
+                .map { it.id }
             if (toMiss.isNotEmpty()) {
                 dao.setMissing(toMiss, true)
                 markedMissing += toMiss.size
             }
 
             // 3) 之前失效、现在又扫到了 → 恢复
-            val toRestore = existing.filter { it.isMissing && it.uri in scannedUris }.map { it.id }
+            val toRestore = existing
+                .filter { it.isMissing && it.fileKey in scannedKeys }
+                .map { it.id }
             if (toRestore.isNotEmpty()) {
                 dao.setMissing(toRestore, false)
                 restored += toRestore.size
             }
         }
-        ScanResult(added, markedMissing, restored, failed)
+        ScanResult(
+            added = added,
+            markedMissing = markedMissing,
+            restored = restored,
+            alreadyInLibrary = alreadyInLibrary,
+            failedFolders = failed,
+        )
     }
 
     /**
@@ -270,8 +301,21 @@ class ComicRepository(context: Context) {
         name.substringBeforeLast('.')
     }
 
+    private suspend fun restoreIfMissing(comic: ComicEntity): ComicEntity {
+        if (!comic.isMissing) return comic
+        dao.setMissing(listOf(comic.id), false)
+        return comic.copy(isMissing = false)
+    }
+
+    private suspend fun getComicsByFileKeys(fileKeys: List<String>): List<ComicEntity> {
+        val distinctKeys = fileKeys.distinct()
+        if (distinctKeys.isEmpty()) return emptyList()
+        return distinctKeys.chunked(SQLITE_MAX_VARIABLES).flatMap { dao.getByFileKeys(it) }
+    }
+
     companion object {
         /** Repository 实例随处构造（自身无状态），扫描锁必须放进程级单例处 */
         private val syncMutex = Mutex()
+        private const val SQLITE_MAX_VARIABLES = 500
     }
 }

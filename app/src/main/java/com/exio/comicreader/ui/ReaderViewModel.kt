@@ -88,7 +88,7 @@ class ReaderViewModel(
                 val comic = repo.getComic(comicId)
                     ?: throw ComicOpenException("书架记录不存在")
                 this@ReaderViewModel.comic = comic
-                observeFavorites(comic.uri)
+                observeFavorites(comic.fileKey)
                 val opened = ComicBook.open(getApplication(), Uri.parse(comic.uri), comicId)
                 book = opened
                 // 首次打开回填页数和封面；Room Flow 会自动刷新书架
@@ -163,11 +163,11 @@ class ReaderViewModel(
         }
     }
 
-    private fun observeFavorites(sourceUri: String) {
-        if (observedFavoriteSource == sourceUri) return
-        observedFavoriteSource = sourceUri
+    private fun observeFavorites(sourceFileKey: String) {
+        if (observedFavoriteSource == sourceFileKey) return
+        observedFavoriteSource = sourceFileKey
         viewModelScope.launch {
-            favoriteRepo.observeForSource(sourceUri).collect { favorites ->
+            favoriteRepo.observeForSource(sourceFileKey).collect { favorites ->
                 favoritePages.clear()
                 favorites.forEach { favoritePages[it.pageIndex] = it }
             }

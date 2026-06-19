@@ -10,17 +10,17 @@ interface FavoriteDao {
     @Query("SELECT * FROM favorite_pages ORDER BY addedAt DESC")
     fun observeAll(): Flow<List<FavoritePageEntity>>
 
-    @Query("SELECT * FROM favorite_pages WHERE sourceUri = :sourceUri")
-    fun observeForSource(sourceUri: String): Flow<List<FavoritePageEntity>>
+    @Query("SELECT * FROM favorite_pages WHERE sourceFileKey = :sourceFileKey")
+    fun observeForSource(sourceFileKey: String): Flow<List<FavoritePageEntity>>
 
     @Query("SELECT * FROM favorite_pages WHERE id = :id")
     suspend fun getById(id: Long): FavoritePageEntity?
 
     @Query(
         "SELECT * FROM favorite_pages " +
-                "WHERE sourceUri = :sourceUri AND pageIndex = :pageIndex LIMIT 1"
+                "WHERE sourceFileKey = :sourceFileKey AND pageIndex = :pageIndex LIMIT 1"
     )
-    suspend fun getBySourcePage(sourceUri: String, pageIndex: Int): FavoritePageEntity?
+    suspend fun getBySourcePage(sourceFileKey: String, pageIndex: Int): FavoritePageEntity?
 
     @Insert
     suspend fun insert(favorite: FavoritePageEntity): Long

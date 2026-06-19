@@ -25,8 +25,8 @@ class FavoriteRepository(context: Context) {
 
     fun observeAll(): Flow<List<FavoritePageEntity>> = favoriteDao.observeAll()
 
-    fun observeForSource(sourceUri: String): Flow<List<FavoritePageEntity>> =
-        favoriteDao.observeForSource(sourceUri)
+    fun observeForSource(sourceFileKey: String): Flow<List<FavoritePageEntity>> =
+        favoriteDao.observeForSource(sourceFileKey)
 
     suspend fun addSnapshot(
         comic: ComicEntity,
@@ -34,9 +34,9 @@ class FavoriteRepository(context: Context) {
         pageCount: Int,
         pageBytes: ByteArray,
     ): FavoritePageEntity = withContext(Dispatchers.IO) {
-        favoriteDao.getBySourcePage(comic.uri, pageIndex)?.let { return@withContext it }
+        favoriteDao.getBySourcePage(comic.fileKey, pageIndex)?.let { return@withContext it }
 
-        val key = stableKey(comic.uri, pageIndex)
+        val key = stableKey(comic.fileKey, pageIndex)
         val extension = imageExtension(pageBytes)
         val imageFile = File(pagesDir(), "$key.$extension")
         atomicWrite(imageFile, pageBytes)
@@ -44,7 +44,7 @@ class FavoriteRepository(context: Context) {
         val thumbnailFile = createThumbnail(key, pageBytes)
         val favorite = FavoritePageEntity(
             sourceComicId = comic.id,
-            sourceUri = comic.uri,
+            sourceFileKey = comic.fileKey,
             sourceTitle = comic.title,
             pageIndex = pageIndex,
             pageCount = pageCount,
@@ -63,8 +63,8 @@ class FavoriteRepository(context: Context) {
 
     suspend fun findSourceComic(favorite: FavoritePageEntity): ComicEntity? {
         val byId = comicDao.getById(favorite.sourceComicId)
-            ?.takeIf { it.uri == favorite.sourceUri && !it.isMissing }
-        return byId ?: comicDao.getByUri(favorite.sourceUri)?.takeIf { !it.isMissing }
+            ?.takeIf { it.fileKey == favorite.sourceFileKey && !it.isMissing }
+        return byId ?: comicDao.getByFileKey(favorite.sourceFileKey)?.takeIf { !it.isMissing }
     }
 
     fun shareIntent(favorite: FavoritePageEntity): Intent? {
@@ -170,9 +170,9 @@ class FavoriteRepository(context: Context) {
         private const val THUMBS_DIR = "thumbs"
         private const val THUMB_TARGET_WIDTH = 360
 
-        private fun stableKey(sourceUri: String, pageIndex: Int): String {
+        private fun stableKey(sourceFileKey: String, pageIndex: Int): String {
             val bytes = MessageDigest.getInstance("SHA-256")
-                .digest("$sourceUri\n$pageIndex".toByteArray())
+                .digest("$sourceFileKey\n$pageIndex".toByteArray())
             return bytes.joinToString("") { "%02x".format(it.toInt() and 0xff) }
         }
 

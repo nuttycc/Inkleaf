@@ -14,7 +14,11 @@ import kotlinx.coroutines.withContext
 class LibraryScanner(context: Context) {
     private val resolver = context.applicationContext.contentResolver
 
-    data class ScannedFile(val uri: String, val displayName: String)
+    data class ScannedFile(
+        val uri: String,
+        val fileKey: String,
+        val displayName: String,
+    )
 
     /** 目录本身打不开（权限被撤销/目录被删）时抛出，调用方按目录粒度处理 */
     class FolderAccessException(message: String, cause: Throwable? = null) :
@@ -55,7 +59,13 @@ class LibraryScanner(context: Context) {
                     if (depth < MAX_DEPTH) queue.add(child.docId to depth + 1)
                 } else if (COMIC_EXT.matches(child.name)) {
                     val fileUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, child.docId)
-                    found.add(ScannedFile(uri = fileUri.toString(), displayName = child.name))
+                    found.add(
+                        ScannedFile(
+                            uri = fileUri.toString(),
+                            fileKey = ComicIdentity.fileKey(treeUri.authority, child.docId),
+                            displayName = child.name,
+                        )
+                    )
                 }
             }
         }

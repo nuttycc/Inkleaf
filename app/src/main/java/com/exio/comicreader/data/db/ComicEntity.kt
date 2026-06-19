@@ -10,12 +10,16 @@ import androidx.room.PrimaryKey
  */
 @Entity(
     tableName = "comics",
-    // uri 加唯一索引：同一个文件不允许重复入库（业务上由先查后插保证，索引是兜底）
-    indices = [Index(value = ["uri"], unique = true)],
+    indices = [
+        // fileKey 是漫画文件身份；uri 只是当前可用于打开文件的 SAF 地址
+        Index(value = ["fileKey"], unique = true),
+        Index(value = ["uri"], unique = true),
+    ],
 )
 data class ComicEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val uri: String,                 // SAF Uri.toString()，重新打开文件的"钥匙"
+    val fileKey: String,             // 稳定文件身份：同一 SAF 文档不重复入库
     val title: String,               // 文件名去掉扩展名
     val pageCount: Int = 0,          // 0 = 还没成功打开过，首次打开后回填真实页数
     val lastReadPage: Int = 0,       // 阅读进度（页索引，从 0 开始）
