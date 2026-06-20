@@ -10,6 +10,7 @@
 local.properties
 
 docs/
+design/
 
 AGENTS.md
 CLAUDE.md
@@ -18,5 +19,7 @@ CLAUDE.md
 .claude/
 .agents/
 .wiki/
+.junie/
+.kotlin/
 
 skills-lock.json
