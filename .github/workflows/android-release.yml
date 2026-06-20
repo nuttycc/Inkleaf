@@ -1,0 +1,68 @@
+name: Android Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    name: Build signed APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Make Gradle wrapper executable
+        run: chmod +x gradlew
+
+      - name: Validate signing secrets
+        run: |
+          test -n "$INKLEAF_KEYSTORE_BASE64"
+          test -n "$INKLEAF_KEYSTORE_PASSWORD"
+          test -n "$INKLEAF_KEY_ALIAS"
+          test -n "$INKLEAF_KEY_PASSWORD"
+        env:
+          INKLEAF_KEYSTORE_BASE64: ${{ secrets.INKLEAF_KEYSTORE_BASE64 }}
+          INKLEAF_KEYSTORE_PASSWORD: ${{ secrets.INKLEAF_KEYSTORE_PASSWORD }}
+          INKLEAF_KEY_ALIAS: ${{ secrets.INKLEAF_KEY_ALIAS }}
+          INKLEAF_KEY_PASSWORD: ${{ secrets.INKLEAF_KEY_PASSWORD }}
+
+      - name: Restore release keystore
+        run: printf '%s' "$INKLEAF_KEYSTORE_BASE64" | base64 --decode > app/inkleaf-release.jks
+        env:
+          INKLEAF_KEYSTORE_BASE64: ${{ secrets.INKLEAF_KEYSTORE_BASE64 }}
+
+      - name: Build release APK
+        run: ./gradlew assembleRelease
+        env:
+          INKLEAF_KEYSTORE_FILE: ${{ github.workspace }}/app/inkleaf-release.jks
+          INKLEAF_KEYSTORE_PASSWORD: ${{ secrets.INKLEAF_KEYSTORE_PASSWORD }}
+          INKLEAF_KEY_ALIAS: ${{ secrets.INKLEAF_KEY_ALIAS }}
+          INKLEAF_KEY_PASSWORD: ${{ secrets.INKLEAF_KEY_PASSWORD }}
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: inkleaf-release-apk
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: app/build/outputs/apk/release/*.apk
+          generate_release_notes: true

@@ -5,6 +5,19 @@ plugins {
     alias(libs.plugins.google.devtools.ksp)
 }
 
+val releaseSigningValues = listOf(
+    "INKLEAF_KEYSTORE_FILE",
+    "INKLEAF_KEYSTORE_PASSWORD",
+    "INKLEAF_KEY_ALIAS",
+    "INKLEAF_KEY_PASSWORD",
+).associateWith { System.getenv(it) }
+val hasAnyReleaseSigningValue = releaseSigningValues.values.any { !it.isNullOrBlank() }
+val hasReleaseSigning = releaseSigningValues.values.all { !it.isNullOrBlank() }
+
+if (hasAnyReleaseSigningValue && !hasReleaseSigning) {
+    error("INKLEAF_KEYSTORE_FILE, INKLEAF_KEYSTORE_PASSWORD, INKLEAF_KEY_ALIAS, and INKLEAF_KEY_PASSWORD must be set together.")
+}
+
 android {
     namespace = "com.exio.inkleaf"
     compileSdk = 37
@@ -19,9 +32,24 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(releaseSigningValues.getValue("INKLEAF_KEYSTORE_FILE")!!)
+                storePassword = releaseSigningValues.getValue("INKLEAF_KEYSTORE_PASSWORD")
+                keyAlias = releaseSigningValues.getValue("INKLEAF_KEY_ALIAS")
+                keyPassword = releaseSigningValues.getValue("INKLEAF_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (hasReleaseSigning) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
