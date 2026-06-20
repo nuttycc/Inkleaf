@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -42,6 +43,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -105,7 +107,7 @@ fun ShelfScreen(
     val picker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
-        if (uri != null) viewModel.addComic(uri, onReady = onOpenComic)
+        if (uri != null) viewModel.addComic(uri)
     }
 
     // OpenDocumentTree：系统目录选择器。launcher 挂屏幕层级而非菜单内容里：
@@ -158,7 +160,20 @@ fun ShelfScreen(
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
             )
         },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        snackbarHost = {
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier
+                    .navigationBarsPadding()
+                    .padding(start = 16.dp, end = 16.dp),
+                snackbar = { data ->
+                    Snackbar(
+                        snackbarData = data,
+                        modifier = Modifier.widthIn(max = 360.dp),
+                    )
+                },
+            )
+        },
     ) { innerPadding ->
         // 下拉刷新指示器只跟随"手动"刷新：自动扫描保持完全静默，
         // 结果通过网格的 item 级增删自然呈现
@@ -329,7 +344,7 @@ private fun AddSheetContent(
         )
         ListItem(
             headlineContent = { Text("添加单本漫画") },
-            supportingContent = { Text("导入单个文件，立即开始阅读") },
+            supportingContent = { Text("导入单个文件到书架") },
             leadingContent = {
                 Icon(
                     painterResource(R.drawable.ic_file),

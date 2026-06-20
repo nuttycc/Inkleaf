@@ -7,6 +7,7 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.viewModelScope
+import com.exio.inkleaf.data.AddComicOutcome
 import com.exio.inkleaf.data.AddFolderOutcome
 import com.exio.inkleaf.data.ComicRepository
 import com.exio.inkleaf.data.CoverAspect
@@ -127,10 +128,14 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycle
     }
 
     /** 手动添加单个文件（与目录扫描共存） */
-    fun addComic(uri: Uri, onReady: (Long) -> Unit) {
+    fun addComic(uri: Uri) {
         viewModelScope.launch {
-            val comic = repo.addOrGetComic(uri)
-            onReady(comic.id)
+            val msg = when (repo.addOrGetComic(uri)) {
+                is AddComicOutcome.Added -> "已添加到书架"
+                is AddComicOutcome.AlreadyInLibrary -> "这本漫画已在书架中"
+                is AddComicOutcome.Restored -> "已恢复到书架"
+            }
+            _scanState.value = _scanState.value.copy(message = msg)
         }
     }
 

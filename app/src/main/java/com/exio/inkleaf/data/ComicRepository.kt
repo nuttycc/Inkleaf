@@ -32,6 +32,13 @@ sealed interface AddFolderOutcome {
     data object Duplicate : AddFolderOutcome
 }
 
+/** addOrGetComic 的结果：单本是新加入、已存在，还是从失效状态恢复 */
+sealed interface AddComicOutcome {
+    data class Added(val comic: ComicEntity) : AddComicOutcome
+    data class AlreadyInLibrary(val comic: ComicEntity) : AddComicOutcome
+    data class Restored(val comic: ComicEntity) : AddComicOutcome
+}
+
 /**
  * 业务数据的统一入口：ViewModel 不直接接触 DAO、文件系统和权限 API。
  * 自身无状态（数据库是单例），随处构造无代价——所以暂时不需要依赖注入框架。
@@ -49,12 +56,12 @@ class ComicRepository(context: Context) {
     suspend fun getComic(id: Long): ComicEntity? = dao.getById(id)
 
     /**
-     * 手动添加单个漫画；同一文件已在书架时直接返回已有记录（自然恢复其进度）。
+     * 手动添加单个漫画；同一文件已在书架时直接返回已有记录，失效记录会恢复。
      *
      * takePersistableUriPermission 把 SAF 的"本次会话可读"升级为
      * "重启后仍可读"。个别文档提供方不支持持久化授权，失败也不阻断添加。
      */
-    suspend fun addOrGetComic(uri: Uri): ComicEntity {
+    suspend fun addOrGetComic(uri: Uri): AddComicOutcome {
         runCatching {
             appContext.contentResolver.takePersistableUriPermission(
                 uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
@@ -64,8 +71,8 @@ class ComicRepository(context: Context) {
         val uriString = uri.toString()
         val fileKey = withContext(Dispatchers.IO) { ComicIdentity.fileKey(appContext, uri) }
         return syncMutex.withLock {
-            dao.getByFileKey(fileKey)?.let { return@withLock restoreIfMissing(it) }
-            dao.getByUri(uriString)?.let { return@withLock restoreIfMissing(it) }
+            dao.getByFileKey(fileKey)?.let { return@withLock existingComicOutcome(it) }
+            dao.getByUri(uriString)?.let { return@withLock existingComicOutcome(it) }
 
             val now = System.currentTimeMillis()
             val id = dao.insert(
@@ -78,11 +85,12 @@ class ComicRepository(context: Context) {
                 )
             )
             if (id != -1L) {
-                dao.getById(id)!!
+                AddComicOutcome.Added(dao.getById(id)!!)
             } else {
-                dao.getByFileKey(fileKey)
+                val existing = dao.getByFileKey(fileKey)
                     ?: dao.getByUri(uriString)
                     ?: error("Comic insert conflicted but no existing row was found")
+                existingComicOutcome(existing)
             }
         }
     }
@@ -305,6 +313,14 @@ class ComicRepository(context: Context) {
         if (!comic.isMissing) return comic
         dao.setMissing(listOf(comic.id), false)
         return comic.copy(isMissing = false)
+    }
+
+    private suspend fun existingComicOutcome(comic: ComicEntity): AddComicOutcome {
+        return if (comic.isMissing) {
+            AddComicOutcome.Restored(restoreIfMissing(comic))
+        } else {
+            AddComicOutcome.AlreadyInLibrary(comic)
+        }
     }
 
     private suspend fun getComicsByFileKeys(fileKeys: List<String>): List<ComicEntity> {
