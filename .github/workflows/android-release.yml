@@ -1,6 +1,12 @@
 name: Android Release
 
 on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Release tag to build and publish, for example v0.1.0
+        required: true
+        type: string
   push:
     tags:
       - "v*"
@@ -8,14 +14,21 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: android-release-${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-release:
     name: Build signed APK
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
 
       - name: Set up JDK
         uses: actions/setup-java@v5
@@ -25,6 +38,9 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4.0.1
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6.2.0
 
       - name: Make Gradle wrapper executable
         run: chmod +x gradlew
@@ -54,15 +70,16 @@ jobs:
           INKLEAF_KEY_ALIAS: ${{ secrets.INKLEAF_KEY_ALIAS }}
           INKLEAF_KEY_PASSWORD: ${{ secrets.INKLEAF_KEY_PASSWORD }}
 
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: inkleaf-release-apk
-          path: app/build/outputs/apk/release/*.apk
-          if-no-files-found: error
+      - name: Prepare release APK
+        run: |
+          mkdir -p release
+          cp app/build/outputs/apk/release/*.apk "release/Inkleaf-${RELEASE_TAG}-release.apk"
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3.0.1
         with:
-          files: app/build/outputs/apk/release/*.apk
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+          files: release/*.apk
           generate_release_notes: true
