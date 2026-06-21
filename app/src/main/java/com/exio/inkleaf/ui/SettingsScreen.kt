@@ -1,5 +1,9 @@
 package com.exio.inkleaf.ui
 
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -86,6 +90,7 @@ fun SettingsScreen(
     val autoCacheBudgetBytes = remember(context) { CacheLimit.AUTO.bytes(context) }
     var showCacheLimitSheet by remember { mutableStateOf(false) }
     var showCustomColorSheet by remember { mutableStateOf(false) }
+    var showAboutSheet by remember { mutableStateOf(false) }
     // rememberSaveable：目录选择器是外部全屏 Activity，期间进程可能被杀；
     // 重建后 sheet 必须恢复打开，选择结果才有处展示
     var showFoldersSheet by rememberSaveable { mutableStateOf(false) }
@@ -210,6 +215,19 @@ fun SettingsScreen(
                 },
                 modifier = Modifier.clickable { showFoldersSheet = true },
             )
+
+            SectionLabel("关于")
+            ListItem(
+                headlineContent = { Text("关于 Inkleaf") },
+                supportingContent = { Text("版本、GitHub 与项目信息") },
+                trailingContent = {
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                    )
+                },
+                modifier = Modifier.clickable { showAboutSheet = true },
+            )
         }
     }
 
@@ -255,6 +273,56 @@ fun SettingsScreen(
                 viewModel = foldersViewModel,
             )
         }
+    }
+
+    if (showAboutSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showAboutSheet = false },
+            sheetState = rememberExpandOnlySheetState(),
+        ) {
+            AboutSheetContent(
+                versionName = remember(context) { appVersionName(context) },
+                onOpenGitHub = {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(GITHUB_URL)))
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun AboutSheetContent(
+    versionName: String,
+    onOpenGitHub: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(bottom = 12.dp),
+    ) {
+        StandardSheetTitle("关于 Inkleaf")
+
+        ListItem(
+            headlineContent = { Text("Inkleaf") },
+            supportingContent = { Text("本地漫画阅读器") },
+        )
+        ListItem(
+            headlineContent = { Text("版本") },
+            supportingContent = { Text(versionName) },
+        )
+        ListItem(
+            headlineContent = { Text("GitHub") },
+            supportingContent = { Text(GITHUB_URL) },
+            trailingContent = {
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                )
+            },
+            modifier = Modifier.clickable(onClick = onOpenGitHub),
+        )
     }
 }
 
@@ -333,6 +401,22 @@ private fun cacheLimitDescription(limit: CacheLimit, autoBudgetBytes: Long): Str
     } else {
         limit.description
     }
+
+private const val GITHUB_URL = "https://github.com/nuttycc/inkleaf"
+
+private fun appVersionName(context: Context): String {
+    val packageInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        context.packageManager.getPackageInfo(
+            context.packageName,
+            PackageManager.PackageInfoFlags.of(0),
+        )
+    } else {
+        @Suppress("DEPRECATION")
+        context.packageManager.getPackageInfo(context.packageName, 0)
+    }
+
+    return packageInfo.versionName ?: "未知"
+}
 
 /** 圆形种子色卡：选中态 = 主题色描边 + 白色对勾（所有内置种子都偏深，白勾可读） */
 @Composable
