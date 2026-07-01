@@ -13,12 +13,31 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTop"
             android:theme="@style/Theme.Inkleaf.Starting"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+
+                <data
+                    android:mimeType="application/zip"
+                    android:scheme="content" />
+                <data
+                    android:mimeType="application/x-cbz"
+                    android:scheme="content" />
+                <data
+                    android:mimeType="application/zip"
+                    android:scheme="file" />
+                <data
+                    android:mimeType="application/x-cbz"
+                    android:scheme="file" />
             </intent-filter>
         </activity>
         <provider

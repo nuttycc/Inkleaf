@@ -1,6 +1,9 @@
 package com.exio.inkleaf
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -27,6 +30,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -49,6 +53,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
+import com.exio.inkleaf.data.AddComicOutcome
 import com.exio.inkleaf.data.ComicRepository
 import com.exio.inkleaf.data.ReaderCache
 import com.exio.inkleaf.data.ThemeSettings
@@ -86,6 +91,8 @@ data object SettingsRoute
 /** 页面转场时长。全宽滑动的运动量大，350~450ms 区间体感比较合适 */
 private const val NAV_TRANSITION_MS = 400
 private const val FAVORITES_RESULT_MESSAGE_KEY = "favorites_result_message"
+
+private data class ExternalOpenRequest(val id: Long, val uri: Uri)
 
 /**
  * M3 emphasized 缓动：起步快、减速段长，比默认 FastOutSlowIn 的收尾
@@ -215,12 +222,19 @@ private fun RowScope.CompactBottomBarPlaceholder(iconRes: Int) {
 }
 
 class MainActivity : ComponentActivity() {
+    private var externalOpenSequence = 0L
+    private var externalOpenRequest by mutableStateOf<ExternalOpenRequest?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // 必须在 super.onCreate 之前调用：它要接管系统启动画面（API 31+）
         // 或自己换主题（低版本），晚了启动画面就脱离控制了
         val splashScreen = installSplashScreen()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        if (savedInstanceState == null) {
+            queueExternalOpen(intent)
+        }
 
         // 只在冷启动时清理：旧版固定名副本 + 上次进程被杀留下的过期半成品。
         // 旋转屏幕也会重新走 onCreate（此时 savedInstanceState != null），
@@ -262,6 +276,29 @@ class MainActivity : ComponentActivity() {
                 val navController = rememberNavController()
                 val navBackStackEntry by navController.currentBackStackEntryAsState()
                 val currentDestination = navBackStackEntry?.destination
+                val pendingExternalOpen = externalOpenRequest
+
+                LaunchedEffect(pendingExternalOpen) {
+                    val request = pendingExternalOpen ?: return@LaunchedEffect
+                    val comicId = runCatching {
+                        when (val outcome = ComicRepository(this@MainActivity)
+                            .addOrGetComic(request.uri)) {
+                            is AddComicOutcome.Added -> outcome.comic.id
+                            is AddComicOutcome.AlreadyInLibrary -> outcome.comic.id
+                            is AddComicOutcome.Restored -> outcome.comic.id
+                        }
+                    }.getOrElse {
+                        Toast.makeText(
+                            this@MainActivity,
+                            "无法打开该漫画文件",
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                        return@LaunchedEffect
+                    }
+                    navController.navigate(ReaderRoute(comicId)) {
+                        launchSingleTop = true
+                    }
+                }
 
                 Surface(
                     modifier = Modifier.fillMaxSize(),
@@ -367,5 +404,16 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        queueExternalOpen(intent)
+    }
+
+    private fun queueExternalOpen(intent: Intent?) {
+        val uri = intent?.takeIf { it.action == Intent.ACTION_VIEW }?.data ?: return
+        externalOpenRequest = ExternalOpenRequest(++externalOpenSequence, uri)
     }
 }
