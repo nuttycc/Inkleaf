@@ -113,6 +113,21 @@ class ComicRepository(context: Context) {
         }
     }
 
+    suspend fun setCoverFromPage(comicId: Long, book: ComicBook, page: Int) {
+        if (page !in 0 until book.pageCount) {
+            throw IllegalArgumentException("页码超出范围")
+        }
+        val comic = dao.getById(comicId) ?: throw IllegalStateException("书架记录不存在")
+        val bytes = book.loadPageBytes(page)
+        val cover = Covers.createCoverFile(appContext, comicId, bytes)
+            ?: throw IllegalStateException("封面生成失败")
+        dao.updateCover(comicId, cover.absolutePath)
+        comic.coverPath
+            ?.let(::File)
+            ?.takeIf { it.absolutePath != cover.absolutePath }
+            ?.delete()
+    }
+
     /** 从书架移除单本：删记录 + 删封面 + 删磁盘缓存 + 释放权限（不动用户的原文件） */
     suspend fun deleteComic(comic: ComicEntity) {
         dao.deleteById(comic.id)

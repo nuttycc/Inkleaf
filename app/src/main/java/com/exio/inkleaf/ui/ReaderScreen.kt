@@ -112,11 +112,11 @@ fun ReaderScreen(
     val context = LocalContext.current
     val window = (view.context as? Activity)?.window
 
-    val favoriteMessage = viewModel.favoriteMessage
-    LaunchedEffect(favoriteMessage) {
-        favoriteMessage?.let {
+    val readerMessage = viewModel.readerMessage
+    LaunchedEffect(readerMessage) {
+        readerMessage?.let {
             Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
-            viewModel.consumeFavoriteMessage()
+            viewModel.consumeReaderMessage()
         }
     }
 
@@ -182,6 +182,7 @@ fun ReaderScreen(
                     favoritePages = viewModel.favoritePages,
                     onNeedThumbnail = viewModel::requestThumbnail,
                     onToggleFavorite = viewModel::toggleFavorite,
+                    onSetCover = viewModel::setCurrentPageAsCover,
                     onPageChanged = viewModel::saveProgress,
                     onBack = exitReader,
                     showControls = showControls,
@@ -203,6 +204,7 @@ private fun ComicPager(
     favoritePages: Map<Int, FavoritePageEntity>,
     onNeedThumbnail: (Int) -> Unit,
     onToggleFavorite: (Int) -> Unit,
+    onSetCover: (Int) -> Unit,
     onPageChanged: (Int) -> Unit,
     onBack: () -> Unit,
     showControls: Boolean,
@@ -278,6 +280,7 @@ private fun ComicPager(
             isFavorite = favoritePages.containsKey(pagerState.currentPage),
             onBack = onBack,
             onToggleFavorite = { onToggleFavorite(pagerState.currentPage) },
+            onSetCover = { onSetCover(pagerState.currentPage) },
             modifier = Modifier.align(Alignment.TopCenter),
         )
 
@@ -300,6 +303,7 @@ private fun ReaderTopBar(
     isFavorite: Boolean,
     onBack: () -> Unit,
     onToggleFavorite: () -> Unit,
+    onSetCover: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     AnimatedVisibility(
@@ -334,6 +338,13 @@ private fun ReaderTopBar(
                     .weight(1f)
                     .padding(end = 8.dp),
             )
+            IconButton(onClick = onSetCover) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_image),
+                    contentDescription = "设为封面",
+                    tint = Color.White,
+                )
+            }
             IconButton(onClick = onToggleFavorite) {
                 Icon(
                     painter = painterResource(

@@ -22,7 +22,7 @@ object Covers {
                     ?: return@runCatching null
 
                 val dir = File(context.filesDir, "covers").apply { mkdirs() }
-                val file = File(dir, "$comicId.jpg")
+                val file = File(dir, "$comicId-${System.currentTimeMillis()}.jpg")
                 file.outputStream().use { out ->
                     bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
                 }

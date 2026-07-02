@@ -70,13 +70,14 @@ class ReaderViewModel(
     val thumbnails = mutableStateMapOf<Int, ImageBitmap>()
     val favoritePages = mutableStateMapOf<Int, FavoritePageEntity>()
 
-    var favoriteMessage by mutableStateOf<String?>(null)
+    var readerMessage by mutableStateOf<String?>(null)
         private set
 
     /** 正在加载中的页码集合，配合 Mutex 实现去重 */
     private val thumbInFlight = mutableSetOf<Int>()
     private val thumbMutex = Mutex()
     private val favoriteInFlight = mutableSetOf<Int>()
+    private var coverInFlight = false
 
     private var book: ComicBook? = null
     private var comic: ComicEntity? = null
@@ -125,22 +126,40 @@ class ReaderViewModel(
                 val existing = favoritePages[page]
                 if (existing != null) {
                     favoriteRepo.remove(existing)
-                    favoriteMessage = "已取消收藏"
+                    readerMessage = "已取消收藏"
                 } else {
                     val bytes = opened.loadPageBytes(page)
                     favoriteRepo.addSnapshot(source, page, opened.pageCount, bytes)
-                    favoriteMessage = "已收藏"
+                    readerMessage = "已收藏"
                 }
             } catch (e: Exception) {
-                favoriteMessage = e.message?.let { "收藏失败：$it" } ?: "收藏失败"
+                readerMessage = e.message?.let { "收藏失败：$it" } ?: "收藏失败"
             } finally {
                 favoriteInFlight -= page
             }
         }
     }
 
-    fun consumeFavoriteMessage() {
-        favoriteMessage = null
+    fun setCurrentPageAsCover(page: Int) {
+        if (coverInFlight) return
+        val opened = book ?: return
+        if (page !in 0 until opened.pageCount) return
+
+        coverInFlight = true
+        viewModelScope.launch {
+            try {
+                repo.setCoverFromPage(comicId, opened, page)
+                readerMessage = "已设为封面"
+            } catch (e: Exception) {
+                readerMessage = e.message?.let { "设置封面失败：$it" } ?: "设置封面失败"
+            } finally {
+                coverInFlight = false
+            }
+        }
+    }
+
+    fun consumeReaderMessage() {
+        readerMessage = null
     }
 
     /** 胶片格子按需请求缩略图：缓存已有或正在加载则直接返回（去重） */
