@@ -11,6 +11,7 @@
     -->
     <style name="Theme.Inkleaf.Starting" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">@color/splash_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_splash_logo</item>
         <item name="postSplashScreenTheme">@style/Theme.Inkleaf</item>
     </style>
 </resources>
