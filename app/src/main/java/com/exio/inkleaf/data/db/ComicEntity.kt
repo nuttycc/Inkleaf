@@ -14,6 +14,7 @@ import androidx.room.PrimaryKey
         // fileKey 是漫画文件身份；uri 只是当前可用于打开文件的 SAF 地址
         Index(value = ["fileKey"], unique = true),
         Index(value = ["uri"], unique = true),
+        Index(value = ["groupId"]),
     ],
 )
 data class ComicEntity(
@@ -27,5 +28,6 @@ data class ComicEntity(
     val addedAt: Long,               // 添加时间戳（毫秒）
     val lastReadAt: Long = 0,        // 最近阅读时间，书架按它倒序排
     val folderId: Long? = null,      // 来自哪个库目录；null = 手动添加（不参与扫描同步）
+    val groupId: Long? = null,       // 用户自定义分组；null = 未分组
     val isMissing: Boolean = false,  // 扫描发现文件消失 → true；文件找回 → false
 )

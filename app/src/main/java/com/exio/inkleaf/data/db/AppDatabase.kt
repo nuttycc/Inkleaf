@@ -12,14 +12,20 @@ import androidx.room.RoomDatabase
  * 迁移包袱带进主逻辑。发布给真实用户前再恢复显式 Migration。
  */
 @Database(
-    entities = [ComicEntity::class, LibraryFolderEntity::class, FavoritePageEntity::class],
-    version = 1,
+    entities = [
+        ComicEntity::class,
+        LibraryFolderEntity::class,
+        FavoritePageEntity::class,
+        ComicGroupEntity::class,
+    ],
+    version = 2,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun comicDao(): ComicDao
     abstract fun libraryFolderDao(): LibraryFolderDao
     abstract fun favoriteDao(): FavoriteDao
+    abstract fun comicGroupDao(): ComicGroupDao
 
     companion object {
         @Volatile

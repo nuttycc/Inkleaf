@@ -2,6 +2,7 @@ package com.exio.inkleaf.data
 
 import android.content.Context
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
@@ -41,6 +42,17 @@ data class ShelfLayoutSettings(
     val crop: CoverCrop = CoverCrop.CROP,
 )
 
+enum class ShelfGroupFilterKind {
+    ALL,
+    UNGROUPED,
+    GROUP,
+}
+
+data class ShelfGroupSelection(
+    val kind: ShelfGroupFilterKind = ShelfGroupFilterKind.ALL,
+    val groupId: Long? = null,
+)
+
 /**
  * 书架排版设置的唯一持久化来源。
  * 读取是一个 Flow：任何一处写入，所有订阅者（书架网格、排版抽屉）自动收到
@@ -57,6 +69,19 @@ class ShelfSettingsRepository(context: Context) {
         )
     }
 
+    val selectedGroup: Flow<ShelfGroupSelection> = dataStore.data.map { prefs ->
+        val kind = prefs[KEY_GROUP_FILTER_KIND].toEnum(ShelfGroupFilterKind.ALL)
+        val groupId = prefs[KEY_GROUP_FILTER_ID]
+        ShelfGroupSelection(
+            kind = if (kind == ShelfGroupFilterKind.GROUP && groupId == null) {
+                ShelfGroupFilterKind.ALL
+            } else {
+                kind
+            },
+            groupId = groupId.takeIf { kind == ShelfGroupFilterKind.GROUP },
+        )
+    }
+
     suspend fun setColumns(value: GridColumnsMode) {
         dataStore.edit { it[KEY_COLUMNS] = value.name }
     }
@@ -69,9 +94,23 @@ class ShelfSettingsRepository(context: Context) {
         dataStore.edit { it[KEY_CROP] = value.name }
     }
 
+    suspend fun setSelectedGroup(value: ShelfGroupSelection) {
+        dataStore.edit {
+            it[KEY_GROUP_FILTER_KIND] = value.kind.name
+            val groupId = value.groupId
+            if (value.kind == ShelfGroupFilterKind.GROUP && groupId != null) {
+                it[KEY_GROUP_FILTER_ID] = groupId
+            } else {
+                it.remove(KEY_GROUP_FILTER_ID)
+            }
+        }
+    }
+
     companion object {
         private val KEY_COLUMNS = stringPreferencesKey("grid_columns")
         private val KEY_ASPECT = stringPreferencesKey("cover_aspect")
         private val KEY_CROP = stringPreferencesKey("cover_crop")
+        private val KEY_GROUP_FILTER_KIND = stringPreferencesKey("group_filter_kind")
+        private val KEY_GROUP_FILTER_ID = longPreferencesKey("group_filter_id")
     }
 }

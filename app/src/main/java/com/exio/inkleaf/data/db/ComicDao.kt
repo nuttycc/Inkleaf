@@ -37,8 +37,11 @@ interface ComicDao {
     @Query("UPDATE comics SET lastReadPage = :page, lastReadAt = :time WHERE id = :id")
     suspend fun updateProgress(id: Long, page: Int, time: Long)
 
-    @Query("UPDATE comics SET pageCount = :pageCount, coverPath = :coverPath WHERE id = :id")
-    suspend fun updateMetadata(id: Long, pageCount: Int, coverPath: String?)
+    @Query("UPDATE comics SET groupId = :groupId WHERE id = :id")
+    suspend fun updateGroup(id: Long, groupId: Long?)
+
+    @Query("UPDATE comics SET pageCount = :pageCount WHERE id = :id")
+    suspend fun updatePageCount(id: Long, pageCount: Int)
 
     @Query("DELETE FROM comics WHERE id = :id")
     suspend fun deleteById(id: Long)
@@ -64,6 +67,24 @@ interface ComicDao {
     /** 只更新封面，不动 pageCount（页数留给首次打开时回填） */
     @Query("UPDATE comics SET coverPath = :coverPath WHERE id = :id")
     suspend fun updateCover(id: Long, coverPath: String)
+
+    /**
+     * 自动生成的封面只能填补当前快照里的空位/失效路径；如果用户已经手动
+     * 换了封面，coverPath 会改变，这次 UPDATE 就不会覆盖用户选择。
+     */
+    @Query(
+        """UPDATE comics SET coverPath = :coverPath
+           WHERE id = :id
+           AND (
+               (:expectedCoverPath IS NULL AND coverPath IS NULL)
+               OR coverPath = :expectedCoverPath
+           )"""
+    )
+    suspend fun updateCoverIfUnchanged(
+        id: Long,
+        expectedCoverPath: String?,
+        coverPath: String?,
+    ): Int
 
     @Query("SELECT * FROM comics WHERE coverPath IS NULL AND isMissing = 0")
     suspend fun getComicsWithoutCover(): List<ComicEntity>

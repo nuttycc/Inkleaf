@@ -13,10 +13,15 @@ import com.exio.inkleaf.data.ComicRepository
 import com.exio.inkleaf.data.CoverAspect
 import com.exio.inkleaf.data.CoverCrop
 import com.exio.inkleaf.data.GridColumnsMode
+import com.exio.inkleaf.data.GroupWriteOutcome
 import com.exio.inkleaf.data.ScanResult
+import com.exio.inkleaf.data.ShelfGroupFilterKind
+import com.exio.inkleaf.data.ShelfGroupSelection
 import com.exio.inkleaf.data.ShelfLayoutSettings
 import com.exio.inkleaf.data.ShelfSettingsRepository
 import com.exio.inkleaf.data.db.ComicEntity
+import com.exio.inkleaf.data.db.GroupWithCount
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -44,8 +49,19 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycle
      * null = Room 尚未发射首批数据；空列表 = 书架确实为空。
      * 不能拿 emptyList() 当初始值——那会让 UI 在数据到达前先闪一帧空状态
      */
-    val comics: StateFlow<List<ComicEntity>?> = repo.observeAll()
+    val comics: StateFlow<List<ComicEntity>?> = combine(
+        repo.observeAll(),
+        settingsRepo.selectedGroup,
+    ) { comics, selection ->
+        filterComics(comics, selection)
+    }
         .stateIn(viewModelScope, SharingStarted.Lazily, null)
+
+    val groups: StateFlow<List<GroupWithCount>?> = repo.observeGroups()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    val selectedGroup: StateFlow<ShelfGroupSelection> = settingsRepo.selectedGroup
+        .stateIn(viewModelScope, SharingStarted.Eagerly, ShelfGroupSelection())
 
     /**
      * 排版设置。initial 给默认构造的设置对象：DataStore 首次发射前
@@ -79,6 +95,24 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycle
         // STARTED），onStart 随注册立即执行一次，冷启动首扫由同一条
         // 路径覆盖——不再需要单独的 init { refresh() }
         ProcessLifecycleOwner.get().lifecycle.addObserver(this)
+
+        // 如果当前筛选的分组被删除，回到"全部"；否则用户会看到一个
+        // 永远为空、也没有入口解释原因的书架。
+        viewModelScope.launch {
+            combine(groups, selectedGroup) { groups, selection -> groups to selection }
+                .collect { (list, selection) ->
+                    if (list == null || selection.kind != ShelfGroupFilterKind.GROUP) return@collect
+                    val selectedGroupId = selection.groupId
+                    if (selectedGroupId == null) {
+                        settingsRepo.setSelectedGroup(ShelfGroupSelection())
+                        return@collect
+                    }
+                    val selectedExists = list.any { it.group.id == selectedGroupId }
+                    if (!selectedExists && !repo.groupExists(selectedGroupId)) {
+                        settingsRepo.setSelectedGroup(ShelfGroupSelection())
+                    }
+                }
+        }
     }
 
     /**
@@ -166,6 +200,78 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycle
 
     fun deleteComic(comic: ComicEntity) {
         viewModelScope.launch { repo.deleteComic(comic) }
+    }
+
+    fun selectGroup(selection: ShelfGroupSelection) {
+        viewModelScope.launch { settingsRepo.setSelectedGroup(selection) }
+    }
+
+    fun createGroup(name: String) {
+        viewModelScope.launch {
+            when (val outcome = repo.createGroup(name)) {
+                is GroupWriteOutcome.Success -> {
+                    outcome.groupId?.let {
+                        settingsRepo.setSelectedGroup(
+                            ShelfGroupSelection(ShelfGroupFilterKind.GROUP, it)
+                        )
+                    }
+                }
+
+                GroupWriteOutcome.BlankName -> showMessage("分组名不能为空")
+                GroupWriteOutcome.Duplicate -> showMessage("分组已存在")
+                GroupWriteOutcome.Missing -> showMessage("分组不存在")
+            }
+        }
+    }
+
+    fun renameGroup(groupId: Long, name: String) {
+        viewModelScope.launch {
+            when (repo.renameGroup(groupId, name)) {
+                is GroupWriteOutcome.Success -> Unit
+                GroupWriteOutcome.BlankName -> showMessage("分组名不能为空")
+                GroupWriteOutcome.Duplicate -> showMessage("分组已存在")
+                GroupWriteOutcome.Missing -> showMessage("分组不存在")
+            }
+        }
+    }
+
+    fun deleteGroup(groupId: Long) {
+        viewModelScope.launch {
+            repo.deleteGroup(groupId)
+            if (selectedGroup.value.groupId == groupId) {
+                settingsRepo.setSelectedGroup(ShelfGroupSelection())
+            }
+        }
+    }
+
+    fun setComicGroup(comic: ComicEntity, groupId: Long?) {
+        viewModelScope.launch {
+            when (repo.setComicGroup(comic.id, groupId)) {
+                is GroupWriteOutcome.Success -> showMessage(
+                    groupId
+                        ?.let { id -> groups.value?.firstOrNull { it.group.id == id }?.group?.name }
+                        ?.let { "已移动到「$it」" }
+                        ?: "已设为未分组"
+                )
+
+                GroupWriteOutcome.BlankName -> Unit
+                GroupWriteOutcome.Duplicate -> Unit
+                GroupWriteOutcome.Missing -> showMessage("分组不存在")
+            }
+        }
+    }
+
+    private fun filterComics(
+        comics: List<ComicEntity>,
+        selection: ShelfGroupSelection,
+    ): List<ComicEntity> = when (selection.kind) {
+        ShelfGroupFilterKind.ALL -> comics
+        ShelfGroupFilterKind.UNGROUPED -> comics.filter { it.groupId == null }
+        ShelfGroupFilterKind.GROUP -> comics.filter { it.groupId == selection.groupId }
+    }
+
+    private fun showMessage(message: String) {
+        _scanState.value = _scanState.value.copy(message = message)
     }
 
     /**

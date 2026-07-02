@@ -5,8 +5,10 @@ import android.content.Intent
 import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 import com.exio.inkleaf.data.db.AppDatabase
+import com.exio.inkleaf.data.db.ComicGroupEntity
 import com.exio.inkleaf.data.db.ComicEntity
 import com.exio.inkleaf.data.db.FolderWithCount
+import com.exio.inkleaf.data.db.GroupWithCount
 import com.exio.inkleaf.data.db.LibraryFolderEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
@@ -39,6 +41,13 @@ sealed interface AddComicOutcome {
     data class Restored(val comic: ComicEntity) : AddComicOutcome
 }
 
+sealed interface GroupWriteOutcome {
+    data class Success(val groupId: Long? = null) : GroupWriteOutcome
+    data object BlankName : GroupWriteOutcome
+    data object Duplicate : GroupWriteOutcome
+    data object Missing : GroupWriteOutcome
+}
+
 /**
  * 业务数据的统一入口：ViewModel 不直接接触 DAO、文件系统和权限 API。
  * 自身无状态（数据库是单例），随处构造无代价——所以暂时不需要依赖注入框架。
@@ -47,6 +56,7 @@ class ComicRepository(context: Context) {
     private val appContext = context.applicationContext
     private val dao = AppDatabase.getInstance(appContext).comicDao()
     private val folderDao = AppDatabase.getInstance(appContext).libraryFolderDao()
+    private val groupDao = AppDatabase.getInstance(appContext).comicGroupDao()
     private val scanner = LibraryScanner(appContext)
 
     // ===== 漫画条目 =====
@@ -54,6 +64,53 @@ class ComicRepository(context: Context) {
     fun observeAll(): Flow<List<ComicEntity>> = dao.observeAll()
 
     suspend fun getComic(id: Long): ComicEntity? = dao.getById(id)
+
+    // ===== 自定义分组 =====
+
+    fun observeGroups(): Flow<List<GroupWithCount>> = groupDao.observeGroupsWithCount()
+
+    suspend fun groupExists(id: Long): Boolean = groupDao.getById(id) != null
+
+    suspend fun createGroup(name: String): GroupWriteOutcome {
+        val normalized = normalizeGroupName(name) ?: return GroupWriteOutcome.BlankName
+        if (groupDao.getByName(normalized) != null) return GroupWriteOutcome.Duplicate
+        val id = groupDao.insert(
+            ComicGroupEntity(
+                name = normalized,
+                createdAt = System.currentTimeMillis(),
+            )
+        )
+        return if (id == -1L) {
+            GroupWriteOutcome.Duplicate
+        } else {
+            GroupWriteOutcome.Success(id)
+        }
+    }
+
+    suspend fun renameGroup(id: Long, name: String): GroupWriteOutcome {
+        val normalized = normalizeGroupName(name) ?: return GroupWriteOutcome.BlankName
+        val group = groupDao.getById(id) ?: return GroupWriteOutcome.Missing
+        val sameNameGroup = groupDao.getByName(normalized)
+        if (sameNameGroup != null && sameNameGroup.id != group.id) {
+            return GroupWriteOutcome.Duplicate
+        }
+        if (group.name != normalized) {
+            groupDao.updateName(id, normalized)
+        }
+        return GroupWriteOutcome.Success(id)
+    }
+
+    suspend fun deleteGroup(id: Long) {
+        groupDao.deleteKeepingComics(id)
+    }
+
+    suspend fun setComicGroup(comicId: Long, groupId: Long?): GroupWriteOutcome {
+        if (groupId != null && groupDao.getById(groupId) == null) {
+            return GroupWriteOutcome.Missing
+        }
+        dao.updateGroup(comicId, groupId)
+        return GroupWriteOutcome.Success(groupId)
+    }
 
     /**
      * 手动添加单个漫画；同一文件已在书架时直接返回已有记录，失效记录会恢复。
@@ -102,14 +159,26 @@ class ComicRepository(context: Context) {
     /** 首次成功打开后回填真实页数和封面；Room Flow 会自动刷新书架 */
     suspend fun backfillMetadata(comic: ComicEntity, book: ComicBook) {
         val needCover = comic.coverPath == null || !File(comic.coverPath).exists()
-        val coverPath = if (needCover) {
+        val cover = if (needCover) {
             val firstPage = runCatching { book.loadPageBytes(0) }.getOrNull()
-            firstPage?.let { Covers.createCoverFile(appContext, comic.id, it)?.absolutePath }
+            firstPage?.let { Covers.createCoverFile(appContext, comic.id, it) }
         } else {
-            comic.coverPath
+            null
         }
-        if (comic.pageCount != book.pageCount || coverPath != comic.coverPath) {
-            dao.updateMetadata(comic.id, book.pageCount, coverPath)
+        if (comic.pageCount != book.pageCount) {
+            dao.updatePageCount(comic.id, book.pageCount)
+        }
+        if (cover != null) {
+            val updated = dao.updateCoverIfUnchanged(
+                comic.id,
+                comic.coverPath,
+                cover.absolutePath,
+            )
+            if (updated == 0) {
+                cover.delete()
+            }
+        } else if (needCover && comic.coverPath != null) {
+            dao.updateCoverIfUnchanged(comic.id, comic.coverPath, null)
         }
     }
 
@@ -292,7 +361,14 @@ class ComicRepository(context: Context) {
             val bytes = runCatching { readFirstImageBytes(Uri.parse(comic.uri)) }
                 .getOrNull() ?: continue
             val cover = Covers.createCoverFile(appContext, comic.id, bytes) ?: continue
-            dao.updateCover(comic.id, cover.absolutePath)
+            val updated = dao.updateCoverIfUnchanged(
+                comic.id,
+                comic.coverPath,
+                cover.absolutePath,
+            )
+            if (updated == 0) {
+                cover.delete()
+            }
         }
     }
 
@@ -343,6 +419,9 @@ class ComicRepository(context: Context) {
         if (distinctKeys.isEmpty()) return emptyList()
         return distinctKeys.chunked(SQLITE_MAX_VARIABLES).flatMap { dao.getByFileKeys(it) }
     }
+
+    private fun normalizeGroupName(name: String): String? =
+        name.trim().takeIf { it.isNotEmpty() }
 
     companion object {
         /** Repository 实例随处构造（自身无状态），扫描锁必须放进程级单例处 */

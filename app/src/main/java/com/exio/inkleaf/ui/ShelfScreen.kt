@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
@@ -25,10 +26,16 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -39,6 +46,8 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -64,6 +73,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -73,8 +83,11 @@ import com.exio.inkleaf.R
 import com.exio.inkleaf.data.CoverAspect
 import com.exio.inkleaf.data.CoverCrop
 import com.exio.inkleaf.data.GridColumnsMode
+import com.exio.inkleaf.data.ShelfGroupFilterKind
+import com.exio.inkleaf.data.ShelfGroupSelection
 import com.exio.inkleaf.data.ShelfLayoutSettings
 import com.exio.inkleaf.data.db.ComicEntity
+import com.exio.inkleaf.data.db.GroupWithCount
 import java.io.File
 
 /** 书架内容区的三态：作为 Crossfade 的 key，列表内容增删不触发整区动画 */
@@ -97,10 +110,18 @@ fun ShelfScreen(
     viewModel: ShelfViewModel = viewModel(),
 ) {
     val comics by viewModel.comics.collectAsStateWithLifecycle()
+    val groups by viewModel.groups.collectAsStateWithLifecycle()
+    val selectedGroup by viewModel.selectedGroup.collectAsStateWithLifecycle()
     val scanState by viewModel.scanState.collectAsStateWithLifecycle()
     val layout by viewModel.layoutSettings.collectAsStateWithLifecycle()
 
     var pendingDelete by remember { mutableStateOf<ComicEntity?>(null) }
+    var pendingAction by remember { mutableStateOf<ComicEntity?>(null) }
+    var pendingGroupAssignment by remember { mutableStateOf<ComicEntity?>(null) }
+    var pendingGroupDelete by remember { mutableStateOf<GroupWithCount?>(null) }
+    var pendingGroupRename by remember { mutableStateOf<GroupWithCount?>(null) }
+    var showCreateGroupDialog by remember { mutableStateOf(false) }
+    var showGroupSheet by remember { mutableStateOf(false) }
     var showLayoutSheet by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -132,7 +153,21 @@ fun ShelfScreen(
         contentWindowInsets = WindowInsets(0),
         topBar = {
             TopAppBar(
-                title = { Text("我的书架") },
+                title = {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { showGroupSheet = true }
+                            .padding(horizontal = 4.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(groupTitle(selectedGroup, groups))
+                        Icon(
+                            Icons.Filled.ArrowDropDown,
+                            contentDescription = "选择分组",
+                        )
+                    }
+                },
                 actions = {
                     // 添加是"必须但低频"的功能：顶栏小图标拿最低调的常驻位，
                     // 空书架时的主推入口是空状态里的按钮（渐进式显著度）。
@@ -244,7 +279,7 @@ fun ShelfScreen(
                                 aspect = layout.aspect.ratio,
                                 crop = layout.crop,
                                 onClick = { onOpenComic(comic.id) },
-                                onLongClick = { pendingDelete = comic },
+                                onLongClick = { pendingAction = comic },
                             )
                         }
                     }
@@ -289,6 +324,108 @@ fun ShelfScreen(
         }
     }
 
+    if (showGroupSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showGroupSheet = false },
+            sheetState = rememberExpandOnlySheetState(),
+        ) {
+            GroupPickerSheetContent(
+                groups = groups,
+                selected = selectedGroup,
+                onSelect = {
+                    viewModel.selectGroup(it)
+                    showGroupSheet = false
+                },
+                onCreate = { showCreateGroupDialog = true },
+                onRename = { pendingGroupRename = it },
+                onDelete = { pendingGroupDelete = it },
+            )
+        }
+    }
+
+    pendingAction?.let { comic ->
+        ModalBottomSheet(
+            onDismissRequest = { pendingAction = null },
+            sheetState = rememberExpandOnlySheetState(),
+        ) {
+            ComicActionSheetContent(
+                comic = comic,
+                onAssignGroup = {
+                    pendingAction = null
+                    pendingGroupAssignment = comic
+                },
+                onDelete = {
+                    pendingAction = null
+                    pendingDelete = comic
+                },
+            )
+        }
+    }
+
+    pendingGroupAssignment?.let { comic ->
+        ModalBottomSheet(
+            onDismissRequest = { pendingGroupAssignment = null },
+            sheetState = rememberExpandOnlySheetState(),
+        ) {
+            AssignGroupSheetContent(
+                comic = comic,
+                groups = groups,
+                onSelect = { groupId ->
+                    viewModel.setComicGroup(comic, groupId)
+                    pendingGroupAssignment = null
+                },
+            )
+        }
+    }
+
+    if (showCreateGroupDialog) {
+        GroupNameDialog(
+            title = "新建分组",
+            confirmLabel = "创建",
+            onDismiss = { showCreateGroupDialog = false },
+            onConfirm = {
+                viewModel.createGroup(it)
+                showCreateGroupDialog = false
+                showGroupSheet = false
+            },
+        )
+    }
+
+    pendingGroupRename?.let { item ->
+        GroupNameDialog(
+            title = "重命名分组",
+            initialName = item.group.name,
+            confirmLabel = "保存",
+            onDismiss = { pendingGroupRename = null },
+            onConfirm = {
+                viewModel.renameGroup(item.group.id, it)
+                pendingGroupRename = null
+            },
+        )
+    }
+
+    pendingGroupDelete?.let { item ->
+        AlertDialog(
+            onDismissRequest = { pendingGroupDelete = null },
+            title = { Text("删除分组") },
+            text = {
+                Text(
+                    "删除「${item.group.name}」？\n\n" +
+                            "该分组内的 ${item.comicCount} 本漫画会变为未分组，漫画不会被移除。"
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.deleteGroup(item.group.id)
+                    pendingGroupDelete = null
+                }) { Text("删除") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingGroupDelete = null }) { Text("取消") }
+            },
+        )
+    }
+
     pendingDelete?.let { comic ->
         val rescanHint = if (comic.folderId != null && !comic.isMissing) {
             "\n注意：该漫画来自库目录，重新扫描后会再次出现。"
@@ -310,6 +447,227 @@ fun ShelfScreen(
             },
         )
     }
+}
+
+@Composable
+private fun GroupPickerSheetContent(
+    groups: List<GroupWithCount>?,
+    selected: ShelfGroupSelection,
+    onSelect: (ShelfGroupSelection) -> Unit,
+    onCreate: () -> Unit,
+    onRename: (GroupWithCount) -> Unit,
+    onDelete: (GroupWithCount) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .verticalScroll(rememberScrollState())
+            .selectableGroup()
+            .padding(bottom = 12.dp),
+    ) {
+        StandardSheetTitle("选择分组")
+        GroupFilterRow(
+            title = "全部",
+            selected = selected.kind == ShelfGroupFilterKind.ALL,
+            onClick = { onSelect(ShelfGroupSelection()) },
+        )
+        GroupFilterRow(
+            title = "未分组",
+            selected = selected.kind == ShelfGroupFilterKind.UNGROUPED,
+            onClick = {
+                onSelect(ShelfGroupSelection(ShelfGroupFilterKind.UNGROUPED))
+            },
+        )
+        groups.orEmpty().forEach { item ->
+            ListItem(
+                headlineContent = { Text(item.group.name) },
+                supportingContent = { Text("${item.comicCount} 本漫画") },
+                leadingContent = {
+                    RadioButton(
+                        selected = selected.kind == ShelfGroupFilterKind.GROUP &&
+                                selected.groupId == item.group.id,
+                        onClick = null,
+                    )
+                },
+                trailingContent = {
+                    Row {
+                        IconButton(onClick = { onRename(item) }) {
+                            Icon(Icons.Filled.Edit, contentDescription = "重命名分组")
+                        }
+                        IconButton(onClick = { onDelete(item) }) {
+                            Icon(Icons.Filled.Delete, contentDescription = "删除分组")
+                        }
+                    }
+                },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                modifier = Modifier.selectable(
+                    selected = selected.kind == ShelfGroupFilterKind.GROUP &&
+                            selected.groupId == item.group.id,
+                    onClick = {
+                        onSelect(
+                            ShelfGroupSelection(
+                                kind = ShelfGroupFilterKind.GROUP,
+                                groupId = item.group.id,
+                            )
+                        )
+                    },
+                    role = Role.RadioButton,
+                ),
+            )
+        }
+        ListItem(
+            headlineContent = { Text("新建分组") },
+            leadingContent = {
+                Icon(
+                    Icons.Filled.Add,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            },
+            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            modifier = Modifier.clickable(onClick = onCreate),
+        )
+    }
+}
+
+@Composable
+private fun GroupFilterRow(
+    title: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    ListItem(
+        headlineContent = { Text(title) },
+        leadingContent = {
+            RadioButton(
+                selected = selected,
+                onClick = null,
+            )
+        },
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        modifier = modifier.selectable(
+            selected = selected,
+            onClick = onClick,
+            role = Role.RadioButton,
+        ),
+    )
+}
+
+@Composable
+private fun ComicActionSheetContent(
+    comic: ComicEntity,
+    onAssignGroup: () -> Unit,
+    onDelete: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(bottom = 12.dp),
+    ) {
+        StandardSheetTitle(comic.title)
+        ListItem(
+            headlineContent = { Text("设置分组") },
+            leadingContent = {
+                Icon(
+                    painterResource(R.drawable.ic_folder),
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            },
+            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            modifier = Modifier.clickable(onClick = onAssignGroup),
+        )
+        ListItem(
+            headlineContent = { Text("从书架移除") },
+            leadingContent = {
+                Icon(
+                    Icons.Filled.Delete,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error,
+                )
+            },
+            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            modifier = Modifier.clickable(onClick = onDelete),
+        )
+    }
+}
+
+@Composable
+private fun AssignGroupSheetContent(
+    comic: ComicEntity,
+    groups: List<GroupWithCount>?,
+    onSelect: (Long?) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .verticalScroll(rememberScrollState())
+            .selectableGroup()
+            .padding(bottom = 12.dp),
+    ) {
+        StandardSheetTitle("设置分组")
+        GroupFilterRow(
+            title = "未分组",
+            selected = comic.groupId == null,
+            onClick = { onSelect(null) },
+        )
+        groups.orEmpty().forEach { item ->
+            GroupFilterRow(
+                title = item.group.name,
+                selected = comic.groupId == item.group.id,
+                onClick = { onSelect(item.group.id) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun GroupNameDialog(
+    title: String,
+    confirmLabel: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    initialName: String = "",
+) {
+    var name by remember(initialName) { mutableStateOf(initialName) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text("分组名") },
+                singleLine = true,
+                modifier = modifier.fillMaxWidth(),
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(name) }) { Text(confirmLabel) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        },
+    )
+}
+
+private fun groupTitle(
+    selected: ShelfGroupSelection,
+    groups: List<GroupWithCount>?,
+): String = when (selected.kind) {
+    ShelfGroupFilterKind.ALL -> "全部"
+    ShelfGroupFilterKind.UNGROUPED -> "未分组"
+    ShelfGroupFilterKind.GROUP ->
+        groups?.firstOrNull { it.group.id == selected.groupId }?.group?.name ?: "全部"
 }
 
 /**
