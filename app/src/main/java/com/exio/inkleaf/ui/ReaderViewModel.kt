@@ -2,8 +2,6 @@ package com.exio.inkleaf.ui
 
 import android.app.Application
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -21,6 +19,9 @@ import com.exio.inkleaf.data.ReaderCache
 import com.exio.inkleaf.data.db.ComicEntity
 import com.exio.inkleaf.data.db.FavoritePageEntity
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -79,6 +80,10 @@ class ReaderViewModel(
     private val favoriteInFlight = mutableSetOf<Int>()
     private var coverInFlight = false
 
+    /** 待落库的最新阅读页；null = 没有待写的进度（见 saveProgress 的节流说明） */
+    private var pendingProgressPage: Int? = null
+    private var progressWriteJob: Job? = null
+
     private var book: ComicBook? = null
     private var comic: ComicEntity? = null
     private var observedFavoriteSource: String? = null
@@ -90,7 +95,7 @@ class ReaderViewModel(
                     ?: throw ComicOpenException("书架记录不存在")
                 this@ReaderViewModel.comic = comic
                 observeFavorites(comic.fileKey)
-                val opened = ComicBook.open(getApplication(), Uri.parse(comic.uri), comicId)
+                val opened = repo.openBook(comic)
                 book = opened
                 // 首次打开回填页数和封面；Room Flow 会自动刷新书架
                 repo.backfillMetadata(comic, opened)
@@ -110,8 +115,32 @@ class ReaderViewModel(
         }
     }
 
+    /**
+     * 进度写库按 trailing 节流：快速连翻/拖滑杆跳页时不逐页写——每次写库
+     * 都会让书架侧仍在订阅的 Room Flow 在后台重查一轮。窗口内只记最新页，
+     * 到期写一次；退出阅读页取消协程时由 finally + NonCancellable
+     * 保证最后的进度必然落库。
+     */
     fun saveProgress(page: Int) {
-        viewModelScope.launch { repo.saveProgress(comicId, page) }
+        pendingProgressPage = page
+        if (progressWriteJob?.isActive == true) return
+        progressWriteJob = viewModelScope.launch {
+            try {
+                while (true) {
+                    delay(PROGRESS_WRITE_INTERVAL_MS)
+                    val latest = pendingProgressPage ?: break
+                    pendingProgressPage = null
+                    withContext(NonCancellable) { repo.saveProgress(comicId, latest) }
+                }
+            } finally {
+                withContext(NonCancellable) {
+                    pendingProgressPage?.let { latest ->
+                        pendingProgressPage = null
+                        repo.saveProgress(comicId, latest)
+                    }
+                }
+            }
+        }
     }
 
     fun toggleFavorite(page: Int) {
@@ -202,21 +231,9 @@ class ReaderViewModel(
         }
         try {
             val app = getApplication<Application>()
-            val diskFile = ReaderCache.thumbFile(app, comicId, page)
 
             // 一级：磁盘缓存（上次开书时落盘的小 JPEG，读取+解码不到 1ms 级）
-            val fromDisk = withContext(Dispatchers.IO) {
-                if (diskFile.exists()) {
-                    BitmapFactory.decodeFile(
-                        diskFile.absolutePath,
-                        BitmapFactory.Options().apply {
-                            inPreferredConfig = Bitmap.Config.RGB_565
-                        },
-                    )
-                } else {
-                    null
-                }
-            }
+            val fromDisk = ReaderCache.readThumbnail(app, comicId, page)
             if (fromDisk != null) {
                 thumbnails[page] = fromDisk.asImageBitmap()
                 return
@@ -229,15 +246,7 @@ class ReaderViewModel(
                 Covers.decodeSampled(bytes, THUMB_TARGET_WIDTH, Bitmap.Config.RGB_565)
             } ?: return
             thumbnails[page] = decoded.asImageBitmap()
-            withContext(Dispatchers.IO) {
-                // 落盘失败无所谓（磁盘满等）：缓存只是加速，下次重新解码
-                runCatching {
-                    diskFile.parentFile?.mkdirs()
-                    diskFile.outputStream().use { out ->
-                        decoded.compress(Bitmap.CompressFormat.JPEG, 85, out)
-                    }
-                }
-            }
+            ReaderCache.writeThumbnail(app, comicId, page, decoded)
         } catch (_: Exception) {
             // 单页缩略图失败只影响胶片上一个格子，静默跳过；
             // 不缓存失败结果，下次该格子可见时会自动重试
@@ -268,5 +277,8 @@ class ReaderViewModel(
 
         /** 全量预热的页数上限，超过则只按需加载（内存保险） */
         private const val PREWARM_MAX_PAGES = 400
+
+        /** 进度写库的节流窗口 */
+        private const val PROGRESS_WRITE_INTERVAL_MS = 500L
     }
 }

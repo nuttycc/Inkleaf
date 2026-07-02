@@ -13,14 +13,12 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -59,13 +57,11 @@ fun FavoriteViewerScreen(
     var initialIndex by rememberSaveable(favoriteId) { mutableStateOf<Int?>(null) }
     var exitRequested by rememberSaveable(favoriteId) { mutableStateOf(false) }
 
-    val message = viewModel.message
-    LaunchedEffect(message) {
-        message?.let {
-            snackbarHostState.showSnackbar(it)
-            viewModel.consumeMessage()
-        }
-    }
+    SnackbarMessageEffect(
+        message = viewModel.message,
+        hostState = snackbarHostState,
+        onConsumed = viewModel::consumeMessage,
+    )
 
     LaunchedEffect(favorites, favoriteId, initialIndex, exitRequested) {
         val list = favorites ?: return@LaunchedEffect
@@ -206,19 +202,15 @@ private fun FavoriteViewer(
     }
 
     pendingDelete?.let { favorite ->
-        AlertDialog(
-            onDismissRequest = { pendingDelete = null },
-            title = { Text("取消收藏") },
-            text = { Text("移除《${favorite.sourceTitle}》第 ${favorite.pageIndex + 1} 页？") },
-            confirmButton = {
-                TextButton(onClick = {
-                    pendingDelete = null
-                    onDelete(favorite)
-                }) { Text("移除") }
+        ConfirmDialog(
+            title = "取消收藏",
+            text = "移除《${favorite.sourceTitle}》第 ${favorite.pageIndex + 1} 页？",
+            confirmLabel = "移除",
+            onConfirm = {
+                pendingDelete = null
+                onDelete(favorite)
             },
-            dismissButton = {
-                TextButton(onClick = { pendingDelete = null }) { Text("取消") }
-            },
+            onDismiss = { pendingDelete = null },
         )
     }
 }

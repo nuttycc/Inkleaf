@@ -27,13 +27,11 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Settings
@@ -61,7 +59,6 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -83,6 +80,7 @@ import com.exio.inkleaf.R
 import com.exio.inkleaf.data.CoverAspect
 import com.exio.inkleaf.data.CoverCrop
 import com.exio.inkleaf.data.GridColumnsMode
+import com.exio.inkleaf.data.LibraryScanner
 import com.exio.inkleaf.data.ShelfGroupFilterKind
 import com.exio.inkleaf.data.ShelfGroupSelection
 import com.exio.inkleaf.data.ShelfLayoutSettings
@@ -92,13 +90,6 @@ import java.io.File
 
 /** 书架内容区的三态：作为 Crossfade 的 key，列表内容增删不触发整区动画 */
 private enum class ShelfPhase { LOADING, EMPTY, CONTENT }
-
-/** 单本漫画选择器接受的 MIME 类型（顶栏菜单和空状态按钮共用） */
-private val COMIC_MIME_TYPES = arrayOf(
-    "application/zip",
-    "application/x-cbz",
-    "application/octet-stream",
-)
 
 /** 首页书架：封面网格 + 目录扫描 + 排版抽屉 + 顶栏添加菜单 + 长按删除 */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -141,12 +132,11 @@ fun ShelfScreen(
 
     var showAddSheet by remember { mutableStateOf(false) }
 
-    LaunchedEffect(scanState.message) {
-        scanState.message?.let {
-            snackbarHostState.showSnackbar(it)
-            viewModel.consumeMessage()
-        }
-    }
+    SnackbarMessageEffect(
+        message = scanState.message,
+        hostState = snackbarHostState,
+        onConsumed = viewModel::consumeMessage,
+    )
 
     Scaffold(
         modifier = modifier,
@@ -256,7 +246,9 @@ fun ShelfScreen(
                             Button(onClick = { treePicker.launch(null) }) {
                                 Text("添加漫画目录")
                             }
-                            TextButton(onClick = { picker.launch(COMIC_MIME_TYPES) }) {
+                            TextButton(onClick = {
+                                picker.launch(LibraryScanner.COMIC_PICKER_MIME_TYPES)
+                            }) {
                                 Text("或添加单本漫画")
                             }
                         }
@@ -318,7 +310,7 @@ fun ShelfScreen(
                 },
                 onAddFile = {
                     showAddSheet = false
-                    picker.launch(COMIC_MIME_TYPES)
+                    picker.launch(LibraryScanner.COMIC_PICKER_MIME_TYPES)
                 },
             )
         }
@@ -405,24 +397,16 @@ fun ShelfScreen(
     }
 
     pendingGroupDelete?.let { item ->
-        AlertDialog(
-            onDismissRequest = { pendingGroupDelete = null },
-            title = { Text("删除分组") },
-            text = {
-                Text(
-                    "删除「${item.group.name}」？\n\n" +
-                            "该分组内的 ${item.comicCount} 本漫画会变为未分组，漫画不会被移除。"
-                )
+        ConfirmDialog(
+            title = "删除分组",
+            text = "删除「${item.group.name}」？\n\n" +
+                    "该分组内的 ${item.comicCount} 本漫画会变为未分组，漫画不会被移除。",
+            confirmLabel = "删除",
+            onConfirm = {
+                viewModel.deleteGroup(item.group.id)
+                pendingGroupDelete = null
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    viewModel.deleteGroup(item.group.id)
-                    pendingGroupDelete = null
-                }) { Text("删除") }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingGroupDelete = null }) { Text("取消") }
-            },
+            onDismiss = { pendingGroupDelete = null },
         )
     }
 
@@ -432,19 +416,15 @@ fun ShelfScreen(
         } else {
             ""
         }
-        AlertDialog(
-            onDismissRequest = { pendingDelete = null },
-            title = { Text("从书架移除") },
-            text = { Text("移除《${comic.title}》？\n原文件不会被删除。$rescanHint") },
-            confirmButton = {
-                TextButton(onClick = {
-                    viewModel.deleteComic(comic)
-                    pendingDelete = null
-                }) { Text("移除") }
+        ConfirmDialog(
+            title = "从书架移除",
+            text = "移除《${comic.title}》？\n原文件不会被删除。$rescanHint",
+            confirmLabel = "移除",
+            onConfirm = {
+                viewModel.deleteComic(comic)
+                pendingDelete = null
             },
-            dismissButton = {
-                TextButton(onClick = { pendingDelete = null }) { Text("取消") }
-            },
+            onDismiss = { pendingDelete = null },
         )
     }
 }
@@ -459,14 +439,7 @@ private fun GroupPickerSheetContent(
     onDelete: (GroupWithCount) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .verticalScroll(rememberScrollState())
-            .selectableGroup()
-            .padding(bottom = 12.dp),
-    ) {
+    SheetColumn(modifier = modifier, scrollable = true, selectable = true) {
         StandardSheetTitle("选择分组")
         GroupFilterRow(
             title = "全部",
@@ -563,12 +536,7 @@ private fun ComicActionSheetContent(
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(bottom = 12.dp),
-    ) {
+    SheetColumn(modifier = modifier) {
         StandardSheetTitle(comic.title)
         ListItem(
             headlineContent = { Text("设置分组") },
@@ -604,14 +572,7 @@ private fun AssignGroupSheetContent(
     onSelect: (Long?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .verticalScroll(rememberScrollState())
-            .selectableGroup()
-            .padding(bottom = 12.dp),
-    ) {
+    SheetColumn(modifier = modifier, scrollable = true, selectable = true) {
         StandardSheetTitle("设置分组")
         GroupFilterRow(
             title = "未分组",
@@ -680,12 +641,7 @@ private fun AddSheetContent(
     onAddFile: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(bottom = 12.dp),
-    ) {
+    SheetColumn(modifier = modifier) {
         StandardSheetTitle("添加漫画")
         ListItem(
             headlineContent = { Text("添加漫画目录") },

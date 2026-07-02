@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
+import java.io.OutputStream
 import java.security.MessageDigest
 
 class FavoriteRepository(context: Context) {
@@ -39,7 +40,7 @@ class FavoriteRepository(context: Context) {
         val key = stableKey(comic.fileKey, pageIndex)
         val extension = imageExtension(pageBytes)
         val imageFile = File(pagesDir(), "$key.$extension")
-        atomicWrite(imageFile, pageBytes)
+        atomicWrite(imageFile, "收藏图片写入失败") { it.write(pageBytes) }
 
         val thumbnailFile = createThumbnail(key, pageBytes)
         val favorite = FavoritePageEntity(
@@ -123,18 +124,14 @@ class FavoriteRepository(context: Context) {
     private fun createThumbnail(key: String, pageBytes: ByteArray): File? = runCatching {
         val bitmap = Covers.decodeSampled(pageBytes, THUMB_TARGET_WIDTH)
             ?: return@runCatching null
-        val file = File(thumbsDir(), "$key.jpg")
-        val tmp = File(file.parentFile, file.name + ".tmp")
         try {
-            tmp.outputStream().use { out ->
+            val file = File(thumbsDir(), "$key.jpg")
+            atomicWrite(file, "缩略图写入失败") { out ->
                 bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, out)
             }
-            if (file.exists()) file.delete()
-            if (!tmp.renameTo(file)) throw IOException("缩略图写入失败")
             file
         } finally {
             bitmap.recycle()
-            tmp.delete()
         }
     }.getOrNull()
 
@@ -143,13 +140,18 @@ class FavoriteRepository(context: Context) {
         favorite.thumbnailPath?.let { File(it).delete() }
     }
 
-    private fun atomicWrite(file: File, bytes: ByteArray) {
+    /** 写临时文件再原子改名：进程中途被杀不会留下半截文件被误当成完整数据 */
+    private inline fun atomicWrite(
+        file: File,
+        errorMessage: String,
+        write: (OutputStream) -> Unit,
+    ) {
         file.parentFile?.mkdirs()
         val tmp = File(file.parentFile, file.name + ".tmp")
         try {
-            tmp.outputStream().use { it.write(bytes) }
+            tmp.outputStream().use(write)
             if (file.exists()) file.delete()
-            if (!tmp.renameTo(file)) throw IOException("收藏图片写入失败")
+            if (!tmp.renameTo(file)) throw IOException(errorMessage)
         } catch (e: Throwable) {
             tmp.delete()
             throw e

@@ -104,6 +104,18 @@ class LibraryScanner(context: Context) {
 
     companion object {
         private val COMIC_EXT = Regex(".*\\.(cbz|zip)$", RegexOption.IGNORE_CASE)
+
+        /**
+         * SAF 单文件选择器的 MIME 过滤，与 COMIC_EXT 描述同一组格式（zip/cbz），
+         * 放在一起是为了支持新格式时两份定义一起改。
+         * octet-stream 兜底：不少文档提供方对 .cbz 只报通用二进制类型
+         */
+        val COMIC_PICKER_MIME_TYPES = arrayOf(
+            "application/zip",
+            "application/x-cbz",
+            "application/octet-stream",
+        )
+
         private const val MAX_DEPTH = 15 // 防御环形/超深目录结构
     }
 }

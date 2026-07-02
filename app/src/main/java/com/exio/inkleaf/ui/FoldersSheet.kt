@@ -18,7 +18,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -27,9 +26,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -64,14 +61,12 @@ fun FoldersSheetContent(
     var pendingDelete by remember { mutableStateOf<FolderWithCount?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
 
-    // 一次性消息 → Snackbar（展示完清空，防止旋转屏幕后重复弹出）。
     // 宿主 Scaffold 的 Snackbar 会被 sheet 的 window 压住，所以在 sheet 内部展示
-    LaunchedEffect(viewModel.message) {
-        viewModel.message?.let {
-            snackbarHostState.showSnackbar(it)
-            viewModel.consumeMessage()
-        }
-    }
+    SnackbarMessageEffect(
+        message = viewModel.message,
+        hostState = snackbarHostState,
+        onConsumed = viewModel::consumeMessage,
+    )
 
     Box(modifier = modifier.navigationBarsPadding()) {
         Column(
@@ -168,25 +163,17 @@ fun FoldersSheetContent(
     }
 
     pendingDelete?.let { item ->
-        AlertDialog(
-            onDismissRequest = { pendingDelete = null },
-            title = { Text("移除库目录") },
-            text = {
-                Text(
-                    "移除「${item.folder.displayName}」？\n\n" +
-                            "该目录扫描到的 ${item.comicCount} 本漫画及其阅读进度将一并移除。" +
-                            "原文件不会被删除，手动添加的漫画不受影响。"
-                )
+        ConfirmDialog(
+            title = "移除库目录",
+            text = "移除「${item.folder.displayName}」？\n\n" +
+                    "该目录扫描到的 ${item.comicCount} 本漫画及其阅读进度将一并移除。" +
+                    "原文件不会被删除，手动添加的漫画不受影响。",
+            confirmLabel = "移除",
+            onConfirm = {
+                viewModel.removeFolder(item.folder)
+                pendingDelete = null
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    viewModel.removeFolder(item.folder)
-                    pendingDelete = null
-                }) { Text("移除") }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingDelete = null }) { Text("取消") }
-            },
+            onDismiss = { pendingDelete = null },
         )
     }
 }

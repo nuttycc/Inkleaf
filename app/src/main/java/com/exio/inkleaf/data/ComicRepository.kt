@@ -36,9 +36,11 @@ sealed interface AddFolderOutcome {
 
 /** addOrGetComic 的结果：单本是新加入、已存在，还是从失效状态恢复 */
 sealed interface AddComicOutcome {
-    data class Added(val comic: ComicEntity) : AddComicOutcome
-    data class AlreadyInLibrary(val comic: ComicEntity) : AddComicOutcome
-    data class Restored(val comic: ComicEntity) : AddComicOutcome
+    val comic: ComicEntity
+
+    data class Added(override val comic: ComicEntity) : AddComicOutcome
+    data class AlreadyInLibrary(override val comic: ComicEntity) : AddComicOutcome
+    data class Restored(override val comic: ComicEntity) : AddComicOutcome
 }
 
 sealed interface GroupWriteOutcome {
@@ -54,9 +56,10 @@ sealed interface GroupWriteOutcome {
  */
 class ComicRepository(context: Context) {
     private val appContext = context.applicationContext
-    private val dao = AppDatabase.getInstance(appContext).comicDao()
-    private val folderDao = AppDatabase.getInstance(appContext).libraryFolderDao()
-    private val groupDao = AppDatabase.getInstance(appContext).comicGroupDao()
+    private val db = AppDatabase.getInstance(appContext)
+    private val dao = db.comicDao()
+    private val folderDao = db.libraryFolderDao()
+    private val groupDao = db.comicGroupDao()
     private val scanner = LibraryScanner(appContext)
 
     // ===== 漫画条目 =====
@@ -64,6 +67,10 @@ class ComicRepository(context: Context) {
     fun observeAll(): Flow<List<ComicEntity>> = dao.observeAll()
 
     suspend fun getComic(id: Long): ComicEntity? = dao.getById(id)
+
+    /** 打开一本书。SAF Uri 的解析收在数据层，UI 不接触存储地址格式 */
+    suspend fun openBook(comic: ComicEntity): ComicBook =
+        ComicBook.open(appContext, Uri.parse(comic.uri), comic.id)
 
     // ===== 自定义分组 =====
 
@@ -169,14 +176,7 @@ class ComicRepository(context: Context) {
             dao.updatePageCount(comic.id, book.pageCount)
         }
         if (cover != null) {
-            val updated = dao.updateCoverIfUnchanged(
-                comic.id,
-                comic.coverPath,
-                cover.absolutePath,
-            )
-            if (updated == 0) {
-                cover.delete()
-            }
+            applyGeneratedCover(comic, cover)
         } else if (needCover && comic.coverPath != null) {
             dao.updateCoverIfUnchanged(comic.id, comic.coverPath, null)
         }
@@ -197,11 +197,10 @@ class ComicRepository(context: Context) {
             ?.delete()
     }
 
-    /** 从书架移除单本：删记录 + 删封面 + 删磁盘缓存 + 释放权限（不动用户的原文件） */
+    /** 从书架移除单本：删记录 + 删派生文件 + 释放权限（不动用户的原文件） */
     suspend fun deleteComic(comic: ComicEntity) {
         dao.deleteById(comic.id)
-        comic.coverPath?.let { File(it).delete() }
-        ReaderCache.wipeBook(appContext, comic.id)
+        deleteComicArtifacts(comic)
         runCatching {
             appContext.contentResolver.releasePersistableUriPermission(
                 Uri.parse(comic.uri), Intent.FLAG_GRANT_READ_URI_PERMISSION
@@ -240,10 +239,7 @@ class ComicRepository(context: Context) {
      * （树授权覆盖整棵子树）。手动添加的条目（folderId=null）不受影响。
      */
     suspend fun removeFolder(folder: LibraryFolderEntity) {
-        dao.getByFolderId(folder.id).forEach { comic ->
-            comic.coverPath?.let { File(it).delete() }
-            ReaderCache.wipeBook(appContext, comic.id)
-        }
+        dao.getByFolderId(folder.id).forEach(::deleteComicArtifacts)
         dao.deleteByFolderId(folder.id)
         folderDao.deleteById(folder.id)
         runCatching {
@@ -314,7 +310,7 @@ class ComicRepository(context: Context) {
                         ComicEntity(
                             uri = it.uri,
                             fileKey = it.fileKey,
-                            title = it.displayName.substringBeforeLast('.'),
+                            title = titleFromFileName(it.displayName),
                             folderId = folder.id,
                             addedAt = now,
                         )
@@ -361,14 +357,7 @@ class ComicRepository(context: Context) {
             val bytes = runCatching { readFirstImageBytes(Uri.parse(comic.uri)) }
                 .getOrNull() ?: continue
             val cover = Covers.createCoverFile(appContext, comic.id, bytes) ?: continue
-            val updated = dao.updateCoverIfUnchanged(
-                comic.id,
-                comic.coverPath,
-                cover.absolutePath,
-            )
-            if (updated == 0) {
-                cover.delete()
-            }
+            applyGeneratedCover(comic, cover)
         }
     }
 
@@ -397,21 +386,37 @@ class ComicRepository(context: Context) {
         val name = DocumentFile.fromSingleUri(appContext, uri)?.name
             ?: uri.lastPathSegment?.substringAfterLast('/')
             ?: "未命名漫画"
-        name.substringBeforeLast('.')
+        titleFromFileName(name)
     }
 
-    private suspend fun restoreIfMissing(comic: ComicEntity): ComicEntity {
-        if (!comic.isMissing) return comic
-        dao.setMissing(listOf(comic.id), false)
-        return comic.copy(isMissing = false)
+    /** 文件名 → 书架标题的唯一规则（手动添加与目录扫描两条入库路径共用） */
+    private fun titleFromFileName(name: String): String = name.substringBeforeLast('.')
+
+    /**
+     * 自动生成的封面落库。updateCoverIfUnchanged 只在行内 coverPath 仍是
+     * 快照值时生效——期间用户手动换过封面则放弃并删掉刚生成的文件
+     */
+    private suspend fun applyGeneratedCover(comic: ComicEntity, cover: File) {
+        val updated = dao.updateCoverIfUnchanged(
+            comic.id,
+            comic.coverPath,
+            cover.absolutePath,
+        )
+        if (updated == 0) {
+            cover.delete()
+        }
+    }
+
+    /** 删除一本书的全部派生磁盘产物：封面文件 + 阅读缓存（zip 副本、缩略图） */
+    private fun deleteComicArtifacts(comic: ComicEntity) {
+        comic.coverPath?.let { File(it).delete() }
+        ReaderCache.wipeBook(appContext, comic.id)
     }
 
     private suspend fun existingComicOutcome(comic: ComicEntity): AddComicOutcome {
-        return if (comic.isMissing) {
-            AddComicOutcome.Restored(restoreIfMissing(comic))
-        } else {
-            AddComicOutcome.AlreadyInLibrary(comic)
-        }
+        if (!comic.isMissing) return AddComicOutcome.AlreadyInLibrary(comic)
+        dao.setMissing(listOf(comic.id), false)
+        return AddComicOutcome.Restored(comic.copy(isMissing = false))
     }
 
     private suspend fun getComicsByFileKeys(fileKeys: List<String>): List<ComicEntity> {

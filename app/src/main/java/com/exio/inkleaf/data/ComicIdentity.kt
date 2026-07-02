@@ -42,15 +42,8 @@ object ComicIdentity {
 
     private fun safKey(uri: Uri): String {
         val documentId = runCatching { DocumentsContract.getDocumentId(uri) }.getOrNull()
-        return if (!documentId.isNullOrBlank()) {
-            safKey(uri.authority, documentId)
-        } else {
-            "uri:${uri.normalizeScheme()}"
-        }
-    }
-
-    private fun safKey(authority: String?, documentId: String): String {
-        val provider = authority?.takeIf { it.isNotBlank() } ?: "unknown"
+        if (documentId.isNullOrBlank()) return "uri:${uri.normalizeScheme()}"
+        val provider = uri.authority?.takeIf { it.isNotBlank() } ?: "unknown"
         return "saf:$provider:$documentId"
     }
 }

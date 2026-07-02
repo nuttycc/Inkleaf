@@ -52,13 +52,11 @@ fun FavoritesScreen(
     val favorites by viewModel.favorites.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
-    val message = viewModel.message
-    LaunchedEffect(message) {
-        message?.let {
-            snackbarHostState.showSnackbar(it)
-            viewModel.consumeMessage()
-        }
-    }
+    SnackbarMessageEffect(
+        message = viewModel.message,
+        hostState = snackbarHostState,
+        onConsumed = viewModel::consumeMessage,
+    )
     LaunchedEffect(viewerMessage) {
         viewerMessage?.let {
             onViewerMessageConsumed()

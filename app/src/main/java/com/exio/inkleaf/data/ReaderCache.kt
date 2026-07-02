@@ -1,7 +1,11 @@
 package com.exio.inkleaf.data
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
@@ -38,8 +42,37 @@ object ReaderCache {
     fun thumbsDir(context: Context, comicId: Long): File =
         File(File(context.cacheDir, THUMBS_DIR), comicId.toString())
 
-    fun thumbFile(context: Context, comicId: Long, page: Int): File =
+    private fun thumbFile(context: Context, comicId: Long, page: Int): File =
         File(thumbsDir(context, comicId), "$page.jpg")
+
+    /** 读某页缩略图的磁盘缓存；从未落盘过返回 null。RGB_565：缩略图无透明需求、内存减半 */
+    suspend fun readThumbnail(context: Context, comicId: Long, page: Int): Bitmap? =
+        withContext(Dispatchers.IO) {
+            val file = thumbFile(context, comicId, page)
+            if (file.exists()) {
+                BitmapFactory.decodeFile(
+                    file.absolutePath,
+                    BitmapFactory.Options().apply {
+                        inPreferredConfig = Bitmap.Config.RGB_565
+                    },
+                )
+            } else {
+                null
+            }
+        }
+
+    /** 缩略图落盘供下次开书复用。失败无所谓（磁盘满等）：缓存只是加速，下次重新解码 */
+    suspend fun writeThumbnail(context: Context, comicId: Long, page: Int, bitmap: Bitmap) {
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val file = thumbFile(context, comicId, page)
+                file.parentFile?.mkdirs()
+                file.outputStream().use { out ->
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
+                }
+            }
+        }
+    }
 
     /** 作废一本书的全部派生缓存：zip 副本（任意校验键）+ 缩略图目录 */
     fun wipeBook(context: Context, comicId: Long) {

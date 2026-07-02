@@ -399,6 +399,7 @@ private fun ReaderBottomBar(
                 thumbnails = thumbnails,
                 onNeedThumbnail = onNeedThumbnail,
                 currentPage = shownPage,
+                accent = accent,
                 // 拖动中胶片要瞬时贴住手指，不播追赶动画
                 isDragging = draggingValue != null,
                 onPageSelected = { page ->
@@ -504,6 +505,7 @@ private fun FilmstripRow(
     thumbnails: Map<Int, ImageBitmap>,
     onNeedThumbnail: (Int) -> Unit,
     currentPage: Int,
+    accent: Color,
     isDragging: Boolean,
     onPageSelected: (Int) -> Unit,
     modifier: Modifier = Modifier,
@@ -568,6 +570,7 @@ private fun FilmstripRow(
                 thumbnail = thumbnails[page],
                 onNeedThumbnail = onNeedThumbnail,
                 selected = page == currentPage,
+                accent = accent,
                 onClick = { onPageSelected(page) },
             )
         }
@@ -580,6 +583,7 @@ private fun FilmstripThumb(
     thumbnail: ImageBitmap?,
     onNeedThumbnail: (Int) -> Unit,
     selected: Boolean,
+    accent: Color,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -603,7 +607,6 @@ private fun FilmstripThumb(
 
     Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         val shape = RoundedCornerShape(4.dp)
-        val accent = readerAccentColor()
         Box(
             modifier = Modifier
                 // graphicsLayer 放链首：缩放作用于后续的裁剪/背景/描边整体，

@@ -56,14 +56,6 @@ enum class CacheLimit(
         private const val AUTO_MIN_BYTES = 1_073_741_824L
         private const val AUTO_MAX_BYTES = 8_589_934_592L
 
-        fun fromStoredName(value: String?): CacheLimit = when (value) {
-            null -> AUTO
-            "M100", "M300" -> M512
-            "G1" -> G2
-            "G3" -> G5
-            else -> entries.firstOrNull { it.name == value } ?: AUTO
-        }
-
         private fun recommendedBytes(context: Context): Long {
             val availableBytes = runCatching {
                 StatFs(context.cacheDir.absolutePath).availableBytes
@@ -81,7 +73,7 @@ class CacheSettingsRepository(context: Context) {
     private val dataStore = context.applicationContext.cacheSettingsDataStore
 
     val limit: Flow<CacheLimit> = dataStore.data.map { prefs ->
-        CacheLimit.fromStoredName(prefs[KEY_LIMIT])
+        prefs[KEY_LIMIT].toEnum(CacheLimit.AUTO)
     }
 
     suspend fun setLimit(value: CacheLimit) {

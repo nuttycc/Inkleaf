@@ -53,7 +53,6 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
-import com.exio.inkleaf.data.AddComicOutcome
 import com.exio.inkleaf.data.ComicRepository
 import com.exio.inkleaf.data.ReaderCache
 import com.exio.inkleaf.data.ThemeSettings
@@ -281,12 +280,7 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(pendingExternalOpen) {
                     val request = pendingExternalOpen ?: return@LaunchedEffect
                     val comicId = runCatching {
-                        when (val outcome = ComicRepository(this@MainActivity)
-                            .addOrGetComic(request.uri)) {
-                            is AddComicOutcome.Added -> outcome.comic.id
-                            is AddComicOutcome.AlreadyInLibrary -> outcome.comic.id
-                            is AddComicOutcome.Restored -> outcome.comic.id
-                        }
+                        ComicRepository(this@MainActivity).addOrGetComic(request.uri).comic.id
                     }.getOrElse {
                         Toast.makeText(
                             this@MainActivity,

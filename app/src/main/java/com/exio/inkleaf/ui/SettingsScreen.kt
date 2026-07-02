@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -296,12 +295,7 @@ private fun AboutSheetContent(
     onOpenGitHub: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(bottom = 12.dp),
-    ) {
+    SheetColumn(modifier = modifier) {
         StandardSheetTitle("关于 Inkleaf")
 
         ListItem(
@@ -333,13 +327,7 @@ private fun CacheLimitSheetContent(
     onSelect: (CacheLimit) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .selectableGroup()
-            .navigationBarsPadding()
-            .padding(bottom = 12.dp),
-    ) {
+    SheetColumn(modifier = modifier, selectable = true) {
         StandardSheetTitle("漫画缓存上限")
 
         CacheLimit.entries.forEach { limit ->
@@ -418,6 +406,15 @@ private fun appVersionName(context: Context): String {
     return packageInfo.versionName ?: "未知"
 }
 
+/** 色卡选中态的统一视觉：主题色描边圆环（预设/自定义/取色网格三处共用） */
+@Composable
+private fun Modifier.selectionRing(selected: Boolean): Modifier =
+    if (selected) {
+        border(3.dp, MaterialTheme.colorScheme.primary, CircleShape)
+    } else {
+        this
+    }
+
 /** 圆形种子色卡：选中态 = 主题色描边 + 白色对勾（所有内置种子都偏深，白勾可读） */
 @Composable
 private fun SeedSwatch(
@@ -435,13 +432,7 @@ private fun SeedSwatch(
                 .size(44.dp)
                 .clip(CircleShape)
                 .background(Color(seed.argb))
-                .then(
-                    if (selected) {
-                        Modifier.border(3.dp, MaterialTheme.colorScheme.primary, CircleShape)
-                    } else {
-                        Modifier
-                    }
-                ),
+                .selectionRing(selected),
             contentAlignment = Alignment.Center,
         ) {
             if (selected) {
@@ -490,13 +481,7 @@ private fun CustomSwatch(
                             )
                     }
                 )
-                .then(
-                    if (selected) {
-                        Modifier.border(3.dp, MaterialTheme.colorScheme.primary, CircleShape)
-                    } else {
-                        Modifier
-                    }
-                ),
+                .selectionRing(selected),
             contentAlignment = Alignment.Center,
         ) {
             if (selected) {
@@ -657,13 +642,7 @@ private fun HueCell(
             .clip(CircleShape)
             .background(color)
             .clickable(onClick = onClick)
-            .then(
-                if (selected) {
-                    Modifier.border(3.dp, MaterialTheme.colorScheme.primary, CircleShape)
-                } else {
-                    Modifier
-                }
-            ),
+            .selectionRing(selected),
         contentAlignment = Alignment.Center,
     ) {
         if (selected) {

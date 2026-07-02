@@ -47,7 +47,9 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycle
     /**
      * 书架列表：数据库一变自动推送。
      * null = Room 尚未发射首批数据；空列表 = 书架确实为空。
-     * 不能拿 emptyList() 当初始值——那会让 UI 在数据到达前先闪一帧空状态
+     * 不能拿 emptyList() 当初始值——那会让 UI 在数据到达前先闪一帧空状态。
+     * WhileSubscribed：阅读页盖住书架时停止收集上游，翻页进度写库不再
+     * 驱动无人观看的重查与重过滤；已缓存的列表保留，返回书架不闪加载态
      */
     val comics: StateFlow<List<ComicEntity>?> = combine(
         repo.observeAll(),
@@ -55,7 +57,7 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycle
     ) { comics, selection ->
         filterComics(comics, selection)
     }
-        .stateIn(viewModelScope, SharingStarted.Lazily, null)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     val groups: StateFlow<List<GroupWithCount>?> = repo.observeGroups()
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
@@ -102,11 +104,8 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycle
             combine(groups, selectedGroup) { groups, selection -> groups to selection }
                 .collect { (list, selection) ->
                     if (list == null || selection.kind != ShelfGroupFilterKind.GROUP) return@collect
-                    val selectedGroupId = selection.groupId
-                    if (selectedGroupId == null) {
-                        settingsRepo.setSelectedGroup(ShelfGroupSelection())
-                        return@collect
-                    }
+                    // 仓库层已保证 GROUP 选中必带 groupId（见 selectedGroup 的规范化）
+                    val selectedGroupId = selection.groupId ?: return@collect
                     val selectedExists = list.any { it.group.id == selectedGroupId }
                     if (!selectedExists && !repo.groupExists(selectedGroupId)) {
                         settingsRepo.setSelectedGroup(ShelfGroupSelection())
