@@ -5,9 +5,8 @@ import android.content.Intent
 import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 import com.exio.inkleaf.data.db.AppDatabase
-import com.exio.inkleaf.data.db.ChapterEntity
-import com.exio.inkleaf.data.db.ComicGroupEntity
 import com.exio.inkleaf.data.db.ComicEntity
+import com.exio.inkleaf.data.db.ComicGroupEntity
 import com.exio.inkleaf.data.db.FolderWithCount
 import com.exio.inkleaf.data.db.GroupWithCount
 import com.exio.inkleaf.data.db.LibraryFolderEntity
@@ -199,9 +198,10 @@ class ComicRepository(context: Context) {
         if (comic.pageCount != volume.totalPageCount) {
             dao.updatePageCount(comic.id, volume.totalPageCount)
         }
-        // PDF 目录需回填各章节页数
-        val chapters = db.chapterDao().getByComicId(comic.id)
-        if (chapters.isNotEmpty()) {
+        // PDF 目录需回填各章节页数；单文件漫画（zip/cbz）chapterCount=1，没有章节行，
+        // 直接跳过这次 DB 查询，避免每次开书都白跑一趟。
+        if (volume.chapterCount > 1) {
+            val chapters = db.chapterDao().getByComicId(comic.id)
             chapters.forEach { chapter ->
                 val actual = volume.chapterPageCount(chapter.chapterIndex)
                 if (actual > 0 && chapter.pageCount != actual) {

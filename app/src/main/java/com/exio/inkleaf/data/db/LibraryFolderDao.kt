@@ -31,9 +31,6 @@ interface LibraryFolderDao {
     @Query("SELECT * FROM library_folders ORDER BY addedAt")
     suspend fun getAll(): List<LibraryFolderEntity>
 
-    @Query("SELECT * FROM library_folders WHERE type = :type ORDER BY addedAt")
-    suspend fun getByType(type: LibraryFolderType): List<LibraryFolderEntity>
-
     @Query("SELECT * FROM library_folders WHERE treeUri = :treeUri")
     suspend fun getByTreeUri(treeUri: String): LibraryFolderEntity?
 

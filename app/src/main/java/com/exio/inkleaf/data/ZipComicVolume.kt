@@ -1,9 +1,5 @@
 package com.exio.inkleaf.data
 
-import android.graphics.Bitmap
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
-
 /**
  * 把现有的 zip/cbz 单文件漫画包装成 [ComicVolume]。
  *
@@ -28,12 +24,6 @@ class ZipComicVolume(private val book: ComicBook, private val title: String) : C
 
     override suspend fun loadThumbnailPageBytes(globalPage: Int): ByteArray =
         book.loadThumbnailPageBytes(globalPage.coerceIn(0, book.pageCount - 1))
-
-    override suspend fun renderThumbnail(globalPage: Int, targetWidth: Int): ImageBitmap? {
-        val bytes = loadThumbnailPageBytes(globalPage)
-        val decoded = Covers.decodeSampled(bytes, targetWidth, Bitmap.Config.RGB_565) ?: return null
-        return decoded.asImageBitmap()
-    }
 
     override fun close() = book.close()
 }

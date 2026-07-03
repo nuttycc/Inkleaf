@@ -108,7 +108,7 @@ class ComicBook private constructor(
 
                     val pages = zipFile.entries().asSequence()
                         .filter { !it.isDirectory && isImageEntry(it.name) }
-                        .sortedWith { a, b -> naturalCompare(a.name, b.name) }
+                        .sortedWith { a, b -> ChapterSort.compareNatural(a.name, b.name) }
                         .toList()
 
                     if (pages.isEmpty()) {
@@ -183,41 +183,6 @@ class ComicBook private constructor(
             val fileName = entryName.substringAfterLast('/')
             if (fileName.startsWith(".")) return false // 隐藏文件，如 ._page1.jpg
             return IMAGE_EXT.matches(fileName)
-        }
-
-        /**
-         * 自然排序：把连续数字当作数值比较，"page2.jpg" < "page10.jpg"。
-         * 纯字典序会把 10 排在 2 前面，导致阅读顺序错乱。
-         */
-        private fun naturalCompare(a: String, b: String): Int {
-            var i = 0
-            var j = 0
-            while (i < a.length && j < b.length) {
-                val ca = a[i]
-                val cb = b[j]
-                if (ca.isDigit() && cb.isDigit()) {
-                    var endA = i
-                    while (endA < a.length && a[endA].isDigit()) endA++
-                    var endB = j
-                    while (endB < b.length && b[endB].isDigit()) endB++
-                    val numA = a.substring(i, endA).trimStart('0')
-                    val numB = b.substring(j, endB).trimStart('0')
-                    val cmp = if (numA.length != numB.length) {
-                        numA.length - numB.length // 位数多的数值大
-                    } else {
-                        numA.compareTo(numB)
-                    }
-                    if (cmp != 0) return cmp
-                    i = endA
-                    j = endB
-                } else {
-                    val cmp = ca.lowercaseChar().compareTo(cb.lowercaseChar())
-                    if (cmp != 0) return cmp
-                    i++
-                    j++
-                }
-            }
-            return (a.length - i) - (b.length - j)
         }
     }
 }

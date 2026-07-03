@@ -1,6 +1,8 @@
 package com.exio.inkleaf.data
 
+import android.graphics.Bitmap
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 
 /**
  * 一本已打开的漫画，对 UI 层隐藏底层是 zip/cbz 还是 PDF 目录。
@@ -46,8 +48,15 @@ interface ComicVolume {
     /** 缩略图专用读取通道 */
     suspend fun loadThumbnailPageBytes(globalPage: Int): ByteArray
 
-    /** 生成第 [globalPage] 页的缩略图位图 */
-    suspend fun renderThumbnail(globalPage: Int, targetWidth: Int): ImageBitmap?
+    /**
+     * 生成第 [globalPage] 页的缩略图位图。默认实现走 [loadThumbnailPageBytes] +
+     * [Covers.decodeSampled] 通用通道，zip/cbz 与 PDF 都适用。
+     */
+    suspend fun renderThumbnail(globalPage: Int, targetWidth: Int): ImageBitmap? {
+        val bytes = loadThumbnailPageBytes(globalPage)
+        val decoded = Covers.decodeSampled(bytes, targetWidth, Bitmap.Config.RGB_565) ?: return null
+        return decoded.asImageBitmap()
+    }
 
     /** 关闭所有底层资源 */
     fun close()

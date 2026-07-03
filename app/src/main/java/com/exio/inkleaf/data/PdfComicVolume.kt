@@ -50,9 +50,6 @@ class PdfComicVolume(
 
     override val totalPageCount: Int
         get() {
-            // 旧实现把 computeStartPages() 的返回值丢了——startPages 仍是 null，
-            // 整个 getter 恒返回 0，导致 backfillSeriesCover 的 totalPageCount > 0
-            // 永远为 false，封面永远不生成。这里用返回值。
             val starts = startPages ?: computeStartPages()
             if (starts.isEmpty()) return 0
             val last = starts.lastIndex
@@ -73,14 +70,21 @@ class PdfComicVolume(
     }
 
     override fun globalToChapterPage(globalPage: Int): ChapterProgress {
+        // 封面回填等早期路径只会读第 0 页：在 startPages 还没算出来时，只要
+        // 第 0 章本身能打开，就直接落在 (0, globalPage)，避免触发 computeStartPages
+        // 把整本书所有章节都打开一遍。
+        if (startPages == null && chapterCount > 0 && globalPage >= 0) {
+            val firstPages = chapterPageCount(0)
+            if (firstPages > 0 && globalPage < firstPages) {
+                return ChapterProgress(0, globalPage)
+            }
+        }
         val starts = startPages ?: computeStartPages()
         if (starts.isEmpty()) return ChapterProgress(0, 0)
         val chapter = (0 until chapterCount).lastOrNull { starts[it] <= globalPage } ?: 0
         val pages = pageCounts.getOrElse(chapter) { 0 }.coerceAtLeast(0)
         // 章节打不开时 pageCounts[chapter] 为 -1（被 coerce 成 0）。
-        // 旧代码 coerceIn(0, -1) 会抛 IllegalArgumentException——单章损坏/加密
-        // PDF 的目录会从这里崩。pages <= 0 时直接落在第 0 页，渲染层会再给
-        // 出"无法打开章节"的清晰提示。
+        // pages <= 0 时直接落在第 0 页，渲染层会再给出"无法打开章节"的清晰提示。
         val pageInChapter = if (pages <= 0) 0
             else (globalPage - starts[chapter]).coerceIn(0, pages - 1)
         return ChapterProgress(chapter, pageInChapter)
@@ -115,18 +119,10 @@ class PdfComicVolume(
         renderPageToPng(chapter, page, fullQuality = false)
     }
 
-    override suspend fun renderThumbnail(globalPage: Int, targetWidth: Int): ImageBitmap? =
-        withContext(Dispatchers.IO) {
-            val bytes = loadThumbnailPageBytes(globalPage)
-            val decoded = Covers.decodeSampled(bytes, targetWidth, Bitmap.Config.RGB_565) ?: return@withContext null
-            decoded.asImageBitmap()
-        }
-
     override fun close() {
-        // 显式按"文档 → 核心 → PFD"顺序释放。PdfiumCore.close() 关 native 文档，
+        // 显式按"核心 → PFD"顺序释放。PdfiumCore.close() 关 native 文档，
         // 但 ParcelFileDescriptor 是我们开的、不会被他代关——不显式 close 会
         // 泄漏文件描述符，多本 PDF 书反复打开最终会撞系统 fd 上限。
-        documents.values.forEach { runCatching { /* PdfDocument 由 core.close 释放 */ } }
         cores.values.forEach { runCatching { it.close() } }
         pfds.values.forEach { runCatching { it.close() } }
         cores.clear()
