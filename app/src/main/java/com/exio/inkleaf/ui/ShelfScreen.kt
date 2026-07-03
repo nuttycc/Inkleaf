@@ -116,10 +116,12 @@ fun ShelfScreen(
     var showLayoutSheet by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
 
+    // OpenMultipleDocuments：系统多文件选择器。取消返回空列表而非 null，
+    // 所以用 isNotEmpty() 判空——照搬旧的单选判空会触发空批量调用
     val picker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        if (uri != null) viewModel.addComic(uri)
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        if (uris.isNotEmpty()) viewModel.addComics(uris)
     }
 
     // OpenDocumentTree：系统目录选择器。launcher 挂屏幕层级而非菜单内容里：
@@ -255,7 +257,7 @@ fun ShelfScreen(
                             TextButton(onClick = {
                                 picker.launch(LibraryScanner.COMIC_PICKER_MIME_TYPES)
                             }) {
-                                Text("或添加单本漫画")
+                                Text("或添加漫画文件")
                             }
                         }
                     }
@@ -681,8 +683,8 @@ private fun AddSheetContent(
             modifier = Modifier.clickable(onClick = onAddSeriesFolder),
         )
         ListItem(
-            headlineContent = { Text("添加单本漫画") },
-            supportingContent = { Text("导入单个文件到书架") },
+            headlineContent = { Text("添加漫画文件") },
+            supportingContent = { Text("可多选，导入一个或多个文件到书架") },
             leadingContent = {
                 Icon(
                     painterResource(R.drawable.ic_file),

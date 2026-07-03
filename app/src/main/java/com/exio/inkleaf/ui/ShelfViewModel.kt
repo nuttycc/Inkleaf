@@ -2,6 +2,7 @@ package com.exio.inkleaf.ui
 
 import android.app.Application
 import android.net.Uri
+import android.os.Build
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
@@ -25,12 +26,12 @@ import com.exio.inkleaf.data.db.ComicEntity
 import com.exio.inkleaf.data.db.FolderWithCount
 import com.exio.inkleaf.data.db.GroupWithCount
 import com.exio.inkleaf.data.db.LibraryFolderType
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -167,16 +168,58 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycle
         _scanState.value = _scanState.value.copy(message = null)
     }
 
-    /** 手动添加单个文件（与目录扫描共存） */
-    fun addComic(uri: Uri) {
+    /**
+     * 手动添加一个或多个文件（与目录扫描共存）。顺序循环调用 addOrGetComic，
+     * syncMutex 保证去重安全；逐个计数后聚合成一条 Snackbar 文案，避免
+     * 多次覆盖只剩最后一条。
+     *
+     * 持久 URI 权限有系统配额（API 29- 为 128，API 30+ 为 512），多选批量
+     * 导入会显著消耗。配额不足时提前提示并放弃添加——比起"添加成功但重启
+     * 后无法访问"的坏体验，明确拒绝更诚实
+     */
+    fun addComics(uris: List<Uri>) {
+        if (uris.isEmpty()) return
         viewModelScope.launch {
-            val msg = when (repo.addOrGetComic(uri)) {
-                is AddComicOutcome.Added -> "已添加到书架"
-                is AddComicOutcome.AlreadyInLibrary -> "这本漫画已在书架中"
-                is AddComicOutcome.Restored -> "已恢复到书架"
+            val msg = try {
+                val remaining = persistedUriQuotaRemaining()
+                if (uris.size > remaining) {
+                    "持久权限配额不足（剩余 $remaining 个），请改用「添加漫画目录」批量导入"
+                } else {
+                    val counts = IntArray(3) // [Added, AlreadyInLibrary, Restored]
+                    for (uri in uris) {
+                        when (repo.addOrGetComic(uri)) {
+                            is AddComicOutcome.Added -> counts[0]++
+                            is AddComicOutcome.AlreadyInLibrary -> counts[1]++
+                            is AddComicOutcome.Restored -> counts[2]++
+                        }
+                    }
+                    summarizeBatch(counts[0], counts[1], counts[2])
+                }
+            } catch (e: SecurityException) {
+                "无法获得持久访问权限"
             }
             _scanState.value = _scanState.value.copy(message = msg)
         }
+    }
+
+    /**
+     * 持久 URI 权限剩余配额。系统上限：API 29- 为 128，API 30+ 为 512。
+     * 这里只统计已持有的读权限数量，保守估计剩余空间
+     */
+    private fun persistedUriQuotaRemaining(): Int {
+        val used = getApplication<Application>().contentResolver
+            .persistedUriPermissions.count { it.isReadPermission }
+        val limit = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) 512 else 128
+        return (limit - used).coerceAtLeast(0)
+    }
+
+    /** 把批量添加的三态计数合并成一句话，省略为零的项 */
+    private fun summarizeBatch(added: Int, alreadyInLibrary: Int, restored: Int): String {
+        val parts = mutableListOf<String>()
+        if (added > 0) parts.add("已添加 $added 本")
+        if (alreadyInLibrary > 0) parts.add("$alreadyInLibrary 本已在书架")
+        if (restored > 0) parts.add("$restored 本已恢复")
+        return if (parts.isEmpty()) "所选漫画已在书架中" else parts.joinToString("，")
     }
 
     /**
