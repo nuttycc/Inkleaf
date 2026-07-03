@@ -22,8 +22,9 @@ data class ComicEntity(
     val uri: String,                 // SAF Uri.toString()，重新打开文件的"钥匙"
     val fileKey: String,             // 稳定文件身份：同一 SAF 文档不重复入库
     val title: String,               // 文件名去掉扩展名
-    val pageCount: Int = 0,          // 0 = 还没成功打开过，首次打开后回填真实页数
-    val lastReadPage: Int = 0,       // 阅读进度（页索引，从 0 开始）
+    val pageCount: Int = 0,          // 0 = 还没成功打开过，首次打开后回填真实总页数
+    val lastReadChapterIndex: Int = 0, // 阅读进度：章节索引（单文件漫画固定为 0）
+    val lastReadPage: Int = 0,       // 阅读进度：章节内页索引（从 0 开始）
     val coverPath: String? = null,   // 封面文件绝对路径，null = 还没生成
     val addedAt: Long,               // 添加时间戳（毫秒）
     val lastReadAt: Long = 0,        // 最近阅读时间，书架按它倒序排

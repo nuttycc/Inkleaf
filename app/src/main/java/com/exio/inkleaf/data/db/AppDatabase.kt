@@ -14,15 +14,17 @@ import androidx.room.RoomDatabase
 @Database(
     entities = [
         ComicEntity::class,
+        ChapterEntity::class,
         LibraryFolderEntity::class,
         FavoritePageEntity::class,
         ComicGroupEntity::class,
     ],
-    version = 2,
+    version = 5,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun comicDao(): ComicDao
+    abstract fun chapterDao(): ChapterDao
     abstract fun libraryFolderDao(): LibraryFolderDao
     abstract fun favoriteDao(): FavoriteDao
     abstract fun comicGroupDao(): ComicGroupDao

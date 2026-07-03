@@ -14,4 +14,5 @@ data class LibraryFolderEntity(
     val treeUri: String,       // 目录树 Uri：一次授权覆盖整棵子树
     val displayName: String,   // 目录名，列表展示用
     val addedAt: Long,
+    val type: LibraryFolderType = LibraryFolderType.LIBRARY,
 )

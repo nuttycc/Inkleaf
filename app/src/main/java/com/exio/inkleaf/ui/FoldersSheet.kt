@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.exio.inkleaf.R
 import com.exio.inkleaf.data.db.FolderWithCount
+import com.exio.inkleaf.data.db.LibraryFolderType
 
 /** 目录列表区的三态：作为 Crossfade 的 key，列表内容增删不触发整区动画 */
 private enum class FoldersPhase { LOADING, EMPTY, CONTENT }
@@ -125,7 +126,11 @@ fun FoldersSheetContent(
                                         },
                                         label = "folderCount",
                                     ) { count ->
-                                        Text("$count 本漫画")
+                                        val typeLabel = when (item.folder.type) {
+                                            LibraryFolderType.SERIES -> "PDF 章节目录"
+                                            LibraryFolderType.LIBRARY -> "漫画库"
+                                        }
+                                        Text("$typeLabel · $count 本漫画")
                                     }
                                 },
                                 trailingContent = {

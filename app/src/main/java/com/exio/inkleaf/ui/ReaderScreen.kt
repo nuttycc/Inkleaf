@@ -83,7 +83,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.exio.inkleaf.R
-import com.exio.inkleaf.data.ComicBook
+import com.exio.inkleaf.data.ComicOpenException
+import com.exio.inkleaf.data.ComicVolume
 import com.exio.inkleaf.data.db.FavoritePageEntity
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -174,7 +175,7 @@ fun ReaderScreen(
                 )
 
                 is ReaderUiState.Ready -> ComicPager(
-                    book = s.book,
+                    volume = s.volume,
                     startPage = s.startPage,
                     title = s.title,
                     cacheKeyPrefix = "comic-$comicId",
@@ -196,7 +197,7 @@ fun ReaderScreen(
 
 @Composable
 private fun ComicPager(
-    book: ComicBook,
+    volume: ComicVolume,
     startPage: Int,
     title: String,
     cacheKeyPrefix: String,
@@ -213,13 +214,22 @@ private fun ComicPager(
 ) {
     val pagerState = rememberPagerState(
         initialPage = startPage,
-        pageCount = { book.pageCount },
+        pageCount = { volume.totalPageCount },
     )
     val scope = rememberCoroutineScope()
 
+    // 当前页对应的章节信息，用于多章书籍的界面提示
+    val currentPage = pagerState.currentPage
+    val chapterProgress = remember(currentPage, volume) {
+        volume.globalToChapterPage(currentPage)
+    }
+    val chapterTitle = remember(chapterProgress, volume) {
+        volume.chapterTitle(chapterProgress.chapterIndex)
+    }
+
     // 翻页统一走"前进/后退"抽象：将来日漫右→左模式只需反转点按区到 delta 的映射
     val turnPage: (Int) -> Unit = { delta ->
-        val target = (pagerState.currentPage + delta).coerceIn(0, book.pageCount - 1)
+        val target = (pagerState.currentPage + delta).coerceIn(0, volume.totalPageCount - 1)
         if (target != pagerState.currentPage) {
             scope.launch { pagerState.animateScrollToPage(target) }
         }
@@ -253,7 +263,7 @@ private fun ComicPager(
             modifier = Modifier.fillMaxSize(),
         ) { page ->
             ComicPage(
-                book = book,
+                volume = volume,
                 page = page,
                 cacheKeyPrefix = cacheKeyPrefix,
                 thumbnail = thumbnails[page],
@@ -261,8 +271,13 @@ private fun ComicPager(
         }
 
         if (!showControls) {
+            val pageLabel = if (volume.chapterCount > 1) {
+                "$chapterTitle · ${pagerState.currentPage + 1} / ${volume.totalPageCount}"
+            } else {
+                "${pagerState.currentPage + 1} / ${volume.totalPageCount}"
+            }
             Text(
-                text = "${pagerState.currentPage + 1} / ${book.pageCount}",
+                text = pageLabel,
                 color = Color.White,
                 style = MaterialTheme.typography.labelLarge,
                 modifier = Modifier
@@ -287,7 +302,7 @@ private fun ComicPager(
         ReaderBottomBar(
             visible = showControls,
             pagerState = pagerState,
-            pageCount = book.pageCount,
+            pageCount = volume.totalPageCount,
             thumbnails = thumbnails,
             onNeedThumbnail = onNeedThumbnail,
             modifier = Modifier.align(Alignment.BottomCenter),
@@ -672,7 +687,7 @@ private fun readerAccentColor(): Color {
 
 @Composable
 private fun ComicPage(
-    book: ComicBook,
+    volume: ComicVolume,
     page: Int,
     cacheKeyPrefix: String,
     thumbnail: ImageBitmap?,
@@ -680,13 +695,28 @@ private fun ComicPage(
 ) {
     val context = LocalContext.current
 
-    val bytes by produceState<ByteArray?>(initialValue = null, book, page) {
-        value = book.loadPageBytes(page)
+    // 单页加载结果统一封装在 [PageContent]：失败时返回 Error 而非抛出，
+    // 不让异常逃逸到 produceState 协程外导致整页崩溃。spec：corrupt/encrypted
+    // PDF 不崩溃，遇到时给清晰提示。
+    val content by produceState<PageContent>(initialValue = PageContent.Loading, volume, page) {
+        value = try {
+            // PDF 路径：直接拿 ImageBitmap，无往返
+            val bitmap = volume.loadPageBitmap(page)
+            if (bitmap != null) {
+                PageContent.Bitmap(bitmap)
+            } else {
+                // zip/cbz 路径：拿压缩字节，交给 Coil 解码
+                PageContent.Bytes(volume.loadPageBytes(page))
+            }
+        } catch (e: ComicOpenException) {
+            PageContent.Error(e.message ?: "本页无法打开")
+        } catch (e: Exception) {
+            PageContent.Error("本页无法打开")
+        }
     }
 
     Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        val pageBytes = bytes
-        var imageReady by remember(page, pageBytes) { mutableStateOf(false) }
+        var imageReady by remember(page, content) { mutableStateOf(false) }
 
         // 垫底层：远跳到未加载页时，原图要经历 zip 解压 + 解码（几十到
         // 几百毫秒），期间这层保证屏幕有内容、消除黑屏闪烁。
@@ -695,7 +725,7 @@ private fun ComicPage(
         // 原图加载完成后移除垫底层，避免在 Fit 留白处形成持久光晕。
         // blur 依赖 RenderEffect（API 31+），更低版本宁可黑屏也不展示糊图
         val canBlur = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
-        val showBlurPlaceholder = !imageReady && thumbnail != null && canBlur
+        val showBlurPlaceholder = !imageReady && thumbnail != null && canBlur && content !is PageContent.Error
         if (showBlurPlaceholder) {
             Image(
                 bitmap = thumbnail,
@@ -707,31 +737,66 @@ private fun ComicPage(
             )
         }
 
-        if (pageBytes == null) {
-            // 没有模糊垫底（预热未到/系统不支持）才显示转圈
-            if (!showBlurPlaceholder) {
-                DelayedSpinner(showDelay = 200.milliseconds)
+        when (val c = content) {
+            is PageContent.Error -> {
+                Text(
+                    text = c.message,
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodyLarge,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(32.dp),
+                )
             }
-        } else {
-            val imageRequest = remember(context, pageBytes, cacheKeyPrefix, page) {
-                ImageRequest.Builder(context)
-                    .data(pageBytes)
-                    .memoryCacheKey("$cacheKeyPrefix#$page")
-                    // 原图短淡入，避免加载完成时硬切；
-                    // 内存缓存命中时 Coil 自动跳过淡入，翻回已读页无延迟感
-                    .crossfade(150)
-                    .build()
+            PageContent.Loading -> {
+                // 没有模糊垫底（预热未到/系统不支持）才显示转圈
+                if (!showBlurPlaceholder) {
+                    DelayedSpinner(showDelay = 200.milliseconds)
+                }
             }
-            AsyncImage(
-                model = imageRequest,
-                contentDescription = "第 ${page + 1} 页",
-                contentScale = ContentScale.Fit,
-                onSuccess = { imageReady = true },
-                onError = { imageReady = true },
-                modifier = Modifier.fillMaxSize(),
-            )
+            is PageContent.Bitmap -> {
+                // PDF 路径：ImageBitmap 直接显示，无 Coil 解码
+                Image(
+                    bitmap = c.bitmap,
+                    contentDescription = "第 ${page + 1} 页",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize(),
+                )
+                imageReady = true
+            }
+            is PageContent.Bytes -> {
+                // zip/cbz 路径：压缩字节交给 Coil 解码（本来就是压缩图片，无往返）
+                val imageRequest = remember(context, c.bytes, cacheKeyPrefix, page) {
+                    ImageRequest.Builder(context)
+                        .data(c.bytes)
+                        .memoryCacheKey("$cacheKeyPrefix#$page")
+                        // 原图短淡入，避免加载完成时硬切；
+                        // 内存缓存命中时 Coil 自动跳过淡入，翻回已读页无延迟感
+                        .crossfade(150)
+                        .build()
+                }
+                AsyncImage(
+                    model = imageRequest,
+                    contentDescription = "第 ${page + 1} 页",
+                    contentScale = ContentScale.Fit,
+                    onSuccess = { imageReady = true },
+                    onError = { imageReady = true },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
         }
     }
+}
+
+/**
+ * 单页加载结果。优先走 [ComicVolume.loadPageBitmap]（PDF 直接返回渲染好的
+ * ImageBitmap，跳过"渲染→PNG 压缩→Coil 解码"往返）；返回 null 时 fallback
+ * 到 [ComicVolume.loadPageBytes]（zip/cbz 的压缩图片字节，交给 Coil 解码）。
+ */
+private sealed interface PageContent {
+    data object Loading : PageContent
+    data class Bitmap(val bitmap: ImageBitmap) : PageContent
+    data class Bytes(val bytes: ByteArray) : PageContent
+    data class Error(val message: String) : PageContent
 }
 
 /**

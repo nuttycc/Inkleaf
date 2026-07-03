@@ -130,6 +130,12 @@ fun ShelfScreen(
         if (uri != null) viewModel.addFolder(uri)
     }
 
+    val seriesTreePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) viewModel.addSeriesFolder(uri)
+    }
+
     var showAddSheet by remember { mutableStateOf(false) }
 
     SnackbarMessageEffect(
@@ -308,6 +314,10 @@ fun ShelfScreen(
                     showAddSheet = false
                     treePicker.launch(null)
                 },
+                onAddSeriesFolder = {
+                    showAddSheet = false
+                    seriesTreePicker.launch(null)
+                },
                 onAddFile = {
                     showAddSheet = false
                     picker.launch(LibraryScanner.COMIC_PICKER_MIME_TYPES)
@@ -411,10 +421,10 @@ fun ShelfScreen(
     }
 
     pendingDelete?.let { comic ->
-        val rescanHint = if (comic.folderId != null && !comic.isMissing) {
-            "\n注意：该漫画来自库目录，重新扫描后会再次出现。"
-        } else {
-            ""
+        val rescanHint = when {
+            comic.folderId == null || comic.isMissing -> ""
+            viewModel.isSeriesComic(comic) -> "\n注意：移除后将停止同步该 PDF 章节目录。"
+            else -> "\n注意：该漫画来自库目录，重新扫描后会再次出现。"
         }
         ConfirmDialog(
             title = "从书架移除",
@@ -632,12 +642,13 @@ private fun groupTitle(
 }
 
 /**
- * 添加入口的 sheet 内容：两个动作行。sheet 行的宽度优势用来放说明文字——
- * 把"目录 = 长期同步的库 / 单本 = 一次性导入"的本质差异讲清楚
+ * 添加入口的 sheet 内容：三个动作行。sheet 行的宽度优势用来放说明文字——
+ * 把"目录 = 长期同步的库 / PDF 目录 = 单本多章 / 单本 = 一次性导入"的本质差异讲清楚
  */
 @Composable
 private fun AddSheetContent(
     onAddFolder: () -> Unit,
+    onAddSeriesFolder: () -> Unit,
     onAddFile: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -655,6 +666,19 @@ private fun AddSheetContent(
             },
             colors = ListItemDefaults.colors(containerColor = Color.Transparent),
             modifier = Modifier.clickable(onClick = onAddFolder),
+        )
+        ListItem(
+            headlineContent = { Text("添加 PDF 章节目录") },
+            supportingContent = { Text("把文件夹内多个 PDF 作为一本书的章节导入") },
+            leadingContent = {
+                Icon(
+                    painterResource(R.drawable.ic_folder),
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            },
+            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            modifier = Modifier.clickable(onClick = onAddSeriesFolder),
         )
         ListItem(
             headlineContent = { Text("添加单本漫画") },

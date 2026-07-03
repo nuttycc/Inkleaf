@@ -10,9 +10,10 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.exio.inkleaf.data.ComicBook
+import com.exio.inkleaf.data.ChapterProgress
 import com.exio.inkleaf.data.ComicOpenException
 import com.exio.inkleaf.data.ComicRepository
+import com.exio.inkleaf.data.ComicVolume
 import com.exio.inkleaf.data.Covers
 import com.exio.inkleaf.data.FavoriteRepository
 import com.exio.inkleaf.data.ReaderCache
@@ -32,7 +33,7 @@ sealed interface ReaderUiState {
     data object Loading : ReaderUiState
     data class Error(val message: String) : ReaderUiState
     data class Ready(
-        val book: ComicBook,
+        val volume: ComicVolume,
         val startPage: Int,
         val title: String,
     ) : ReaderUiState
@@ -80,11 +81,11 @@ class ReaderViewModel(
     private val favoriteInFlight = mutableSetOf<Int>()
     private var coverInFlight = false
 
-    /** 待落库的最新阅读页；null = 没有待写的进度（见 saveProgress 的节流说明） */
-    private var pendingProgressPage: Int? = null
+    /** 待落库的最新阅读进度；null = 没有待写的进度（见 saveProgress 的节流说明） */
+    private var pendingProgress: ChapterProgress? = null
     private var progressWriteJob: Job? = null
 
-    private var book: ComicBook? = null
+    private var volume: ComicVolume? = null
     private var comic: ComicEntity? = null
     private var observedFavoriteSource: String? = null
 
@@ -95,18 +96,29 @@ class ReaderViewModel(
                     ?: throw ComicOpenException("书架记录不存在")
                 this@ReaderViewModel.comic = comic
                 observeFavorites(comic.fileKey)
-                val opened = repo.openBook(comic)
-                book = opened
-                // 首次打开回填页数和封面；Room Flow 会自动刷新书架
-                repo.backfillMetadata(comic, opened)
-                val startPage = (initialPageOverride ?: comic.lastReadPage)
-                    .coerceIn(0, opened.pageCount - 1)
+                val opened = withContext(Dispatchers.IO) { repo.openBook(comic) }
+                volume = opened
+                // 首次打开回填页数和封面；Room Flow 会自动刷新书架。
+                // openBook 内部 PdfComicVolume 的 PDF 解析走 IO，这里包一层
+                // withContext 兜底，避免某些路径在主线程做 native 打开。
+                withContext(Dispatchers.IO) { repo.backfillMetadata(comic, opened) }
+                // 全章都打不开（损坏/加密/权限全失效）→ 给清晰提示而非崩在
+                // coerceIn(0, -1)。spec：corrupt/encrypted PDF 不崩溃。
+                if (opened.totalPageCount <= 0) {
+                    opened.close()
+                    throw ComicOpenException("无法打开任何章节，PDF 文件可能已损坏或加密")
+                }
+                val startPage = initialPageOverride ?: opened.chapterPageToGlobal(
+                    comic.lastReadChapterIndex,
+                    comic.lastReadPage,
+                )
+                val safeStartPage = startPage.coerceIn(0, opened.totalPageCount - 1)
                 // 后台预热胶片缩略图：呼出工具栏时大概率已全部就绪
-                prewarmThumbnails(opened, startPage)
+                prewarmThumbnails(opened, safeStartPage)
                 ReaderUiState.Ready(
-                    book = opened,
+                    volume = opened,
                     // 原文件可能被换成页数更少的版本，夹紧防止越界
-                    startPage = startPage,
+                    startPage = safeStartPage,
                     title = comic.title,
                 )
             } catch (e: ComicOpenException) {
@@ -117,26 +129,31 @@ class ReaderViewModel(
 
     /**
      * 进度写库按 trailing 节流：快速连翻/拖滑杆跳页时不逐页写——每次写库
-     * 都会让书架侧仍在订阅的 Room Flow 在后台重查一轮。窗口内只记最新页，
+     * 都会让书架侧仍在订阅的 Room Flow 在后台重查一轮。窗口内只记最新进度，
      * 到期写一次；退出阅读页取消协程时由 finally + NonCancellable
      * 保证最后的进度必然落库。
+     *
+     * UI 仍使用全局页码；内部按 (章节, 页) 落库。
      */
-    fun saveProgress(page: Int) {
-        pendingProgressPage = page
+    fun saveProgress(globalPage: Int) {
+        val progress = volume?.globalToChapterPage(globalPage) ?: ChapterProgress(0, globalPage)
+        pendingProgress = progress
         if (progressWriteJob?.isActive == true) return
         progressWriteJob = viewModelScope.launch {
             try {
                 while (true) {
                     delay(PROGRESS_WRITE_INTERVAL_MS)
-                    val latest = pendingProgressPage ?: break
-                    pendingProgressPage = null
-                    withContext(NonCancellable) { repo.saveProgress(comicId, latest) }
+                    val latest = pendingProgress ?: break
+                    pendingProgress = null
+                    withContext(NonCancellable) {
+                        repo.saveProgress(comicId, latest.chapterIndex, latest.pageIndex)
+                    }
                 }
             } finally {
                 withContext(NonCancellable) {
-                    pendingProgressPage?.let { latest ->
-                        pendingProgressPage = null
-                        repo.saveProgress(comicId, latest)
+                    pendingProgress?.let { latest ->
+                        pendingProgress = null
+                        repo.saveProgress(comicId, latest.chapterIndex, latest.pageIndex)
                     }
                 }
             }
@@ -145,9 +162,9 @@ class ReaderViewModel(
 
     fun toggleFavorite(page: Int) {
         if (page in favoriteInFlight) return
-        val opened = book ?: return
+        val opened = volume ?: return
         val source = comic ?: return
-        if (page !in 0 until opened.pageCount) return
+        if (page !in 0 until opened.totalPageCount) return
 
         viewModelScope.launch {
             favoriteInFlight += page
@@ -158,7 +175,7 @@ class ReaderViewModel(
                     readerMessage = "已取消收藏"
                 } else {
                     val bytes = opened.loadPageBytes(page)
-                    favoriteRepo.addSnapshot(source, page, opened.pageCount, bytes)
+                    favoriteRepo.addSnapshot(source, page, opened.totalPageCount, bytes)
                     readerMessage = "已收藏"
                 }
             } catch (e: Exception) {
@@ -171,8 +188,8 @@ class ReaderViewModel(
 
     fun setCurrentPageAsCover(page: Int) {
         if (coverInFlight) return
-        val opened = book ?: return
-        if (page !in 0 until opened.pageCount) return
+        val opened = volume ?: return
+        if (page !in 0 until opened.totalPageCount) return
 
         coverInFlight = true
         viewModelScope.launch {
@@ -201,12 +218,12 @@ class ReaderViewModel(
      * 顺序串行——loadThumbnail 逐个 suspend 完成，天然不会挤爆 IO；
      * 用户滑到未预热区域时 requestThumbnail 并发插队，zip 锁自动排队。
      */
-    private fun prewarmThumbnails(book: ComicBook, startPage: Int) {
+    private fun prewarmThumbnails(volume: ComicVolume, startPage: Int) {
         // 超大书全量预热会吃掉过多内存（每张约 80KB），只走按需加载。
         // 这是个有意的覆盖上限：手动浏览仍然能加载任何页
-        if (book.pageCount > PREWARM_MAX_PAGES) return
+        if (volume.totalPageCount > PREWARM_MAX_PAGES) return
         viewModelScope.launch {
-            for (page in startPage until book.pageCount) loadThumbnail(page)
+            for (page in startPage until volume.totalPageCount) loadThumbnail(page)
             for (page in startPage - 1 downTo 0) loadThumbnail(page)
         }
     }
@@ -223,8 +240,8 @@ class ReaderViewModel(
     }
 
     private suspend fun loadThumbnail(page: Int) {
-        val opened = book ?: return
-        if (page !in 0 until opened.pageCount) return
+        val opened = volume ?: return
+        if (page !in 0 until opened.totalPageCount) return
         thumbMutex.withLock {
             if (thumbnails.containsKey(page) || page in thumbInFlight) return
             thumbInFlight += page
@@ -268,7 +285,7 @@ class ReaderViewModel(
      * 注意旋转屏幕不会走到这里——这正是资源不被重复释放/创建的关键。
      */
     override fun onCleared() {
-        book?.close()
+        volume?.close()
     }
 
     companion object {

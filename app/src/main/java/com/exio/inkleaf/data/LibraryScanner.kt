@@ -73,6 +73,33 @@ class LibraryScanner(context: Context) {
         found
     }
 
+    /**
+     * 只扫描 treeUri 根目录下的 PDF 文件（不递归子目录），作为一本书的章节。
+     * 返回结果按调用方期望的顺序排列——这里保持自然文件名顺序。
+     */
+    suspend fun scanPdfs(treeUri: Uri): List<ScannedFile> = withContext(Dispatchers.IO) {
+        val rootDocId = DocumentsContract.getTreeDocumentId(treeUri)
+        val children = try {
+            queryChildren(treeUri, rootDocId)
+        } catch (e: Exception) {
+            throw FolderAccessException("无法访问该目录", e)
+        }
+
+        children
+            .asSequence()
+            .filter { !it.isDirectory && !it.name.startsWith(".") && PDF_EXT.matches(it.name) }
+            .map { child ->
+                val fileUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, child.docId)
+                ScannedFile(
+                    uri = fileUri.toString(),
+                    fileKey = ComicIdentity.fileKey(appContext, fileUri),
+                    displayName = child.name,
+                )
+            }
+            .sortedWith { a, b -> ChapterSort.compareNatural(a.displayName, b.displayName) }
+            .toList()
+    }
+
     private data class Child(val docId: String, val name: String, val isDirectory: Boolean)
 
     /** 一次跨进程查询拿到一个目录的全部孩子 */
@@ -104,6 +131,7 @@ class LibraryScanner(context: Context) {
 
     companion object {
         private val COMIC_EXT = Regex(".*\\.(cbz|zip)$", RegexOption.IGNORE_CASE)
+        private val PDF_EXT = Regex(".*\\.pdf$", RegexOption.IGNORE_CASE)
 
         /**
          * SAF 单文件选择器的 MIME 过滤，与 COMIC_EXT 描述同一组格式（zip/cbz），

@@ -34,8 +34,16 @@ interface ComicDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(comic: ComicEntity): Long
 
-    @Query("UPDATE comics SET lastReadPage = :page, lastReadAt = :time WHERE id = :id")
-    suspend fun updateProgress(id: Long, page: Int, time: Long)
+    @Query("UPDATE comics SET lastReadChapterIndex = :chapterIndex, lastReadPage = :page, lastReadAt = :time WHERE id = :id")
+    suspend fun updateProgress(id: Long, chapterIndex: Int, page: Int, time: Long)
+
+    /**
+     * 仅更新进度章节索引，不碰 lastReadPage / lastReadAt。
+     * 用于章节重排后把 [ComicEntity.lastReadChapterIndex] 重新指向同一章节的新位置——
+     * 不能用 [updateProgress]，那会污染最近阅读时间。
+     */
+    @Query("UPDATE comics SET lastReadChapterIndex = :chapterIndex WHERE id = :id")
+    suspend fun updateLastReadChapterIndex(id: Long, chapterIndex: Int)
 
     @Query("UPDATE comics SET groupId = :groupId WHERE id = :id")
     suspend fun updateGroup(id: Long, groupId: Long?)

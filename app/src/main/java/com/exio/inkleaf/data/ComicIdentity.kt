@@ -46,4 +46,15 @@ object ComicIdentity {
         val provider = uri.authority?.takeIf { it.isNotBlank() } ?: "unknown"
         return "saf:$provider:$documentId"
     }
+
+    /**
+     * 目录树 URI 的稳定身份。树 URI 不能直接用 [fileKey]（无法打开文件描述符），
+     * 所以用 documentId 作为标识。
+     */
+    fun folderKey(treeUri: Uri): String {
+        val documentId = runCatching { DocumentsContract.getTreeDocumentId(treeUri) }.getOrNull()
+        if (documentId.isNullOrBlank()) return "tree:${treeUri.normalizeScheme()}"
+        val provider = treeUri.authority?.takeIf { it.isNotBlank() } ?: "unknown"
+        return "saf-tree:$provider:$documentId"
+    }
 }

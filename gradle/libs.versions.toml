@@ -18,6 +18,7 @@ ksp = "2.3.9"
 kotlinxSerializationJson = "1.11.0"
 datastorePreferences = "1.2.1"
 materialKolor = "4.1.1"
+ahmerPdfium = "1.9.2"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -48,6 +49,7 @@ androidx-room-compiler = { group = "androidx.room", name = "room-compiler", vers
 androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCommon" }
 androidx-documentfile = { group = "androidx.documentfile", name = "documentfile", version.ref = "documentfile" }
 material-kolor = { group = "com.materialkolor", name = "material-kolor", version.ref = "materialKolor" }
+ahmer-pdfium = { group = "io.github.ahmerafzal1", name = "ahmer-pdfium", version.ref = "ahmerPdfium" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

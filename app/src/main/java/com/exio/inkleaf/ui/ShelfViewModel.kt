@@ -9,18 +9,22 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.viewModelScope
 import com.exio.inkleaf.data.AddComicOutcome
 import com.exio.inkleaf.data.AddFolderOutcome
+import com.exio.inkleaf.data.AddSeriesFolderOutcome
 import com.exio.inkleaf.data.ComicRepository
 import com.exio.inkleaf.data.CoverAspect
 import com.exio.inkleaf.data.CoverCrop
 import com.exio.inkleaf.data.GridColumnsMode
 import com.exio.inkleaf.data.GroupWriteOutcome
+import com.exio.inkleaf.data.LibraryScanner
 import com.exio.inkleaf.data.ScanResult
 import com.exio.inkleaf.data.ShelfGroupFilterKind
 import com.exio.inkleaf.data.ShelfGroupSelection
 import com.exio.inkleaf.data.ShelfLayoutSettings
 import com.exio.inkleaf.data.ShelfSettingsRepository
 import com.exio.inkleaf.data.db.ComicEntity
+import com.exio.inkleaf.data.db.FolderWithCount
 import com.exio.inkleaf.data.db.GroupWithCount
+import com.exio.inkleaf.data.db.LibraryFolderType
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -60,6 +64,9 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycle
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     val groups: StateFlow<List<GroupWithCount>?> = repo.observeGroups()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    val folders: StateFlow<List<FolderWithCount>?> = repo.observeFolders()
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     val selectedGroup: StateFlow<ShelfGroupSelection> = settingsRepo.selectedGroup
@@ -197,8 +204,38 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycle
         }
     }
 
+    /**
+     * 添加 PDF 章节目录：把目录内 PDF 作为一本书导入。
+     */
+    fun addSeriesFolder(uri: Uri) {
+        viewModelScope.launch {
+            val msg = try {
+                when (val outcome = repo.addSeriesFolderAndSync(uri)) {
+                    is AddSeriesFolderOutcome.Duplicate -> "该目录已在漫画库中"
+                    is AddSeriesFolderOutcome.Empty -> "所选目录中没有 PDF 文件"
+                    is AddSeriesFolderOutcome.Added ->
+                        "已导入《${outcome.comic.title}》，共 ${outcome.chaptersAdded} 章"
+                }
+            } catch (e: SecurityException) {
+                "无法获得该目录的持久访问权限"
+            } catch (e: LibraryScanner.FolderAccessException) {
+                "无法访问该目录，可能权限被撤销或目录已被删除"
+            }
+            _scanState.value = _scanState.value.copy(message = msg)
+        }
+    }
+
     fun deleteComic(comic: ComicEntity) {
         viewModelScope.launch { repo.deleteComic(comic) }
+    }
+
+    /**
+     * 判断一本漫画是否来自 PDF 章节目录（用于删除对话框的提示文案）。
+     * 直接读已缓存的 folders 列表，避免为弹窗再启动异步查询。
+     */
+    fun isSeriesComic(comic: ComicEntity): Boolean {
+        val folderId = comic.folderId ?: return false
+        return folders.value?.any { it.folder.id == folderId && it.folder.type == LibraryFolderType.SERIES } == true
     }
 
     fun selectGroup(selection: ShelfGroupSelection) {
