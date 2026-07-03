@@ -12,17 +12,8 @@ local.properties
 *.keystore
 /app/release/
 
-docs/
-design/
-
-AGENTS.md
-CLAUDE.md
-
 .gemini/
 .claude/
-.agents/
-.wiki/
 .junie/
 .kotlin/
-
-skills-lock.json
+.wiki/
