@@ -23,6 +23,7 @@ data class AlbumEditorUiState(
     val isLoading: Boolean = false,
     val isImporting: Boolean = false,
     val isSaving: Boolean = false,
+    val loadError: String? = null,
     val failedNames: List<String> = emptyList(),
     val message: String? = null,
 ) {
@@ -52,32 +53,12 @@ class AlbumEditorViewModel(
 
     init {
         if (comicId != null) {
-            viewModelScope.launch {
-                runCatchingPreservingCancellation {
-                    repository.loadAlbum(comicId)
-                }
-                    .onSuccess { snapshot ->
-                        _state.value = _state.value.copy(
-                            title = snapshot.comic.title,
-                            pages = snapshot.pages,
-                            coverPageId = snapshot.comic.coverPageId
-                                ?: snapshot.pages.firstOrNull()?.id,
-                            initialTitle = snapshot.comic.title,
-                            initialPageIds = snapshot.pages.map { it.id },
-                            initialCoverPageId = snapshot.comic.coverPageId
-                                ?: snapshot.pages.firstOrNull()?.id,
-                            isPersisted = true,
-                            isLoading = false,
-                        )
-                    }
-                    .onFailure { error ->
-                        _state.value = _state.value.copy(
-                            isLoading = false,
-                            message = error.userMessage("无法打开图册"),
-                        )
-                    }
-            }
+            loadAlbum(comicId)
         }
+    }
+
+    fun retryLoad() {
+        currentComicId?.let(::loadAlbum)
     }
 
     fun updateTitle(value: String) {
@@ -141,13 +122,27 @@ class AlbumEditorViewModel(
         )
     }
 
+    fun restorePage(page: AlbumPageDraft, index: Int, previousCoverPageId: String?) {
+        val current = _state.value
+        if (current.isSaving || current.pages.any { it.id == page.id }) return
+        val pages = current.pages.toMutableList().apply {
+            add(index.coerceIn(0, size), page)
+        }
+        _state.value = current.copy(
+            pages = pages,
+            coverPageId = previousCoverPageId?.takeIf { coverId ->
+                pages.any { it.id == coverId }
+            } ?: current.coverPageId ?: pages.firstOrNull()?.id,
+        )
+    }
+
     fun setCover(pageId: String) {
         if (_state.value.pages.any { it.id == pageId }) {
             _state.value = _state.value.copy(coverPageId = pageId)
         }
     }
 
-    fun save() {
+    fun save(onSaved: () -> Unit) {
         val current = _state.value
         if (current.isSaving || current.isImporting) return
         if (current.title.isBlank()) {
@@ -182,8 +177,8 @@ class AlbumEditorViewModel(
                     initialCoverPageId = savedCoverPageId,
                     isPersisted = true,
                     isSaving = false,
-                    message = "已保存",
                 )
+                onSaved()
             }.onFailure { error ->
                 _state.value = _state.value.copy(
                     isSaving = false,
@@ -225,6 +220,38 @@ class AlbumEditorViewModel(
 
     fun consumeMessage() {
         _state.value = _state.value.copy(message = null)
+    }
+
+    private fun loadAlbum(comicId: Long) {
+        _state.value = _state.value.copy(
+            isLoading = true,
+            loadError = null,
+            message = null,
+        )
+        viewModelScope.launch {
+            runCatchingPreservingCancellation { repository.loadAlbum(comicId) }
+                .onSuccess { snapshot ->
+                    _state.value = _state.value.copy(
+                        title = snapshot.comic.title,
+                        pages = snapshot.pages,
+                        coverPageId = snapshot.comic.coverPageId
+                            ?: snapshot.pages.firstOrNull()?.id,
+                        initialTitle = snapshot.comic.title,
+                        initialPageIds = snapshot.pages.map { it.id },
+                        initialCoverPageId = snapshot.comic.coverPageId
+                            ?: snapshot.pages.firstOrNull()?.id,
+                        isPersisted = true,
+                        isLoading = false,
+                        loadError = null,
+                    )
+                }
+                .onFailure { error ->
+                    _state.value = _state.value.copy(
+                        isLoading = false,
+                        loadError = error.userMessage("无法打开图册"),
+                    )
+                }
+        }
     }
 
     private fun appendImportResult(result: com.exio.inkleaf.data.AlbumImportResult) {

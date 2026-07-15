@@ -210,6 +210,18 @@ louder than the comic content.
 - **Motion:** Page, control, and thumbnail motion must preserve cause and spatial direction. Honor
   the system animation preference with reduced or immediate alternatives.
 
+### App Icon
+
+- **Mark:** A white leaf drawn with a dark ink-like vein and a short Rouge stem. The leaf expresses
+  both halves of the Inkleaf name without adding text or a generic reader badge.
+- **Background:** Soft Charcoal Ink fills the adaptive icon background layer.
+- **Adaptive bounds:** The complete mark stays inside Android's 66dp guaranteed safe zone on the
+  108dp adaptive icon canvas.
+- **Themed icon:** The monochrome layer simplifies the mark to the leaf silhouette, central ink cut,
+  and stem so it remains legible when tinted by the launcher.
+- **Splash:** The foreground mark and Soft Charcoal Ink icon background are supplied separately to
+  the splash theme, preventing adaptive-icon recropping on Android 10 and 11.
+
 ## Do's and Don'ts
 
 ### Do:

@@ -281,7 +281,7 @@ fun ShelfScreen(
                                 Text("或添加漫画文件")
                             }
                             TextButton(onClick = onCreateAlbum) {
-                                Text("创建图片图册")
+                                Text("从图片创建图册")
                             }
                         }
                     }
@@ -757,7 +757,7 @@ private fun AddSheetContent(
     SheetColumn(modifier = modifier, scrollable = true) {
         StandardSheetTitle("添加内容")
         ListItem(
-            headlineContent = { Text("创建图片图册") },
+            headlineContent = { Text("从图片创建图册") },
             supportingContent = { Text("选择图片、调整顺序并制作成可分享的 CBZ") },
             leadingContent = {
                 Icon(
@@ -909,7 +909,15 @@ private fun ComicCard(
     Column(
         modifier = modifier
             .clip(RoundedCornerShape(8.dp))
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+            .combinedClickable(
+                onClick = onClick,
+                onLongClickLabel = if (comic.sourceType == BookSourceType.CREATED_ALBUM) {
+                    "打开图册操作"
+                } else {
+                    "打开漫画操作"
+                },
+                onLongClick = onLongClick,
+            ),
     ) {
         Box(
             modifier = Modifier

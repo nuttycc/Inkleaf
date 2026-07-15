@@ -9,9 +9,10 @@
         core-splashscreen 库统一了 API 31+（系统启动画面）和更低版本
         （库自己绘制）的行为。installSplashScreen() 之后切到 postSplashScreenTheme
     -->
-    <style name="Theme.Inkleaf.Starting" parent="Theme.SplashScreen">
+    <style name="Theme.Inkleaf.Starting" parent="Theme.SplashScreen.IconBackground">
         <item name="windowSplashScreenBackground">@color/splash_background</item>
-        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_splash_logo</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+        <item name="windowSplashScreenIconBackgroundColor">@color/launcher_icon_background</item>
         <item name="postSplashScreenTheme">@style/Theme.Inkleaf</item>
     </style>
 </resources>

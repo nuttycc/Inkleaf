@@ -12,6 +12,7 @@ import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.WindowInsets
@@ -44,13 +45,10 @@ import androidx.compose.ui.unit.dp
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
-import androidx.navigation.NavDestination
-import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
-import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import com.exio.inkleaf.data.AlbumExporter
@@ -59,9 +57,9 @@ import com.exio.inkleaf.data.ComicRepository
 import com.exio.inkleaf.data.ReaderCache
 import com.exio.inkleaf.data.ThemeSettings
 import com.exio.inkleaf.data.ThemeSettingsRepository
+import com.exio.inkleaf.ui.AlbumEditorScreen
 import com.exio.inkleaf.ui.FavoriteViewerScreen
 import com.exio.inkleaf.ui.FavoritesScreen
-import com.exio.inkleaf.ui.AlbumEditorScreen
 import com.exio.inkleaf.ui.ReaderScreen
 import com.exio.inkleaf.ui.SettingsScreen
 import com.exio.inkleaf.ui.ShelfScreen
@@ -97,6 +95,11 @@ data object SettingsRoute
 private const val NAV_TRANSITION_MS = 400
 private const val FAVORITES_RESULT_MESSAGE_KEY = "favorites_result_message"
 
+private enum class TopLevelDestination {
+    SHELF,
+    FAVORITES,
+}
+
 private data class ExternalOpenRequest(val id: Long, val uri: Uri)
 
 /**
@@ -119,13 +122,12 @@ private fun <T : Any> NavHostController.navigateTopLevel(route: T) {
 
 @Composable
 private fun InkleafBottomBar(
-    currentDestination: NavDestination?,
+    selectedDestination: TopLevelDestination,
     onOpenShelf: () -> Unit,
     onSelectFavorites: () -> Unit,
 ) {
-    val shelfSelected = currentDestination?.hasRoute<ShelfRoute>() == true
-    val favoritesSelected = currentDestination?.hasRoute<FavoritesRoute>() == true
-    if (!shelfSelected && !favoritesSelected) return
+    val shelfSelected = selectedDestination == TopLevelDestination.SHELF
+    val favoritesSelected = selectedDestination == TopLevelDestination.FAVORITES
 
     Box(
         modifier = Modifier
@@ -173,6 +175,28 @@ private fun InkleafBottomBar(
             CompactBottomBarPlaceholder(iconRes = R.drawable.ic_tune)
         }
     }
+}
+
+@Composable
+private fun TopLevelScaffold(
+    selectedDestination: TopLevelDestination,
+    onOpenShelf: () -> Unit,
+    onSelectFavorites: () -> Unit,
+    content: @Composable (PaddingValues) -> Unit,
+) {
+    Scaffold(
+        modifier = Modifier.fillMaxSize(),
+        containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = WindowInsets(0),
+        bottomBar = {
+            InkleafBottomBar(
+                selectedDestination = selectedDestination,
+                onOpenShelf = onOpenShelf,
+                onSelectFavorites = onSelectFavorites,
+            )
+        },
+        content = content,
+    )
 }
 
 @Composable
@@ -281,8 +305,6 @@ class MainActivity : ComponentActivity() {
 
             InkleafTheme(settings = themeSettings) {
                 val navController = rememberNavController()
-                val navBackStackEntry by navController.currentBackStackEntryAsState()
-                val currentDestination = navBackStackEntry?.destination
                 val pendingExternalOpen = externalOpenRequest
 
                 LaunchedEffect(pendingExternalOpen) {
@@ -313,50 +335,47 @@ class MainActivity : ComponentActivity() {
                     // 两页位移量相同、无重叠区，因此不依赖绘制层级，任意
                     // 两页之间都成立：新增页面无需再配转场。
                     // slideInto/OutOfContainer 按布局方向解析 Start/End，RTL 自适应
-                    Scaffold(
+                    NavHost(
+                        navController = navController,
+                        startDestination = ShelfRoute,
                         modifier = Modifier.fillMaxSize(),
-                        containerColor = MaterialTheme.colorScheme.background,
-                        contentWindowInsets = WindowInsets(0),
-                        bottomBar = {
-                            InkleafBottomBar(
-                                currentDestination = currentDestination,
-                                onOpenShelf = { navController.navigateTopLevel(ShelfRoute) },
-                                onSelectFavorites = {
-                                    navController.navigateTopLevel(FavoritesRoute)
-                                },
-                            )
+                        enterTransition = {
+                            slideIntoContainer(SlideDirection.Start, navSpec())
                         },
-                    ) { outerPadding ->
-                        NavHost(
-                            navController = navController,
-                            startDestination = ShelfRoute,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(outerPadding),
-                            enterTransition = {
-                                slideIntoContainer(SlideDirection.Start, navSpec())
-                            },
-                            exitTransition = {
-                                slideOutOfContainer(SlideDirection.Start, navSpec())
-                            },
-                            popEnterTransition = {
-                                slideIntoContainer(SlideDirection.End, navSpec())
-                            },
-                            popExitTransition = {
-                                slideOutOfContainer(SlideDirection.End, navSpec())
-                            },
-                        ) {
+                        exitTransition = {
+                            slideOutOfContainer(SlideDirection.Start, navSpec())
+                        },
+                        popEnterTransition = {
+                            slideIntoContainer(SlideDirection.End, navSpec())
+                        },
+                        popExitTransition = {
+                            slideOutOfContainer(SlideDirection.End, navSpec())
+                        },
+                    ) {
                             composable<ShelfRoute> {
-                                ShelfScreen(
-                                    onOpenComic = { id -> navController.navigate(ReaderRoute(id)) },
-                                    onCreateAlbum = {
-                                        navController.navigate(AlbumEditorRoute())
+                                TopLevelScaffold(
+                                    selectedDestination = TopLevelDestination.SHELF,
+                                    onOpenShelf = {},
+                                    onSelectFavorites = {
+                                        navController.navigateTopLevel(FavoritesRoute)
                                     },
-                                    onEditAlbum = { id ->
-                                        navController.navigate(AlbumEditorRoute(id))
-                                    },
-                                    onOpenSettings = { navController.navigate(SettingsRoute) },
-                                )
+                                ) { topLevelPadding ->
+                                    ShelfScreen(
+                                        onOpenComic = { id ->
+                                            navController.navigate(ReaderRoute(id))
+                                        },
+                                        onCreateAlbum = {
+                                            navController.navigate(AlbumEditorRoute())
+                                        },
+                                        onEditAlbum = { id ->
+                                            navController.navigate(AlbumEditorRoute(id))
+                                        },
+                                        onOpenSettings = {
+                                            navController.navigate(SettingsRoute)
+                                        },
+                                        modifier = Modifier.padding(topLevelPadding),
+                                    )
+                                }
                             }
                             composable<AlbumEditorRoute> { entry ->
                                 val route = entry.toRoute<AlbumEditorRoute>()
@@ -377,18 +396,27 @@ class MainActivity : ComponentActivity() {
                                 val viewerMessage by entry.savedStateHandle
                                     .getStateFlow<String?>(FAVORITES_RESULT_MESSAGE_KEY, null)
                                     .collectAsStateWithLifecycle()
-                                FavoritesScreen(
-                                    onOpenFavorite = { id ->
-                                        navController.navigate(FavoriteViewerRoute(id))
+                                TopLevelScaffold(
+                                    selectedDestination = TopLevelDestination.FAVORITES,
+                                    onOpenShelf = {
+                                        navController.navigateTopLevel(ShelfRoute)
                                     },
-                                    viewerMessage = viewerMessage,
-                                    onViewerMessageConsumed = {
-                                        entry.savedStateHandle.set<String?>(
-                                            FAVORITES_RESULT_MESSAGE_KEY,
-                                            null,
-                                        )
-                                    },
-                                )
+                                    onSelectFavorites = {},
+                                ) { topLevelPadding ->
+                                    FavoritesScreen(
+                                        onOpenFavorite = { id ->
+                                            navController.navigate(FavoriteViewerRoute(id))
+                                        },
+                                        modifier = Modifier.padding(topLevelPadding),
+                                        viewerMessage = viewerMessage,
+                                        onViewerMessageConsumed = {
+                                            entry.savedStateHandle.set<String?>(
+                                                FAVORITES_RESULT_MESSAGE_KEY,
+                                                null,
+                                            )
+                                        },
+                                    )
+                                }
                             }
                             composable<FavoriteViewerRoute> { entry ->
                                 val route = entry.toRoute<FavoriteViewerRoute>()
@@ -414,7 +442,6 @@ class MainActivity : ComponentActivity() {
                                     onBack = { navController.popBackStack() },
                                 )
                             }
-                        }
                     }
                 }
             }

@@ -4,10 +4,11 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -49,14 +50,18 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -64,6 +69,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.selected
@@ -75,7 +81,9 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
+import com.exio.inkleaf.R
 import com.exio.inkleaf.data.AlbumPageDraft
+import kotlinx.coroutines.launch
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyGridState
 import java.io.File
@@ -93,7 +101,9 @@ fun AlbumEditorScreen(
     }
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
-    var showAddSheet by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    var showAddSheet by rememberSaveable { mutableStateOf(false) }
+    var hasPromptedForInitialImport by rememberSaveable(comicId) { mutableStateOf(false) }
     var showDiscardDialog by remember { mutableStateOf(false) }
 
     val photoPicker = rememberLauncherForActivityResult(
@@ -117,6 +127,7 @@ fun AlbumEditorScreen(
     )
     val canLeave = !state.isSaving && !state.isImporting
     val canSave = !state.isLoading &&
+            state.loadError == null &&
             !state.isImporting &&
             !state.isSaving &&
             state.hasUnsavedChanges &&
@@ -132,7 +143,35 @@ fun AlbumEditorScreen(
     val handleBack = {
         if (canLeave) discardAndBack() else viewModel.notifyBusy()
     }
+    val removePageWithUndo: (AlbumPageDraft, Int) -> Unit = { page, index ->
+        val previousCoverPageId = state.coverPageId
+        viewModel.removePage(page.id)
+        scope.launch {
+            snackbarHostState.currentSnackbarData?.dismiss()
+            val result = snackbarHostState.showSnackbar(
+                message = "已移除第 ${index + 1} 页",
+                actionLabel = "撤销",
+                withDismissAction = true,
+            )
+            if (result == SnackbarResult.ActionPerformed) {
+                viewModel.restorePage(page, index, previousCoverPageId)
+            }
+        }
+    }
     BackHandler(onBack = handleBack)
+
+    LaunchedEffect(comicId, state.isLoading, state.loadError, state.pages.isEmpty()) {
+        if (
+            comicId == null &&
+            !state.isLoading &&
+            state.loadError == null &&
+            state.pages.isEmpty() &&
+            !hasPromptedForInitialImport
+        ) {
+            hasPromptedForInitialImport = true
+            showAddSheet = true
+        }
+    }
 
     Scaffold(
         modifier = modifier,
@@ -157,7 +196,7 @@ fun AlbumEditorScreen(
                 },
                 actions = {
                     TextButton(
-                        onClick = viewModel::save,
+                        onClick = { viewModel.save(onBack) },
                         enabled = canSave,
                     ) {
                         if (state.isSaving) {
@@ -178,30 +217,23 @@ fun AlbumEditorScreen(
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
-            if (!state.isLoading && state.pages.isNotEmpty()) {
+            if (!state.isLoading && state.loadError == null && state.pages.isNotEmpty()) {
                 Surface(tonalElevation = 3.dp) {
-                    Row(
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .navigationBarsPadding()
                             .imePadding()
                             .padding(horizontal = 16.dp, vertical = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         Button(
                             onClick = { showAddSheet = true },
                             enabled = !state.isImporting && !state.isSaving,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.fillMaxWidth(),
                         ) {
                             Icon(Icons.Filled.Add, contentDescription = null)
                             Spacer(Modifier.size(8.dp))
-                            Text("添加图片")
-                        }
-                        TextButton(
-                            onClick = discardAndBack,
-                            enabled = canLeave,
-                        ) {
-                            Text(if (state.hasUnsavedChanges) "取消" else "返回")
+                            Text("继续添加图片")
                         }
                     }
                 }
@@ -218,11 +250,38 @@ fun AlbumEditorScreen(
                 CircularProgressIndicator()
             }
 
+            state.loadError != null -> Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .padding(32.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "无法打开图册",
+                        style = MaterialTheme.typography.titleLarge,
+                    )
+                    Text(
+                        text = state.loadError.orEmpty(),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 8.dp, bottom = 16.dp),
+                    )
+                    Button(onClick = viewModel::retryLoad) {
+                        Text("重试")
+                    }
+                    TextButton(onClick = onBack) {
+                        Text("返回书架")
+                    }
+                }
+            }
+
             else -> AlbumEditorContent(
                 state = state,
                 onTitleChange = viewModel::updateTitle,
                 onMovePage = viewModel::movePage,
-                onRemovePage = viewModel::removePage,
+                onRemovePage = removePageWithUndo,
                 onSetCover = viewModel::setCover,
                 onClearFailures = viewModel::clearFailures,
                 onAdd = { showAddSheet = true },
@@ -241,6 +300,12 @@ fun AlbumEditorScreen(
                 ListItem(
                     headlineContent = { Text("从系统相册选择") },
                     supportingContent = { Text("使用照片选择器多选图片") },
+                    leadingContent = {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_image),
+                            contentDescription = null,
+                        )
+                    },
                     modifier = Modifier.clickable {
                         showAddSheet = false
                         photoPicker.launch(
@@ -251,6 +316,12 @@ fun AlbumEditorScreen(
                 ListItem(
                     headlineContent = { Text("从文件中选择") },
                     supportingContent = { Text("从文件管理器多选图片") },
+                    leadingContent = {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_file),
+                            contentDescription = null,
+                        )
+                    },
                     modifier = Modifier.clickable {
                         showAddSheet = false
                         filePicker.launch(arrayOf("image/*"))
@@ -258,7 +329,13 @@ fun AlbumEditorScreen(
                 )
                 ListItem(
                     headlineContent = { Text("导入文件夹") },
-                    supportingContent = { Text("导入所选文件夹当前层的图片") },
+                    supportingContent = { Text("仅导入当前层，并按文件名排序") },
+                    leadingContent = {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_folder),
+                            contentDescription = null,
+                        )
+                    },
                     modifier = Modifier.clickable {
                         showAddSheet = false
                         folderPicker.launch(null)
@@ -298,7 +375,7 @@ private fun AlbumEditorContent(
     state: AlbumEditorUiState,
     onTitleChange: (String) -> Unit,
     onMovePage: (String, String) -> Unit,
-    onRemovePage: (String) -> Unit,
+    onRemovePage: (AlbumPageDraft, Int) -> Unit,
     onSetCover: (String) -> Unit,
     onClearFailures: () -> Unit,
     onAdd: () -> Unit,
@@ -415,7 +492,7 @@ private fun AlbumEditorContent(
                             pageCount = state.pages.size,
                             isCover = state.coverPageId == page.id,
                             isDragging = isDragging,
-                            onRemove = { onRemovePage(page.id) },
+                            onRemove = { onRemovePage(page, index) },
                             onSetCover = { onSetCover(page.id) },
                             onMoveBackward = if (pageActionsEnabled) {
                                 state.pages.getOrNull(index - 1)?.let { previous ->
@@ -480,6 +557,7 @@ private fun AlbumPageItem(
     modifier: Modifier = Modifier,
 ) {
     var showMenu by remember(page.id) { mutableStateOf(false) }
+    val cardShape = RoundedCornerShape(12.dp)
     val scale by animateFloatAsState(
         targetValue = if (isDragging) 1.05f else 1f,
         label = "album page drag scale",
@@ -504,8 +582,8 @@ private fun AlbumPageItem(
     }
 
     Surface(
-        shape = RoundedCornerShape(12.dp),
-        tonalElevation = if (isCover) 6.dp else 1.dp,
+        shape = cardShape,
+        tonalElevation = 0.dp,
         shadowElevation = shadowElevation,
         color = if (isCover) {
             MaterialTheme.colorScheme.primaryContainer
@@ -519,6 +597,13 @@ private fun AlbumPageItem(
                 scaleY = scale
                 alpha = if (isDragging) 0.92f else 1f
             }
+            .then(
+                if (isCover) {
+                    Modifier.border(1.dp, MaterialTheme.colorScheme.primary, cardShape)
+                } else {
+                    Modifier
+                }
+            )
             .semantics {
                 selected = isCover
                 stateDescription = if (isCover) {
@@ -543,7 +628,7 @@ private fun AlbumPageItem(
             AsyncImage(
                 model = File(page.filePath),
                 contentDescription = page.displayName,
-                contentScale = ContentScale.Crop,
+                contentScale = ContentScale.Fit,
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(0.75f)

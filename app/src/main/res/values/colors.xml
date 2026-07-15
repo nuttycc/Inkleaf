@@ -7,6 +7,7 @@
     <color name="teal_700">#FF018786</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+    <color name="launcher_icon_background">#FF2B2B2E</color>
 
     <!-- 启动画面背景：取 INK 种子在浅色模式下生成的 surface 近似值，
          让 启动画面 → 书架首帧 的过渡几乎无色差。深色值在 values-night -->
