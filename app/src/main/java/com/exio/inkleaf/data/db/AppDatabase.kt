@@ -18,8 +18,9 @@ import androidx.room.RoomDatabase
         LibraryFolderEntity::class,
         FavoritePageEntity::class,
         ComicGroupEntity::class,
+        AlbumPageEntity::class,
     ],
-    version = 5,
+    version = 7,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -28,6 +29,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun libraryFolderDao(): LibraryFolderDao
     abstract fun favoriteDao(): FavoriteDao
     abstract fun comicGroupDao(): ComicGroupDao
+    abstract fun albumPageDao(): AlbumPageDao
 
     companion object {
         @Volatile

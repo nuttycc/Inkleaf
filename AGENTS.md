@@ -10,13 +10,30 @@ This is an unreleased personal hobby project under active development. Prefer si
 
 ## Build, Test, and Development Commands
 
-Run from the repository root.
+Run from the repository root. This machine is low-spec: prefer the lightweight checks below and
+avoid full builds unless an APK is actually needed. CI (`.github/workflows/android-check.yml`) runs
+the full build, tests, and lint on push, so local verification only needs to confirm the code
+compiles.
 
-- `.\gradlew.bat assembleDebug` builds a debug APK.
+Preferred lightweight checks (fast, no dexing or packaging):
+
+- `.\gradlew.bat :app:compileDebugKotlin` compiles main Kotlin sources plus KSP. Use this as the
+  default "does it compile" check after code changes.
+- `.\gradlew.bat :app:compileDebugUnitTestKotlin` also compiles unit test sources. Use when tests
+  were changed.
+- `.\gradlew.bat testDebugUnitTest` runs local JVM unit tests. Use when behavior covered by tests
+  changed.
+
+Heavier commands (only when required):
+
+- `.\gradlew.bat assembleDebug` builds a debug APK. Only needed to produce an installable APK, not
+  for code checking.
 - `.\gradlew.bat installDebug` installs the debug app on a connected device or emulator.
-- `.\gradlew.bat testDebugUnitTest` runs local JVM unit tests.
 - `.\gradlew.bat connectedDebugAndroidTest` runs instrumented tests on a connected device or emulator.
 - `.\gradlew.bat assembleRelease` builds a minified APK. Signing uses debug signing unless all release signing environment variables are set.
+
+Never run `clean` routinely; incremental builds depend on prior outputs. Add `--offline` when
+dependencies have not changed to skip network checks.
 
 ## Coding Style & Naming Conventions
 

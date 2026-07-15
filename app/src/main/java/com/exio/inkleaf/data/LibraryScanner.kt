@@ -141,6 +141,7 @@ class LibraryScanner(context: Context) {
         val COMIC_PICKER_MIME_TYPES = arrayOf(
             "application/zip",
             "application/x-cbz",
+            "application/vnd.comicbook+zip",
             "application/octet-stream",
         )
 

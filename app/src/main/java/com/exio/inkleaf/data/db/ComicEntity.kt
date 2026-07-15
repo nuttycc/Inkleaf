@@ -31,4 +31,11 @@ data class ComicEntity(
     val folderId: Long? = null,      // 来自哪个库目录；null = 手动添加（不参与扫描同步）
     val groupId: Long? = null,       // 用户自定义分组；null = 未分组
     val isMissing: Boolean = false,  // 扫描发现文件消失 → true；文件找回 → false
+    val sourceType: BookSourceType = BookSourceType.EXTERNAL_ARCHIVE,
+    /** Stable album page identity used to preserve progress across reordering. */
+    val lastReadPageId: String? = null,
+    /** Album page selected as the shelf cover; null for non-album books. */
+    val coverPageId: String? = null,
+    /** Hidden until album pages and metadata have been committed successfully. */
+    val isDraft: Boolean = false,
 )

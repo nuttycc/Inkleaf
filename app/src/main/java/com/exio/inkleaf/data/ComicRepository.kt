@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 import com.exio.inkleaf.data.db.AppDatabase
+import com.exio.inkleaf.data.db.BookSourceType
 import com.exio.inkleaf.data.db.ComicEntity
 import com.exio.inkleaf.data.db.ComicGroupEntity
 import com.exio.inkleaf.data.db.FolderWithCount
@@ -78,8 +79,15 @@ class ComicRepository(context: Context) {
 
     /** 打开一本书。SAF Uri 的解析收在数据层，UI 不接触存储地址格式 */
     suspend fun openBook(comic: ComicEntity): ComicVolume {
+        if (comic.sourceType == BookSourceType.CREATED_ALBUM) {
+            return AlbumComicVolume(
+                context = appContext,
+                pages = db.albumPageDao().getByComicId(comic.id),
+                title = comic.title,
+            )
+        }
         val chapters = db.chapterDao().getByComicId(comic.id)
-        return if (chapters.isNotEmpty()) {
+        return if (comic.sourceType == BookSourceType.PDF_SERIES || chapters.isNotEmpty()) {
             PdfComicVolume(
                 context = appContext,
                 chapters = chapters,
@@ -182,16 +190,40 @@ class ComicRepository(context: Context) {
         }
     }
 
-    suspend fun saveProgress(id: Long, chapterIndex: Int, page: Int) {
-        dao.updateProgress(id, chapterIndex, page, System.currentTimeMillis())
+    suspend fun saveProgress(
+        id: Long,
+        sourceType: BookSourceType,
+        chapterIndex: Int,
+        page: Int,
+    ) {
+        if (sourceType == BookSourceType.CREATED_ALBUM) {
+            val pageId = db.albumPageDao().getIdByPosition(id, page)
+            dao.updateAlbumProgress(id, page, pageId, System.currentTimeMillis())
+        } else {
+            dao.updateProgress(id, chapterIndex, page, System.currentTimeMillis())
+        }
     }
 
     /** 首次成功打开后回填真实页数和封面；Room Flow 会自动刷新书架 */
     suspend fun backfillMetadata(comic: ComicEntity, volume: ComicVolume) {
         val needCover = comic.coverPath == null || !File(comic.coverPath).exists()
         val cover = if (needCover) {
-            val firstPage = runCatching { volume.loadPageBytes(0) }.getOrNull()
-            firstPage?.let { Covers.createCoverFile(appContext, comic.id, it) }
+            if (comic.sourceType == BookSourceType.CREATED_ALBUM) {
+                val pages = db.albumPageDao().getByComicId(comic.id)
+                val page = pages.firstOrNull { it.id == comic.coverPageId } ?: pages.firstOrNull()
+                page?.let {
+                    runCatching {
+                        Covers.createCoverFile(
+                            appContext,
+                            comic.id,
+                            resolveAlbumPageFile(appContext.filesDir, it.relativePath),
+                        )
+                    }.getOrNull()
+                }
+            } else {
+                val pageBytes = runCatching { volume.loadPageBytes(0) }.getOrNull()
+                pageBytes?.let { Covers.createCoverFile(appContext, comic.id, it) }
+            }
         } else {
             null
         }
@@ -200,7 +232,7 @@ class ComicRepository(context: Context) {
         }
         // PDF 目录需回填各章节页数；单文件漫画（zip/cbz）chapterCount=1，没有章节行，
         // 直接跳过这次 DB 查询，避免每次开书都白跑一趟。
-        if (volume.chapterCount > 1) {
+        if (comic.sourceType == BookSourceType.PDF_SERIES && volume.chapterCount > 1) {
             val chapters = db.chapterDao().getByComicId(comic.id)
             chapters.forEach { chapter ->
                 val actual = volume.chapterPageCount(chapter.chapterIndex)
@@ -221,18 +253,42 @@ class ComicRepository(context: Context) {
             throw IllegalArgumentException("页码超出范围")
         }
         val comic = dao.getById(comicId) ?: throw IllegalStateException("书架记录不存在")
-        val bytes = volume.loadPageBytes(page)
-        val cover = Covers.createCoverFile(appContext, comicId, bytes)
-            ?: throw IllegalStateException("封面生成失败")
-        dao.updateCover(comicId, cover.absolutePath)
-        comic.coverPath
-            ?.let(::File)
-            ?.takeIf { it.absolutePath != cover.absolutePath }
-            ?.delete()
+        if (comic.sourceType == BookSourceType.CREATED_ALBUM) {
+            val pageId = db.albumPageDao().getIdByPosition(comicId, page)
+                ?: throw IllegalStateException("图册页面不存在")
+            val albumPage = db.albumPageDao().getById(pageId)
+                ?: throw IllegalStateException("图册页面不存在")
+            val cover = Covers.createCoverFile(
+                appContext,
+                comicId,
+                resolveAlbumPageFile(appContext.filesDir, albumPage.relativePath),
+            ) ?: throw IllegalStateException("封面生成失败")
+            dao.updateAlbumCover(comicId, cover.absolutePath, pageId)
+            comic.coverPath
+                ?.let(::File)
+                ?.takeIf { it.absolutePath != cover.absolutePath }
+                ?.delete()
+        } else {
+            val bytes = volume.loadPageBytes(page)
+            val cover = Covers.createCoverFile(appContext, comicId, bytes)
+                ?: throw IllegalStateException("封面生成失败")
+            dao.updateCover(comicId, cover.absolutePath)
+            comic.coverPath
+                ?.let(::File)
+                ?.takeIf { it.absolutePath != cover.absolutePath }
+                ?.delete()
+        }
     }
 
     /** 从书架移除单本：删记录 + 删派生文件 + 释放权限（不动用户的原文件） */
     suspend fun deleteComic(comic: ComicEntity) {
+        if (comic.sourceType == BookSourceType.CREATED_ALBUM) {
+            albumFileMutex.withLock {
+                dao.deleteById(comic.id)
+                deleteComicArtifacts(comic)
+            }
+            return
+        }
         dao.deleteById(comic.id)
         deleteComicArtifacts(comic)
         // PDF 章节目录的书被移除时，一并移除目录记录，避免自动同步把它又加回来
@@ -243,10 +299,12 @@ class ComicRepository(context: Context) {
                 }
             }
         }
-        runCatching {
-            appContext.contentResolver.releasePersistableUriPermission(
-                Uri.parse(comic.uri), Intent.FLAG_GRANT_READ_URI_PERMISSION
-            )
+        if (comic.sourceType != BookSourceType.CREATED_ALBUM) {
+            runCatching {
+                appContext.contentResolver.releasePersistableUriPermission(
+                    Uri.parse(comic.uri), Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
         }
     }
 
@@ -488,6 +546,7 @@ class ComicRepository(context: Context) {
                 addedAt = now,
                 lastReadAt = now,
                 folderId = folder.id,
+                sourceType = BookSourceType.PDF_SERIES,
             )
         )
         return dao.getById(id) ?: error("系列漫画插入失败")
@@ -569,6 +628,25 @@ class ComicRepository(context: Context) {
     suspend fun backfillCovers() = withContext(Dispatchers.IO) {
         for (comic in dao.getComicsWithoutCover()) {
             coroutineContext.ensureActive() // 用户退出时及时停下，下次继续（幂等）
+            if (comic.sourceType == BookSourceType.CREATED_ALBUM) {
+                val pages = db.albumPageDao().getByComicId(comic.id)
+                val coverPage =
+                    pages.firstOrNull { it.id == comic.coverPageId } ?: pages.firstOrNull()
+                val file = coverPage
+                    ?.let {
+                        runCatching {
+                            resolveAlbumPageFile(
+                                appContext.filesDir,
+                                it.relativePath
+                            )
+                        }.getOrNull()
+                    }
+                    ?.takeIf(File::isFile)
+                    ?: continue
+                val cover = Covers.createCoverFile(appContext, comic.id, file) ?: continue
+                applyGeneratedCover(comic, cover)
+                continue
+            }
             // PDF 章节目录的封面在首次导入或首次打开时通过 PdfComicVolume 生成
             if (db.chapterDao().countByComicId(comic.id) > 0) continue
             val bytes = runCatching { readFirstImageBytes(Uri.parse(comic.uri)) }
@@ -627,6 +705,9 @@ class ComicRepository(context: Context) {
     /** 删除一本书的全部派生磁盘产物：封面文件 + 阅读缓存（zip 副本、缩略图） */
     private fun deleteComicArtifacts(comic: ComicEntity) {
         comic.coverPath?.let { File(it).delete() }
+        if (comic.sourceType == BookSourceType.CREATED_ALBUM) {
+            File(appContext.filesDir, "albums/${comic.id}").deleteRecursively()
+        }
         ReaderCache.wipeBook(appContext, comic.id)
     }
 

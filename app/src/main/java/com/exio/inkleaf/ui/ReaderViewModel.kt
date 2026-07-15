@@ -1,12 +1,12 @@
 package com.exio.inkleaf.ui
 
 import android.app.Application
-import android.graphics.Bitmap
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -14,9 +14,9 @@ import com.exio.inkleaf.data.ChapterProgress
 import com.exio.inkleaf.data.ComicOpenException
 import com.exio.inkleaf.data.ComicRepository
 import com.exio.inkleaf.data.ComicVolume
-import com.exio.inkleaf.data.Covers
 import com.exio.inkleaf.data.FavoriteRepository
 import com.exio.inkleaf.data.ReaderCache
+import com.exio.inkleaf.data.db.BookSourceType
 import com.exio.inkleaf.data.db.ComicEntity
 import com.exio.inkleaf.data.db.FavoritePageEntity
 import kotlinx.coroutines.Dispatchers
@@ -146,14 +146,24 @@ class ReaderViewModel(
                     val latest = pendingProgress ?: break
                     pendingProgress = null
                     withContext(NonCancellable) {
-                        repo.saveProgress(comicId, latest.chapterIndex, latest.pageIndex)
+                        repo.saveProgress(
+                            comicId,
+                            comic?.sourceType ?: BookSourceType.EXTERNAL_ARCHIVE,
+                            latest.chapterIndex,
+                            latest.pageIndex,
+                        )
                     }
                 }
             } finally {
                 withContext(NonCancellable) {
                     pendingProgress?.let { latest ->
                         pendingProgress = null
-                        repo.saveProgress(comicId, latest.chapterIndex, latest.pageIndex)
+                        repo.saveProgress(
+                            comicId,
+                            comic?.sourceType ?: BookSourceType.EXTERNAL_ARCHIVE,
+                            latest.chapterIndex,
+                            latest.pageIndex,
+                        )
                     }
                 }
             }
@@ -256,14 +266,11 @@ class ReaderViewModel(
                 return
             }
 
-            // 二级：从 zip 解压原图并降采样解码，然后落盘供下次开书复用。
-            // RGB_565 每像素 2 字节，缩略图场景画质无损感、内存减半
-            val bytes = opened.loadThumbnailPageBytes(page)
-            val decoded = withContext(Dispatchers.Default) {
-                Covers.decodeSampled(bytes, THUMB_TARGET_WIDTH, Bitmap.Config.RGB_565)
-            } ?: return
-            thumbnails[page] = decoded.asImageBitmap()
-            ReaderCache.writeThumbnail(app, comicId, page, decoded)
+            // Let each volume choose its cheapest thumbnail path. Albums can
+            // sample local files directly without loading full images into byte arrays.
+            val rendered = opened.renderThumbnail(page, THUMB_TARGET_WIDTH) ?: return
+            thumbnails[page] = rendered
+            ReaderCache.writeThumbnail(app, comicId, page, rendered.asAndroidBitmap())
         } catch (_: Exception) {
             // 单页缩略图失败只影响胶片上一个格子，静默跳过；
             // 不缓存失败结果，下次该格子可见时会自动重试

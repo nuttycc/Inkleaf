@@ -3,4 +3,7 @@
     <files-path
         name="favorite_pages"
         path="favorites/pages/" />
+    <cache-path
+        name="album_exports"
+        path="exports/" />
 </paths>

@@ -1,5 +1,6 @@
 package com.exio.inkleaf.ui
 
+import android.content.ActivityNotFoundException
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.Crossfade
@@ -62,6 +63,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -69,6 +71,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
@@ -84,6 +87,7 @@ import com.exio.inkleaf.data.LibraryScanner
 import com.exio.inkleaf.data.ShelfGroupFilterKind
 import com.exio.inkleaf.data.ShelfGroupSelection
 import com.exio.inkleaf.data.ShelfLayoutSettings
+import com.exio.inkleaf.data.db.BookSourceType
 import com.exio.inkleaf.data.db.ComicEntity
 import com.exio.inkleaf.data.db.GroupWithCount
 import java.io.File
@@ -96,10 +100,13 @@ private enum class ShelfPhase { LOADING, EMPTY, CONTENT }
 @Composable
 fun ShelfScreen(
     onOpenComic: (Long) -> Unit,
+    onCreateAlbum: () -> Unit,
+    onEditAlbum: (Long) -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: ShelfViewModel = viewModel(),
 ) {
+    val context = LocalContext.current
     val comics by viewModel.comics.collectAsStateWithLifecycle()
     val groups by viewModel.groups.collectAsStateWithLifecycle()
     val selectedGroup by viewModel.selectedGroup.collectAsStateWithLifecycle()
@@ -114,6 +121,8 @@ fun ShelfScreen(
     var showCreateGroupDialog by remember { mutableStateOf(false) }
     var showGroupSheet by remember { mutableStateOf(false) }
     var showLayoutSheet by remember { mutableStateOf(false) }
+    var pendingSaveAlbumId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var pendingSaveAlbumTitle by rememberSaveable { mutableStateOf<String?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
 
     // OpenMultipleDocuments：系统多文件选择器。取消返回空列表而非 null，
@@ -136,6 +145,18 @@ fun ShelfScreen(
         contract = ActivityResultContracts.OpenDocumentTree()
     ) { uri ->
         if (uri != null) viewModel.addSeriesFolder(uri)
+    }
+
+    val albumFileCreator = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/vnd.comicbook+zip")
+    ) { uri ->
+        val comicId = pendingSaveAlbumId
+        val title = pendingSaveAlbumTitle
+        pendingSaveAlbumId = null
+        pendingSaveAlbumTitle = null
+        if (uri != null && comicId != null) {
+            viewModel.exportAlbum(comicId, title ?: "图册", uri)
+        }
     }
 
     var showAddSheet by remember { mutableStateOf(false) }
@@ -171,7 +192,7 @@ fun ShelfScreen(
                     // 空书架时的主推入口是空状态里的按钮（渐进式显著度）。
                     // 点开走底部 sheet——与排版抽屉、目录管理同一套视觉语言
                     IconButton(onClick = { showAddSheet = true }) {
-                        Icon(Icons.Filled.Add, contentDescription = "添加漫画")
+                        Icon(Icons.Filled.Add, contentDescription = "添加内容")
                     }
                     // core 图标集没有 Tune，用自建的矢量资源（res/drawable/ic_tune.xml）
                     IconButton(onClick = { showLayoutSheet = true }) {
@@ -259,6 +280,9 @@ fun ShelfScreen(
                             }) {
                                 Text("或添加漫画文件")
                             }
+                            TextButton(onClick = onCreateAlbum) {
+                                Text("创建图片图册")
+                            }
                         }
                     }
 
@@ -312,6 +336,10 @@ fun ShelfScreen(
             sheetState = rememberExpandOnlySheetState(),
         ) {
             AddSheetContent(
+                onCreateAlbum = {
+                    showAddSheet = false
+                    onCreateAlbum()
+                },
                 onAddFolder = {
                     showAddSheet = false
                     treePicker.launch(null)
@@ -354,6 +382,29 @@ fun ShelfScreen(
         ) {
             ComicActionSheetContent(
                 comic = comic,
+                isAlbum = comic.sourceType == BookSourceType.CREATED_ALBUM,
+                onEditAlbum = {
+                    pendingAction = null
+                    onEditAlbum(comic.id)
+                },
+                onShareAlbum = {
+                    pendingAction = null
+                    viewModel.shareAlbum(comic) { intent ->
+                        try {
+                            context.startActivity(intent)
+                        } catch (_: ActivityNotFoundException) {
+                            viewModel.showMessage("没有可用的分享应用")
+                        }
+                    }
+                },
+                onSaveAlbum = {
+                    pendingAction = null
+                    viewModel.prepareAlbumFileName(comic) { fileName ->
+                        pendingSaveAlbumId = comic.id
+                        pendingSaveAlbumTitle = comic.title
+                        albumFileCreator.launch(fileName)
+                    }
+                },
                 onAssignGroup = {
                     pendingAction = null
                     pendingGroupAssignment = comic
@@ -423,15 +474,21 @@ fun ShelfScreen(
     }
 
     pendingDelete?.let { comic ->
+        val isAlbum = comic.sourceType == BookSourceType.CREATED_ALBUM
         val rescanHint = when {
+            isAlbum -> ""
             comic.folderId == null || comic.isMissing -> ""
             viewModel.isSeriesComic(comic) -> "\n注意：移除后将停止同步该 PDF 章节目录。"
             else -> "\n注意：该漫画来自库目录，重新扫描后会再次出现。"
         }
         ConfirmDialog(
-            title = "从书架移除",
-            text = "移除《${comic.title}》？\n原文件不会被删除。$rescanHint",
-            confirmLabel = "移除",
+            title = if (isAlbum) "删除图册" else "从书架移除",
+            text = if (isAlbum) {
+                "删除《${comic.title}》？\n应用内复制的图片会被彻底删除，已导出的 CBZ 不受影响。"
+            } else {
+                "移除《${comic.title}》？\n原文件不会被删除。$rescanHint"
+            },
+            confirmLabel = if (isAlbum) "删除" else "移除",
             onConfirm = {
                 viewModel.deleteComic(comic)
                 pendingDelete = null
@@ -544,12 +601,54 @@ private fun GroupFilterRow(
 @Composable
 private fun ComicActionSheetContent(
     comic: ComicEntity,
+    isAlbum: Boolean,
+    onEditAlbum: () -> Unit,
+    onShareAlbum: () -> Unit,
+    onSaveAlbum: () -> Unit,
     onAssignGroup: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    SheetColumn(modifier = modifier) {
+    SheetColumn(modifier = modifier, scrollable = true) {
         StandardSheetTitle(comic.title)
+        if (isAlbum) {
+            ListItem(
+                headlineContent = { Text("编辑图册") },
+                leadingContent = {
+                    Icon(
+                        Icons.Filled.Edit,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                modifier = Modifier.clickable(onClick = onEditAlbum),
+            )
+            ListItem(
+                headlineContent = { Text("分享 CBZ") },
+                leadingContent = {
+                    Icon(
+                        painterResource(R.drawable.ic_share),
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                modifier = Modifier.clickable(onClick = onShareAlbum),
+            )
+            ListItem(
+                headlineContent = { Text("保存为 CBZ 文件") },
+                leadingContent = {
+                    Icon(
+                        painterResource(R.drawable.ic_download),
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                modifier = Modifier.clickable(onClick = onSaveAlbum),
+            )
+        }
         ListItem(
             headlineContent = { Text("设置分组") },
             leadingContent = {
@@ -563,7 +662,7 @@ private fun ComicActionSheetContent(
             modifier = Modifier.clickable(onClick = onAssignGroup),
         )
         ListItem(
-            headlineContent = { Text("从书架移除") },
+            headlineContent = { Text(if (isAlbum) "删除图册" else "从书架移除") },
             leadingContent = {
                 Icon(
                     Icons.Filled.Delete,
@@ -649,13 +748,27 @@ private fun groupTitle(
  */
 @Composable
 private fun AddSheetContent(
+    onCreateAlbum: () -> Unit,
     onAddFolder: () -> Unit,
     onAddSeriesFolder: () -> Unit,
     onAddFile: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    SheetColumn(modifier = modifier) {
-        StandardSheetTitle("添加漫画")
+    SheetColumn(modifier = modifier, scrollable = true) {
+        StandardSheetTitle("添加内容")
+        ListItem(
+            headlineContent = { Text("创建图片图册") },
+            supportingContent = { Text("选择图片、调整顺序并制作成可分享的 CBZ") },
+            leadingContent = {
+                Icon(
+                    painterResource(R.drawable.ic_image),
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            },
+            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            modifier = Modifier.clickable(onClick = onCreateAlbum),
+        )
         ListItem(
             headlineContent = { Text("添加漫画目录") },
             supportingContent = { Text("选择文件夹建立漫画库，内容变化自动同步") },

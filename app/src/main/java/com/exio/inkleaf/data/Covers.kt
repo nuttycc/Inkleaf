@@ -20,14 +20,16 @@ object Covers {
             runCatching {
                 val bitmap = decodeSampled(pageBytes, TARGET_WIDTH)
                     ?: return@runCatching null
+                saveCoverBitmap(context, comicId, bitmap)
+            }.getOrNull()
+        }
 
-                val dir = File(context.filesDir, "covers").apply { mkdirs() }
-                val file = File(dir, "$comicId-${System.currentTimeMillis()}.jpg")
-                file.outputStream().use { out ->
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
-                }
-                bitmap.recycle()
-                file
+    suspend fun createCoverFile(context: Context, comicId: Long, imageFile: File): File? =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val bitmap = decodeSampled(imageFile, TARGET_WIDTH)
+                    ?: return@runCatching null
+                saveCoverBitmap(context, comicId, bitmap)
             }.getOrNull()
         }
 
@@ -57,5 +59,33 @@ object Covers {
             config?.let { inPreferredConfig = it }
         }
         return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+    }
+
+    fun decodeSampled(file: File, targetWidth: Int, config: Bitmap.Config? = null): Bitmap? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.absolutePath, bounds)
+        if (bounds.outWidth <= 0) return null
+
+        var sampleSize = 1
+        while (bounds.outWidth / (sampleSize * 2) >= targetWidth) sampleSize *= 2
+
+        val opts = BitmapFactory.Options().apply {
+            inSampleSize = sampleSize
+            config?.let { inPreferredConfig = it }
+        }
+        return BitmapFactory.decodeFile(file.absolutePath, opts)
+    }
+
+    private fun saveCoverBitmap(context: Context, comicId: Long, bitmap: Bitmap): File {
+        try {
+            val dir = File(context.filesDir, "covers").apply { mkdirs() }
+            val file = File(dir, "$comicId-${System.currentTimeMillis()}.jpg")
+            file.outputStream().use { out ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
+            }
+            return file
+        } finally {
+            bitmap.recycle()
+        }
     }
 }

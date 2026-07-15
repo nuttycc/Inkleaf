@@ -1,0 +1,254 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-15T18:59:46.0367955+08:00",
+  "title": "Design System: Inkleaf",
+  "extensions": {
+    "colorMeta": {
+      "soft-charcoal-ink": {
+        "role": "primary",
+        "displayName": "Soft Charcoal Ink",
+        "canonical": "#2B2B2E",
+        "tonalRamp": [
+          "#171719",
+          "#2B2B2E",
+          "#444448",
+          "#606065",
+          "#7E7E84",
+          "#A0A0A6",
+          "#C7C7CC",
+          "#F1F1F3"
+        ]
+      },
+      "rouge-seed": {
+        "role": "secondary",
+        "displayName": "Rouge",
+        "canonical": "#9D2933",
+        "tonalRamp": [
+          "#31070B",
+          "#571018",
+          "#7B1D27",
+          "#9D2933",
+          "#BD4B53",
+          "#D9787D",
+          "#ECA9AC",
+          "#FBDADB"
+        ]
+      },
+      "azurite-seed": {
+        "role": "secondary",
+        "displayName": "Azurite",
+        "canonical": "#1685A9",
+        "tonalRamp": [
+          "#062A36",
+          "#084B61",
+          "#0D6B88",
+          "#1685A9",
+          "#42A4C2",
+          "#75C0D6",
+          "#ADDAE6",
+          "#E0F3F7"
+        ]
+      },
+      "amber-seed": {
+        "role": "secondary",
+        "displayName": "Amber",
+        "canonical": "#CA6924",
+        "tonalRamp": [
+          "#3D1B05",
+          "#6C300A",
+          "#994912",
+          "#CA6924",
+          "#DE8B50",
+          "#EAAD80",
+          "#F3CEB3",
+          "#FBEADC"
+        ]
+      },
+      "reader-black": {
+        "role": "neutral",
+        "displayName": "Reader Black",
+        "canonical": "#000000",
+        "tonalRamp": [
+          "#000000",
+          "#181818",
+          "#303030",
+          "#494949",
+          "#666666",
+          "#888888",
+          "#B8B8B8",
+          "#F2F2F2"
+        ]
+      },
+      "reader-white": {
+        "role": "neutral",
+        "displayName": "Reader White",
+        "canonical": "#FFFFFF",
+        "tonalRamp": [
+          "#1A1A1A",
+          "#333333",
+          "#555555",
+          "#777777",
+          "#999999",
+          "#BBBBBB",
+          "#DDDDDD",
+          "#FFFFFF"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "body-large": {
+        "displayName": "Material Body Large",
+        "purpose": "Primary instructional and supporting text; all other roles inherit the Material 3 type scale."
+      }
+    },
+    "shadows": [
+      {
+        "name": "material-overlay-only",
+        "value": "Material 3 component elevation",
+        "purpose": "Dialogs, sheets, menus, and other true overlays only; resting content stays tonal and flat."
+      }
+    ],
+    "motion": [
+      {
+        "name": "state-feedback",
+        "value": "150-250ms Material easing",
+        "purpose": "Selection, control visibility, and ordinary state transitions."
+      },
+      {
+        "name": "directional-navigation",
+        "value": "Material shared-axis or directional slide",
+        "purpose": "Preserve spatial direction when entering and leaving reading surfaces."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "crossfade or immediate state change",
+        "purpose": "Fallback when system animations are disabled or reduced."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "compact",
+        "value": "phone width; bottom navigation"
+      },
+      {
+        "name": "expanded",
+        "value": "tablet width; navigation rail or drawer"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Single clear recovery or permission action, styled from Material roles.",
+      "html": "<button class=\"ds-btn-primary\">Open folder</button>",
+      "css": ".ds-btn-primary { min-height: 48px; padding: 0 24px; border: 0; border-radius: 9999px; background: #2B2B2E; color: #FFFFFF; font: 500 14px/20px system-ui, sans-serif; transition: filter 180ms cubic-bezier(.2,0,0,1), transform 180ms cubic-bezier(.2,0,0,1); } .ds-btn-primary:hover { filter: brightness(1.12); } .ds-btn-primary:focus-visible { outline: 3px solid #1685A9; outline-offset: 2px; } .ds-btn-primary:active { transform: scale(.98); }"
+    },
+    {
+      "name": "Outlined Field",
+      "kind": "input",
+      "refersTo": "outlined-field",
+      "description": "Material-style text input for names and hexadecimal colors.",
+      "html": "<label class=\"ds-field\"><span>Color</span><input value=\"#2B2B2E\" /></label>",
+      "css": ".ds-field { display: grid; gap: 4px; color: #444448; font: 500 12px/16px system-ui, sans-serif; } .ds-field input { min-height: 48px; padding: 0 16px; border: 1px solid #7E7E84; border-radius: 8px; background: transparent; color: #2B2B2E; font: 400 16px/24px system-ui, sans-serif; } .ds-field input:hover { border-color: #444448; } .ds-field input:focus-visible { border: 2px solid #2B2B2E; outline: none; }"
+    },
+    {
+      "name": "Bottom Navigation Item",
+      "kind": "nav",
+      "refersTo": "bottom-navigation-item",
+      "description": "Compact phone navigation with a quiet pill-shaped selected state.",
+      "html": "<button class=\"ds-nav-item ds-nav-item-selected\"><span class=\"ds-nav-icon\">●</span><span>Shelf</span></button>",
+      "css": ".ds-nav-item { min-width: 72px; height: 48px; padding: 4px 8px; border: 0; border-radius: 9999px; background: transparent; color: #606065; font: 500 12px/16px system-ui, sans-serif; } .ds-nav-icon { display: grid; place-items: center; width: 56px; height: 32px; margin: 0 auto; border-radius: 9999px; } .ds-nav-item-selected { color: #2B2B2E; } .ds-nav-item-selected .ds-nav-icon { background: #C7C7CC; } .ds-nav-item:focus-visible { outline: 3px solid #1685A9; outline-offset: 2px; }"
+    },
+    {
+      "name": "Comic Card",
+      "kind": "card",
+      "refersTo": "comic-card",
+      "description": "Image-led, flat library item with restrained metadata.",
+      "html": "<article class=\"ds-comic-card\"><div class=\"ds-comic-cover\"></div><strong>Comic title</strong><small>24 pages</small></article>",
+      "css": ".ds-comic-card { width: 152px; color: #2B2B2E; font-family: system-ui, sans-serif; } .ds-comic-cover { aspect-ratio: 2 / 3; border-radius: 8px; background: #C7C7CC; } .ds-comic-card strong { display: block; margin-top: 4px; font-size: 14px; line-height: 20px; } .ds-comic-card small { color: #606065; font-size: 12px; line-height: 16px; } .ds-comic-card:focus-within .ds-comic-cover { outline: 3px solid #1685A9; outline-offset: 2px; }"
+    },
+    {
+      "name": "Reader Overlay",
+      "kind": "custom",
+      "refersTo": "reader-overlay",
+      "description": "Compact transient status surface over the black reading stage.",
+      "html": "<div class=\"ds-reader-stage\"><span class=\"ds-reader-overlay\">12 / 48</span></div>",
+      "css": ".ds-reader-stage { display: grid; place-items: end center; width: 240px; height: 160px; padding: 16px; background: #000000; } .ds-reader-overlay { padding: 4px 12px; border-radius: 12px; background: rgba(0,0,0,.5); color: #FFFFFF; font: 500 12px/16px system-ui, sans-serif; }"
+    },
+    {
+      "name": "Selected Reader Thumbnail",
+      "kind": "custom",
+      "refersTo": "reader-thumbnail-selected",
+      "description": "Directional page thumbnail with a restrained accent selection state.",
+      "html": "<button class=\"ds-reader-thumb\" aria-label=\"Page 12\"></button>",
+      "css": ".ds-reader-thumb { width: 56px; height: 80px; border: 1px solid #1685A9; border-radius: 4px; background: #303030; transform: scale(1.15); transform-origin: bottom center; transition: transform 180ms cubic-bezier(.2,0,0,1); } .ds-reader-thumb:hover { filter: brightness(1.15); } .ds-reader-thumb:focus-visible { outline: 3px solid #FFFFFF; outline-offset: 3px; } .ds-reader-thumb:active { transform: scale(1.1); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "Ink in Motion",
+    "overview": "Inkleaf should feel like ink moving only when the reader asks it to move. The interface is quiet at rest, then becomes expressive through page changes, gestures, selection feedback, and transitions that preserve spatial continuity. Material 3 Expressive supplies the shape and motion vocabulary, but the comic remains visually dominant. The system is content-first, moderately spacious, and familiar to an Android user. It rejects feature-heavy, visually noisy interfaces that fill the library with competing entry points, labels, recommendations, or decoration. Expressiveness must clarify state or movement; it must never become ambient spectacle.",
+    "keyCharacteristics": [
+      "Dynamic Material color derived from a user-selected seed or Android wallpaper.",
+      "Tonal, flat-at-rest surfaces with elevation reserved for true overlays.",
+      "A compact 4dp-based rhythm with 12–16dp content spacing.",
+      "Familiar Material controls with restrained Expressive shape and motion.",
+      "A dedicated black reading stage that isolates comic pages from app chrome."
+    ],
+    "rules": [
+      {
+        "name": "The Seed, Not Swatches Rule",
+        "body": "Store and expose color seeds; generate the complete Material role scheme at runtime through Material Kolor or Android Dynamic Color.",
+        "section": "colors"
+      },
+      {
+        "name": "The Neutral Ink Rule",
+        "body": "Soft Charcoal Ink always uses the Neutral palette style. Never allow a chromatic generator to turn it into purple-gray.",
+        "section": "colors"
+      },
+      {
+        "name": "The Comic Owns the Stage Rule",
+        "body": "In the reader, the page and black stage dominate. Theme color appears only as a controlled accent for selection, progress, and actionable state.",
+        "section": "colors"
+      },
+      {
+        "name": "The Material Role Rule",
+        "body": "Choose typography by semantic Material role. Never hand-pick an isolated text size to make one screen feel more dramatic.",
+        "section": "typography"
+      },
+      {
+        "name": "The Comic Is the Display Face Rule",
+        "body": "App typography must not compete with cover art or page imagery. No decorative display fonts in navigation, buttons, labels, or reader controls.",
+        "section": "typography"
+      },
+      {
+        "name": "The Tonal First Rule",
+        "body": "Use Material surface roles before adding shadow. If a resting card needs a wide decorative shadow to read as a card, the hierarchy is wrong.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Overlay Earns Elevation Rule",
+        "body": "Only an element that interrupts or overlays the current plane may use visible elevation.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do keep the comic visually dominant and reveal controls in response to reader intent.",
+      "Do use MaterialTheme.colorScheme roles for app surfaces and generate them from the selected seed or Android wallpaper.",
+      "Do build spacing from 4, 8, 12, 16, 24, and 32dp, using 12–16dp for most content layout.",
+      "Do use standard Material 3 Expressive components and state behavior before creating custom controls.",
+      "Do preserve at least 48×48dp touch targets even when the visible icon or swatch is smaller.",
+      "Do use motion to explain page direction, selection, entry, exit, and transient control state."
+    ],
+    "donts": [
+      "Don't create feature-heavy, visually noisy interfaces that fill the library with competing entry points, labels, recommendations, or decoration.",
+      "Don't let secondary tools distract from choosing a comic and reading it.",
+      "Don't use Expressive motion, shape, or color as ambient decoration; every expressive choice must communicate state or movement.",
+      "Don't hard-code app surface colors when a Material color role exists.",
+      "Don't add decorative shadows to resting comic cards or pair a thin border with a wide soft shadow.",
+      "Don't add nested cards, oversized corner radii, gradient text, glassmorphism, decorative grids, or striped backgrounds.",
+      "Don't port iOS navigation, dialogs, switches, or back behavior into the Android interface."
+    ]
+  }
+}

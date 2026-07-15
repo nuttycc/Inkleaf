@@ -15,7 +15,7 @@ import kotlinx.coroutines.flow.Flow
  */
 @Dao
 interface ComicDao {
-    @Query("SELECT * FROM comics ORDER BY lastReadAt DESC, addedAt DESC")
+    @Query("SELECT * FROM comics WHERE isDraft = 0 ORDER BY lastReadAt DESC, addedAt DESC")
     fun observeAll(): Flow<List<ComicEntity>>
 
     @Query("SELECT * FROM comics WHERE id = :id")
@@ -36,6 +36,9 @@ interface ComicDao {
 
     @Query("UPDATE comics SET lastReadChapterIndex = :chapterIndex, lastReadPage = :page, lastReadAt = :time WHERE id = :id")
     suspend fun updateProgress(id: Long, chapterIndex: Int, page: Int, time: Long)
+
+    @Query("UPDATE comics SET lastReadChapterIndex = 0, lastReadPage = :page, lastReadPageId = :pageId, lastReadAt = :time WHERE id = :id")
+    suspend fun updateAlbumProgress(id: Long, page: Int, pageId: String?, time: Long)
 
     /**
      * 仅更新进度章节索引，不碰 lastReadPage / lastReadAt。
@@ -74,7 +77,37 @@ interface ComicDao {
 
     /** 只更新封面，不动 pageCount（页数留给首次打开时回填） */
     @Query("UPDATE comics SET coverPath = :coverPath WHERE id = :id")
-    suspend fun updateCover(id: Long, coverPath: String)
+    suspend fun updateCover(id: Long, coverPath: String?)
+
+    @Query("UPDATE comics SET coverPath = :coverPath, coverPageId = :coverPageId WHERE id = :id")
+    suspend fun updateAlbumCover(id: Long, coverPath: String?, coverPageId: String?)
+
+    @Query("UPDATE comics SET uri = :uri, fileKey = :fileKey WHERE id = :id")
+    suspend fun updateIdentity(id: Long, uri: String, fileKey: String)
+
+    @Query(
+        """UPDATE comics SET
+               title = :title,
+               pageCount = :pageCount,
+               lastReadChapterIndex = 0,
+               lastReadPage = :lastReadPage,
+               lastReadPageId = :lastReadPageId,
+               coverPageId = :coverPageId,
+               isMissing = 0,
+               isDraft = 0
+           WHERE id = :id"""
+    )
+    suspend fun updateAlbumMetadata(
+        id: Long,
+        title: String,
+        pageCount: Int,
+        lastReadPage: Int,
+        lastReadPageId: String?,
+        coverPageId: String?,
+    )
+
+    @Query("SELECT * FROM comics WHERE sourceType = :sourceType")
+    suspend fun getBySourceType(sourceType: BookSourceType): List<ComicEntity>
 
     /**
      * 自动生成的封面只能填补当前快照里的空位/失效路径；如果用户已经手动
@@ -94,6 +127,6 @@ interface ComicDao {
         coverPath: String?,
     ): Int
 
-    @Query("SELECT * FROM comics WHERE coverPath IS NULL AND isMissing = 0")
+    @Query("SELECT * FROM comics WHERE coverPath IS NULL AND isMissing = 0 AND isDraft = 0")
     suspend fun getComicsWithoutCover(): List<ComicEntity>
 }

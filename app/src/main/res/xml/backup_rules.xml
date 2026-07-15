@@ -6,6 +6,10 @@
    See https://developer.android.com/about/versions/12/backup-restore
 -->
 <full-backup-content>
+    <!-- Album source images can be large and are intentionally restored from exported CBZ files. -->
+    <exclude
+        domain="file"
+        path="albums/" />
     <!--
    <include domain="sharedpref" path="."/>
    <exclude domain="sharedpref" path="device.xml"/>

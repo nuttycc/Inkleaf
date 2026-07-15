@@ -53,12 +53,15 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
+import com.exio.inkleaf.data.AlbumExporter
+import com.exio.inkleaf.data.AlbumRepository
 import com.exio.inkleaf.data.ComicRepository
 import com.exio.inkleaf.data.ReaderCache
 import com.exio.inkleaf.data.ThemeSettings
 import com.exio.inkleaf.data.ThemeSettingsRepository
 import com.exio.inkleaf.ui.FavoriteViewerScreen
 import com.exio.inkleaf.ui.FavoritesScreen
+import com.exio.inkleaf.ui.AlbumEditorScreen
 import com.exio.inkleaf.ui.ReaderScreen
 import com.exio.inkleaf.ui.SettingsScreen
 import com.exio.inkleaf.ui.ShelfScreen
@@ -77,6 +80,9 @@ data object ShelfRoute
 
 @Serializable
 data class ReaderRoute(val comicId: Long, val initialPage: Int? = null)
+
+@Serializable
+data class AlbumEditorRoute(val comicId: Long? = null)
 
 @Serializable
 data object FavoritesRoute
@@ -242,6 +248,8 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null) {
             lifecycleScope.launch(Dispatchers.IO) {
                 ReaderCache.cleanupOnColdStart(this@MainActivity)
+                AlbumRepository(this@MainActivity).cleanupOnColdStart()
+                AlbumExporter.cleanupOnColdStart(this@MainActivity)
             }
         }
 
@@ -341,7 +349,20 @@ class MainActivity : ComponentActivity() {
                             composable<ShelfRoute> {
                                 ShelfScreen(
                                     onOpenComic = { id -> navController.navigate(ReaderRoute(id)) },
+                                    onCreateAlbum = {
+                                        navController.navigate(AlbumEditorRoute())
+                                    },
+                                    onEditAlbum = { id ->
+                                        navController.navigate(AlbumEditorRoute(id))
+                                    },
                                     onOpenSettings = { navController.navigate(SettingsRoute) },
+                                )
+                            }
+                            composable<AlbumEditorRoute> { entry ->
+                                val route = entry.toRoute<AlbumEditorRoute>()
+                                AlbumEditorScreen(
+                                    comicId = route.comicId,
+                                    onBack = { navController.popBackStack() },
                                 )
                             }
                             composable<ReaderRoute> { entry ->

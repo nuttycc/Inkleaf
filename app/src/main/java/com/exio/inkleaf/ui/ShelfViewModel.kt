@@ -1,6 +1,7 @@
 package com.exio.inkleaf.ui
 
 import android.app.Application
+import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import androidx.lifecycle.AndroidViewModel
@@ -11,6 +12,7 @@ import androidx.lifecycle.viewModelScope
 import com.exio.inkleaf.data.AddComicOutcome
 import com.exio.inkleaf.data.AddFolderOutcome
 import com.exio.inkleaf.data.AddSeriesFolderOutcome
+import com.exio.inkleaf.data.AlbumExporter
 import com.exio.inkleaf.data.ComicRepository
 import com.exio.inkleaf.data.CoverAspect
 import com.exio.inkleaf.data.CoverCrop
@@ -47,6 +49,7 @@ data class ScanState(
 
 class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycleObserver {
     private val repo = ComicRepository(app)
+    private val albumExporter = AlbumExporter(app)
     private val settingsRepo = ShelfSettingsRepository(app)
 
     /**
@@ -97,6 +100,7 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycle
 
     private var scanJob: Job? = null
     private var coverJob: Job? = null
+    private var albumExportJob: Job? = null
 
     init {
         // 进程级生命周期：ON_START 只在"App 从后台回到前台"时发生——
@@ -272,6 +276,47 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycle
         viewModelScope.launch { repo.deleteComic(comic) }
     }
 
+    fun shareAlbum(comic: ComicEntity, onReady: (Intent) -> Unit) {
+        if (albumExportJob?.isActive == true) {
+            showMessage("已有图册正在导出")
+            return
+        }
+        showMessage("正在生成分享文件…")
+        albumExportJob = viewModelScope.launch {
+            try {
+                onReady(albumExporter.createShareIntent(comic.id))
+            } catch (e: Exception) {
+                showMessage(e.message?.let { "生成分享文件失败：$it" } ?: "生成分享文件失败")
+            }
+        }
+    }
+
+    fun prepareAlbumFileName(comic: ComicEntity, onReady: (String) -> Unit) {
+        viewModelScope.launch {
+            try {
+                onReady(albumExporter.suggestedFileName(comic.id))
+            } catch (e: Exception) {
+                showMessage(e.message?.let { "无法生成文件名：$it" } ?: "无法生成文件名")
+            }
+        }
+    }
+
+    fun exportAlbum(comicId: Long, title: String, uri: Uri) {
+        if (albumExportJob?.isActive == true) {
+            showMessage("已有图册正在导出")
+            return
+        }
+        showMessage("正在保存图册…")
+        albumExportJob = viewModelScope.launch {
+            try {
+                albumExporter.exportToUri(comicId, uri)
+                showMessage("已保存《$title》")
+            } catch (e: Exception) {
+                showMessage(e.message?.let { "保存失败：$it" } ?: "保存失败")
+            }
+        }
+    }
+
     /**
      * 判断一本漫画是否来自 PDF 章节目录（用于删除对话框的提示文案）。
      * 直接读已缓存的 folders 列表，避免为弹窗再启动异步查询。
@@ -349,7 +394,7 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycle
         ShelfGroupFilterKind.GROUP -> comics.filter { it.groupId == selection.groupId }
     }
 
-    private fun showMessage(message: String) {
+    fun showMessage(message: String) {
         _scanState.value = _scanState.value.copy(message = message)
     }
 

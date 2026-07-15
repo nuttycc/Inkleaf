@@ -5,15 +5,18 @@
 -->
 <data-extraction-rules>
     <cloud-backup>
+        <!-- Album source images can be large and are intentionally restored from exported CBZ files. -->
+        <exclude
+            domain="file"
+            path="albums/" />
         <!-- TODO: Use <include> and <exclude> to control what is backed up.
         <include .../>
         <exclude .../>
         -->
     </cloud-backup>
-    <!--
     <device-transfer>
-        <include .../>
-        <exclude .../>
+        <exclude
+            domain="file"
+            path="albums/" />
     </device-transfer>
-    -->
 </data-extraction-rules>

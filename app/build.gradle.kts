@@ -92,6 +92,7 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.documentfile)
     implementation(libs.ahmer.pdfium)
+    implementation(libs.reorderable)
 
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))

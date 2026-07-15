@@ -33,10 +33,16 @@
                     android:mimeType="application/x-cbz"
                     android:scheme="content" />
                 <data
+                    android:mimeType="application/vnd.comicbook+zip"
+                    android:scheme="content" />
+                <data
                     android:mimeType="application/zip"
                     android:scheme="file" />
                 <data
                     android:mimeType="application/x-cbz"
+                    android:scheme="file" />
+                <data
+                    android:mimeType="application/vnd.comicbook+zip"
                     android:scheme="file" />
             </intent-filter>
         </activity>
