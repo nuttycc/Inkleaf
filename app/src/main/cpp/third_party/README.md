@@ -29,3 +29,16 @@ construction during cleanup.
 - License: MIT
 
 The same source-selection and local safety-patch policy as Real-CUGAN applies.
+
+## Real-ESRGAN ncnn Vulkan adapter
+
+- Commit: `37026f49824c5cf84062e7c6a5dd71445dcf610f`
+- Source: <https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan>
+- Adapter license: MIT, including the retained realsr-ncnn-vulkan MIT notice
+- Real-ESRGAN project license: BSD 3-Clause
+
+The adapter and four preprocessing/postprocessing shaders are vendored. Inkleaf adds the same
+CPU tiling path, error propagation, allocation guards, and runtime shader compilation used by the
+other adapters. The CPU tiling path is adapted from the vendored Waifu2x adapter, whose MIT notice
+remains in `waifu2x/LICENSE`. Model sessions keep TTA disabled. Official ncnn model files are
+extracted from the pinned Real-ESRGAN `v0.2.5.0` release archive and are not bundled in the APK.

@@ -24,6 +24,7 @@ class NcnnEnhancementBudgetTest {
         val heapBytes = 64L * 1024 * 1024
 
         assertEquals(heapBytes / 4L / 48L, calculateMaxInputPixels(heapBytes))
+        assertEquals(heapBytes / 4L / 144L, calculateMaxInputPixels(heapBytes, scale = 4))
     }
 
     @Test
@@ -31,6 +32,7 @@ class NcnnEnhancementBudgetTest {
         val heapBytes = 2L * 1024 * 1024 * 1024
 
         assertEquals(64L * 1024 * 1024 / 48L, calculateMaxInputPixels(heapBytes))
+        assertEquals(64L * 1024 * 1024 / 144L, calculateMaxInputPixels(heapBytes, scale = 4))
         assertEquals(24 * 1024, calculateBitmapCacheKilobytes(heapBytes))
     }
 }

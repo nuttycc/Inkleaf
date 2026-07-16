@@ -5,6 +5,14 @@ data class EnhancementModelArtifact(
     val url: String,
     val bytes: Long,
     val sha256: String,
+    val archiveEntry: String? = null,
+)
+
+data class EnhancementModelArchive(
+    val packageId: String,
+    val url: String,
+    val bytes: Long,
+    val sha256: String,
 )
 
 data class EnhancementModelDescriptor(
@@ -21,7 +29,10 @@ data class EnhancementModelDescriptor(
     val license: String,
     val sourceUrl: String,
     val artifacts: List<EnhancementModelArtifact>,
-)
+    val archive: EnhancementModelArchive? = null,
+) {
+    val installedSize: Long get() = artifacts.sumOf(EnhancementModelArtifact::bytes)
+}
 
 object EnhancementSelectionIds {
     const val ORIGINAL = "original"
@@ -33,6 +44,13 @@ object EnhancementSelectionIds {
 }
 
 object EnhancementModelCatalog {
+    private val realEsrganNcnnArchive = EnhancementModelArchive(
+        packageId = "realesrgan-ncnn-vulkan-20220424-ubuntu",
+        url = "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-20220424-ubuntu.zip",
+        bytes = 46_931_474,
+        sha256 = "e5aa6eb131234b87c0c51f82b89390f5e3e642b7b70f2b9bbe95b6a285a40c96",
+    )
+
     val models: List<EnhancementModelDescriptor> = listOf(
         EnhancementModelDescriptor(
             id = "realcugan-2x-nose",
@@ -117,6 +135,68 @@ object EnhancementModelCatalog {
                     sha256 = "413195ffde05b4d43807792c6c020c916cecdf25dcf002ee83f5e28d5cc246c6",
                 ),
             ),
+        ),
+        EnhancementModelDescriptor(
+            id = "realesrgan-animevideov3-2x",
+            displayName = "Real-ESRGAN AnimeVideo-v3 2x",
+            family = "Real-ESRGAN",
+            version = "v0.2.5.0 · adapter 37026f4",
+            variant = "AnimeVideo-v3 / native 2×",
+            scale = 2,
+            targetBackend = "ncnn · Vulkan / CPU",
+            downloadSize = realEsrganNcnnArchive.bytes,
+            capabilities = listOf("2× 超分", "动漫线条增强", "轻量 GAN 修复"),
+            recommendedFor = listOf("漫画阅读实时增强", "动漫彩图", "性能较低设备"),
+            license = "主项目 BSD-3-Clause；ncnn 实现 MIT；模型权重未单独声明",
+            sourceUrl = "https://github.com/xinntao/Real-ESRGAN",
+            artifacts = listOf(
+                EnhancementModelArtifact(
+                    filename = "realesr-animevideov3-x2.bin",
+                    url = "${realEsrganNcnnArchive.url}#models/realesr-animevideov3-x2.bin",
+                    bytes = 1_247_368,
+                    sha256 = "548a36f9c3f4ab8da56cd3b13badf23968bee207b396dad14d04b830e5f2ab2d",
+                    archiveEntry = "models/realesr-animevideov3-x2.bin",
+                ),
+                EnhancementModelArtifact(
+                    filename = "realesr-animevideov3-x2.param",
+                    url = "${realEsrganNcnnArchive.url}#models/realesr-animevideov3-x2.param",
+                    bytes = 3_173,
+                    sha256 = "b88ff4f00ebf019a7fdac17fdd45a7fd3665d37509efc5baf2e4da2e24420a04",
+                    archiveEntry = "models/realesr-animevideov3-x2.param",
+                ),
+            ),
+            archive = realEsrganNcnnArchive,
+        ),
+        EnhancementModelDescriptor(
+            id = "realesrgan-x4plus-anime-4x",
+            displayName = "Real-ESRGAN x4plus Anime 4x",
+            family = "Real-ESRGAN",
+            version = "v0.2.5.0 · adapter 37026f4",
+            variant = "x4plus Anime 6B / native 4×",
+            scale = 4,
+            targetBackend = "ncnn · Vulkan / CPU",
+            downloadSize = realEsrganNcnnArchive.bytes,
+            capabilities = listOf("4× 超分", "动漫插画增强", "高质量 GAN 修复"),
+            recommendedFor = listOf("小尺寸漫画页", "动漫插画", "高性能 Vulkan 设备"),
+            license = "主项目 BSD-3-Clause；ncnn 实现 MIT；模型权重未单独声明",
+            sourceUrl = "https://github.com/xinntao/Real-ESRGAN",
+            artifacts = listOf(
+                EnhancementModelArtifact(
+                    filename = "realesrgan-x4plus-anime.bin",
+                    url = "${realEsrganNcnnArchive.url}#models/realesrgan-x4plus-anime.bin",
+                    bytes = 8_943_500,
+                    sha256 = "fe01c269cfd10cdef8e018ab66ebe750cf79c7af4d1f9c16c737e1295229bacc",
+                    archiveEntry = "models/realesrgan-x4plus-anime.bin",
+                ),
+                EnhancementModelArtifact(
+                    filename = "realesrgan-x4plus-anime.param",
+                    url = "${realEsrganNcnnArchive.url}#models/realesrgan-x4plus-anime.param",
+                    bytes = 30_290,
+                    sha256 = "2b8fb6e0ae4d2d85704ca08c119a2f5ea40add4f2ecd512eb7f4cd44b6127ed4",
+                    archiveEntry = "models/realesrgan-x4plus-anime.param",
+                ),
+            ),
+            archive = realEsrganNcnnArchive,
         ),
     )
 

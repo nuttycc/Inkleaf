@@ -34,11 +34,13 @@ internal fun calculateInferenceSampleSize(
     }
 }
 
-internal fun calculateMaxInputPixels(maxMemoryBytes: Long): Long {
+internal fun calculateMaxInputPixels(maxMemoryBytes: Long, scale: Int = 2): Long {
+    require(scale > 0)
+    val estimatedBytesPerInputPixel = 16L + 8L * scale * scale
     val inferenceBudget = (maxMemoryBytes / INFERENCE_HEAP_DIVISOR)
         .coerceAtMost(MAX_INFERENCE_BYTES)
-        .coerceAtLeast(ESTIMATED_BYTES_PER_INPUT_PIXEL)
-    return inferenceBudget / ESTIMATED_BYTES_PER_INPUT_PIXEL
+        .coerceAtLeast(estimatedBytesPerInputPixel)
+    return inferenceBudget / estimatedBytesPerInputPixel
 }
 
 internal fun calculateBitmapCacheKilobytes(maxMemoryBytes: Long): Int =
@@ -104,6 +106,7 @@ object NcnnEnhancementEngine {
     private data class Session(
         val handle: Long,
         val backend: EnhancementInferenceBackend,
+        val scale: Int,
         val inferenceMutex: Mutex = Mutex(),
         var closed: Boolean = false,
     )
@@ -171,14 +174,14 @@ object NcnnEnhancementEngine {
                         ?: return@withLock EnhancementInferenceOutcome.Failure(
                             "模型加载失败，请重新下载模型包。"
                         )
-                    prepared = prepareInput(source)
+                    prepared = prepareInput(source, session.scale)
                         ?: return@withLock EnhancementInferenceOutcome.Failure(
                             "页面尺寸过大，无法安全创建推理位图。"
                         )
                     val inferenceInput = requireNotNull(prepared)
                     unownedOutput = Bitmap.createBitmap(
-                        inferenceInput.width * MODEL_SCALE,
-                        inferenceInput.height * MODEL_SCALE,
+                        inferenceInput.width * session.scale,
+                        inferenceInput.height * session.scale,
                         Bitmap.Config.ARGB_8888,
                     ).apply { setHasAlpha(inferenceInput.hasAlpha()) }
                     val inferenceOutput = requireNotNull(unownedOutput)
@@ -297,6 +300,7 @@ object NcnnEnhancementEngine {
             if (handle == 0L) return@withLock null
             Session(
                 handle = handle,
+                scale = model.scale,
                 backend = if (NativeEnhancementBridge.sessionUsesVulkan(handle)) {
                     EnhancementInferenceBackend.VULKAN
                 } else {
@@ -318,7 +322,7 @@ object NcnnEnhancementEngine {
             modelId !in disabledModels && modelGenerations.getOrDefault(modelId, 0L) == generation
         }
 
-    private fun prepareInput(source: Bitmap): Bitmap? {
+    private fun prepareInput(source: Bitmap, scale: Int): Bitmap? {
         val argb = try {
             if (source.config == Bitmap.Config.ARGB_8888 && !source.isRecycled) {
                 source
@@ -329,7 +333,7 @@ object NcnnEnhancementEngine {
             return null
         } ?: return null
 
-        val maxInputPixels = maxInputPixels()
+        val maxInputPixels = maxInputPixels(scale)
         val sourcePixels = argb.width.toLong() * argb.height.toLong()
         if (sourcePixels <= maxInputPixels) return argb
 
@@ -345,16 +349,15 @@ object NcnnEnhancementEngine {
         return scaled
     }
 
-    fun maxInputPixels(): Long = calculateMaxInputPixels(Runtime.getRuntime().maxMemory())
+    fun maxInputPixels(scale: Int = 2): Long =
+        calculateMaxInputPixels(Runtime.getRuntime().maxMemory(), scale)
 
-    private const val MODEL_SCALE = 2
     // Includes source/prepared overlap, native input/output, Java output, and headroom.
     private const val NATIVE_RESULT_OK = 0
     private const val NATIVE_ERROR_SESSION_CLOSED = -1
     private const val NATIVE_ERROR_MODEL_DISABLED = -2
 }
 
-private const val ESTIMATED_BYTES_PER_INPUT_PIXEL = 48L
 private const val INFERENCE_HEAP_DIVISOR = 4L
 private const val CACHE_HEAP_DIVISOR = 12L
 private const val MAX_INFERENCE_BYTES = 64L * 1024 * 1024

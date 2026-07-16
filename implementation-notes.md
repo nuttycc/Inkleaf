@@ -9,11 +9,13 @@
 - Add a settings entry and a full model-management screen.
 - Keep the catalog and runtime boundary extensible without hard-coding UI branches per model.
 
-## Initial Catalog
+## Catalog
 
 - Real-CUGAN 2x NoSE
 - Real-CUGAN 2x Conservative
 - Waifu2x UpConv7 Anime 2x
+- Real-ESRGAN AnimeVideo-v3 2x
+- Real-ESRGAN x4plus Anime 4x
 
 Only artifacts with verified direct download URLs and SHA-256 metadata are included.
 
@@ -61,6 +63,13 @@ Only artifacts with verified direct download URLs and SHA-256 metadata are inclu
   model artifact hashes.
 - Adapter failures from ncnn input/extract/submit operations are propagated to JNI instead of
   allowing empty tensors to reach later stages. Real-CUGAN gap synchronization remains intact.
+- Real-ESRGAN models share one pinned official `v0.2.5.0` ncnn archive. The downloader verifies the
+  full 46,931,474-byte ZIP, caches it by package ID and SHA-256, extracts only explicitly declared
+  entries, then verifies each extracted model file independently before atomic installation. The
+  shared archive is counted in total model storage and removed after the last dependent model is
+  deleted.
+- Output scale is session-driven rather than fixed at 2×. The memory budget accounts for the much
+  larger 4× native and Java outputs before decoding or rendering the source page.
 
 ## Deviations
 
@@ -76,6 +85,9 @@ Only artifacts with verified direct download URLs and SHA-256 metadata are inclu
 - The vendored adapters retain upstream TTA-only branches, but Inkleaf constructs every session
   with TTA disabled and exposes no TTA setting. Allocation guards were hardened for every reachable
   non-TTA CPU/Vulkan path; the unused TTA-only branches remain outside the supported runtime path.
+- If the last installed Real-ESRGAN model is deleted while a sibling model is still installing, the
+  shared ZIP is conservatively retained. A later refresh or app start removes it if that sibling
+  install fails or is cancelled.
 - Enhanced pages are cached in memory only. Persistent disk caching is deferred to avoid adding a
   second large cache budget and lossless-encoding work before device performance is measured.
 - The initial catalog labels repository licensing separately from model-weight licensing. Weight
@@ -91,6 +103,8 @@ Only artifacts with verified direct download URLs and SHA-256 metadata are inclu
 - Latest safety pass:
   `./gradlew.bat ':app:buildCMakeDebug[arm64-v8a][inkleaf_enhancement]' --offline` passed.
 - Latest safety pass: `./gradlew.bat :app:compileDebugAndroidTestKotlin --offline` passed.
+- Real-ESRGAN extension pass re-ran JVM tests and the arm64 native target after ZIP extraction,
+  dynamic 2×/4× output, CPU/Vulkan adapter, and shared-cache concurrency changes; all passed.
 - Earlier integration validation also compiled all four configured ABIs with
   `:app:externalNativeBuildDebug`; it was intentionally not repeated after the low-spec-machine
   constraint.

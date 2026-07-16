@@ -105,9 +105,9 @@ import com.exio.inkleaf.data.ComicOpenException
 import com.exio.inkleaf.data.ComicVolume
 import com.exio.inkleaf.data.ReaderPageCacheKey
 import com.exio.inkleaf.data.db.FavoritePageEntity
+import com.exio.inkleaf.data.enhancement.EnhancementInferenceOutcome
 import com.exio.inkleaf.data.enhancement.EnhancementModelCatalog
 import com.exio.inkleaf.data.enhancement.EnhancementModelInstallState
-import com.exio.inkleaf.data.enhancement.EnhancementInferenceOutcome
 import com.exio.inkleaf.data.enhancement.EnhancementSelectionIds
 import com.exio.inkleaf.data.enhancement.NcnnEnhancementEngine
 import com.exio.inkleaf.data.enhancement.calculateInferenceSampleSize
@@ -959,7 +959,11 @@ private fun ComicPage(
                     PageContent.Bytes(volume.loadPageBytes(page))
                 }
             } else {
-                val sourceBitmap = loadInferenceSourceBitmap(volume, page)
+                val sourceBitmap = loadInferenceSourceBitmap(
+                    volume = volume,
+                    page = page,
+                    scale = enhancementModel.scale,
+                )
                 val sourceImage = sourceBitmap.asImageBitmap()
                 value = PageContent.Bitmap(
                     bitmap = sourceImage,
@@ -1120,8 +1124,12 @@ private fun ComicPage(
     }
 }
 
-private suspend fun loadInferenceSourceBitmap(volume: ComicVolume, page: Int): Bitmap {
-    val maxPixels = NcnnEnhancementEngine.maxInputPixels()
+private suspend fun loadInferenceSourceBitmap(
+    volume: ComicVolume,
+    page: Int,
+    scale: Int,
+): Bitmap {
+    val maxPixels = NcnnEnhancementEngine.maxInputPixels(scale)
     try {
         volume.loadPageBitmapForInference(page, maxPixels)?.let {
             return it.asAndroidBitmap()

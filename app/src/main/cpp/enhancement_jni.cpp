@@ -4,6 +4,7 @@
 #include <android/log.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
 #include <mutex>
 #include <new>
@@ -13,6 +14,7 @@
 #include "gpu.h"
 #include "mat.h"
 #include "realcugan.h"
+#include "realesrgan.h"
 #include "waifu2x.h"
 
 namespace {
@@ -30,20 +32,25 @@ enum class ModelKind {
     RealCuganNoSe,
     RealCuganConservative,
     Waifu2xUpconv7,
+    RealEsrganAnimeVideoV3,
+    RealEsrganX4PlusAnime,
 };
 
 struct EnhancementSession {
-    EnhancementSession(ModelKind model_kind, bool vulkan)
-        : kind(model_kind), uses_vulkan(vulkan) {}
+    EnhancementSession(ModelKind model_kind, bool vulkan, int output_scale)
+        : kind(model_kind), uses_vulkan(vulkan), scale(output_scale) {}
 
     ModelKind kind;
     bool uses_vulkan;
+    int scale;
     RealCUGAN* realcugan = nullptr;
+    RealESRGAN* realesrgan = nullptr;
     Waifu2x* waifu2x = nullptr;
     std::mutex inference_mutex;
 
     ~EnhancementSession() {
         delete realcugan;
+        delete realesrgan;
         delete waifu2x;
     }
 };
@@ -71,8 +78,24 @@ ModelKind parse_model_kind(const std::string& model_id, bool* valid) {
     if (model_id == "realcugan-2x-nose") return ModelKind::RealCuganNoSe;
     if (model_id == "realcugan-2x-conservative") return ModelKind::RealCuganConservative;
     if (model_id == "waifu2x-upconv7-anime-2x") return ModelKind::Waifu2xUpconv7;
+    if (model_id == "realesrgan-animevideov3-2x") return ModelKind::RealEsrganAnimeVideoV3;
+    if (model_id == "realesrgan-x4plus-anime-4x") return ModelKind::RealEsrganX4PlusAnime;
     *valid = false;
     return ModelKind::RealCuganNoSe;
+}
+
+int model_scale(ModelKind kind) {
+    return kind == ModelKind::RealEsrganX4PlusAnime ? 4 : 2;
+}
+
+int choose_realesrgan_tile_size(bool uses_vulkan, int scale) {
+    if (!uses_vulkan) return scale >= 4 ? 32 : 64;
+    const ncnn::VulkanDevice* device = ncnn::get_gpu_device(0);
+    if (!device) return 32;
+    const uint32_t heap_budget = device->get_heap_budget();
+    if (heap_budget > 550) return 100;
+    if (heap_budget > 190) return 64;
+    return 32;
 }
 
 int choose_tile_size(bool uses_vulkan) {
@@ -91,14 +114,28 @@ EnhancementSession* create_session(
     const bool use_vulkan = prefer_vulkan && ncnn::get_gpu_count() > 0;
     const int gpu_id = use_vulkan ? 0 : -1;
     const int thread_count = std::max(1, std::min(4, ncnn::get_big_cpu_count()));
-    const int tile_size = choose_tile_size(use_vulkan);
+    const bool is_realesrgan =
+        kind == ModelKind::RealEsrganAnimeVideoV3 ||
+        kind == ModelKind::RealEsrganX4PlusAnime;
+    const int scale = model_scale(kind);
+    const int tile_size = is_realesrgan
+        ? choose_realesrgan_tile_size(use_vulkan, scale)
+        : choose_tile_size(use_vulkan);
 
     EnhancementSession* session =
-        new (std::nothrow) EnhancementSession(kind, use_vulkan);
+        new (std::nothrow) EnhancementSession(kind, use_vulkan, scale);
     if (!session) return nullptr;
 
     int load_result = -1;
-    if (kind == ModelKind::Waifu2xUpconv7) {
+    if (is_realesrgan) {
+        session->realesrgan = new (std::nothrow) RealESRGAN(gpu_id, false, thread_count);
+        if (session->realesrgan) {
+            load_result = session->realesrgan->load(param_path, model_path);
+            session->realesrgan->scale = scale;
+            session->realesrgan->tilesize = tile_size;
+            session->realesrgan->prepadding = 10;
+        }
+    } else if (kind == ModelKind::Waifu2xUpconv7) {
         session->waifu2x = new (std::nothrow) Waifu2x(gpu_id, false, thread_count);
         if (session->waifu2x) {
             load_result = session->waifu2x->load(param_path, model_path);
@@ -149,8 +186,8 @@ int process_bitmap(
         return ERROR_BITMAP_FORMAT;
     }
     if (
-        output_info.width != input_info.width * 2 ||
-        output_info.height != input_info.height * 2
+        output_info.width != input_info.width * session->scale ||
+        output_info.height != input_info.height * session->scale
     ) {
         return ERROR_BITMAP_SIZE;
     }
@@ -158,7 +195,12 @@ int process_bitmap(
     const int input_width = static_cast<int>(input_info.width);
     const int input_height = static_cast<int>(input_info.height);
     ncnn::Mat input(input_width, input_height, static_cast<size_t>(4u), 4);
-    ncnn::Mat output(input_width * 2, input_height * 2, static_cast<size_t>(4u), 4);
+    ncnn::Mat output(
+        input_width * session->scale,
+        input_height * session->scale,
+        static_cast<size_t>(4u),
+        4
+    );
     if (input.empty() || output.empty()) {
         return ERROR_ALLOCATION;
     }
@@ -206,6 +248,8 @@ int process_bitmap(
         std::lock_guard<std::mutex> guard(session->inference_mutex);
         if (session->realcugan) {
             process_result = session->realcugan->process(input, output);
+        } else if (session->realesrgan) {
+            process_result = session->realesrgan->process(input, output);
         } else if (session->waifu2x) {
             process_result = session->waifu2x->process(input, output);
         }

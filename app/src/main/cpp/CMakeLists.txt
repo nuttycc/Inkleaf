@@ -31,6 +31,7 @@ endfunction()
 
 set(REALCUGAN_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/third_party/realcugan")
 set(WAIFU2X_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/third_party/waifu2x")
+set(REALESRGAN_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/third_party/realesrgan")
 
 set(GENERATED_SHADER_HEADERS)
 foreach(SHADER_NAME IN ITEMS
@@ -44,6 +45,17 @@ foreach(SHADER_NAME IN ITEMS
     inkleaf_add_shader(
         "${REALCUGAN_DIRECTORY}/${SHADER_NAME}.comp"
         GENERATED_SHADER_HEADERS
+    )
+endforeach ()
+foreach (SHADER_NAME IN ITEMS
+        realesrgan_preproc
+        realesrgan_postproc
+        realesrgan_preproc_tta
+        realesrgan_postproc_tta
+)
+    inkleaf_add_shader(
+            "${REALESRGAN_DIRECTORY}/${SHADER_NAME}.comp"
+            GENERATED_SHADER_HEADERS
     )
 endforeach()
 foreach(SHADER_NAME IN ITEMS
@@ -64,6 +76,7 @@ add_library(
     enhancement_jni.cpp
     "${REALCUGAN_DIRECTORY}/realcugan.cpp"
     "${WAIFU2X_DIRECTORY}/waifu2x.cpp"
+        "${REALESRGAN_DIRECTORY}/realesrgan.cpp"
     ${GENERATED_SHADER_HEADERS}
 )
 
@@ -73,6 +86,7 @@ target_include_directories(
     "${CMAKE_CURRENT_BINARY_DIR}"
     "${REALCUGAN_DIRECTORY}"
     "${WAIFU2X_DIRECTORY}"
+        "${REALESRGAN_DIRECTORY}"
 )
 
 target_compile_options(
