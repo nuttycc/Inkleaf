@@ -16,6 +16,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -48,10 +50,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -62,6 +66,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.TransformOrigin
@@ -69,11 +75,13 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -217,6 +225,16 @@ private fun ComicPager(
         pageCount = { volume.totalPageCount },
     )
     val scope = rememberCoroutineScope()
+    var zoomedPage by remember { mutableStateOf<Int?>(null) }
+    var zoomToggleRequest by remember { mutableStateOf(0) }
+    var zoomResetRequest by remember { mutableStateOf(0) }
+    var zoomTogglePage by remember { mutableStateOf(-1) }
+    var zoomResetPage by remember { mutableStateOf(-1) }
+    var zoomToggleAnchor by remember { mutableStateOf(Offset.Unspecified) }
+
+    LaunchedEffect(pagerState.currentPage) {
+        zoomedPage = null
+    }
 
     // 当前页对应的章节信息，用于多章书籍的界面提示
     val currentPage = pagerState.currentPage
@@ -243,30 +261,50 @@ private fun ComicPager(
     Box(
         modifier = modifier
             .fillMaxSize()
-            // 点按与 Pager 的拖动天然不冲突：手指移动超过阈值即升级为拖动、
-            // 由 Pager 接管，点按检测自动作废。工具栏上的按钮/滑杆会消费
-            // 自己的事件，也不会误触发这里
-            .pointerInput(Unit) {
-                detectTapGestures { offset ->
-                    val third = size.width / 3f
-                    when {
-                        offset.x < third -> turnPage(-1)     // 左 1/3：上一页
-                        offset.x > third * 2 -> turnPage(1)  // 右 1/3：下一页
-                        else -> onToggleControls()           // 中间：工具栏开关
-                    }
-                }
+            // 1x 时 Pager 接管单指拖动；放大后由当前页接管平移。
+            // 点按检测在移动超过阈值时自动作废，工具栏上的按钮/滑杆会消费
+            // 自己的事件，也不会误触发这里。
+            .pointerInput(pagerState.currentPage, zoomedPage) {
+                detectTapGestures(
+                    onDoubleTap = { anchor ->
+                        zoomToggleAnchor = anchor
+                        zoomTogglePage = pagerState.currentPage
+                        zoomToggleRequest++
+                    },
+                    onTap = { offset ->
+                        val third = size.width / 3f
+                        when {
+                            zoomedPage == pagerState.currentPage && offset.x !in third..(third * 2) -> Unit
+                            offset.x < third -> turnPage(-1)     // 左 1/3：上一页
+                            offset.x > third * 2 -> turnPage(1)  // 右 1/3：下一页
+                            else -> onToggleControls()           // 中间：工具栏开关
+                        }
+                    },
+                )
             },
     ) {
         HorizontalPager(
             state = pagerState,
             beyondViewportPageCount = 1,
+            userScrollEnabled = zoomedPage != pagerState.currentPage,
             modifier = Modifier.fillMaxSize(),
         ) { page ->
             ComicPage(
                 volume = volume,
                 page = page,
+                currentPage = pagerState.currentPage,
                 cacheKeyPrefix = cacheKeyPrefix,
                 thumbnail = thumbnails[page],
+                zoomToggleRequest = zoomToggleRequest,
+                zoomResetRequest = zoomResetRequest,
+                zoomTogglePage = zoomTogglePage,
+                zoomResetPage = zoomResetPage,
+                zoomToggleAnchor = zoomToggleAnchor,
+                onZoomChanged = { isZoomed ->
+                    if (page == pagerState.currentPage) {
+                        zoomedPage = if (isZoomed) page else null
+                    }
+                },
             )
         }
 
@@ -293,9 +331,14 @@ private fun ComicPager(
             visible = showControls,
             title = title,
             isFavorite = favoritePages.containsKey(pagerState.currentPage),
+            isZoomed = zoomedPage == pagerState.currentPage,
             onBack = onBack,
             onToggleFavorite = { onToggleFavorite(pagerState.currentPage) },
             onSetCover = { onSetCover(pagerState.currentPage) },
+            onResetZoom = {
+                zoomResetPage = pagerState.currentPage
+                zoomResetRequest++
+            },
             modifier = Modifier.align(Alignment.TopCenter),
         )
 
@@ -316,9 +359,11 @@ private fun ReaderTopBar(
     visible: Boolean,
     title: String,
     isFavorite: Boolean,
+    isZoomed: Boolean,
     onBack: () -> Unit,
     onToggleFavorite: () -> Unit,
     onSetCover: () -> Unit,
+    onResetZoom: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     AnimatedVisibility(
@@ -353,6 +398,11 @@ private fun ReaderTopBar(
                     .weight(1f)
                     .padding(end = 8.dp),
             )
+            if (isZoomed) {
+                TextButton(onClick = onResetZoom) {
+                    Text(text = "100%", color = Color.White)
+                }
+            }
             IconButton(onClick = onSetCover) {
                 Icon(
                     painter = painterResource(R.drawable.ic_image),
@@ -689,11 +739,81 @@ private fun readerAccentColor(): Color {
 private fun ComicPage(
     volume: ComicVolume,
     page: Int,
+    currentPage: Int,
     cacheKeyPrefix: String,
     thumbnail: ImageBitmap?,
+    zoomToggleRequest: Int,
+    zoomResetRequest: Int,
+    zoomTogglePage: Int,
+    zoomResetPage: Int,
+    zoomToggleAnchor: Offset,
+    onZoomChanged: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    var scale by remember(page) { mutableFloatStateOf(MIN_ZOOM_SCALE) }
+    var offset by remember(page) { mutableStateOf(Offset.Zero) }
+    var viewportSize by remember(page) { mutableStateOf(IntSize.Zero) }
+
+    fun resetZoom() {
+        scale = MIN_ZOOM_SCALE
+        offset = Offset.Zero
+    }
+
+    fun toggleZoom(anchor: Offset) {
+        if (scale > ZOOMED_THRESHOLD) {
+            resetZoom()
+        } else {
+            scale = DEFAULT_ZOOM_SCALE
+            val center = Offset(viewportSize.width / 2f, viewportSize.height / 2f)
+            offset = if (anchor != Offset.Unspecified) {
+                val requested = (center - anchor) * (DEFAULT_ZOOM_SCALE - 1f)
+                val maxX = viewportSize.width * (DEFAULT_ZOOM_SCALE - 1f) / 2f
+                val maxY = viewportSize.height * (DEFAULT_ZOOM_SCALE - 1f) / 2f
+                Offset(
+                    x = requested.x.coerceIn(-maxX, maxX),
+                    y = requested.y.coerceIn(-maxY, maxY),
+                )
+            } else {
+                Offset.Zero
+            }
+        }
+    }
+
+    val transformState = rememberTransformableState { centroid, zoomChange, panChange, _ ->
+        val nextScale = (scale * zoomChange).coerceIn(MIN_ZOOM_SCALE, MAX_ZOOM_SCALE)
+        if (nextScale <= ZOOMED_THRESHOLD) {
+            resetZoom()
+            return@rememberTransformableState
+        }
+        val center = Offset(viewportSize.width / 2f, viewportSize.height / 2f)
+        val maxX = viewportSize.width * (nextScale - 1f) / 2f
+        val maxY = viewportSize.height * (nextScale - 1f) / 2f
+        // Scale the existing translation with the zoom delta so the content under
+        // the gesture centroid stays anchored while the viewport magnifies.
+        val requested = offset * zoomChange + (centroid - center) * (1f - zoomChange) + panChange
+        scale = nextScale
+        offset = Offset(
+            x = requested.x.coerceIn(-maxX, maxX),
+            y = requested.y.coerceIn(-maxY, maxY),
+        )
+    }
+
+    LaunchedEffect(currentPage) {
+        if (page != currentPage) resetZoom()
+    }
+
+    LaunchedEffect(zoomToggleRequest, zoomTogglePage) {
+        if (zoomTogglePage == page) toggleZoom(zoomToggleAnchor)
+    }
+
+    LaunchedEffect(zoomResetRequest, zoomResetPage) {
+        if (zoomResetPage == page) resetZoom()
+    }
+
+    LaunchedEffect(scale, page) {
+        onZoomChanged(scale > ZOOMED_THRESHOLD)
+    }
 
     // 单页加载结果统一封装在 [PageContent]：失败时返回 Error 而非抛出，
     // 不让异常逃逸到 produceState 协程外导致整页崩溃。spec：corrupt/encrypted
@@ -715,77 +835,112 @@ private fun ComicPage(
         }
     }
 
-    Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .clipToBounds()
+            .onSizeChanged { size ->
+                if (viewportSize != IntSize.Zero && viewportSize != size) resetZoom()
+                viewportSize = size
+            },
+        contentAlignment = Alignment.Center,
+    ) {
         var imageReady by remember(page, content) { mutableStateOf(false) }
 
-        // 垫底层：远跳到未加载页时，原图要经历 zip 解压 + 解码（几十到
-        // 几百毫秒），期间这层保证屏幕有内容、消除黑屏闪烁。
-        // 关键是重度模糊：直接放大的低清图"看得出是糊图"，很难看；
-        // 模糊成只剩色调和明暗的色彩氛围，读作有意的过渡效果。
-        // 原图加载完成后移除垫底层，避免在 Fit 留白处形成持久光晕。
-        // blur 依赖 RenderEffect（API 31+），更低版本宁可黑屏也不展示糊图
-        val canBlur = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
-        val showBlurPlaceholder = !imageReady && thumbnail != null && canBlur && content !is PageContent.Error
-        if (showBlurPlaceholder) {
-            Image(
-                bitmap = thumbnail,
-                contentDescription = null,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .blur(24.dp),
-            )
-        }
-
-        when (val c = content) {
-            is PageContent.Error -> {
-                Text(
-                    text = c.message,
-                    color = Color.White,
-                    style = MaterialTheme.typography.bodyLarge,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(32.dp),
-                )
-            }
-            PageContent.Loading -> {
-                // 没有模糊垫底（预热未到/系统不支持）才显示转圈
-                if (!showBlurPlaceholder) {
-                    DelayedSpinner(showDelay = 200.milliseconds)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                    translationX = offset.x
+                    translationY = offset.y
                 }
-            }
-            is PageContent.Bitmap -> {
-                // PDF 路径：ImageBitmap 直接显示，无 Coil 解码
+                .transformable(
+                    state = transformState,
+                    canPan = { scale > ZOOMED_THRESHOLD },
+                    enabled = page == currentPage,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            // 垫底层：远跳到未加载页时，原图要经历 zip 解压 + 解码（几十到
+            // 几百毫秒），期间这层保证屏幕有内容、消除黑屏闪烁。
+            // 关键是重度模糊：直接放大的低清图"看得出是糊图"，很难看；
+            // 模糊成只剩色调和明暗的色彩氛围，读作有意的过渡效果。
+            // 原图加载完成后移除垫底层，避免在 Fit 留白处形成持久光晕。
+            // blur 依赖 RenderEffect（API 31+），更低版本宁可黑屏也不展示糊图
+            val canBlur = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+            val showBlurPlaceholder =
+                !imageReady && thumbnail != null && canBlur && content !is PageContent.Error
+            if (showBlurPlaceholder) {
                 Image(
-                    bitmap = c.bitmap,
-                    contentDescription = "第 ${page + 1} 页",
+                    bitmap = thumbnail,
+                    contentDescription = null,
                     contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .blur(24.dp),
                 )
-                imageReady = true
             }
-            is PageContent.Bytes -> {
-                // zip/cbz 路径：压缩字节交给 Coil 解码（本来就是压缩图片，无往返）
-                val imageRequest = remember(context, c.bytes, cacheKeyPrefix, page) {
-                    ImageRequest.Builder(context)
-                        .data(c.bytes)
-                        .memoryCacheKey("$cacheKeyPrefix#$page")
-                        // 原图短淡入，避免加载完成时硬切；
-                        // 内存缓存命中时 Coil 自动跳过淡入，翻回已读页无延迟感
-                        .crossfade(150)
-                        .build()
+
+            when (val c = content) {
+                is PageContent.Error -> {
+                    Text(
+                        text = c.message,
+                        color = Color.White,
+                        style = MaterialTheme.typography.bodyLarge,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(32.dp),
+                    )
                 }
-                AsyncImage(
-                    model = imageRequest,
-                    contentDescription = "第 ${page + 1} 页",
-                    contentScale = ContentScale.Fit,
-                    onSuccess = { imageReady = true },
-                    onError = { imageReady = true },
-                    modifier = Modifier.fillMaxSize(),
-                )
+
+                PageContent.Loading -> {
+                    // 没有模糊垫底（预热未到/系统不支持）才显示转圈
+                    if (!showBlurPlaceholder) {
+                        DelayedSpinner(showDelay = 200.milliseconds)
+                    }
+                }
+
+                is PageContent.Bitmap -> {
+                    // PDF 路径：ImageBitmap 直接显示，无 Coil 解码
+                    Image(
+                        bitmap = c.bitmap,
+                        contentDescription = "第 ${page + 1} 页",
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    imageReady = true
+                }
+
+                is PageContent.Bytes -> {
+                    // zip/cbz 路径：压缩字节交给 Coil 解码（本来就是压缩图片，无往返）
+                    val imageRequest = remember(context, c.bytes, cacheKeyPrefix, page) {
+                        ImageRequest.Builder(context)
+                            .data(c.bytes)
+                            .memoryCacheKey("$cacheKeyPrefix#$page")
+                            // 原图短淡入，避免加载完成时硬切；
+                            // 内存缓存命中时 Coil 自动跳过淡入，翻回已读页无延迟感
+                            .crossfade(150)
+                            .build()
+                    }
+                    AsyncImage(
+                        model = imageRequest,
+                        contentDescription = "第 ${page + 1} 页",
+                        contentScale = ContentScale.Fit,
+                        onSuccess = { imageReady = true },
+                        onError = { imageReady = true },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
         }
     }
 }
+
+private const val MIN_ZOOM_SCALE = 1f
+private const val ZOOMED_THRESHOLD = 1.01f
+private const val DEFAULT_ZOOM_SCALE = 2f
+private const val MAX_ZOOM_SCALE = 3f
 
 /**
  * 单页加载结果。优先走 [ComicVolume.loadPageBitmap]（PDF 直接返回渲染好的
