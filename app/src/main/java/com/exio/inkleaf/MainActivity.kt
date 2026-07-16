@@ -60,6 +60,7 @@ import com.exio.inkleaf.data.ThemeSettingsRepository
 import com.exio.inkleaf.ui.AlbumEditorScreen
 import com.exio.inkleaf.ui.FavoriteViewerScreen
 import com.exio.inkleaf.ui.FavoritesScreen
+import com.exio.inkleaf.ui.EnhancementModelManagerScreen
 import com.exio.inkleaf.ui.ReaderScreen
 import com.exio.inkleaf.ui.SettingsScreen
 import com.exio.inkleaf.ui.ShelfScreen
@@ -90,6 +91,9 @@ data class FavoriteViewerRoute(val favoriteId: Long)
 
 @Serializable
 data object SettingsRoute
+
+@Serializable
+data object EnhancementModelsRoute
 
 /** 页面转场时长。全宽滑动的运动量大，350~450ms 区间体感比较合适 */
 private const val NAV_TRANSITION_MS = 400
@@ -390,6 +394,9 @@ class MainActivity : ComponentActivity() {
                                     comicId = route.comicId,
                                     initialPage = route.initialPage,
                                     onBack = { navController.popBackStack() },
+                                    onOpenModelManager = {
+                                        navController.navigate(EnhancementModelsRoute)
+                                    },
                                 )
                             }
                             composable<FavoritesRoute> { entry ->
@@ -439,6 +446,14 @@ class MainActivity : ComponentActivity() {
                                     // 复用顶层已收集的主题状态：进设置页首帧即真实值，
                                     // 不会出现开关从默认值滑到真实值的突变
                                     themeSettings = themeSettings,
+                                    onBack = { navController.popBackStack() },
+                                    onOpenModelManager = {
+                                        navController.navigate(EnhancementModelsRoute)
+                                    },
+                                )
+                            }
+                            composable<EnhancementModelsRoute> {
+                                EnhancementModelManagerScreen(
                                     onBack = { navController.popBackStack() },
                                 )
                             }

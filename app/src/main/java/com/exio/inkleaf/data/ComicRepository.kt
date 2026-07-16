@@ -12,6 +12,8 @@ import com.exio.inkleaf.data.db.FolderWithCount
 import com.exio.inkleaf.data.db.GroupWithCount
 import com.exio.inkleaf.data.db.LibraryFolderEntity
 import com.exio.inkleaf.data.db.LibraryFolderType
+import com.exio.inkleaf.data.enhancement.EnhancementSelectionIds
+import com.exio.inkleaf.data.enhancement.EnhancementModelCatalog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
@@ -76,6 +78,18 @@ class ComicRepository(context: Context) {
     fun observeAll(): Flow<List<ComicEntity>> = dao.observeAll()
 
     suspend fun getComic(id: Long): ComicEntity? = dao.getById(id)
+
+    suspend fun setEnhancementSelection(comicId: Long, selectionId: String) {
+        require(EnhancementSelectionIds.isValid(selectionId)) {
+            "未知的图像增强选项：$selectionId"
+        }
+        dao.updateEnhancementSelection(comicId, selectionId)
+    }
+
+    suspend fun resetEnhancementSelections(modelId: String) {
+        EnhancementModelCatalog.require(modelId)
+        dao.resetEnhancementSelection(modelId, EnhancementSelectionIds.ORIGINAL)
+    }
 
     /** 打开一本书。SAF Uri 的解析收在数据层，UI 不接触存储地址格式 */
     suspend fun openBook(comic: ComicEntity): ComicVolume {

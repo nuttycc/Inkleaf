@@ -1,6 +1,8 @@
 package com.exio.inkleaf.ui
 
 import android.app.Activity
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.os.Build
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -41,8 +43,11 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -69,8 +74,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
@@ -87,6 +96,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
@@ -95,6 +105,13 @@ import com.exio.inkleaf.data.ComicOpenException
 import com.exio.inkleaf.data.ComicVolume
 import com.exio.inkleaf.data.ReaderPageCacheKey
 import com.exio.inkleaf.data.db.FavoritePageEntity
+import com.exio.inkleaf.data.enhancement.EnhancementModelCatalog
+import com.exio.inkleaf.data.enhancement.EnhancementModelInstallState
+import com.exio.inkleaf.data.enhancement.EnhancementInferenceOutcome
+import com.exio.inkleaf.data.enhancement.EnhancementSelectionIds
+import com.exio.inkleaf.data.enhancement.NcnnEnhancementEngine
+import com.exio.inkleaf.data.enhancement.calculateInferenceSampleSize
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -107,16 +124,36 @@ fun ReaderScreen(
     comicId: Long,
     initialPage: Int? = null,
     onBack: () -> Unit,
+    onOpenModelManager: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val viewModel: ReaderViewModel = viewModel {
         val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY]!!
         ReaderViewModel(app, comicId, initialPage)
     }
+    val enhancementModelsViewModel: EnhancementModelsViewModel = viewModel()
+    val modelStates by enhancementModelsViewModel.modelStates.collectAsStateWithLifecycle()
 
     // 工具栏显隐提升到这一层：系统栏控制要在 Loading 阶段就生效，
     // 不能等 Ready 才开始（否则进入时多一次"系统栏缩进"的视觉跳变）
     var showControls by remember { mutableStateOf(false) }
+    var showEnhancementSheet by remember { mutableStateOf(false) }
+
+    val selectedEnhancementId = viewModel.enhancementSelectionId
+    val selectedModelState = modelStates[selectedEnhancementId]
+    val selectedModelInstalled = EnhancementModelCatalog.find(selectedEnhancementId) == null ||
+            selectedModelState is EnhancementModelInstallState.Installed
+    LaunchedEffect(selectedEnhancementId, selectedModelState) {
+        val selectedId = selectedEnhancementId
+        val selectedModel = EnhancementModelCatalog.find(selectedId)
+        if (
+            selectedId !in EnhancementSelectionIds.builtIn &&
+            (selectedModel == null ||
+                    selectedModelState is EnhancementModelInstallState.NotInstalled)
+        ) {
+            viewModel.setEnhancementSelection(EnhancementSelectionIds.ORIGINAL)
+        }
+    }
 
     val view = LocalView.current
     val context = LocalContext.current
@@ -143,7 +180,7 @@ fun ReaderScreen(
     }
 
     // 系统返回手势/返回键也要走 exitReader，而不是让 Navigation 直接 pop
-    BackHandler(onBack = exitReader)
+    BackHandler(enabled = !showEnhancementSheet, onBack = exitReader)
 
     if (window != null) {
         DisposableEffect(showControls) {
@@ -194,6 +231,9 @@ fun ReaderScreen(
                     onToggleFavorite = viewModel::toggleFavorite,
                     onSetCover = viewModel::setCurrentPageAsCover,
                     onPageChanged = viewModel::saveProgress,
+                    enhancementSelectionId = viewModel.enhancementSelectionId,
+                    enhancementModelInstalled = selectedModelInstalled,
+                    onOpenEnhancement = { showEnhancementSheet = true },
                     onBack = exitReader,
                     showControls = showControls,
                     onToggleControls = { showControls = !showControls },
@@ -201,6 +241,27 @@ fun ReaderScreen(
                 )
             }
         }
+    }
+
+    if (showEnhancementSheet) {
+        ReaderEnhancementSheet(
+            selectedId = viewModel.enhancementSelectionId,
+            modelStates = modelStates,
+            accent = readerAccentColor(),
+            onDismiss = { showEnhancementSheet = false },
+            onOpenManager = {
+                showEnhancementSheet = false
+                if (window != null) {
+                    WindowCompat.getInsetsController(window, view)
+                        .show(WindowInsetsCompat.Type.systemBars())
+                }
+                onOpenModelManager()
+            },
+            onSelect = viewModel::setEnhancementSelection,
+            onInstall = enhancementModelsViewModel::install,
+            onCancel = enhancementModelsViewModel::cancel,
+            onDelete = enhancementModelsViewModel::delete,
+        )
     }
 }
 
@@ -216,6 +277,9 @@ private fun ComicPager(
     onToggleFavorite: (Int) -> Unit,
     onSetCover: (Int) -> Unit,
     onPageChanged: (Int) -> Unit,
+    enhancementSelectionId: String,
+    enhancementModelInstalled: Boolean,
+    onOpenEnhancement: () -> Unit,
     onBack: () -> Unit,
     showControls: Boolean,
     onToggleControls: () -> Unit,
@@ -306,6 +370,8 @@ private fun ComicPager(
                         zoomedPage = if (isZoomed) page else null
                     }
                 },
+                enhancementSelectionId = enhancementSelectionId,
+                enhancementModelInstalled = enhancementModelInstalled,
             )
         }
 
@@ -333,7 +399,9 @@ private fun ComicPager(
             title = title,
             isFavorite = favoritePages.containsKey(pagerState.currentPage),
             isZoomed = zoomedPage == pagerState.currentPage,
+            enhancementSelectionId = enhancementSelectionId,
             onBack = onBack,
+            onOpenEnhancement = onOpenEnhancement,
             onToggleFavorite = { onToggleFavorite(pagerState.currentPage) },
             onSetCover = { onSetCover(pagerState.currentPage) },
             onResetZoom = {
@@ -361,7 +429,9 @@ private fun ReaderTopBar(
     title: String,
     isFavorite: Boolean,
     isZoomed: Boolean,
+    enhancementSelectionId: String,
     onBack: () -> Unit,
+    onOpenEnhancement: () -> Unit,
     onToggleFavorite: () -> Unit,
     onSetCover: () -> Unit,
     onResetZoom: () -> Unit,
@@ -374,6 +444,7 @@ private fun ReaderTopBar(
         modifier = modifier,
     ) {
         val accent = readerAccentColor()
+        var showMoreMenu by remember { mutableStateOf(false) }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -404,11 +475,23 @@ private fun ReaderTopBar(
                     Text(text = "100%", color = Color.White)
                 }
             }
-            IconButton(onClick = onSetCover) {
+            IconButton(onClick = onOpenEnhancement) {
                 Icon(
-                    painter = painterResource(R.drawable.ic_image),
-                    contentDescription = "设为封面",
-                    tint = Color.White,
+                    painter = painterResource(R.drawable.ic_tune),
+                    contentDescription = when (enhancementSelectionId) {
+                        EnhancementSelectionIds.ORIGINAL -> "图像增强，当前为原图"
+                        EnhancementSelectionIds.QUICK_CLARITY -> "图像增强，快速清晰已生效"
+                        else -> {
+                            val modelName = EnhancementModelCatalog.find(enhancementSelectionId)
+                                ?.displayName ?: enhancementSelectionId
+                            "图像增强，已选择 $modelName，页面加载时应用"
+                        }
+                    },
+                    tint = if (enhancementSelectionId != EnhancementSelectionIds.ORIGINAL) {
+                        accent
+                    } else {
+                        Color.White
+                    },
                 )
             }
             IconButton(onClick = onToggleFavorite) {
@@ -419,6 +502,33 @@ private fun ReaderTopBar(
                     contentDescription = if (isFavorite) "取消收藏本页" else "收藏本页",
                     tint = if (isFavorite) accent else Color.White,
                 )
+            }
+            Box {
+                IconButton(onClick = { showMoreMenu = true }) {
+                    Icon(
+                        Icons.Filled.MoreVert,
+                        contentDescription = "更多阅读操作",
+                        tint = Color.White,
+                    )
+                }
+                DropdownMenu(
+                    expanded = showMoreMenu,
+                    onDismissRequest = { showMoreMenu = false },
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("设为封面") },
+                        leadingIcon = {
+                            Icon(
+                                painterResource(R.drawable.ic_image),
+                                contentDescription = null,
+                            )
+                        },
+                        onClick = {
+                            showMoreMenu = false
+                            onSetCover()
+                        },
+                    )
+                }
             }
         }
     }
@@ -749,12 +859,21 @@ private fun ComicPage(
     zoomResetPage: Int,
     zoomToggleAnchor: Offset,
     onZoomChanged: (Boolean) -> Unit,
+    enhancementSelectionId: String,
+    enhancementModelInstalled: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     var scale by remember(page) { mutableFloatStateOf(MIN_ZOOM_SCALE) }
     var offset by remember(page) { mutableStateOf(Offset.Zero) }
     var viewportSize by remember(page) { mutableStateOf(IntSize.Zero) }
+    val displayColorFilter = remember(enhancementSelectionId) {
+        if (enhancementSelectionId == EnhancementSelectionIds.QUICK_CLARITY) {
+            quickClarityColorFilter()
+        } else {
+            null
+        }
+    }
 
     fun resetZoom() {
         scale = MIN_ZOOM_SCALE
@@ -819,16 +938,61 @@ private fun ComicPage(
     // 单页加载结果统一封装在 [PageContent]：失败时返回 Error 而非抛出，
     // 不让异常逃逸到 produceState 协程外导致整页崩溃。spec：corrupt/encrypted
     // PDF 不崩溃，遇到时给清晰提示。
-    val content by produceState<PageContent>(initialValue = PageContent.Loading, volume, page) {
+    val content by produceState<PageContent>(
+        initialValue = PageContent.Loading,
+        volume,
+        page,
+        currentPage,
+        enhancementSelectionId,
+        enhancementModelInstalled,
+    ) {
         value = try {
-            // PDF 路径：直接拿 ImageBitmap，无往返
-            val bitmap = volume.loadPageBitmap(page)
-            if (bitmap != null) {
-                PageContent.Bitmap(bitmap)
+            val enhancementModel = EnhancementModelCatalog.find(enhancementSelectionId)
+                ?.takeIf { page == currentPage && enhancementModelInstalled }
+            if (enhancementModel == null) {
+                // PDF 路径：直接拿 ImageBitmap，无往返
+                val bitmap = volume.loadPageBitmap(page)
+                if (bitmap != null) {
+                    PageContent.Bitmap(bitmap)
+                } else {
+                    // zip/cbz 路径：拿压缩字节，交给 Coil 解码
+                    PageContent.Bytes(volume.loadPageBytes(page))
+                }
             } else {
-                // zip/cbz 路径：拿压缩字节，交给 Coil 解码
-                PageContent.Bytes(volume.loadPageBytes(page))
+                val sourceBitmap = loadInferenceSourceBitmap(volume, page)
+                val sourceImage = sourceBitmap.asImageBitmap()
+                value = PageContent.Bitmap(
+                    bitmap = sourceImage,
+                    enhancementStatus = PageEnhancementStatus.Processing,
+                )
+                val sourceKey = ReaderPageCacheKey.forPage(
+                    cacheKeyPrefix,
+                    page,
+                    volume.pageIdentity(page),
+                )
+                val modelRevision = enhancementModel.artifacts.joinToString(separator = "-") {
+                    it.sha256.take(MODEL_CACHE_HASH_LENGTH)
+                }
+                when (
+                    val outcome = NcnnEnhancementEngine.enhance(
+                        context = context,
+                        modelId = enhancementModel.id,
+                        source = sourceBitmap,
+                        cacheKey = "$sourceKey@${enhancementModel.id}@$modelRevision",
+                    )
+                ) {
+                    is EnhancementInferenceOutcome.Success -> PageContent.Bitmap(
+                        bitmap = outcome.bitmap.asImageBitmap(),
+                    )
+
+                    is EnhancementInferenceOutcome.Failure -> PageContent.Bitmap(
+                        bitmap = sourceImage,
+                        enhancementStatus = PageEnhancementStatus.Failed(outcome.message),
+                    )
+                }
             }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (e: ComicOpenException) {
             PageContent.Error(e.message ?: "本页无法打开")
         } catch (e: Exception) {
@@ -903,13 +1067,24 @@ private fun ComicPage(
                 }
 
                 is PageContent.Bitmap -> {
-                    // PDF 路径：ImageBitmap 直接显示，无 Coil 解码
-                    Image(
-                        bitmap = c.bitmap,
-                        contentDescription = "第 ${page + 1} 页",
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier.fillMaxSize(),
-                    )
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        // PDF 与 AI 增强路径直接显示 ImageBitmap。
+                        Image(
+                            bitmap = c.bitmap,
+                            contentDescription = "第 ${page + 1} 页",
+                            contentScale = ContentScale.Fit,
+                            colorFilter = displayColorFilter,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                        c.enhancementStatus?.let { status ->
+                            PageEnhancementStatusOverlay(
+                                status = status,
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .padding(16.dp),
+                            )
+                        }
+                    }
                     imageReady = true
                 }
 
@@ -936,12 +1111,90 @@ private fun ComicPage(
                         contentScale = ContentScale.Fit,
                         onSuccess = { imageReady = true },
                         onError = { imageReady = true },
+                        colorFilter = displayColorFilter,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
             }
         }
     }
+}
+
+private suspend fun loadInferenceSourceBitmap(volume: ComicVolume, page: Int): Bitmap {
+    val maxPixels = NcnnEnhancementEngine.maxInputPixels()
+    try {
+        volume.loadPageBitmapForInference(page, maxPixels)?.let {
+            return it.asAndroidBitmap()
+        }
+        val bytes = volume.loadPageBytes(page)
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+            throw ComicOpenException("本页图像无法解码")
+        }
+
+        val sampleSize = calculateInferenceSampleSize(
+            width = bounds.outWidth,
+            height = bounds.outHeight,
+            maxPixels = maxPixels,
+        )
+        return BitmapFactory.decodeByteArray(
+            bytes,
+            0,
+            bytes.size,
+            BitmapFactory.Options().apply {
+                inSampleSize = sampleSize
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            },
+        ) ?: throw ComicOpenException("本页图像无法解码")
+    } catch (_: OutOfMemoryError) {
+        throw ComicOpenException("设备内存不足，无法增强本页")
+    }
+}
+
+@Composable
+private fun PageEnhancementStatusOverlay(
+    status: PageEnhancementStatus,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .background(Color.Black.copy(alpha = 0.78f), RoundedCornerShape(12.dp))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (status is PageEnhancementStatus.Processing) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(16.dp),
+                strokeWidth = 2.dp,
+                color = Color.White,
+            )
+        }
+        Text(
+            text = when (status) {
+                PageEnhancementStatus.Processing -> "AI 增强中…"
+                is PageEnhancementStatus.Failed -> status.message
+            },
+            color = Color.White,
+            style = MaterialTheme.typography.bodySmall,
+        )
+    }
+}
+
+private fun quickClarityColorFilter(): ColorFilter {
+    val contrast = 1.16f
+    val offset = 128f * (1f - contrast)
+    return ColorFilter.colorMatrix(
+        ColorMatrix(
+            floatArrayOf(
+                contrast, 0f, 0f, 0f, offset,
+                0f, contrast, 0f, 0f, offset,
+                0f, 0f, contrast, 0f, offset,
+                0f, 0f, 0f, 1f, 0f,
+            )
+        )
+    )
 }
 
 private const val MIN_ZOOM_SCALE = 1f
@@ -956,10 +1209,20 @@ private const val MAX_ZOOM_SCALE = 3f
  */
 private sealed interface PageContent {
     data object Loading : PageContent
-    data class Bitmap(val bitmap: ImageBitmap) : PageContent
+    data class Bitmap(
+        val bitmap: ImageBitmap,
+        val enhancementStatus: PageEnhancementStatus? = null,
+    ) : PageContent
     data class Bytes(val bytes: ByteArray) : PageContent
     data class Error(val message: String) : PageContent
 }
+
+private sealed interface PageEnhancementStatus {
+    data object Processing : PageEnhancementStatus
+    data class Failed(val message: String) : PageEnhancementStatus
+}
+
+private const val MODEL_CACHE_HASH_LENGTH = 12
 
 /**
  * 延迟显示的转圈：加载在 delayMillis 内完成就全程不显示。

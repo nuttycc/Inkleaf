@@ -19,6 +19,8 @@ import com.exio.inkleaf.data.ReaderCache
 import com.exio.inkleaf.data.db.BookSourceType
 import com.exio.inkleaf.data.db.ComicEntity
 import com.exio.inkleaf.data.db.FavoritePageEntity
+import com.exio.inkleaf.data.enhancement.EnhancementSelectionIds
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -75,6 +77,9 @@ class ReaderViewModel(
     var readerMessage by mutableStateOf<String?>(null)
         private set
 
+    var enhancementSelectionId by mutableStateOf(EnhancementSelectionIds.ORIGINAL)
+        private set
+
     /** 正在加载中的页码集合，配合 Mutex 实现去重 */
     private val thumbInFlight = mutableSetOf<Int>()
     private val thumbMutex = Mutex()
@@ -94,7 +99,20 @@ class ReaderViewModel(
             state = try {
                 val comic = repo.getComic(comicId)
                     ?: throw ComicOpenException("书架记录不存在")
-                this@ReaderViewModel.comic = comic
+                val normalizedSelectionId = comic.enhancementSelectionId.takeIf(
+                    EnhancementSelectionIds::isValid
+                ) ?: EnhancementSelectionIds.ORIGINAL
+                this@ReaderViewModel.comic = comic.copy(
+                    enhancementSelectionId = normalizedSelectionId
+                )
+                enhancementSelectionId = normalizedSelectionId
+                if (normalizedSelectionId != comic.enhancementSelectionId) {
+                    runCatching {
+                        repo.setEnhancementSelection(comicId, normalizedSelectionId)
+                    }.onFailure { error ->
+                        if (error is CancellationException) throw error
+                    }
+                }
                 observeFavorites(comic.fileKey)
                 val opened = withContext(Dispatchers.IO) { repo.openBook(comic) }
                 volume = opened
@@ -216,6 +234,24 @@ class ReaderViewModel(
 
     fun consumeReaderMessage() {
         readerMessage = null
+    }
+
+    fun setEnhancementSelection(selectionId: String) {
+        if (selectionId == enhancementSelectionId) return
+        viewModelScope.launch {
+            try {
+                repo.setEnhancementSelection(comicId, selectionId)
+                enhancementSelectionId = selectionId
+                comic = comic?.copy(enhancementSelectionId = selectionId)
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                readerMessage = if (error is IllegalArgumentException) {
+                    error.message ?: "未知的图像增强选项"
+                } else {
+                    "图像增强选择保存失败，请重试。"
+                }
+            }
+        }
     }
 
     /** 胶片格子按需请求缩略图：缓存已有或正在加载则直接返回（去重） */

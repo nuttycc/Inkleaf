@@ -11,6 +11,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlin.math.sqrt
 
 /**
  * 把包含多个 PDF 文件的目录作为一本书来阅读。
@@ -111,7 +112,20 @@ class PdfComicVolume(
      */
     override suspend fun loadPageBitmap(globalPage: Int): ImageBitmap? = withContext(Dispatchers.IO) {
         val (chapter, page) = globalToChapterPage(globalPage)
-        renderPageBitmap(chapter, page, fullQuality = true)?.asImageBitmap()
+        renderPageBitmap(chapter, page, fullQuality = true, maxPixels = null)?.asImageBitmap()
+    }
+
+    override suspend fun loadPageBitmapForInference(
+        globalPage: Int,
+        maxPixels: Long,
+    ): ImageBitmap? = withContext(Dispatchers.IO) {
+        val (chapter, page) = globalToChapterPage(globalPage)
+        renderPageBitmap(
+            chapterIndex = chapter,
+            pageIndex = page,
+            fullQuality = true,
+            maxPixels = maxPixels,
+        )?.asImageBitmap()
     }
 
     override suspend fun loadThumbnailPageBytes(globalPage: Int): ByteArray = withContext(Dispatchers.IO) {
@@ -173,7 +187,12 @@ class PdfComicVolume(
         pageIndex: Int,
         fullQuality: Boolean,
     ): ByteArray = mutex.withLock {
-        val bitmap = renderPageBitmapLocked(chapterIndex, pageIndex, fullQuality)
+        val bitmap = renderPageBitmapLocked(
+            chapterIndex = chapterIndex,
+            pageIndex = pageIndex,
+            fullQuality = fullQuality,
+            maxPixels = null,
+        )
             ?: throw ComicOpenException("无法打开章节 PDF: ${chapters[chapterIndex].title}")
 
         val stream = java.io.ByteArrayOutputStream()
@@ -195,14 +214,16 @@ class PdfComicVolume(
         chapterIndex: Int,
         pageIndex: Int,
         fullQuality: Boolean,
+        maxPixels: Long?,
     ): Bitmap? = mutex.withLock {
-        renderPageBitmapLocked(chapterIndex, pageIndex, fullQuality)
+        renderPageBitmapLocked(chapterIndex, pageIndex, fullQuality, maxPixels)
     }
 
     private fun renderPageBitmapLocked(
         chapterIndex: Int,
         pageIndex: Int,
         fullQuality: Boolean,
+        maxPixels: Long?,
     ): Bitmap? {
         val core = cores[chapterIndex] ?: return null
         val doc = documents[chapterIndex] ?: return null
@@ -211,7 +232,16 @@ class PdfComicVolume(
         val width = core.getPageWidthPoint(pageIndex)
         val height = core.getPageHeightPoint(pageIndex)
 
-        val scale = if (fullQuality) 1.0f else 0.5f
+        val qualityScale = if (fullQuality) 1.0 else 0.5
+        val pagePixels = width.toLong() * height.toLong()
+        val budgetScale = if (
+            maxPixels != null && pagePixels > maxPixels.coerceAtLeast(1L)
+        ) {
+            sqrt(maxPixels.coerceAtLeast(1L).toDouble() / pagePixels.toDouble())
+        } else {
+            1.0
+        }
+        val scale = minOf(qualityScale, budgetScale).toFloat()
         val bmpWidth = (width * scale).toInt().coerceAtLeast(1)
         val bmpHeight = (height * scale).toInt().coerceAtLeast(1)
 

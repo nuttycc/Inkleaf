@@ -51,6 +51,15 @@ interface ComicDao {
     @Query("UPDATE comics SET groupId = :groupId WHERE id = :id")
     suspend fun updateGroup(id: Long, groupId: Long?)
 
+    @Query("UPDATE comics SET enhancementSelectionId = :selectionId WHERE id = :id")
+    suspend fun updateEnhancementSelection(id: Long, selectionId: String)
+
+    @Query(
+        "UPDATE comics SET enhancementSelectionId = :fallbackId " +
+                "WHERE enhancementSelectionId = :modelId"
+    )
+    suspend fun resetEnhancementSelection(modelId: String, fallbackId: String)
+
     @Query("UPDATE comics SET pageCount = :pageCount WHERE id = :id")
     suspend fun updatePageCount(id: Long, pageCount: Int)
 

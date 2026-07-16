@@ -78,12 +78,17 @@ fun SettingsScreen(
     // 修正会被 Switch 的滑动动画"演"出来（进页时开关突然滑动）
     themeSettings: ThemeSettings,
     onBack: () -> Unit,
+    onOpenModelManager: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: SettingsViewModel = viewModel(),
     foldersViewModel: FoldersViewModel = viewModel(),
+    enhancementModelsViewModel: EnhancementModelsViewModel = viewModel(),
 ) {
     val cacheLimit by viewModel.cacheLimit.collectAsStateWithLifecycle()
     val cacheUsage by viewModel.cacheUsageBytes.collectAsStateWithLifecycle()
+    val installedModelCount by enhancementModelsViewModel.installedCount.collectAsStateWithLifecycle()
+    val installedModelBytes by enhancementModelsViewModel.installedBytes.collectAsStateWithLifecycle()
+    val modelsChecking by enhancementModelsViewModel.isChecking.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val cacheBudgetBytes = remember(cacheLimit, context) { cacheLimit.bytes(context) }
     val autoCacheBudgetBytes = remember(context) { CacheLimit.AUTO.bytes(context) }
@@ -200,6 +205,26 @@ fun SettingsScreen(
                     )
                 },
                 modifier = Modifier.clickable { showCacheLimitSheet = true },
+            )
+            ListItem(
+                headlineContent = { Text("图像增强模型") },
+                supportingContent = {
+                    Text(
+                        when {
+                            modelsChecking -> "正在检查模型文件…"
+                            installedModelCount == 0 -> "尚未下载模型包"
+                            else -> "已下载 $installedModelCount 个模型包 · 占用 " +
+                                    formatFileSize(installedModelBytes)
+                        }
+                    )
+                },
+                trailingContent = {
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                    )
+                },
+                modifier = Modifier.clickable(onClick = onOpenModelManager),
             )
 
             SectionLabel("漫画库")
@@ -358,7 +383,7 @@ private fun SectionLabel(text: String) {
         text = text,
         style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 16.dp, top = 20.dp, bottom = 4.dp),
+        modifier = Modifier.padding(start = 16.dp, top = 24.dp, bottom = 4.dp),
     )
 }
 

@@ -1,8 +1,10 @@
 package com.exio.inkleaf.data.db
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import com.exio.inkleaf.data.enhancement.EnhancementSelectionIds
 
 /**
  * 书架上的一本漫画 = 数据库里的一行。
@@ -38,4 +40,7 @@ data class ComicEntity(
     val coverPageId: String? = null,
     /** Hidden until album pages and metadata have been committed successfully. */
     val isDraft: Boolean = false,
+    /** Stable built-in option or downloadable model ID selected for this comic. */
+    @ColumnInfo(defaultValue = "'original'")
+    val enhancementSelectionId: String = EnhancementSelectionIds.ORIGINAL,
 )

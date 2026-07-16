@@ -10,6 +10,10 @@
     <exclude
         domain="file"
         path="albums/" />
+    <!-- Downloadable model packages are reproducible and should not consume backup quota. -->
+    <exclude
+        domain="file"
+        path="image_enhancement_models/" />
     <!--
    <include domain="sharedpref" path="."/>
    <exclude domain="sharedpref" path="device.xml"/>

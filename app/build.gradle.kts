@@ -21,6 +21,7 @@ if (hasAnyReleaseSigningValue && !hasReleaseSigning) {
 android {
     namespace = "com.exio.inkleaf"
     compileSdk = 37
+    ndkVersion = "29.0.14206865"
 
     defaultConfig {
         applicationId = "com.exio.inkleaf"
@@ -30,6 +31,22 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        ndk {
+            abiFilters += listOf(
+                "arm64-v8a",
+                "armeabi-v7a",
+                "x86",
+                "x86_64",
+            )
+        }
+
+        externalNativeBuild {
+            cmake {
+                arguments += "-DANDROID_STL=c++_static"
+                targets += "inkleaf_enhancement"
+            }
+        }
     }
 
     signingConfigs {
@@ -64,6 +81,12 @@ android {
     }
     buildFeatures {
         compose = true
+    }
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.30.5"
+        }
     }
 }
 

@@ -9,6 +9,10 @@
         <exclude
             domain="file"
             path="albums/" />
+        <!-- Downloadable model packages are reproducible and should not consume backup quota. -->
+        <exclude
+            domain="file"
+            path="image_enhancement_models/" />
         <!-- TODO: Use <include> and <exclude> to control what is backed up.
         <include .../>
         <exclude .../>
@@ -18,5 +22,8 @@
         <exclude
             domain="file"
             path="albums/" />
+        <exclude
+            domain="file"
+            path="image_enhancement_models/" />
     </device-transfer>
 </data-extraction-rules>

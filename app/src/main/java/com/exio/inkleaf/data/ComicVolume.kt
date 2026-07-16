@@ -51,6 +51,16 @@ interface ComicVolume {
      */
     suspend fun loadPageBitmap(globalPage: Int): ImageBitmap? = null
 
+    /**
+     * Loads a bitmap for memory-sensitive inference without exceeding [maxPixels] when the
+     * backing format can constrain allocation before rendering. Compressed-image volumes return
+     * null so the caller can perform a sampled decode from [loadPageBytes].
+     */
+    suspend fun loadPageBitmapForInference(
+        globalPage: Int,
+        maxPixels: Long,
+    ): ImageBitmap? = null
+
     /** 缩略图专用读取通道 */
     suspend fun loadThumbnailPageBytes(globalPage: Int): ByteArray
 
