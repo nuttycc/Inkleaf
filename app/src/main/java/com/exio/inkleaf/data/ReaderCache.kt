@@ -42,13 +42,25 @@ object ReaderCache {
     fun thumbsDir(context: Context, comicId: Long): File =
         File(File(context.cacheDir, THUMBS_DIR), comicId.toString())
 
-    private fun thumbFile(context: Context, comicId: Long, page: Int): File =
-        File(thumbsDir(context, comicId), "$page.jpg")
+    private fun thumbFile(
+        context: Context,
+        comicId: Long,
+        page: Int,
+        pageIdentity: String?,
+    ): File = File(
+        thumbsDir(context, comicId),
+        ReaderPageCacheKey.thumbnailFileName(page, pageIdentity),
+    )
 
     /** 读某页缩略图的磁盘缓存；从未落盘过返回 null。RGB_565：缩略图无透明需求、内存减半 */
-    suspend fun readThumbnail(context: Context, comicId: Long, page: Int): Bitmap? =
+    suspend fun readThumbnail(
+        context: Context,
+        comicId: Long,
+        page: Int,
+        pageIdentity: String? = null,
+    ): Bitmap? =
         withContext(Dispatchers.IO) {
-            val file = thumbFile(context, comicId, page)
+            val file = thumbFile(context, comicId, page, pageIdentity)
             if (file.exists()) {
                 BitmapFactory.decodeFile(
                     file.absolutePath,
@@ -62,10 +74,16 @@ object ReaderCache {
         }
 
     /** 缩略图落盘供下次开书复用。失败无所谓（磁盘满等）：缓存只是加速，下次重新解码 */
-    suspend fun writeThumbnail(context: Context, comicId: Long, page: Int, bitmap: Bitmap) {
+    suspend fun writeThumbnail(
+        context: Context,
+        comicId: Long,
+        page: Int,
+        pageIdentity: String? = null,
+        bitmap: Bitmap,
+    ) {
         withContext(Dispatchers.IO) {
             runCatching {
-                val file = thumbFile(context, comicId, page)
+                val file = thumbFile(context, comicId, page, pageIdentity)
                 file.parentFile?.mkdirs()
                 file.outputStream().use { out ->
                     bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)

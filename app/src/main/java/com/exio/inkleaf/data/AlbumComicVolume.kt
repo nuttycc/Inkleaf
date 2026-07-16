@@ -33,6 +33,8 @@ class AlbumComicVolume(
     override fun chapterPageToGlobal(chapterIndex: Int, pageIndex: Int): Int =
         pageIndex.coerceIn(0, (pages.size - 1).coerceAtLeast(0))
 
+    override fun pageIdentity(globalPage: Int): String? = pages.getOrNull(globalPage)?.id
+
     override suspend fun loadPageBytes(globalPage: Int): ByteArray = withContext(Dispatchers.IO) {
         pageFile(globalPage).readBytes()
     }

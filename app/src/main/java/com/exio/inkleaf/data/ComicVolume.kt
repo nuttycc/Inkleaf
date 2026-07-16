@@ -31,6 +31,12 @@ interface ComicVolume {
     /** 将 (章节索引, 章节内页码) 转换为全局页码 */
     fun chapterPageToGlobal(chapterIndex: Int, pageIndex: Int): Int
 
+    /**
+     * Stable identity for a page when the underlying book can be edited.
+     * Immutable volumes can use the default null value and fall back to the page index.
+     */
+    fun pageIdentity(globalPage: Int): String? = null
+
     /** 读取第 [globalPage] 页的原始图片字节（zip/cbz 是压缩图片数据，PDF 是渲染后的 PNG） */
     suspend fun loadPageBytes(globalPage: Int): ByteArray
 

@@ -93,6 +93,7 @@ import coil.request.ImageRequest
 import com.exio.inkleaf.R
 import com.exio.inkleaf.data.ComicOpenException
 import com.exio.inkleaf.data.ComicVolume
+import com.exio.inkleaf.data.ReaderPageCacheKey
 import com.exio.inkleaf.data.db.FavoritePageEntity
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -917,7 +918,13 @@ private fun ComicPage(
                     val imageRequest = remember(context, c.bytes, cacheKeyPrefix, page) {
                         ImageRequest.Builder(context)
                             .data(c.bytes)
-                            .memoryCacheKey("$cacheKeyPrefix#$page")
+                            .memoryCacheKey(
+                                ReaderPageCacheKey.forPage(
+                                    cacheKeyPrefix,
+                                    page,
+                                    volume.pageIdentity(page),
+                                )
+                            )
                             // 原图短淡入，避免加载完成时硬切；
                             // 内存缓存命中时 Coil 自动跳过淡入，翻回已读页无延迟感
                             .crossfade(150)

@@ -258,9 +258,10 @@ class ReaderViewModel(
         }
         try {
             val app = getApplication<Application>()
+            val pageIdentity = opened.pageIdentity(page)
 
             // 一级：磁盘缓存（上次开书时落盘的小 JPEG，读取+解码不到 1ms 级）
-            val fromDisk = ReaderCache.readThumbnail(app, comicId, page)
+            val fromDisk = ReaderCache.readThumbnail(app, comicId, page, pageIdentity)
             if (fromDisk != null) {
                 thumbnails[page] = fromDisk.asImageBitmap()
                 return
@@ -270,7 +271,13 @@ class ReaderViewModel(
             // sample local files directly without loading full images into byte arrays.
             val rendered = opened.renderThumbnail(page, THUMB_TARGET_WIDTH) ?: return
             thumbnails[page] = rendered
-            ReaderCache.writeThumbnail(app, comicId, page, rendered.asAndroidBitmap())
+            ReaderCache.writeThumbnail(
+                app,
+                comicId,
+                page,
+                pageIdentity,
+                rendered.asAndroidBitmap(),
+            )
         } catch (_: Exception) {
             // 单页缩略图失败只影响胶片上一个格子，静默跳过；
             // 不缓存失败结果，下次该格子可见时会自动重试

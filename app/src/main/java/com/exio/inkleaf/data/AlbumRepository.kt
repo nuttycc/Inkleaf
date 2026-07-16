@@ -223,6 +223,12 @@ class AlbumRepository(context: Context) {
                     comicDao.updateAlbumCover(albumId, coverPath, selectedCoverId)
                 }
 
+                if (oldPages.map { it.id } != pageIds) {
+                    // Album page indexes are mutable, so cached thumbnails from the previous
+                    // ordering must not be reused after a successful page edit.
+                    ReaderCache.wipeBook(appContext, albumId)
+                }
+
                 deleteRemovedPageFiles(oldPages, entities)
                 orderedPages.filter { it.isStaged }.forEach { File(it.filePath).delete() }
                 pruneEmptySessionDirectories()
