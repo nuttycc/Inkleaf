@@ -60,6 +60,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -88,6 +89,9 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
@@ -296,6 +300,7 @@ private fun ComicPager(
     var zoomTogglePage by remember { mutableStateOf(-1) }
     var zoomResetPage by remember { mutableStateOf(-1) }
     var zoomToggleAnchor by remember { mutableStateOf(Offset.Unspecified) }
+    var enhancementReport by remember { mutableStateOf<PageEnhancementReport?>(null) }
 
     LaunchedEffect(pagerState.currentPage) {
         zoomedPage = null
@@ -303,6 +308,13 @@ private fun ComicPager(
 
     // 当前页对应的章节信息，用于多章书籍的界面提示
     val currentPage = pagerState.currentPage
+    val currentEnhancementStatus = enhancementReport
+        ?.takeIf {
+            it.page == currentPage &&
+                    it.selectionId == enhancementSelectionId &&
+                    it.modelInstalled == enhancementModelInstalled
+        }
+        ?.status
     val chapterProgress = remember(currentPage, volume) {
         volume.globalToChapterPage(currentPage)
     }
@@ -372,25 +384,37 @@ private fun ComicPager(
                 },
                 enhancementSelectionId = enhancementSelectionId,
                 enhancementModelInstalled = enhancementModelInstalled,
+                onEnhancementStatusChanged = { page, selectionId, status ->
+                    if (
+                        page == pagerState.currentPage &&
+                        selectionId == enhancementSelectionId
+                    ) {
+                        enhancementReport = PageEnhancementReport(
+                            page = page,
+                            selectionId = selectionId,
+                            modelInstalled = enhancementModelInstalled,
+                            status = status,
+                        )
+                    }
+                },
             )
         }
 
         if (!showControls) {
+            val pageCountLabel = "${pagerState.currentPage + 1} / ${volume.totalPageCount}"
             val pageLabel = if (volume.chapterCount > 1) {
-                "$chapterTitle · ${pagerState.currentPage + 1} / ${volume.totalPageCount}"
+                "$chapterTitle · $pageCountLabel"
             } else {
-                "${pagerState.currentPage + 1} / ${volume.totalPageCount}"
+                pageCountLabel
             }
-            Text(
-                text = pageLabel,
-                color = Color.White,
-                style = MaterialTheme.typography.labelLarge,
+            ReaderPageStatus(
+                pageLabel = pageLabel,
+                compactPageLabel = pageCountLabel,
+                enhancementStatus = currentEnhancementStatus,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .navigationBarsPadding()
-                    .padding(bottom = 16.dp)
-                    .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
-                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                    .padding(bottom = 16.dp),
             )
         }
 
@@ -400,6 +424,7 @@ private fun ComicPager(
             isFavorite = favoritePages.containsKey(pagerState.currentPage),
             isZoomed = zoomedPage == pagerState.currentPage,
             enhancementSelectionId = enhancementSelectionId,
+            enhancementStatus = currentEnhancementStatus,
             onBack = onBack,
             onOpenEnhancement = onOpenEnhancement,
             onToggleFavorite = { onToggleFavorite(pagerState.currentPage) },
@@ -430,6 +455,7 @@ private fun ReaderTopBar(
     isFavorite: Boolean,
     isZoomed: Boolean,
     enhancementSelectionId: String,
+    enhancementStatus: PageEnhancementStatus?,
     onBack: () -> Unit,
     onOpenEnhancement: () -> Unit,
     onToggleFavorite: () -> Unit,
@@ -475,24 +501,60 @@ private fun ReaderTopBar(
                     Text(text = "100%", color = Color.White)
                 }
             }
-            IconButton(onClick = onOpenEnhancement) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_tune),
-                    contentDescription = when (enhancementSelectionId) {
-                        EnhancementSelectionIds.ORIGINAL -> "图像增强，当前为原图"
-                        EnhancementSelectionIds.QUICK_CLARITY -> "图像增强，快速清晰已生效"
-                        else -> {
-                            val modelName = EnhancementModelCatalog.find(enhancementSelectionId)
-                                ?.displayName ?: enhancementSelectionId
-                            "图像增强，已选择 $modelName，页面加载时应用"
+            val enhancementDescription = enhancementStatus?.let { status ->
+                "图像增强，${status.readerDescription()}"
+            } ?: when (enhancementSelectionId) {
+                EnhancementSelectionIds.ORIGINAL -> "图像增强，当前为原图"
+                EnhancementSelectionIds.QUICK_CLARITY -> "图像增强，快速清晰已生效"
+                else -> {
+                    val modelName = EnhancementModelCatalog.find(enhancementSelectionId)
+                        ?.displayName ?: enhancementSelectionId
+                    "图像增强，已选择 $modelName，页面加载时应用"
+                }
+            }
+            if (enhancementStatus is PageEnhancementStatus.Failed) {
+                TextButton(
+                    onClick = onOpenEnhancement,
+                    modifier = Modifier.semantics {
+                        contentDescription = enhancementDescription
+                    },
+                ) {
+                    Text(
+                        text = "优化失败",
+                        color = readerErrorColor(),
+                        style = MaterialTheme.typography.labelLarge,
+                        maxLines = 1,
+                    )
+                }
+            } else {
+                IconButton(
+                    onClick = onOpenEnhancement,
+                    modifier = Modifier.semantics {
+                        contentDescription = enhancementDescription
+                    },
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        if (enhancementStatus is PageEnhancementStatus.Processing) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(32.dp),
+                                strokeWidth = 2.dp,
+                                color = accent,
+                            )
                         }
-                    },
-                    tint = if (enhancementSelectionId != EnhancementSelectionIds.ORIGINAL) {
-                        accent
-                    } else {
-                        Color.White
-                    },
-                )
+                        Icon(
+                            painter = painterResource(R.drawable.ic_image_sparkles),
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp),
+                            tint = if (
+                                enhancementSelectionId != EnhancementSelectionIds.ORIGINAL
+                            ) {
+                                accent
+                            } else {
+                                Color.White
+                            },
+                        )
+                    }
+                }
             }
             IconButton(onClick = onToggleFavorite) {
                 Icon(
@@ -839,12 +901,17 @@ private fun FilmstripThumb(
 @Composable
 private fun readerAccentColor(): Color {
     val scheme = MaterialTheme.colorScheme
-    return if (scheme.primary.luminance() >= scheme.inversePrimary.luminance()) {
-        scheme.primary
-    } else {
-        scheme.inversePrimary
-    }
+    return readerColorOnDarkSurface(scheme.primary, scheme.inversePrimary)
 }
+
+@Composable
+private fun readerErrorColor(): Color {
+    val scheme = MaterialTheme.colorScheme
+    return readerColorOnDarkSurface(scheme.error, scheme.onErrorContainer)
+}
+
+private fun readerColorOnDarkSurface(first: Color, second: Color): Color =
+    if (first.luminance() >= second.luminance()) first else second
 
 @Composable
 private fun ComicPage(
@@ -861,6 +928,7 @@ private fun ComicPage(
     onZoomChanged: (Boolean) -> Unit,
     enhancementSelectionId: String,
     enhancementModelInstalled: Boolean,
+    onEnhancementStatusChanged: (Int, String, PageEnhancementStatus?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -938,69 +1006,84 @@ private fun ComicPage(
     // 单页加载结果统一封装在 [PageContent]：失败时返回 Error 而非抛出，
     // 不让异常逃逸到 produceState 协程外导致整页崩溃。spec：corrupt/encrypted
     // PDF 不崩溃，遇到时给清晰提示。
-    val content by produceState<PageContent>(
-        initialValue = PageContent.Loading,
+    val content by key(
         volume,
         page,
         currentPage,
         enhancementSelectionId,
         enhancementModelInstalled,
     ) {
-        value = try {
-            val enhancementModel = EnhancementModelCatalog.find(enhancementSelectionId)
-                ?.takeIf { page == currentPage && enhancementModelInstalled }
-            if (enhancementModel == null) {
-                // PDF 路径：直接拿 ImageBitmap，无往返
-                val bitmap = volume.loadPageBitmap(page)
-                if (bitmap != null) {
-                    PageContent.Bitmap(bitmap)
+        produceState<PageContent>(
+            initialValue = PageContent.Loading,
+        ) {
+            value = try {
+                val enhancementModel = EnhancementModelCatalog.find(enhancementSelectionId)
+                    ?.takeIf { page == currentPage && enhancementModelInstalled }
+                if (enhancementModel == null) {
+                    // PDF 路径：直接拿 ImageBitmap，无往返
+                    val bitmap = volume.loadPageBitmap(page)
+                    if (bitmap != null) {
+                        PageContent.Bitmap(bitmap)
+                    } else {
+                        // zip/cbz 路径：拿压缩字节，交给 Coil 解码
+                        PageContent.Bytes(volume.loadPageBytes(page))
+                    }
                 } else {
-                    // zip/cbz 路径：拿压缩字节，交给 Coil 解码
-                    PageContent.Bytes(volume.loadPageBytes(page))
-                }
-            } else {
-                val sourceBitmap = loadInferenceSourceBitmap(
-                    volume = volume,
-                    page = page,
-                    scale = enhancementModel.scale,
-                )
-                val sourceImage = sourceBitmap.asImageBitmap()
-                value = PageContent.Bitmap(
-                    bitmap = sourceImage,
-                    enhancementStatus = PageEnhancementStatus.Processing,
-                )
-                val sourceKey = ReaderPageCacheKey.forPage(
-                    cacheKeyPrefix,
-                    page,
-                    volume.pageIdentity(page),
-                )
-                val modelRevision = enhancementModel.artifacts.joinToString(separator = "-") {
-                    it.sha256.take(MODEL_CACHE_HASH_LENGTH)
-                }
-                when (
-                    val outcome = NcnnEnhancementEngine.enhance(
-                        context = context,
-                        modelId = enhancementModel.id,
-                        source = sourceBitmap,
-                        cacheKey = "$sourceKey@${enhancementModel.id}@$modelRevision",
+                    val sourceBitmap = loadInferenceSourceBitmap(
+                        volume = volume,
+                        page = page,
+                        scale = enhancementModel.scale,
                     )
-                ) {
-                    is EnhancementInferenceOutcome.Success -> PageContent.Bitmap(
-                        bitmap = outcome.bitmap.asImageBitmap(),
-                    )
-
-                    is EnhancementInferenceOutcome.Failure -> PageContent.Bitmap(
+                    val sourceImage = sourceBitmap.asImageBitmap()
+                    value = PageContent.Bitmap(
                         bitmap = sourceImage,
-                        enhancementStatus = PageEnhancementStatus.Failed(outcome.message),
+                        enhancementStatus = PageEnhancementStatus.Processing,
                     )
+                    val sourceKey = ReaderPageCacheKey.forPage(
+                        cacheKeyPrefix,
+                        page,
+                        volume.pageIdentity(page),
+                    )
+                    val modelRevision = enhancementModel.artifacts.joinToString(separator = "-") {
+                        it.sha256.take(MODEL_CACHE_HASH_LENGTH)
+                    }
+                    when (
+                        val outcome = NcnnEnhancementEngine.enhance(
+                            context = context,
+                            modelId = enhancementModel.id,
+                            source = sourceBitmap,
+                            cacheKey = "$sourceKey@${enhancementModel.id}@$modelRevision",
+                        )
+                    ) {
+                        is EnhancementInferenceOutcome.Success -> PageContent.Bitmap(
+                            bitmap = outcome.bitmap.asImageBitmap(),
+                        )
+
+                        is EnhancementInferenceOutcome.Failure -> PageContent.Bitmap(
+                            bitmap = sourceImage,
+                            enhancementStatus = PageEnhancementStatus.Failed(outcome.message),
+                        )
+                    }
                 }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (e: ComicOpenException) {
+                PageContent.Error(e.message ?: "本页无法打开")
+            } catch (e: Exception) {
+                PageContent.Error("本页无法打开")
             }
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (e: ComicOpenException) {
-            PageContent.Error(e.message ?: "本页无法打开")
-        } catch (e: Exception) {
-            PageContent.Error("本页无法打开")
+        }
+    }
+
+    val enhancementStatus = (content as? PageContent.Bitmap)?.enhancementStatus
+    LaunchedEffect(
+        page,
+        currentPage,
+        enhancementSelectionId,
+        enhancementStatus,
+    ) {
+        if (page == currentPage) {
+            onEnhancementStatusChanged(page, enhancementSelectionId, enhancementStatus)
         }
     }
 
@@ -1080,14 +1163,6 @@ private fun ComicPage(
                             colorFilter = displayColorFilter,
                             modifier = Modifier.fillMaxSize(),
                         )
-                        c.enhancementStatus?.let { status ->
-                            PageEnhancementStatusOverlay(
-                                status = status,
-                                modifier = Modifier
-                                    .align(Alignment.BottomCenter)
-                                    .padding(16.dp),
-                            )
-                        }
                     }
                     imageReady = true
                 }
@@ -1161,31 +1236,39 @@ private suspend fun loadInferenceSourceBitmap(
 }
 
 @Composable
-private fun PageEnhancementStatusOverlay(
-    status: PageEnhancementStatus,
+private fun ReaderPageStatus(
+    pageLabel: String,
+    compactPageLabel: String,
+    enhancementStatus: PageEnhancementStatus?,
     modifier: Modifier = Modifier,
 ) {
+    val visibleText = enhancementStatus?.let { status ->
+        "${status.readerShortLabel()} · $compactPageLabel"
+    } ?: pageLabel
+    val accessibleDescription = enhancementStatus?.let { status ->
+        "页码 $compactPageLabel，${status.readerDescription()}"
+    } ?: pageLabel
     Row(
         modifier = modifier
+            .clearAndSetSemantics { contentDescription = accessibleDescription }
             .background(Color.Black.copy(alpha = 0.78f), RoundedCornerShape(12.dp))
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (status is PageEnhancementStatus.Processing) {
+        if (enhancementStatus is PageEnhancementStatus.Processing) {
             CircularProgressIndicator(
-                modifier = Modifier.size(16.dp),
+                modifier = Modifier.size(14.dp),
                 strokeWidth = 2.dp,
                 color = Color.White,
             )
         }
         Text(
-            text = when (status) {
-                PageEnhancementStatus.Processing -> "AI 增强中…"
-                is PageEnhancementStatus.Failed -> status.message
-            },
+            text = visibleText,
             color = Color.White,
-            style = MaterialTheme.typography.bodySmall,
+            style = MaterialTheme.typography.labelLarge,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
@@ -1229,6 +1312,23 @@ private sealed interface PageEnhancementStatus {
     data object Processing : PageEnhancementStatus
     data class Failed(val message: String) : PageEnhancementStatus
 }
+
+private fun PageEnhancementStatus.readerShortLabel(): String = when (this) {
+    PageEnhancementStatus.Processing -> "优化中"
+    is PageEnhancementStatus.Failed -> "优化失败，已显示原图"
+}
+
+private fun PageEnhancementStatus.readerDescription(): String = when (this) {
+    PageEnhancementStatus.Processing -> "正在优化本页"
+    is PageEnhancementStatus.Failed -> message
+}
+
+private data class PageEnhancementReport(
+    val page: Int,
+    val selectionId: String,
+    val modelInstalled: Boolean,
+    val status: PageEnhancementStatus?,
+)
 
 private const val MODEL_CACHE_HASH_LENGTH = 12
 
