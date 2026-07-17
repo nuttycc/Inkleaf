@@ -1043,15 +1043,18 @@ private fun ComicPage(
     // 单页加载结果统一封装在 [PageContent]：失败时返回 Error 而非抛出，
     // 不让异常逃逸到 produceState 协程外导致整页崩溃。spec：corrupt/encrypted
     // PDF 不崩溃，遇到时给清晰提示。
-    val content by key(
-        volume,
-        page,
-        currentPage,
-        enhancementSelectionId,
-        enhancementModelInstalled,
-    ) {
+    val contentKeys = readerPageContentKeys(
+        volumeToken = volume,
+        page = page,
+        cacheKeyPrefix = cacheKeyPrefix,
+        isCurrentPage = page == currentPage,
+        enhancementSelectionId = enhancementSelectionId,
+        enhancementModelInstalled = enhancementModelInstalled,
+    )
+    val content by key(contentKeys.stateReset) {
         produceState<PageContent>(
             initialValue = PageContent.Loading,
+            key1 = contentKeys.producerRestart,
         ) {
             value = try {
                 val enhancementModel = EnhancementModelCatalog.find(enhancementSelectionId)
