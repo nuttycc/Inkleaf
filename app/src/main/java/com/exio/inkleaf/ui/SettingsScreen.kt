@@ -88,6 +88,7 @@ fun SettingsScreen(
     val cacheUsage by viewModel.cacheUsageBytes.collectAsStateWithLifecycle()
     val installedModelCount by enhancementModelsViewModel.installedCount.collectAsStateWithLifecycle()
     val installedModelBytes by enhancementModelsViewModel.installedBytes.collectAsStateWithLifecycle()
+    val bundledModelCount = enhancementModelsViewModel.bundledCount
     val modelsChecking by enhancementModelsViewModel.isChecking.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val cacheBudgetBytes = remember(cacheLimit, context) { cacheLimit.bytes(context) }
@@ -95,6 +96,7 @@ fun SettingsScreen(
     var showCacheLimitSheet by remember { mutableStateOf(false) }
     var showCustomColorSheet by remember { mutableStateOf(false) }
     var showAboutSheet by remember { mutableStateOf(false) }
+    var showLicensesSheet by remember { mutableStateOf(false) }
     // rememberSaveable：目录选择器是外部全屏 Activity，期间进程可能被杀；
     // 重建后 sheet 必须恢复打开，选择结果才有处展示
     var showFoldersSheet by rememberSaveable { mutableStateOf(false) }
@@ -212,8 +214,8 @@ fun SettingsScreen(
                     Text(
                         when {
                             modelsChecking -> "正在检查模型文件…"
-                            installedModelCount == 0 -> "尚未下载模型包"
-                            else -> "已下载 $installedModelCount 个模型包 · 占用 " +
+                            installedModelCount == 0 -> "已内置 $bundledModelCount 个模型包 · 可继续下载更多模型"
+                            else -> "已内置 $bundledModelCount 个 · 已下载 $installedModelCount 个 · 占用 " +
                                     formatFileSize(installedModelBytes)
                         }
                     )
@@ -309,6 +311,24 @@ fun SettingsScreen(
                 onOpenGitHub = {
                     context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(GITHUB_URL)))
                 },
+                onOpenLicenses = {
+                    showAboutSheet = false
+                    showLicensesSheet = true
+                },
+            )
+        }
+    }
+
+    if (showLicensesSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showLicensesSheet = false },
+            sheetState = rememberExpandOnlySheetState(),
+        ) {
+            ThirdPartyLicensesSheetContent(
+                text = remember(context) {
+                    context.assets.open(MODEL_LICENSE_NOTICE_ASSET).bufferedReader()
+                        .use { it.readText() }
+                },
             )
         }
     }
@@ -318,6 +338,7 @@ fun SettingsScreen(
 private fun AboutSheetContent(
     versionName: String,
     onOpenGitHub: () -> Unit,
+    onOpenLicenses: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     SheetColumn(modifier = modifier) {
@@ -341,6 +362,32 @@ private fun AboutSheetContent(
                 )
             },
             modifier = Modifier.clickable(onClick = onOpenGitHub),
+        )
+        ListItem(
+            headlineContent = { Text("开源许可") },
+            supportingContent = { Text("模型版权、许可证与来源") },
+            trailingContent = {
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                )
+            },
+            modifier = Modifier.clickable(onClick = onOpenLicenses),
+        )
+    }
+}
+
+@Composable
+private fun ThirdPartyLicensesSheetContent(
+    text: String,
+    modifier: Modifier = Modifier,
+) {
+    SheetColumn(modifier = modifier, scrollable = true) {
+        StandardSheetTitle("开源许可")
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
         )
     }
 }
@@ -416,6 +463,7 @@ private fun cacheLimitDescription(limit: CacheLimit, autoBudgetBytes: Long): Str
     }
 
 private const val GITHUB_URL = "https://github.com/nuttycc/inkleaf"
+private const val MODEL_LICENSE_NOTICE_ASSET = "THIRD_PARTY_MODEL_LICENSES.txt"
 
 private fun appVersionName(context: Context): String {
     val packageInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

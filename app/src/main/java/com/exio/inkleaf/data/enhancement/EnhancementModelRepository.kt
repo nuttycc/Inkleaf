@@ -52,7 +52,8 @@ sealed interface EnhancementModelInstallState {
 enum class ModelOperation { DOWNLOAD, DELETE }
 
 class EnhancementModelRepository private constructor(context: Context) {
-    private val rootDirectory = File(context.applicationContext.filesDir, MODEL_DIRECTORY)
+    private val appContext = context.applicationContext
+    private val rootDirectory = File(appContext.filesDir, MODEL_DIRECTORY)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val modelLocks = EnhancementModelCatalog.models.associate { it.id to Mutex() }
     private val downloadJobs = mutableMapOf<String, Job>()
@@ -84,6 +85,7 @@ class EnhancementModelRepository private constructor(context: Context) {
 
     fun install(modelId: String) {
         val model = EnhancementModelCatalog.require(modelId)
+        if (model.isBundled) return
         synchronized(jobsLock) {
             if (downloadJobs[modelId]?.isActive == true) return
             lateinit var job: Job
@@ -111,6 +113,7 @@ class EnhancementModelRepository private constructor(context: Context) {
 
     fun delete(modelId: String): Job {
         val model = EnhancementModelCatalog.require(modelId)
+        if (model.isBundled) return scope.launch { }
         val previousJob = synchronized(jobsLock) { downloadJobs[modelId] }
         previousJob?.cancel(CancellationException("Model deletion requested"))
         disconnectActiveConnection(modelId)
@@ -146,21 +149,34 @@ class EnhancementModelRepository private constructor(context: Context) {
                 if (downloading) return@forEach
                 modelLocks.getValue(model.id).withLock {
                     setState(model.id, EnhancementModelInstallState.Checking)
-                    val installed = try {
-                        cleanupTemporaryDirectories(model, recoverBackup = true)
-                    } catch (cancelled: CancellationException) {
-                        throw cancelled
-                    } catch (_: Exception) {
-                        false
-                    }
-                    setState(
-                        model.id,
-                        if (installed) {
+                    val nextState = try {
+                        if (model.isBundled) {
+                            ensureBundledModel(model)
+                        } else {
+                            cleanupTemporaryDirectories(model, recoverBackup = true)
+                        }
+                        if (EnhancementModelFiles.isModelInstalled(
+                                modelDirectory(model.id),
+                                model
+                            )
+                        ) {
                             EnhancementModelInstallState.Installed(model.installedSize)
                         } else {
                             EnhancementModelInstallState.NotInstalled
-                        },
-                    )
+                        }
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        if (model.isBundled) {
+                            EnhancementModelInstallState.Failed(
+                                operation = ModelOperation.DOWNLOAD,
+                                message = "内置模型不可用，请重新安装应用。",
+                            )
+                        } else {
+                            EnhancementModelInstallState.NotInstalled
+                        }
+                    }
+                    setState(model.id, nextState)
                 }
             }
         }
@@ -216,6 +232,36 @@ class EnhancementModelRepository private constructor(context: Context) {
                     message = userFacingMessage(error),
                 ),
             )
+        } finally {
+            if (!committed) staging.deleteRecursively()
+        }
+    }
+
+    private fun ensureBundledModel(model: EnhancementModelDescriptor): Boolean {
+        if (cleanupTemporaryDirectories(model, recoverBackup = true)) return true
+
+        val assetDirectory = model.bundledAssetDirectory ?: return false
+        val staging = File(rootDirectory, ".${model.id}.${UUID.randomUUID()}.download")
+        var committed = false
+        try {
+            if (!staging.mkdirs()) throw IOException("无法创建内置模型目录")
+            model.artifacts.forEach { artifact ->
+                val assetPath = model.bundledAssetPath(artifact)
+                    ?: throw IOException("内置模型缺少资源路径")
+                val partFile = File(staging, "${artifact.filename}.part")
+                appContext.assets.open(assetPath).use { input ->
+                    BufferedOutputStream(partFile.outputStream()).use { output ->
+                        input.copyTo(output, DOWNLOAD_BUFFER_SIZE)
+                    }
+                }
+                if (!EnhancementModelFiles.isArtifactValid(partFile, artifact)) {
+                    throw IOException("内置模型文件校验失败：$assetDirectory/${artifact.filename}")
+                }
+                atomicMove(partFile, File(staging, artifact.filename))
+            }
+            commitStagingDirectory(model, staging)
+            committed = true
+            return true
         } finally {
             if (!committed) staging.deleteRecursively()
         }
@@ -409,7 +455,8 @@ class EnhancementModelRepository private constructor(context: Context) {
     }
 
     private fun updateInstalledSummaryLocked() {
-        val installedStates = mutableStates.values.mapNotNull { flow ->
+        val installedStates = mutableStates.mapNotNull { (modelId, flow) ->
+            if (EnhancementModelCatalog.require(modelId).isBundled) return@mapNotNull null
             flow.value as? EnhancementModelInstallState.Installed
         }
         mutableInstalledCount.value = installedStates.size

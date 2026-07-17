@@ -5,6 +5,7 @@ data class EnhancementModelArtifact(
     val url: String,
     val bytes: Long,
     val sha256: String,
+    val bundledFilename: String? = null,
 )
 
 data class EnhancementModelDescriptor(
@@ -20,9 +21,16 @@ data class EnhancementModelDescriptor(
     val license: String,
     val sourceUrl: String,
     val artifacts: List<EnhancementModelArtifact>,
+    val bundledAssetDirectory: String? = null,
 ) {
     val installedSize: Long get() = artifacts.sumOf(EnhancementModelArtifact::bytes)
     val downloadSize: Long get() = installedSize
+    val isBundled: Boolean get() = bundledAssetDirectory != null
+
+    fun bundledAssetPath(artifact: EnhancementModelArtifact): String? =
+        bundledAssetDirectory?.let { directory ->
+            "$directory/${artifact.bundledFilename ?: artifact.filename}"
+        }
 }
 
 object EnhancementSelectionIds {
@@ -39,7 +47,7 @@ object EnhancementModelCatalog {
     private const val REAL_ESRGAN_VERSION = "v0.2.5.0 · adapter 37026f4"
     private const val REAL_ESRGAN_BACKEND = "ncnn · Vulkan / CPU"
     private const val REAL_ESRGAN_LICENSE =
-        "主项目 BSD-3-Clause；ncnn 实现 MIT；模型权重未单独声明"
+        "BSD-3-Clause（项目；模型权重随官方 release 发布，未另附限制）"
     private const val REAL_ESRGAN_SOURCE_URL = "https://github.com/xinntao/Real-ESRGAN"
     private const val REAL_ESRGAN_NCNN_BASE_URL =
         "https://huggingface.co/vozzy/inkleaf-models/resolve/main/" +
@@ -50,11 +58,13 @@ object EnhancementModelCatalog {
         filename: String,
         bytes: Long,
         sha256: String,
+        bundledFilename: String? = null,
     ) = EnhancementModelArtifact(
         filename = filename,
         url = "$REAL_ESRGAN_NCNN_BASE_URL/$modelDirectory/$filename",
         bytes = bytes,
         sha256 = sha256,
+        bundledFilename = bundledFilename,
     )
 
     val models: List<EnhancementModelDescriptor> = listOf(
@@ -68,7 +78,7 @@ object EnhancementModelCatalog {
             targetBackend = "ncnn · Vulkan",
             capabilities = listOf("2× 超分", "线条修复", "不降噪"),
             recommendedFor = listOf("干净线稿", "轻微模糊漫画"),
-            license = "代码仓库 MIT；模型权重许可未验证",
+            license = "MIT（nihui/realcugan-ncnn-vulkan；模型源自 bilibili/ailab Real-CUGAN）",
             sourceUrl = "https://github.com/nihui/realcugan-ncnn-vulkan",
             artifacts = listOf(
                 EnhancementModelArtifact(
@@ -95,7 +105,7 @@ object EnhancementModelCatalog {
             targetBackend = "ncnn · Vulkan",
             capabilities = listOf("2× 超分", "线条修复", "保守降噪"),
             recommendedFor = listOf("JPEG 压缩页", "有噪扫描稿"),
-            license = "代码仓库 MIT；模型权重许可未验证",
+            license = "MIT（nihui/realcugan-ncnn-vulkan；模型源自 bilibili/ailab Real-CUGAN）",
             sourceUrl = "https://github.com/nihui/realcugan-ncnn-vulkan",
             artifacts = listOf(
                 EnhancementModelArtifact(
@@ -111,6 +121,7 @@ object EnhancementModelCatalog {
                     sha256 = "4b3b5c5710ad1d00503c8243417aa75f13fe497723e8b4952e8b1abfc08f9b84",
                 ),
             ),
+            bundledAssetDirectory = "enhancement_models/realcugan-2x-conservative",
         ),
         EnhancementModelDescriptor(
             id = "waifu2x-upconv7-anime-2x",
@@ -122,7 +133,7 @@ object EnhancementModelCatalog {
             targetBackend = "ncnn · Vulkan",
             capabilities = listOf("2× 超分", "动漫线条增强"),
             recommendedFor = listOf("动漫风彩图", "较低性能设备"),
-            license = "代码仓库 MIT；模型权重许可未验证",
+            license = "MIT（nihui/waifu2x-ncnn-vulkan；模型源自 nagadomi/waifu2x）",
             sourceUrl = "https://github.com/nihui/waifu2x-ncnn-vulkan",
             artifacts = listOf(
                 EnhancementModelArtifact(
@@ -138,6 +149,7 @@ object EnhancementModelCatalog {
                     sha256 = "413195ffde05b4d43807792c6c020c916cecdf25dcf002ee83f5e28d5cc246c6",
                 ),
             ),
+            bundledAssetDirectory = "enhancement_models/waifu2x-upconv7-anime-2x",
         ),
         EnhancementModelDescriptor(
             id = "realesrgan-animevideov3-2x",
@@ -157,6 +169,7 @@ object EnhancementModelCatalog {
                     filename = "realesr-animevideov3-x2.bin",
                     bytes = 1_247_368,
                     sha256 = "548a36f9c3f4ab8da56cd3b13badf23968bee207b396dad14d04b830e5f2ab2d",
+                    bundledFilename = "shared.bin",
                 ),
                 realEsrganArtifact(
                     modelDirectory = "animevideov3-x2",
@@ -165,6 +178,7 @@ object EnhancementModelCatalog {
                     sha256 = "b88ff4f00ebf019a7fdac17fdd45a7fd3665d37509efc5baf2e4da2e24420a04",
                 ),
             ),
+            bundledAssetDirectory = "enhancement_models/realesrgan-animevideov3",
         ),
         EnhancementModelDescriptor(
             id = "realesrgan-animevideov3-4x",
@@ -184,6 +198,7 @@ object EnhancementModelCatalog {
                     filename = "realesr-animevideov3-x4.bin",
                     bytes = 1_247_368,
                     sha256 = "548a36f9c3f4ab8da56cd3b13badf23968bee207b396dad14d04b830e5f2ab2d",
+                    bundledFilename = "shared.bin",
                 ),
                 realEsrganArtifact(
                     modelDirectory = "animevideov3-x4",
@@ -192,6 +207,7 @@ object EnhancementModelCatalog {
                     sha256 = "850a248e7c14c27e5bd8cf7265113a9441036a7db63963bb8aa5169d788a435e",
                 ),
             ),
+            bundledAssetDirectory = "enhancement_models/realesrgan-animevideov3",
         ),
         EnhancementModelDescriptor(
             id = "realesrgan-x4plus-anime-4x",

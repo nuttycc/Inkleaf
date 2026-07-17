@@ -23,7 +23,7 @@ import com.exio.inkleaf.data.enhancement.EnhancementModelInstallState
 import com.exio.inkleaf.data.enhancement.ModelOperation
 
 internal const val MODEL_RUNTIME_MESSAGE =
-    "应用内置 ncnn CPU/Vulkan 推理引擎。模型包下载后会在页面加载时进行本机处理；不支持 Vulkan 的设备会自动使用 CPU。"
+    "应用使用内置的 ncnn CPU/Vulkan 推理引擎。内置或下载的模型包会在页面加载时进行本机处理；不支持 Vulkan 的设备会自动使用 CPU。"
 
 internal fun formatFileSize(bytes: Long): String = when {
     bytes >= 1L shl 30 -> "%.1f GB".format(bytes / (1024f * 1024f * 1024f))
@@ -56,7 +56,7 @@ internal fun ModelSummaryContent(
             text = model.recommendedFor.joinToString(" · "),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        ModelDownloadStatus(state)
+        ModelDownloadStatus(model, state)
     }
 }
 
@@ -75,8 +75,16 @@ internal fun ModelPackageAction(
             modifier = Modifier.size(24.dp),
         )
 
-        EnhancementModelInstallState.NotInstalled -> FilledTonalButton(onClick = onInstall) {
-            Text("下载")
+        EnhancementModelInstallState.NotInstalled -> if (model.isBundled) {
+            Text(
+                text = "不可用",
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.labelLarge,
+            )
+        } else {
+            FilledTonalButton(onClick = onInstall) {
+                Text("下载")
+            }
         }
 
         is EnhancementModelInstallState.Downloading -> IconButton(onClick = onCancel) {
@@ -86,21 +94,39 @@ internal fun ModelPackageAction(
             )
         }
 
-        is EnhancementModelInstallState.Installed -> installedAction()
-        is EnhancementModelInstallState.Failed -> TextButton(
-            onClick = if (state.operation == ModelOperation.DOWNLOAD) {
-                onRetryDownload
-            } else {
-                onRetryDelete
-            },
-        ) {
-            Text(if (state.operation == ModelOperation.DOWNLOAD) "重试下载" else "重试删除")
+        is EnhancementModelInstallState.Installed -> if (model.isBundled) {
+            Text(
+                text = "内置",
+                color = MaterialTheme.colorScheme.primary,
+                style = MaterialTheme.typography.labelLarge,
+            )
+        } else {
+            installedAction()
+        }
+
+        is EnhancementModelInstallState.Failed -> if (model.isBundled) {
+            Text(
+                text = "不可用",
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.labelLarge,
+            )
+        } else {
+            TextButton(
+                onClick = if (state.operation == ModelOperation.DOWNLOAD) {
+                    onRetryDownload
+                } else {
+                    onRetryDelete
+                },
+            ) {
+                Text(if (state.operation == ModelOperation.DOWNLOAD) "重试下载" else "重试删除")
+            }
         }
     }
 }
 
 @Composable
 internal fun ModelDownloadStatus(
+    model: EnhancementModelDescriptor,
     state: EnhancementModelInstallState,
     modifier: Modifier = Modifier,
 ) {
@@ -129,7 +155,11 @@ internal fun ModelDownloadStatus(
         }
 
         is EnhancementModelInstallState.Installed -> Text(
-            text = "模型包已下载 · ${formatFileSize(state.bytes)}",
+            text = if (model.isBundled) {
+                "应用内置 · ${formatFileSize(state.bytes)}"
+            } else {
+                "模型包已下载 · ${formatFileSize(state.bytes)}"
+            },
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.primary,
             modifier = modifier,

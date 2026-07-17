@@ -23,6 +23,7 @@ from the official Real-ESRGAN release archive:
 - Release archive: https://github.com/xinntao/Real-ESRGAN/releases/tag/v0.2.5.0
 - Archive SHA-256: `e5aa6eb131234b87c0c51f82b89390f5e3e642b7b70f2b9bbe95b6a285a40c96`
 
-The upstream project is BSD-3-Clause licensed. The upstream project does not provide a separate
-license declaration specifically for the model weights, so consumers should review the upstream
-project and release terms for their use case.
+The upstream project is BSD-3-Clause licensed. The release does not provide a separate
+model-weight license file; Inkleaf distributes these unchanged files under the upstream
+project license and includes the complete BSD-3-Clause notice in the app's
+`THIRD_PARTY_MODEL_LICENSES.txt` asset.

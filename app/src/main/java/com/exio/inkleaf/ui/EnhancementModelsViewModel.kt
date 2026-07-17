@@ -36,6 +36,7 @@ class EnhancementModelsViewModel(app: Application) : AndroidViewModel(app) {
 
     val installedCount = repository.installedCount
     val installedBytes = repository.installedBytes
+    val bundledCount: Int = EnhancementModelCatalog.models.count { it.isBundled }
     val isChecking = modelStates.map { states ->
         states.values.any { it is EnhancementModelInstallState.Checking }
     }.stateIn(
@@ -45,6 +46,7 @@ class EnhancementModelsViewModel(app: Application) : AndroidViewModel(app) {
     )
 
     fun install(modelId: String) {
+        if (EnhancementModelCatalog.require(modelId).isBundled) return
         NcnnEnhancementEngine.enableModel(modelId)
         repository.install(modelId)
     }
@@ -52,6 +54,7 @@ class EnhancementModelsViewModel(app: Application) : AndroidViewModel(app) {
     fun cancel(modelId: String) = repository.cancel(modelId)
 
     fun delete(modelId: String) {
+        if (EnhancementModelCatalog.require(modelId).isBundled) return
         viewModelScope.launch {
             comicRepository.resetEnhancementSelections(modelId)
             try {

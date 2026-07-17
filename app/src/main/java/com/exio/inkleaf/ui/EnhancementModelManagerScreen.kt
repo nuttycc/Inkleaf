@@ -53,17 +53,26 @@ fun EnhancementModelManagerScreen(
     val states by viewModel.modelStates.collectAsStateWithLifecycle()
     val installedCount by viewModel.installedCount.collectAsStateWithLifecycle()
     val installedBytes by viewModel.installedBytes.collectAsStateWithLifecycle()
+    val bundledCount = viewModel.bundledCount
     val isChecking by viewModel.isChecking.collectAsStateWithLifecycle()
     var detailModelId by rememberSaveable { mutableStateOf<String?>(null) }
 
+    val bundled = remember(states) {
+        EnhancementModelCatalog.models.filter { model ->
+            model.isBundled && states[model.id] !is EnhancementModelInstallState.Checking
+        }
+    }
     val installed = remember(states) {
-        EnhancementModelCatalog.models.filter { states[it.id] is EnhancementModelInstallState.Installed }
+        EnhancementModelCatalog.models.filter { model ->
+            !model.isBundled && states[model.id] is EnhancementModelInstallState.Installed
+        }
     }
     val checking = remember(states) {
         EnhancementModelCatalog.models.filter { states[it.id] is EnhancementModelInstallState.Checking }
     }
     val available = remember(states) {
         EnhancementModelCatalog.models.filter { model ->
+            !model.isBundled &&
             states[model.id] !is EnhancementModelInstallState.Installed &&
                     states[model.id] !is EnhancementModelInstallState.Checking
         }
@@ -104,8 +113,8 @@ fun EnhancementModelManagerScreen(
                 Text(
                     text = when {
                         isChecking -> "正在检查模型文件…"
-                        installedCount == 0 -> "尚未下载模型包。文件保存在应用私有目录。"
-                        else -> "已下载 $installedCount 个模型包 · 占用 " +
+                        installedCount == 0 -> "已内置 $bundledCount 个模型包，可离线使用。"
+                        else -> "已内置 $bundledCount 个 · 已下载 $installedCount 个 · 占用 " +
                                 formatFileSize(installedBytes)
                     },
                     style = MaterialTheme.typography.bodyMedium,
@@ -115,6 +124,9 @@ fun EnhancementModelManagerScreen(
             }
 
             modelManagerSection("正在检查", checking, states, actions) {
+                detailModelId = it
+            }
+            modelManagerSection("已内置", bundled, states, actions) {
                 detailModelId = it
             }
             modelManagerSection("已下载", installed, states, actions) {
@@ -226,7 +238,10 @@ private fun ModelDetailsSheet(model: EnhancementModelDescriptor) {
         DetailRow("模型目标后端", model.targetBackend)
         DetailRow("应用推理后端", NcnnEnhancementEngine.runtimeDescription())
         DetailRow("倍率", "${model.scale}×")
-        DetailRow("下载大小", formatFileSize(model.downloadSize))
+        DetailRow(
+            if (model.isBundled) "内置大小" else "下载大小",
+            formatFileSize(model.downloadSize),
+        )
         DetailRow("能力", model.capabilities.joinToString(" · "))
         DetailRow("推荐场景", model.recommendedFor.joinToString(" · "))
         DetailRow("许可证", model.license)
