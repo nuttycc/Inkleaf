@@ -1,6 +1,7 @@
 package com.exio.inkleaf.ui
 
 import android.app.Activity
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Build
@@ -109,6 +110,7 @@ import com.exio.inkleaf.data.ReaderPageCacheKey
 import com.exio.inkleaf.data.db.FavoritePageEntity
 import com.exio.inkleaf.data.enhancement.EnhancementInferenceOutcome
 import com.exio.inkleaf.data.enhancement.EnhancementModelCatalog
+import com.exio.inkleaf.data.enhancement.EnhancementModelDescriptor
 import com.exio.inkleaf.data.enhancement.EnhancementModelInstallState
 import com.exio.inkleaf.data.enhancement.EnhancementSelectionIds
 import com.exio.inkleaf.data.enhancement.NcnnEnhancementEngine
@@ -284,6 +286,7 @@ private fun ComicPager(
     onToggleControls: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
     val pagerState = rememberPagerState(
         initialPage = startPage,
         pageCount = { volume.totalPageCount },
@@ -296,6 +299,7 @@ private fun ComicPager(
     var zoomResetPage by remember { mutableStateOf(-1) }
     var zoomToggleAnchor by remember { mutableStateOf(Offset.Unspecified) }
     var enhancementReport by remember { mutableStateOf<PageEnhancementReport?>(null) }
+    var enhancementCompletion by remember { mutableStateOf<PageEnhancementCompletion?>(null) }
 
     LaunchedEffect(pagerState.currentPage) {
         zoomedPage = null
@@ -328,6 +332,40 @@ private fun ComicPager(
     LaunchedEffect(pagerState) {
         snapshotFlow { pagerState.currentPage }
             .collect { page -> onPageChanged(page) }
+    }
+
+    // Wait for the settled page's enhancement before preparing only the next page.
+    // This keeps the single native inference queue free for the page the user is reading.
+    LaunchedEffect(
+        pagerState.settledPage,
+        enhancementSelectionId,
+        enhancementModelInstalled,
+        enhancementCompletion,
+    ) {
+        val completion = enhancementCompletion ?: return@LaunchedEffect
+        val model = EnhancementModelCatalog.find(enhancementSelectionId)
+            ?.takeIf { enhancementModelInstalled }
+        if (
+            model == null ||
+            !completion.success ||
+            completion.page != pagerState.settledPage ||
+            completion.selectionId != enhancementSelectionId
+        ) {
+            return@LaunchedEffect
+        }
+
+        val targetPage = pagerState.settledPage + 1
+        if (targetPage >= volume.totalPageCount) return@LaunchedEffect
+        delay(PREFETCH_DELAY_MS)
+        if (pagerState.settledPage != completion.page) return@LaunchedEffect
+
+        prefetchEnhancement(
+            context = context,
+            volume = volume,
+            cacheKeyPrefix = cacheKeyPrefix,
+            page = targetPage,
+            model = model,
+        )
     }
 
     Box(
@@ -379,6 +417,18 @@ private fun ComicPager(
                 },
                 enhancementSelectionId = enhancementSelectionId,
                 enhancementModelInstalled = enhancementModelInstalled,
+                onEnhancementCompleted = { page, selectionId, success ->
+                    if (
+                        page == pagerState.currentPage &&
+                        selectionId == enhancementSelectionId
+                    ) {
+                        enhancementCompletion = PageEnhancementCompletion(
+                            page = page,
+                            selectionId = selectionId,
+                            success = success,
+                        )
+                    }
+                },
                 onEnhancementStatusChanged = { page, selectionId, status ->
                     if (
                         page == pagerState.currentPage &&
@@ -922,6 +972,7 @@ private fun ComicPage(
     onZoomChanged: (Boolean) -> Unit,
     enhancementSelectionId: String,
     enhancementModelInstalled: Boolean,
+    onEnhancementCompleted: (Int, String, Boolean) -> Unit,
     onEnhancementStatusChanged: (Int, String, PageEnhancementStatus?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -1015,40 +1066,52 @@ private fun ComicPage(
                         PageContent.Bytes(volume.loadPageBytes(page))
                     }
                 } else {
-                    val sourceBitmap = loadInferenceSourceBitmap(
-                        volume = volume,
-                        page = page,
-                        scale = enhancementModel.scale,
-                    )
-                    val sourceImage = sourceBitmap.asImageBitmap()
-                    value = PageContent.Bitmap(
-                        bitmap = sourceImage,
-                        enhancementStatus = PageEnhancementStatus.Processing,
-                    )
                     val sourceKey = ReaderPageCacheKey.forPage(
-                        cacheKeyPrefix,
-                        page,
-                        volume.pageIdentity(page),
+                        cacheKeyPrefix = cacheKeyPrefix,
+                        page = page,
+                        pageIdentity = volume.pageIdentity(page),
+                        sourceRevision = volume.sourceRevision,
                     )
                     val modelRevision = enhancementModel.artifacts.joinToString(separator = "-") {
-                        it.sha256.take(MODEL_CACHE_HASH_LENGTH)
+                        it.sha256
                     }
-                    when (
-                        val outcome = NcnnEnhancementEngine.enhance(
-                            context = context,
-                            modelId = enhancementModel.id,
-                            source = sourceBitmap,
-                            cacheKey = "$sourceKey@${enhancementModel.id}@$modelRevision",
+                    val enhancementCacheKey =
+                        "$sourceKey@${enhancementModel.id}@$modelRevision"
+                    val cached = NcnnEnhancementEngine.cached(
+                        modelId = enhancementModel.id,
+                        cacheKey = enhancementCacheKey,
+                    )
+                    if (cached != null) {
+                        PageContent.Bitmap(cached.bitmap.asImageBitmap())
+                    } else {
+                        val sourceBitmap = loadInferenceSourceBitmap(
+                            volume = volume,
+                            page = page,
+                            scale = enhancementModel.scale,
                         )
-                    ) {
-                        is EnhancementInferenceOutcome.Success -> PageContent.Bitmap(
-                            bitmap = outcome.bitmap.asImageBitmap(),
-                        )
-
-                        is EnhancementInferenceOutcome.Failure -> PageContent.Bitmap(
+                        val sourceImage = sourceBitmap.asImageBitmap()
+                        value = PageContent.Bitmap(
                             bitmap = sourceImage,
-                            enhancementStatus = PageEnhancementStatus.Failed(outcome.message),
+                            enhancementStatus = PageEnhancementStatus.Processing,
                         )
+                        when (
+                            val outcome = NcnnEnhancementEngine.enhance(
+                                context = context,
+                                modelId = enhancementModel.id,
+                                source = sourceBitmap,
+                                cacheKey = enhancementCacheKey,
+                            )
+                        ) {
+                            is EnhancementInferenceOutcome.Success -> PageContent.Bitmap(
+                                bitmap = outcome.bitmap.asImageBitmap(),
+                            )
+
+                            is EnhancementInferenceOutcome.Failure -> PageContent.Bitmap(
+                                bitmap = sourceImage,
+                                enhancementStatus =
+                                    PageEnhancementStatus.Failed(outcome.message),
+                            )
+                        }
                     }
                 }
             } catch (cancelled: CancellationException) {
@@ -1062,6 +1125,21 @@ private fun ComicPage(
     }
 
     val enhancementStatus = (content as? PageContent.Bitmap)?.enhancementStatus
+    LaunchedEffect(page, currentPage, enhancementSelectionId, content) {
+        if (
+            page == currentPage &&
+            enhancementModelInstalled &&
+            EnhancementModelCatalog.find(enhancementSelectionId) != null &&
+            content is PageContent.Bitmap
+        ) {
+            onEnhancementCompleted(
+                page,
+                enhancementSelectionId,
+                (content as PageContent.Bitmap).enhancementStatus == null,
+            )
+        }
+    }
+
     LaunchedEffect(
         page,
         currentPage,
@@ -1219,6 +1297,38 @@ private suspend fun loadInferenceSourceBitmap(
     }
 }
 
+private suspend fun prefetchEnhancement(
+    context: Context,
+    volume: ComicVolume,
+    cacheKeyPrefix: String,
+    page: Int,
+    model: EnhancementModelDescriptor,
+) {
+    val sourceKey = ReaderPageCacheKey.forPage(
+        cacheKeyPrefix = cacheKeyPrefix,
+        page = page,
+        pageIdentity = volume.pageIdentity(page),
+        sourceRevision = volume.sourceRevision,
+    )
+    val modelRevision = model.artifacts.joinToString(separator = "-") {
+        it.sha256
+    }
+    val cacheKey = "$sourceKey@${model.id}@$modelRevision"
+    if (NcnnEnhancementEngine.cached(model.id, cacheKey) != null) return
+
+    val source = loadInferenceSourceBitmap(volume, page, model.scale)
+    try {
+        NcnnEnhancementEngine.enhance(
+            context = context,
+            modelId = model.id,
+            source = source,
+            cacheKey = cacheKey,
+        )
+    } finally {
+        if (!source.isRecycled) source.recycle()
+    }
+}
+
 @Composable
 private fun ReaderPageStatus(
     pageLabel: String,
@@ -1299,7 +1409,13 @@ private data class PageEnhancementReport(
     val status: PageEnhancementStatus?,
 )
 
-private const val MODEL_CACHE_HASH_LENGTH = 12
+private data class PageEnhancementCompletion(
+    val page: Int,
+    val selectionId: String,
+    val success: Boolean,
+)
+
+private const val PREFETCH_DELAY_MS = 200L
 
 /**
  * 延迟显示的转圈：加载在 delayMillis 内完成就全程不显示。

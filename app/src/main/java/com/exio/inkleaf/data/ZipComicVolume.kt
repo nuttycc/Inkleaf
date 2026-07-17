@@ -7,6 +7,7 @@ package com.exio.inkleaf.data
  */
 class ZipComicVolume(private val book: ComicBook, private val title: String) : ComicVolume {
     override val totalPageCount: Int get() = book.pageCount
+    override val sourceRevision: String get() = book.sourceRevision
     override val chapterCount: Int get() = 1
 
     override fun chapterTitle(chapterIndex: Int): String = title

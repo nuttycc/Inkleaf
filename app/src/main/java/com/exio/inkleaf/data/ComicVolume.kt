@@ -13,6 +13,9 @@ interface ComicVolume {
     /** 全书总页数（跨所有章节） */
     val totalPageCount: Int
 
+    /** Stable token that changes whenever page content or ordering may have changed. */
+    val sourceRevision: String
+
     /** 章节数量 */
     val chapterCount: Int
 

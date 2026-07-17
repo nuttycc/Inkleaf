@@ -2,9 +2,11 @@ package com.exio.inkleaf.data
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.net.Uri
 import android.os.ParcelFileDescriptor
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.documentfile.provider.DocumentFile
 import com.ahmer.pdfium.PdfiumCore
 import com.exio.inkleaf.data.db.ChapterEntity
 import kotlinx.coroutines.Dispatchers
@@ -48,6 +50,21 @@ class PdfComicVolume(
     }
 
     override val chapterCount: Int get() = chapters.size
+
+    override val sourceRevision: String = ReaderPageCacheKey.sourceRevision(
+        buildList {
+            add("pdf-series")
+            chapters.forEach { chapter ->
+                val document = runCatching {
+                    DocumentFile.fromSingleUri(appContext, Uri.parse(chapter.uri))
+                }.getOrNull()
+                add(chapter.fileKey)
+                add(chapter.uri)
+                add((document?.length() ?: -1L).toString())
+                add((document?.lastModified() ?: -1L).toString())
+            }
+        }
+    )
 
     override val totalPageCount: Int
         get() {

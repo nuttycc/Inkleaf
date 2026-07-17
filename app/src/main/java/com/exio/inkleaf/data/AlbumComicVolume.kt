@@ -19,6 +19,18 @@ class AlbumComicVolume(
     private val filesDir = context.applicationContext.filesDir
 
     override val totalPageCount: Int = pages.size
+    override val sourceRevision: String = ReaderPageCacheKey.sourceRevision(
+        buildList {
+            add("album")
+            pages.forEach { page ->
+                val file = resolveAlbumPageFile(filesDir, page.relativePath)
+                add(page.id)
+                add(page.relativePath)
+                add(file.length().toString())
+                add(file.lastModified().toString())
+            }
+        }
+    )
     override val chapterCount: Int = 1
 
     override fun chapterTitle(chapterIndex: Int): String = title

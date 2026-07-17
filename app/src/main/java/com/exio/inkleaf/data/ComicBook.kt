@@ -27,6 +27,7 @@ class ComicBook private constructor(
     private val zipFile: ZipFile,
     private val thumbZipFile: ZipFile,
     private val pageEntries: List<ZipEntry>,
+    val sourceRevision: String,
 ) {
     val pageCount: Int get() = pageEntries.size
 
@@ -123,7 +124,16 @@ class ComicBook private constructor(
                     cacheFile.setLastModified(System.currentTimeMillis())
                     ReaderCache.enforceBudget(context, keep = cacheFile)
 
-                    ComicBook(zipFile, thumbZipFile, pages)
+                    ComicBook(
+                        zipFile = zipFile,
+                        thumbZipFile = thumbZipFile,
+                        pageEntries = pages,
+                        sourceRevision = calculateSourceRevision(
+                            sourceSize = sourceSize,
+                            sourceMtime = sourceMtime,
+                            pages = pages,
+                        ),
+                    )
                 } catch (e: Throwable) {
                     runCatching { zipFile?.close() }
                     runCatching { thumbZipFile?.close() }
@@ -184,5 +194,23 @@ class ComicBook private constructor(
             if (fileName.startsWith(".")) return false // 隐藏文件，如 ._page1.jpg
             return IMAGE_EXT.matches(fileName)
         }
+
+        private fun calculateSourceRevision(
+            sourceSize: Long,
+            sourceMtime: Long,
+            pages: List<ZipEntry>,
+        ): String = ReaderPageCacheKey.sourceRevision(
+            buildList {
+                add("zip")
+                add(sourceSize.toString())
+                add(sourceMtime.toString())
+                pages.forEach { page ->
+                    add(page.name)
+                    add(page.crc.toString())
+                    add(page.size.toString())
+                    add(page.compressedSize.toString())
+                }
+            }
+        )
     }
 }

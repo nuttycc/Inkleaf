@@ -130,6 +130,8 @@ object NcnnEnhancementEngine {
         override fun sizeOf(key: String, value: CachedBitmap): Int =
             (value.bitmap.allocationByteCount / 1024).coerceAtLeast(1)
     }
+    private val inFlightRequests =
+        InFlightRequestRegistry<String, EnhancementInferenceOutcome>()
 
     fun runtimeDescription(): String = when {
         !NativeEnhancementBridge.isLoaded() -> "ncnn 未加载"
@@ -145,11 +147,31 @@ object NcnnEnhancementEngine {
         cacheKey: String,
         preferVulkan: Boolean = true,
     ): EnhancementInferenceOutcome {
+        cached(modelId, cacheKey)?.let { return it }
+        val requestKey = "$modelId\u0000$cacheKey"
+        return inFlightRequests.run(requestKey) {
+            cached(modelId, cacheKey) ?: enhanceUncached(
+                context = context,
+                modelId = modelId,
+                source = source,
+                cacheKey = cacheKey,
+                preferVulkan = preferVulkan,
+            )
+        }
+    }
+
+    fun cached(
+        modelId: String,
+        cacheKey: String,
+    ): EnhancementInferenceOutcome.Success? {
         val requestGeneration = activeModelGeneration(modelId)
-            ?: return EnhancementInferenceOutcome.Failure("模型当前不可用，已显示原图。")
+            ?: return null
         synchronized(bitmapCache) {
             bitmapCache.get(cacheKey)?.takeUnless { it.bitmap.isRecycled }?.let { cached ->
-                if (isModelGenerationCurrent(modelId, requestGeneration)) {
+                if (
+                    cached.modelId == modelId &&
+                    isModelGenerationCurrent(modelId, requestGeneration)
+                ) {
                     return EnhancementInferenceOutcome.Success(
                         bitmap = cached.bitmap,
                         backend = cached.backend,
@@ -157,7 +179,18 @@ object NcnnEnhancementEngine {
                 }
             }
         }
+        return null
+    }
 
+    private suspend fun enhanceUncached(
+        context: Context,
+        modelId: String,
+        source: Bitmap,
+        cacheKey: String,
+        preferVulkan: Boolean,
+    ): EnhancementInferenceOutcome {
+        val requestGeneration = activeModelGeneration(modelId)
+            ?: return EnhancementInferenceOutcome.Failure("模型当前不可用，已显示原图。")
         return withContext(Dispatchers.Default) {
             currentCoroutineContext().ensureActive()
             if (!NativeEnhancementBridge.isLoaded()) {
@@ -359,6 +392,9 @@ object NcnnEnhancementEngine {
 }
 
 private const val INFERENCE_HEAP_DIVISOR = 4L
-private const val CACHE_HEAP_DIVISOR = 12L
+
+// Keep the cache below the active inference budget so cached output cannot
+// crowd out the input/output bitmaps and native buffers used by ncnn.
+private const val CACHE_HEAP_DIVISOR = 10L
 private const val MAX_INFERENCE_BYTES = 64L * 1024 * 1024
-private const val MAX_CACHE_BYTES = 24L * 1024 * 1024
+private const val MAX_CACHE_BYTES = 48L * 1024 * 1024
