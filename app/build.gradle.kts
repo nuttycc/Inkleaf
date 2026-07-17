@@ -116,6 +116,7 @@ dependencies {
     implementation(libs.androidx.documentfile)
     implementation(libs.ahmer.pdfium)
     implementation(libs.reorderable)
+    implementation(libs.androidx.work.runtime.ktx)
 
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))

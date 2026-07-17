@@ -2,6 +2,7 @@ package com.exio.inkleaf.ui
 
 import android.app.Application
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -19,12 +20,17 @@ import com.exio.inkleaf.data.ReaderCache
 import com.exio.inkleaf.data.db.BookSourceType
 import com.exio.inkleaf.data.db.ComicEntity
 import com.exio.inkleaf.data.db.FavoritePageEntity
+import com.exio.inkleaf.data.enhancement.EnhancementModelCatalog
+import com.exio.inkleaf.data.enhancement.EnhancementModelRepository
 import com.exio.inkleaf.data.enhancement.EnhancementSelectionIds
+import com.exio.inkleaf.data.enhancement.cache.EnhancementCacheTaskRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -56,6 +62,7 @@ class ReaderViewModel(
 ) : AndroidViewModel(app) {
     private val repo = ComicRepository(app)
     private val favoriteRepo = FavoriteRepository(app)
+    private val enhancementCacheRepo = EnhancementCacheTaskRepository(app)
 
     var state by mutableStateOf<ReaderUiState>(ReaderUiState.Loading)
         private set
@@ -79,6 +86,15 @@ class ReaderViewModel(
 
     var enhancementSelectionId by mutableStateOf(EnhancementSelectionIds.ORIGINAL)
         private set
+
+    var currentPage by mutableIntStateOf(0)
+        private set
+
+    val enhancementCacheTask = enhancementCacheRepo.observeLatest(comicId).stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = null,
+    )
 
     /** 正在加载中的页码集合，配合 Mutex 实现去重 */
     private val thumbInFlight = mutableSetOf<Int>()
@@ -131,6 +147,7 @@ class ReaderViewModel(
                     comic.lastReadPage,
                 )
                 val safeStartPage = startPage.coerceIn(0, opened.totalPageCount - 1)
+                currentPage = safeStartPage
                 // 后台预热胶片缩略图：呼出工具栏时大概率已全部就绪
                 prewarmThumbnails(opened, safeStartPage)
                 ReaderUiState.Ready(
@@ -154,6 +171,7 @@ class ReaderViewModel(
      * UI 仍使用全局页码；内部按 (章节, 页) 落库。
      */
     fun saveProgress(globalPage: Int) {
+        currentPage = globalPage
         val progress = volume?.globalToChapterPage(globalPage) ?: ChapterProgress(0, globalPage)
         pendingProgress = progress
         if (progressWriteJob?.isActive == true) return
@@ -252,6 +270,52 @@ class ReaderViewModel(
                 }
             }
         }
+    }
+
+    fun startEnhancementCache(startPageInclusive: Int, endPageInclusive: Int) {
+        val opened = volume ?: return
+        val model = EnhancementModelCatalog.find(enhancementSelectionId)
+        if (model == null) {
+            readerMessage = "请先选择已安装的 AI 增强模型"
+            return
+        }
+        val start = startPageInclusive.coerceIn(0, opened.totalPageCount - 1)
+        val end = endPageInclusive.coerceIn(start, opened.totalPageCount - 1)
+        viewModelScope.launch {
+            try {
+                if (
+                    EnhancementModelRepository.getInstance(getApplication())
+                        .installedDirectory(model.id) == null
+                ) {
+                    readerMessage = "请先安装所选 AI 增强模型"
+                    return@launch
+                }
+                enhancementCacheRepo.start(
+                    comicId = comicId,
+                    modelId = model.id,
+                    modelRevision = model.revision,
+                    sourceRevision = opened.sourceRevision,
+                    startPageInclusive = start,
+                    endPageInclusive = end,
+                )
+                readerMessage = "已开始缓存第 ${start + 1}～${end + 1} 页"
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                readerMessage = "启动缓存失败"
+            }
+        }
+    }
+
+    fun pauseEnhancementCache(taskId: String) {
+        viewModelScope.launch { enhancementCacheRepo.pause(taskId) }
+    }
+
+    fun resumeEnhancementCache(taskId: String) {
+        viewModelScope.launch { enhancementCacheRepo.resume(taskId) }
+    }
+
+    fun cancelEnhancementCache(taskId: String) {
+        viewModelScope.launch { enhancementCacheRepo.cancel(taskId) }
     }
 
     /** 胶片格子按需请求缩略图：缓存已有或正在加载则直接返回（去重） */

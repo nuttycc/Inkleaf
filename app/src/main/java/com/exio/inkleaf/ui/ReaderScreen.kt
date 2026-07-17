@@ -1,12 +1,14 @@
 package com.exio.inkleaf.ui
 
+import android.Manifest
 import android.app.Activity
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
+import android.content.pm.PackageManager
 import android.os.Build
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateFloatAsState
@@ -78,7 +80,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
@@ -95,6 +96,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -112,9 +114,12 @@ import com.exio.inkleaf.data.enhancement.EnhancementInferenceOutcome
 import com.exio.inkleaf.data.enhancement.EnhancementModelCatalog
 import com.exio.inkleaf.data.enhancement.EnhancementModelDescriptor
 import com.exio.inkleaf.data.enhancement.EnhancementModelInstallState
+import com.exio.inkleaf.data.enhancement.EnhancementRequestPriority
 import com.exio.inkleaf.data.enhancement.EnhancementSelectionIds
 import com.exio.inkleaf.data.enhancement.NcnnEnhancementEngine
-import com.exio.inkleaf.data.enhancement.calculateInferenceSampleSize
+import com.exio.inkleaf.data.enhancement.buildEnhancementPageKey
+import com.exio.inkleaf.data.enhancement.cache.EnhancementReaderActivity
+import com.exio.inkleaf.data.enhancement.loadEnhancementSourceBitmap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -137,11 +142,19 @@ fun ReaderScreen(
     }
     val enhancementModelsViewModel: EnhancementModelsViewModel = viewModel()
     val modelStates by enhancementModelsViewModel.modelStates.collectAsStateWithLifecycle()
+    val enhancementCacheTask by viewModel.enhancementCacheTask.collectAsStateWithLifecycle()
+
+    DisposableEffect(Unit) {
+        EnhancementReaderActivity.readerEntered()
+        onDispose { EnhancementReaderActivity.readerExited() }
+    }
 
     // 工具栏显隐提升到这一层：系统栏控制要在 Loading 阶段就生效，
     // 不能等 Ready 才开始（否则进入时多一次"系统栏缩进"的视觉跳变）
     var showControls by remember { mutableStateOf(false) }
     var showEnhancementSheet by remember { mutableStateOf(false) }
+    var showEnhancementCacheSheet by remember { mutableStateOf(false) }
+    var pendingCacheRange by remember { mutableStateOf<IntRange?>(null) }
 
     val selectedEnhancementId = viewModel.enhancementSelectionId
     val selectedModelState = modelStates[selectedEnhancementId]
@@ -162,6 +175,32 @@ fun ReaderScreen(
     val view = LocalView.current
     val context = LocalContext.current
     val window = (view.context as? Activity)?.window
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        val range = pendingCacheRange
+        pendingCacheRange = null
+        if (granted && range != null) {
+            viewModel.startEnhancementCache(range.first, range.last)
+        } else if (!granted) {
+            Toast.makeText(context, "需要通知权限才能显示缓存进度", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    val startEnhancementCache: (Int, Int) -> Unit = { start, end ->
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS,
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            pendingCacheRange = start..end
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            viewModel.startEnhancementCache(start, end)
+        }
+    }
 
     val readerMessage = viewModel.readerMessage
     LaunchedEffect(readerMessage) {
@@ -184,7 +223,10 @@ fun ReaderScreen(
     }
 
     // 系统返回手势/返回键也要走 exitReader，而不是让 Navigation 直接 pop
-    BackHandler(enabled = !showEnhancementSheet, onBack = exitReader)
+    BackHandler(
+        enabled = !showEnhancementSheet && !showEnhancementCacheSheet,
+        onBack = exitReader,
+    )
 
     if (window != null) {
         DisposableEffect(showControls) {
@@ -225,6 +267,7 @@ fun ReaderScreen(
                 )
 
                 is ReaderUiState.Ready -> ComicPager(
+                    comicId = comicId,
                     volume = s.volume,
                     startPage = s.startPage,
                     title = s.title,
@@ -261,13 +304,32 @@ fun ReaderScreen(
                 }
                 onOpenModelManager()
             },
+            onOpenCache = { showEnhancementCacheSheet = true },
             onSelect = viewModel::setEnhancementSelection,
+        )
+    }
+
+    val readyState = viewModel.state as? ReaderUiState.Ready
+    if (showEnhancementCacheSheet && readyState != null) {
+        val cacheModel = EnhancementModelCatalog.find(viewModel.enhancementSelectionId)
+            ?.takeIf { selectedModelState is EnhancementModelInstallState.Installed }
+        EnhancementCacheSheet(
+            currentPage = viewModel.currentPage,
+            pageCount = readyState.volume.totalPageCount,
+            modelName = cacheModel?.displayName,
+            task = enhancementCacheTask,
+            onDismiss = { showEnhancementCacheSheet = false },
+            onStart = startEnhancementCache,
+            onPause = viewModel::pauseEnhancementCache,
+            onResume = viewModel::resumeEnhancementCache,
+            onCancel = viewModel::cancelEnhancementCache,
         )
     }
 }
 
 @Composable
 private fun ComicPager(
+    comicId: Long,
     volume: ComicVolume,
     startPage: Int,
     title: String,
@@ -361,8 +423,8 @@ private fun ComicPager(
 
         prefetchEnhancement(
             context = context,
+            comicId = comicId,
             volume = volume,
-            cacheKeyPrefix = cacheKeyPrefix,
             page = targetPage,
             model = model,
         )
@@ -400,6 +462,7 @@ private fun ComicPager(
             modifier = Modifier.fillMaxSize(),
         ) { page ->
             ComicPage(
+                comicId = comicId,
                 volume = volume,
                 page = page,
                 currentPage = pagerState.currentPage,
@@ -959,6 +1022,7 @@ private fun readerColorOnDarkSurface(first: Color, second: Color): Color =
 
 @Composable
 private fun ComicPage(
+    comicId: Long,
     volume: ComicVolume,
     page: Int,
     currentPage: Int,
@@ -1069,25 +1133,17 @@ private fun ComicPage(
                         PageContent.Bytes(volume.loadPageBytes(page))
                     }
                 } else {
-                    val sourceKey = ReaderPageCacheKey.forPage(
-                        cacheKeyPrefix = cacheKeyPrefix,
+                    val pageKey = buildEnhancementPageKey(
+                        comicId = comicId,
+                        volume = volume,
                         page = page,
-                        pageIdentity = volume.pageIdentity(page),
-                        sourceRevision = volume.sourceRevision,
+                        model = enhancementModel,
                     )
-                    val modelRevision = enhancementModel.artifacts.joinToString(separator = "-") {
-                        it.sha256
-                    }
-                    val enhancementCacheKey =
-                        "$sourceKey@${enhancementModel.id}@$modelRevision"
-                    val cached = NcnnEnhancementEngine.cached(
-                        modelId = enhancementModel.id,
-                        cacheKey = enhancementCacheKey,
-                    )
+                    val cached = NcnnEnhancementEngine.cached(context, pageKey)
                     if (cached != null) {
                         PageContent.Bitmap(cached.bitmap.asImageBitmap())
                     } else {
-                        val sourceBitmap = loadInferenceSourceBitmap(
+                        val sourceBitmap = loadEnhancementSourceBitmap(
                             volume = volume,
                             page = page,
                             scale = enhancementModel.scale,
@@ -1100,9 +1156,8 @@ private fun ComicPage(
                         when (
                             val outcome = NcnnEnhancementEngine.enhance(
                                 context = context,
-                                modelId = enhancementModel.id,
+                                key = pageKey,
                                 source = sourceBitmap,
-                                cacheKey = enhancementCacheKey,
                             )
                         ) {
                             is EnhancementInferenceOutcome.Success -> PageContent.Bitmap(
@@ -1264,68 +1319,23 @@ private fun ComicPage(
     }
 }
 
-private suspend fun loadInferenceSourceBitmap(
-    volume: ComicVolume,
-    page: Int,
-    scale: Int,
-): Bitmap {
-    val maxPixels = NcnnEnhancementEngine.maxInputPixels(scale)
-    try {
-        volume.loadPageBitmapForInference(page, maxPixels)?.let {
-            return it.asAndroidBitmap()
-        }
-        val bytes = volume.loadPageBytes(page)
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
-            throw ComicOpenException("本页图像无法解码")
-        }
-
-        val sampleSize = calculateInferenceSampleSize(
-            width = bounds.outWidth,
-            height = bounds.outHeight,
-            maxPixels = maxPixels,
-        )
-        return BitmapFactory.decodeByteArray(
-            bytes,
-            0,
-            bytes.size,
-            BitmapFactory.Options().apply {
-                inSampleSize = sampleSize
-                inPreferredConfig = Bitmap.Config.ARGB_8888
-            },
-        ) ?: throw ComicOpenException("本页图像无法解码")
-    } catch (_: OutOfMemoryError) {
-        throw ComicOpenException("设备内存不足，无法增强本页")
-    }
-}
-
 private suspend fun prefetchEnhancement(
     context: Context,
+    comicId: Long,
     volume: ComicVolume,
-    cacheKeyPrefix: String,
     page: Int,
     model: EnhancementModelDescriptor,
 ) {
-    val sourceKey = ReaderPageCacheKey.forPage(
-        cacheKeyPrefix = cacheKeyPrefix,
-        page = page,
-        pageIdentity = volume.pageIdentity(page),
-        sourceRevision = volume.sourceRevision,
-    )
-    val modelRevision = model.artifacts.joinToString(separator = "-") {
-        it.sha256
-    }
-    val cacheKey = "$sourceKey@${model.id}@$modelRevision"
-    if (NcnnEnhancementEngine.cached(model.id, cacheKey) != null) return
+    val pageKey = buildEnhancementPageKey(comicId, volume, page, model)
+    if (NcnnEnhancementEngine.cached(context, pageKey) != null) return
 
-    val source = loadInferenceSourceBitmap(volume, page, model.scale)
+    val source = loadEnhancementSourceBitmap(volume, page, model.scale)
     try {
         NcnnEnhancementEngine.enhance(
             context = context,
-            modelId = model.id,
+            key = pageKey,
             source = source,
-            cacheKey = cacheKey,
+            priority = EnhancementRequestPriority.PREFETCH,
         )
     } finally {
         if (!source.isRecycled) source.recycle()

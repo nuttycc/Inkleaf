@@ -38,6 +38,7 @@ internal fun ReaderEnhancementSheet(
     accent: Color,
     onDismiss: () -> Unit,
     onOpenManager: () -> Unit,
+    onOpenCache: () -> Unit,
     onSelect: (String) -> Unit,
 ) {
     val typography = MaterialTheme.typography
@@ -91,6 +92,18 @@ internal fun ReaderEnhancementSheet(
                         ) {
                             Text("管理模型")
                         }
+                    }
+                }
+
+                item {
+                    TextButton(
+                        onClick = {
+                            onDismiss()
+                            onOpenCache()
+                        },
+                        modifier = Modifier.padding(horizontal = 8.dp),
+                    ) {
+                        Text("缓存增强页面")
                     }
                 }
 

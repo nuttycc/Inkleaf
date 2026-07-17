@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.exio.inkleaf.data.ComicRepository
+import com.exio.inkleaf.data.enhancement.EnhancedImageDiskCache
 import com.exio.inkleaf.data.enhancement.EnhancementModelCatalog
 import com.exio.inkleaf.data.enhancement.EnhancementModelInstallState
 import com.exio.inkleaf.data.enhancement.EnhancementModelRepository
@@ -62,6 +63,7 @@ class EnhancementModelsViewModel(app: Application) : AndroidViewModel(app) {
             } finally {
                 // Once eviction starts, the repository-owned job must finish independently of UI.
                 repository.delete(modelId)
+                EnhancedImageDiskCache.getInstance(getApplication()).deleteModel(modelId)
             }
         }
     }

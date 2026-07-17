@@ -5,16 +5,24 @@ import android.graphics.Bitmap
 import android.util.LruCache
 import androidx.annotation.Keep
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlin.math.sqrt
 
-enum class EnhancementInferenceBackend { VULKAN, CPU }
+enum class EnhancementInferenceBackend { VULKAN, CPU, DISK_CACHE }
+
+enum class EnhancementRequestPriority { CURRENT_PAGE, PREFETCH, BULK_CACHE }
 
 internal fun calculateInferenceSampleSize(
     width: Int,
@@ -54,6 +62,7 @@ sealed interface EnhancementInferenceOutcome {
     data class Success(
         val bitmap: Bitmap,
         val backend: EnhancementInferenceBackend,
+        val memoryCached: Boolean,
     ) : EnhancementInferenceOutcome
 
     data class Failure(val message: String) : EnhancementInferenceOutcome
@@ -117,8 +126,15 @@ object NcnnEnhancementEngine {
         val backend: EnhancementInferenceBackend,
     )
 
+    private data class TransientDiskWrite(
+        val diskCache: EnhancedImageDiskCache,
+        val token: EnhancedImageDiskCacheWriteToken,
+        val key: EnhancementPageKey,
+        val bitmap: Bitmap,
+    )
+
     private val sessionMutex = Mutex()
-    private val globalInferenceMutex = Mutex()
+    private val inferenceScheduler = EnhancementInferenceScheduler()
     private val sessions = mutableMapOf<String, Session>()
     private val disabledModelsLock = Any()
     private val disabledModels = mutableSetOf<String>()
@@ -132,6 +148,34 @@ object NcnnEnhancementEngine {
     }
     private val inFlightRequests =
         InFlightRequestRegistry<String, EnhancementInferenceOutcome>()
+    private val diskWriteScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val diskWriteQueue = Channel<TransientDiskWrite>(
+        capacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+
+    init {
+        diskWriteScope.launch {
+            var lastBudgetEnforcementAt = 0L
+            for (request in diskWriteQueue) {
+                if (
+                    request.diskCache.writeTransient(
+                        request.key,
+                        request.bitmap,
+                        request.token,
+                    )
+                ) {
+                    val now = System.currentTimeMillis()
+                    if (now - lastBudgetEnforcementAt >= TRANSIENT_BUDGET_INTERVAL_MS) {
+                        request.diskCache.enforceTransientBudget(
+                            request.diskCache.transientBudgetBytes()
+                        )
+                        lastBudgetEnforcementAt = now
+                    }
+                }
+            }
+        }
+    }
 
     fun runtimeDescription(): String = when {
         !NativeEnhancementBridge.isLoaded() -> "ncnn 未加载"
@@ -142,22 +186,58 @@ object NcnnEnhancementEngine {
 
     suspend fun enhance(
         context: Context,
-        modelId: String,
+        key: EnhancementPageKey,
         source: Bitmap,
-        cacheKey: String,
         preferVulkan: Boolean = true,
+        persistTransient: Boolean = true,
+        priority: EnhancementRequestPriority = EnhancementRequestPriority.CURRENT_PAGE,
+        cacheInMemory: Boolean = true,
     ): EnhancementInferenceOutcome {
-        cached(modelId, cacheKey)?.let { return it }
-        val requestKey = "$modelId\u0000$cacheKey"
+        cached(key.modelId, key.value)?.let { return it }
+        val requestKey = "${priority.name}\u0000${key.modelId}\u0000${key.value}"
         return inFlightRequests.run(requestKey) {
-            cached(modelId, cacheKey) ?: enhanceUncached(
+            cached(key.modelId, key.value) ?: enhanceUncached(
                 context = context,
-                modelId = modelId,
+                modelId = key.modelId,
                 source = source,
-                cacheKey = cacheKey,
+                cacheKey = key.value,
                 preferVulkan = preferVulkan,
-            )
+                priority = priority,
+                cacheInMemory = cacheInMemory,
+            ).also { outcome ->
+                if (persistTransient && outcome is EnhancementInferenceOutcome.Success) {
+                    val diskCache = EnhancedImageDiskCache.getInstance(context)
+                    diskWriteQueue.trySend(
+                        TransientDiskWrite(
+                            diskCache = diskCache,
+                            token = diskCache.writeToken(key),
+                            key = key,
+                            bitmap = outcome.bitmap,
+                        )
+                    )
+                }
+            }
         }
+    }
+
+    suspend fun cached(
+        context: Context,
+        key: EnhancementPageKey,
+    ): EnhancementInferenceOutcome.Success? {
+        cached(key.modelId, key.value)?.let { return it }
+        val bitmap = EnhancedImageDiskCache.getInstance(context).read(key) ?: return null
+        val generation = activeModelGeneration(key.modelId)
+        if (generation == null || !isModelGenerationCurrent(key.modelId, generation)) {
+            bitmap.recycle()
+            return null
+        }
+        val cached = CachedBitmap(
+            modelId = key.modelId,
+            bitmap = bitmap,
+            backend = EnhancementInferenceBackend.DISK_CACHE,
+        )
+        synchronized(bitmapCache) { bitmapCache.put(key.value, cached) }
+        return EnhancementInferenceOutcome.Success(bitmap, cached.backend, memoryCached = true)
     }
 
     fun cached(
@@ -175,6 +255,7 @@ object NcnnEnhancementEngine {
                     return EnhancementInferenceOutcome.Success(
                         bitmap = cached.bitmap,
                         backend = cached.backend,
+                        memoryCached = true,
                     )
                 }
             }
@@ -188,6 +269,8 @@ object NcnnEnhancementEngine {
         source: Bitmap,
         cacheKey: String,
         preferVulkan: Boolean,
+        priority: EnhancementRequestPriority,
+        cacheInMemory: Boolean,
     ): EnhancementInferenceOutcome {
         val requestGeneration = activeModelGeneration(modelId)
             ?: return EnhancementInferenceOutcome.Failure("模型当前不可用，已显示原图。")
@@ -201,14 +284,15 @@ object NcnnEnhancementEngine {
             var prepared: Bitmap? = null
             var unownedOutput: Bitmap? = null
             try {
-                globalInferenceMutex.withLock {
+                inferenceScheduler.withPermit(priority) {
                     currentCoroutineContext().ensureActive()
+                    cached(modelId, cacheKey)?.let { return@withPermit it }
                     val session = sessionFor(context, modelId, preferVulkan)
-                        ?: return@withLock EnhancementInferenceOutcome.Failure(
+                        ?: return@withPermit EnhancementInferenceOutcome.Failure(
                             "模型加载失败，请重新下载模型包。"
                         )
                     prepared = prepareInput(source, session.scale)
-                        ?: return@withLock EnhancementInferenceOutcome.Failure(
+                        ?: return@withPermit EnhancementInferenceOutcome.Failure(
                             "页面尺寸过大，无法安全创建推理位图。"
                         )
                     val inferenceInput = requireNotNull(prepared)
@@ -233,28 +317,34 @@ object NcnnEnhancementEngine {
                     }
                     currentCoroutineContext().ensureActive()
                     if (resultCode != NATIVE_RESULT_OK) {
-                        return@withLock EnhancementInferenceOutcome.Failure(
+                        return@withPermit EnhancementInferenceOutcome.Failure(
                             "AI 推理失败（错误码 $resultCode），已显示原图。"
                         )
                     }
                     if (!isModelGenerationCurrent(modelId, requestGeneration)) {
-                        return@withLock EnhancementInferenceOutcome.Failure(
+                        return@withPermit EnhancementInferenceOutcome.Failure(
                             "模型已被移除，已显示原图。"
                         )
                     }
-                    synchronized(bitmapCache) {
-                        if (!isModelGenerationCurrent(modelId, requestGeneration)) {
-                            return@withLock EnhancementInferenceOutcome.Failure(
-                                "模型已被移除，已显示原图。"
+                    if (cacheInMemory) {
+                        synchronized(bitmapCache) {
+                            if (!isModelGenerationCurrent(modelId, requestGeneration)) {
+                                return@withPermit EnhancementInferenceOutcome.Failure(
+                                    "模型已被移除，已显示原图。"
+                                )
+                            }
+                            bitmapCache.put(
+                                cacheKey,
+                                CachedBitmap(modelId, inferenceOutput, session.backend),
                             )
                         }
-                        bitmapCache.put(
-                            cacheKey,
-                            CachedBitmap(modelId, inferenceOutput, session.backend),
-                        )
                     }
                     unownedOutput = null
-                    EnhancementInferenceOutcome.Success(inferenceOutput, session.backend)
+                    EnhancementInferenceOutcome.Success(
+                        bitmap = inferenceOutput,
+                        backend = session.backend,
+                        memoryCached = cacheInMemory,
+                    )
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -391,6 +481,61 @@ object NcnnEnhancementEngine {
     private const val NATIVE_ERROR_MODEL_DISABLED = -2
 }
 
+internal class EnhancementInferenceScheduler {
+    private data class Waiter(
+        val priority: EnhancementRequestPriority,
+        val signal: CompletableDeferred<Unit> = CompletableDeferred(),
+    )
+
+    private val mutex = Mutex()
+    private val waiters = mutableListOf<Waiter>()
+    private var active = false
+
+    suspend fun <T> withPermit(
+        priority: EnhancementRequestPriority,
+        block: suspend () -> T,
+    ): T {
+        val waiter = mutex.withLock {
+            if (!active) {
+                active = true
+                null
+            } else {
+                Waiter(priority).also(waiters::add)
+            }
+        }
+        if (waiter != null) {
+            try {
+                waiter.signal.await()
+            } catch (cancelled: CancellationException) {
+                withContext(NonCancellable) {
+                    val hadPermit = mutex.withLock { !waiters.remove(waiter) }
+                    if (hadPermit) release()
+                }
+                throw cancelled
+            }
+        }
+
+        try {
+            return block()
+        } finally {
+            withContext(NonCancellable) { release() }
+        }
+    }
+
+    private suspend fun release() {
+        val next = mutex.withLock {
+            if (waiters.isEmpty()) {
+                active = false
+                null
+            } else {
+                val nextIndex = waiters.indices.minBy { waiters[it].priority.ordinal }
+                waiters.removeAt(nextIndex)
+            }
+        }
+        next?.signal?.complete(Unit)
+    }
+}
+
 private const val INFERENCE_HEAP_DIVISOR = 4L
 
 // Keep the cache below the active inference budget so cached output cannot
@@ -398,3 +543,4 @@ private const val INFERENCE_HEAP_DIVISOR = 4L
 private const val CACHE_HEAP_DIVISOR = 10L
 private const val MAX_INFERENCE_BYTES = 64L * 1024 * 1024
 private const val MAX_CACHE_BYTES = 48L * 1024 * 1024
+private const val TRANSIENT_BUDGET_INTERVAL_MS = 30_000L

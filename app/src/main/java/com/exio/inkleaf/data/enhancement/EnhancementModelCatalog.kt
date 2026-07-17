@@ -37,6 +37,7 @@ data class EnhancementModelDescriptor(
     val installedSize: Long get() = artifacts.sumOf(EnhancementModelArtifact::bytes)
     val downloadSize: Long get() = installedSize
     val isBundled: Boolean get() = bundledAssetDirectory != null
+    val revision: String get() = artifacts.joinToString(separator = "-") { it.sha256 }
 
     fun bundledAssetPath(artifact: EnhancementModelArtifact): String? =
         bundledAssetDirectory?.let { directory ->

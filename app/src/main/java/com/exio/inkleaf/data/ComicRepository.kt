@@ -12,8 +12,10 @@ import com.exio.inkleaf.data.db.FolderWithCount
 import com.exio.inkleaf.data.db.GroupWithCount
 import com.exio.inkleaf.data.db.LibraryFolderEntity
 import com.exio.inkleaf.data.db.LibraryFolderType
-import com.exio.inkleaf.data.enhancement.EnhancementSelectionIds
+import com.exio.inkleaf.data.enhancement.EnhancedImageDiskCache
 import com.exio.inkleaf.data.enhancement.EnhancementModelCatalog
+import com.exio.inkleaf.data.enhancement.EnhancementSelectionIds
+import com.exio.inkleaf.data.enhancement.cache.EnhancementCacheTaskRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
@@ -354,7 +356,7 @@ class ComicRepository(context: Context) {
      * （树授权覆盖整棵子树）。手动添加的条目（folderId=null）不受影响。
      */
     suspend fun removeFolder(folder: LibraryFolderEntity) {
-        dao.getByFolderId(folder.id).forEach(::deleteComicArtifacts)
+        dao.getByFolderId(folder.id).forEach { deleteComicArtifacts(it) }
         dao.deleteByFolderId(folder.id)
         folderDao.deleteById(folder.id)
         runCatching {
@@ -717,12 +719,14 @@ class ComicRepository(context: Context) {
     }
 
     /** 删除一本书的全部派生磁盘产物：封面文件 + 阅读缓存（zip 副本、缩略图） */
-    private fun deleteComicArtifacts(comic: ComicEntity) {
+    private suspend fun deleteComicArtifacts(comic: ComicEntity) {
         comic.coverPath?.let { File(it).delete() }
         if (comic.sourceType == BookSourceType.CREATED_ALBUM) {
             File(appContext.filesDir, "albums/${comic.id}").deleteRecursively()
         }
         ReaderCache.wipeBook(appContext, comic.id)
+        EnhancementCacheTaskRepository(appContext).deleteForComic(comic.id)
+        EnhancedImageDiskCache.getInstance(appContext).deleteComic(comic.id)
     }
 
     private suspend fun existingComicOutcome(comic: ComicEntity): AddComicOutcome {
