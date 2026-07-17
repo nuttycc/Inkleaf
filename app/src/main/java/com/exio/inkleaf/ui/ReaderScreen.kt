@@ -75,8 +75,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ColorFilter
-import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asAndroidBitmap
@@ -262,9 +260,6 @@ fun ReaderScreen(
                 onOpenModelManager()
             },
             onSelect = viewModel::setEnhancementSelection,
-            onInstall = enhancementModelsViewModel::install,
-            onCancel = enhancementModelsViewModel::cancel,
-            onDelete = enhancementModelsViewModel::delete,
         )
     }
 }
@@ -505,7 +500,6 @@ private fun ReaderTopBar(
                 "图像增强，${status.readerDescription()}"
             } ?: when (enhancementSelectionId) {
                 EnhancementSelectionIds.ORIGINAL -> "图像增强，当前为原图"
-                EnhancementSelectionIds.QUICK_CLARITY -> "图像增强，快速清晰已生效"
                 else -> {
                     val modelName = EnhancementModelCatalog.find(enhancementSelectionId)
                         ?.displayName ?: enhancementSelectionId
@@ -935,14 +929,6 @@ private fun ComicPage(
     var scale by remember(page) { mutableFloatStateOf(MIN_ZOOM_SCALE) }
     var offset by remember(page) { mutableStateOf(Offset.Zero) }
     var viewportSize by remember(page) { mutableStateOf(IntSize.Zero) }
-    val displayColorFilter = remember(enhancementSelectionId) {
-        if (enhancementSelectionId == EnhancementSelectionIds.QUICK_CLARITY) {
-            quickClarityColorFilter()
-        } else {
-            null
-        }
-    }
-
     fun resetZoom() {
         scale = MIN_ZOOM_SCALE
         offset = Offset.Zero
@@ -1160,7 +1146,6 @@ private fun ComicPage(
                             bitmap = c.bitmap,
                             contentDescription = "第 ${page + 1} 页",
                             contentScale = ContentScale.Fit,
-                            colorFilter = displayColorFilter,
                             modifier = Modifier.fillMaxSize(),
                         )
                     }
@@ -1190,7 +1175,6 @@ private fun ComicPage(
                         contentScale = ContentScale.Fit,
                         onSuccess = { imageReady = true },
                         onError = { imageReady = true },
-                        colorFilter = displayColorFilter,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
@@ -1271,21 +1255,6 @@ private fun ReaderPageStatus(
             overflow = TextOverflow.Ellipsis,
         )
     }
-}
-
-private fun quickClarityColorFilter(): ColorFilter {
-    val contrast = 1.16f
-    val offset = 128f * (1f - contrast)
-    return ColorFilter.colorMatrix(
-        ColorMatrix(
-            floatArrayOf(
-                contrast, 0f, 0f, 0f, offset,
-                0f, contrast, 0f, 0f, offset,
-                0f, 0f, contrast, 0f, offset,
-                0f, 0f, 0f, 1f, 0f,
-            )
-        )
-    )
 }
 
 private const val MIN_ZOOM_SCALE = 1f

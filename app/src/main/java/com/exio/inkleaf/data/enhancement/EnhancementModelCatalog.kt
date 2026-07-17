@@ -35,9 +35,8 @@ data class EnhancementModelDescriptor(
 
 object EnhancementSelectionIds {
     const val ORIGINAL = "original"
-    const val QUICK_CLARITY = "quick_clarity"
 
-    val builtIn: Set<String> = setOf(ORIGINAL, QUICK_CLARITY)
+    val builtIn: Set<String> = setOf(ORIGINAL)
 
     fun isValid(id: String): Boolean = id in builtIn || EnhancementModelCatalog.find(id) != null
 }

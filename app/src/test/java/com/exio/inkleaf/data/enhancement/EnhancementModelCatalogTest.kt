@@ -5,6 +5,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -120,9 +121,9 @@ class EnhancementModelCatalogTest {
     }
 
     @Test
-    fun builtInAndCatalogSelectionsAreValid() {
+    fun originalAndCatalogSelectionsAreValid() {
         assertTrue(EnhancementSelectionIds.isValid(EnhancementSelectionIds.ORIGINAL))
-        assertTrue(EnhancementSelectionIds.isValid(EnhancementSelectionIds.QUICK_CLARITY))
+        assertFalse(EnhancementSelectionIds.isValid("quick_clarity"))
         EnhancementModelCatalog.models.forEach { model ->
             assertTrue(EnhancementSelectionIds.isValid(model.id))
         }

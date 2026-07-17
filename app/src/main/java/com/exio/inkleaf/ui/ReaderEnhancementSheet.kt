@@ -39,12 +39,14 @@ internal fun ReaderEnhancementSheet(
     onDismiss: () -> Unit,
     onOpenManager: () -> Unit,
     onSelect: (String) -> Unit,
-    onInstall: (String) -> Unit,
-    onCancel: (String) -> Unit,
-    onDelete: (String) -> Unit,
 ) {
     val typography = MaterialTheme.typography
     val shapes = MaterialTheme.shapes
+    val installedModels = remember(modelStates) {
+        EnhancementModelCatalog.models.filter { model ->
+            modelStates[model.id] is EnhancementModelInstallState.Installed
+        }
+    }
     val readerScheme = remember(accent) {
         darkColorScheme(
             primary = accent,
@@ -92,7 +94,7 @@ internal fun ReaderEnhancementSheet(
                     }
                 }
 
-                item { ReaderSheetSectionLabel("内置处理") }
+                item { ReaderSheetSectionLabel("显示方式") }
                 item {
                     BuiltInEnhancementRow(
                         title = "原图",
@@ -101,32 +103,31 @@ internal fun ReaderEnhancementSheet(
                         onClick = { onSelect(EnhancementSelectionIds.ORIGINAL) },
                     )
                 }
-                item {
-                    BuiltInEnhancementRow(
-                        title = "快速清晰",
-                        description = "即时增强对比度，不使用 AI 模型",
-                        selected = selectedId == EnhancementSelectionIds.QUICK_CLARITY,
-                        onClick = { onSelect(EnhancementSelectionIds.QUICK_CLARITY) },
-                    )
-                }
 
                 item {
                     ModelRuntimeNotice(
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp),
                     )
                 }
-                item { ReaderSheetSectionLabel("端侧 AI 模型包") }
-                items(EnhancementModelCatalog.models, key = EnhancementModelDescriptor::id) { model ->
-                    ReaderModelRow(
-                        model = model,
-                        state = modelStates.getValue(model.id),
-                        selected = selectedId == model.id,
-                        onSelect = { onSelect(model.id) },
-                        onInstall = { onInstall(model.id) },
-                        onCancel = { onCancel(model.id) },
-                        onRetryDownload = { onInstall(model.id) },
-                        onRetryDelete = { onDelete(model.id) },
-                    )
+                item { ReaderSheetSectionLabel("AI 模型") }
+                if (installedModels.isEmpty()) {
+                    item {
+                        Text(
+                            text = "暂无已安装模型，可前往管理模型页面下载。",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        )
+                    }
+                } else {
+                    items(installedModels, key = EnhancementModelDescriptor::id) { model ->
+                        ReaderModelRow(
+                            model = model,
+                            state = modelStates.getValue(model.id),
+                            selected = selectedId == model.id,
+                            onSelect = { onSelect(model.id) },
+                        )
+                    }
                 }
             }
         }
@@ -158,32 +159,15 @@ private fun ReaderModelRow(
     state: EnhancementModelInstallState,
     selected: Boolean,
     onSelect: () -> Unit,
-    onInstall: () -> Unit,
-    onCancel: () -> Unit,
-    onRetryDownload: () -> Unit,
-    onRetryDelete: () -> Unit,
 ) {
-    val installed = state is EnhancementModelInstallState.Installed
     ListItem(
         headlineContent = { Text(model.displayName, style = MaterialTheme.typography.titleMedium) },
         supportingContent = {
             ModelSummaryContent(model, state)
         },
         leadingContent = { ReaderRadioButton(selected) },
-        trailingContent = {
-            ModelPackageAction(
-                model = model,
-                state = state,
-                onInstall = onInstall,
-                onCancel = onCancel,
-                onRetryDownload = onRetryDownload,
-                onRetryDelete = onRetryDelete,
-                installedAction = {},
-            )
-        },
         modifier = Modifier.selectable(
             selected = selected,
-            enabled = installed,
             onClick = onSelect,
             role = Role.RadioButton,
         ),
