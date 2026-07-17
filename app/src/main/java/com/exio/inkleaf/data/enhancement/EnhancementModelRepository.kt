@@ -13,6 +13,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -54,7 +55,6 @@ class EnhancementModelRepository private constructor(context: Context) {
     private val rootDirectory = File(context.applicationContext.filesDir, MODEL_DIRECTORY)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val modelLocks = EnhancementModelCatalog.models.associate { it.id to Mutex() }
-    private val archiveCacheMutex = Mutex()
     private val downloadJobs = mutableMapOf<String, Job>()
     private val jobsLock = Any()
     private val connectionsLock = Any()
@@ -130,7 +130,6 @@ class EnhancementModelRepository private constructor(context: Context) {
                     return@withLock
                 }
                 cleanupTemporaryDirectories(model, recoverBackup = false)
-                model.archive?.let { archive -> deleteArchiveIfUnused(archive) }
                 setState(modelId, EnhancementModelInstallState.NotInstalled)
             }
         }
@@ -139,7 +138,7 @@ class EnhancementModelRepository private constructor(context: Context) {
     fun refresh() {
         scope.launch {
             rootDirectory.mkdirs()
-            cleanupArchiveCache()
+            cleanupLegacyArchiveCache()
             EnhancementModelCatalog.models.forEach { model ->
                 val downloading = synchronized(jobsLock) {
                     downloadJobs[model.id]?.isActive == true
@@ -147,7 +146,13 @@ class EnhancementModelRepository private constructor(context: Context) {
                 if (downloading) return@forEach
                 modelLocks.getValue(model.id).withLock {
                     setState(model.id, EnhancementModelInstallState.Checking)
-                    val installed = cleanupTemporaryDirectories(model, recoverBackup = true)
+                    val installed = try {
+                        cleanupTemporaryDirectories(model, recoverBackup = true)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        false
+                    }
                     setState(
                         model.id,
                         if (installed) {
@@ -161,10 +166,16 @@ class EnhancementModelRepository private constructor(context: Context) {
         }
     }
 
-    fun installedDirectory(modelId: String): File? {
-        val model = EnhancementModelCatalog.require(modelId)
+    suspend fun installedDirectory(modelId: String): File? {
+        EnhancementModelCatalog.require(modelId)
+        val installState = state(modelId).first { state ->
+            state !is EnhancementModelInstallState.Checking
+        }
+        if (installState !is EnhancementModelInstallState.Installed) {
+            return null
+        }
         val directory = modelDirectory(modelId)
-        return directory.takeIf { EnhancementModelFiles.isModelInstalled(it, model) }
+        return directory.takeIf(File::isDirectory)
     }
 
     private suspend fun installLocked(model: EnhancementModelDescriptor) {
@@ -182,21 +193,11 @@ class EnhancementModelRepository private constructor(context: Context) {
                 throw IOException("无法创建模型下载目录")
             }
             setDownloadingState(model, 0L)
-            val archive = model.archive
-            if (archive == null) {
-                var completedBytes = 0L
-                for (artifact in model.artifacts) {
-                    downloadArtifact(model, artifact, staging, completedBytes)
-                    completedBytes += artifact.bytes
-                    setDownloadingState(model, completedBytes)
-                }
-            } else {
-                val archiveFile = archiveCacheMutex.withLock {
-                    obtainArchive(model, archive)
-                }
-                currentCoroutineContext().ensureActive()
-                EnhancementModelFiles.extractModelArchive(archiveFile, staging, model)
-                currentCoroutineContext().ensureActive()
+            var completedBytes = 0L
+            for (artifact in model.artifacts.sortedBy(EnhancementModelArtifact::bytes)) {
+                downloadArtifact(model, artifact, staging, completedBytes)
+                completedBytes += artifact.bytes
+                setDownloadingState(model, completedBytes)
             }
             commitStagingDirectory(model, staging)
             committed = true
@@ -272,77 +273,6 @@ class EnhancementModelRepository private constructor(context: Context) {
             throw IOException("模型文件 SHA-256 校验失败")
         }
         atomicMove(partFile, finalFile)
-    }
-
-    private suspend fun obtainArchive(
-        model: EnhancementModelDescriptor,
-        archive: EnhancementModelArchive,
-    ): File {
-        if (!archiveCacheDirectory.isDirectory && !archiveCacheDirectory.mkdirs()) {
-            throw IOException("无法创建共享模型包缓存目录")
-        }
-        val finalFile = archiveCacheFile(archive)
-        if (
-            finalFile.isFile &&
-            finalFile.length() == archive.bytes &&
-            EnhancementModelFiles.sha256(finalFile) == archive.sha256
-        ) {
-            setDownloadingState(model, model.downloadSize)
-            return finalFile
-        }
-        if (finalFile.exists() && !finalFile.delete()) {
-            throw IOException("无法替换损坏的共享模型包缓存")
-        }
-
-        val partFile = File(archiveCacheDirectory, "${finalFile.name}.${UUID.randomUUID()}.part")
-        val digest = MessageDigest.getInstance("SHA-256")
-        var downloadedBytes = 0L
-        var lastReportedBytes = 0L
-        var committed = false
-        val connection = openConnectionFollowingRedirects(model.id, archive.url)
-        try {
-            val declaredLength = connection.contentLengthLong
-            if (declaredLength >= 0L && declaredLength != archive.bytes) {
-                throw IOException("服务器返回的模型包大小与目录记录不一致")
-            }
-            BufferedInputStream(connection.inputStream).use { input ->
-                BufferedOutputStream(partFile.outputStream()).use { output ->
-                    val buffer = ByteArray(DOWNLOAD_BUFFER_SIZE)
-                    while (true) {
-                        currentCoroutineContext().ensureActive()
-                        val read = input.read(buffer)
-                        if (read < 0) break
-                        downloadedBytes += read
-                        if (downloadedBytes > archive.bytes) {
-                            throw IOException("服务器返回的模型包超出预期大小")
-                        }
-                        output.write(buffer, 0, read)
-                        digest.update(buffer, 0, read)
-                        if (downloadedBytes - lastReportedBytes >= PROGRESS_UPDATE_BYTES) {
-                            setDownloadingState(model, downloadedBytes)
-                            lastReportedBytes = downloadedBytes
-                        }
-                    }
-                }
-            }
-            if (downloadedBytes != archive.bytes) {
-                throw IOException("模型包下载不完整")
-            }
-            if (!digest.digest().toLowerHex().equals(archive.sha256, ignoreCase = true)) {
-                throw IOException("模型包 SHA-256 校验失败")
-            }
-            atomicMove(partFile, finalFile)
-            committed = true
-            setDownloadingState(model, model.downloadSize)
-            return finalFile
-        } catch (error: IOException) {
-            currentCoroutineContext().ensureActive()
-            throw error
-        } finally {
-            clearActiveConnection(model.id, connection)
-            connection.disconnect()
-            if (!committed) partFile.delete()
-        }
     }
 
     private suspend fun openConnectionFollowingRedirects(
@@ -479,75 +409,18 @@ class EnhancementModelRepository private constructor(context: Context) {
     }
 
     private fun updateInstalledSummaryLocked() {
-        val installedModels = mutableStates.mapNotNull { (modelId, flow) ->
-            (flow.value as? EnhancementModelInstallState.Installed)?.let { state ->
-                EnhancementModelCatalog.require(modelId) to state
-            }
+        val installedStates = mutableStates.values.mapNotNull { flow ->
+            flow.value as? EnhancementModelInstallState.Installed
         }
-        mutableInstalledCount.value = installedModels.size
-        val sharedArchiveBytes = installedModels.mapNotNull { (model, _) -> model.archive }
-            .distinctBy(EnhancementModelArchive::packageId)
-            .sumOf { archive -> archiveCacheFile(archive).takeIf(File::isFile)?.length() ?: 0L }
-        mutableInstalledBytes.value = installedModels.sumOf { (_, state) -> state.bytes } +
-                sharedArchiveBytes
+        mutableInstalledCount.value = installedStates.size
+        mutableInstalledBytes.value =
+            installedStates.sumOf(EnhancementModelInstallState.Installed::bytes)
     }
 
     private fun modelDirectory(modelId: String): File = File(rootDirectory, modelId)
 
-    private val archiveCacheDirectory: File = File(rootDirectory, ARCHIVE_CACHE_DIRECTORY)
-
-    private fun archiveCacheFile(archive: EnhancementModelArchive): File = File(
-        archiveCacheDirectory,
-        "${archive.packageId}-${archive.sha256.take(12)}.zip",
-    )
-
-    private suspend fun deleteArchiveIfUnused(archive: EnhancementModelArchive) {
-        archiveCacheMutex.withLock {
-            if (isArchivePackageActive(archive.packageId)) return@withLock
-            val remainsInUse = EnhancementModelCatalog.models.any { candidate ->
-                candidate.archive?.packageId == archive.packageId &&
-                        EnhancementModelFiles.isModelInstalled(
-                            modelDirectory(candidate.id),
-                            candidate,
-                        )
-            }
-            if (!remainsInUse) archiveCacheFile(archive).delete()
-        }
-    }
-
-    private suspend fun cleanupArchiveCache() {
-        archiveCacheMutex.withLock {
-            if (!archiveCacheDirectory.isDirectory) return@withLock
-            val hasActiveDownloads = synchronized(jobsLock) {
-                downloadJobs.values.any(Job::isActive)
-            }
-            if (hasActiveDownloads) return@withLock
-            val archives = EnhancementModelCatalog.models
-                .mapNotNull(EnhancementModelDescriptor::archive)
-                .distinctBy(EnhancementModelArchive::packageId)
-            val expectedArchives = archives.map(::archiveCacheFile).map(File::getName).toSet()
-            archiveCacheDirectory.listFiles()?.forEach { file ->
-                if (file.name.endsWith(".part") || file.name !in expectedArchives) {
-                    file.delete()
-                }
-            }
-            archives.forEach { archive ->
-                val remainsInUse = EnhancementModelCatalog.models.any { candidate ->
-                    candidate.archive?.packageId == archive.packageId &&
-                            EnhancementModelFiles.isModelInstalled(
-                                modelDirectory(candidate.id),
-                                candidate,
-                            )
-                }
-                if (!remainsInUse) archiveCacheFile(archive).delete()
-            }
-        }
-    }
-
-    private fun isArchivePackageActive(packageId: String): Boolean = synchronized(jobsLock) {
-        downloadJobs.any { (modelId, job) ->
-            job.isActive && EnhancementModelCatalog.require(modelId).archive?.packageId == packageId
-        }
+    private fun cleanupLegacyArchiveCache() {
+        File(rootDirectory, LEGACY_ARCHIVE_CACHE_DIRECTORY).deleteRecursively()
     }
 
     private fun setActiveConnection(modelId: String, connection: HttpURLConnection) {
@@ -574,7 +447,7 @@ class EnhancementModelRepository private constructor(context: Context) {
 
     companion object {
         private const val MODEL_DIRECTORY = "image_enhancement_models"
-        private const val ARCHIVE_CACHE_DIRECTORY = ".archives"
+        private const val LEGACY_ARCHIVE_CACHE_DIRECTORY = ".archives"
         private const val USER_AGENT = "Inkleaf/1.0 (Android; image enhancement model downloader)"
         private const val CONNECT_TIMEOUT_MS = 15_000
         private const val READ_TIMEOUT_MS = 30_000

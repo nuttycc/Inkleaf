@@ -5,14 +5,6 @@ data class EnhancementModelArtifact(
     val url: String,
     val bytes: Long,
     val sha256: String,
-    val archiveEntry: String? = null,
-)
-
-data class EnhancementModelArchive(
-    val packageId: String,
-    val url: String,
-    val bytes: Long,
-    val sha256: String,
 )
 
 data class EnhancementModelDescriptor(
@@ -23,15 +15,14 @@ data class EnhancementModelDescriptor(
     val variant: String,
     val scale: Int,
     val targetBackend: String,
-    val downloadSize: Long,
     val capabilities: List<String>,
     val recommendedFor: List<String>,
     val license: String,
     val sourceUrl: String,
     val artifacts: List<EnhancementModelArtifact>,
-    val archive: EnhancementModelArchive? = null,
 ) {
     val installedSize: Long get() = artifacts.sumOf(EnhancementModelArtifact::bytes)
+    val downloadSize: Long get() = installedSize
 }
 
 object EnhancementSelectionIds {
@@ -44,11 +35,26 @@ object EnhancementSelectionIds {
 }
 
 object EnhancementModelCatalog {
-    private val realEsrganNcnnArchive = EnhancementModelArchive(
-        packageId = "realesrgan-ncnn-vulkan-20220424-ubuntu",
-        url = "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-20220424-ubuntu.zip",
-        bytes = 46_931_474,
-        sha256 = "e5aa6eb131234b87c0c51f82b89390f5e3e642b7b70f2b9bbe95b6a285a40c96",
+    private const val REAL_ESRGAN_FAMILY = "Real-ESRGAN"
+    private const val REAL_ESRGAN_VERSION = "v0.2.5.0 · adapter 37026f4"
+    private const val REAL_ESRGAN_BACKEND = "ncnn · Vulkan / CPU"
+    private const val REAL_ESRGAN_LICENSE =
+        "主项目 BSD-3-Clause；ncnn 实现 MIT；模型权重未单独声明"
+    private const val REAL_ESRGAN_SOURCE_URL = "https://github.com/xinntao/Real-ESRGAN"
+    private const val REAL_ESRGAN_NCNN_BASE_URL =
+        "https://huggingface.co/vozzy/inkleaf-models/resolve/main/" +
+                "releases/realesrgan-ncnn-vulkan/v0.2.5.0"
+
+    private fun realEsrganArtifact(
+        modelDirectory: String,
+        filename: String,
+        bytes: Long,
+        sha256: String,
+    ) = EnhancementModelArtifact(
+        filename = filename,
+        url = "$REAL_ESRGAN_NCNN_BASE_URL/$modelDirectory/$filename",
+        bytes = bytes,
+        sha256 = sha256,
     )
 
     val models: List<EnhancementModelDescriptor> = listOf(
@@ -60,7 +66,6 @@ object EnhancementModelCatalog {
             variant = "NoSE / no denoise",
             scale = 2,
             targetBackend = "ncnn · Vulkan",
-            downloadSize = 2_554_717,
             capabilities = listOf("2× 超分", "线条修复", "不降噪"),
             recommendedFor = listOf("干净线稿", "轻微模糊漫画"),
             license = "代码仓库 MIT；模型权重许可未验证",
@@ -88,7 +93,6 @@ object EnhancementModelCatalog {
             variant = "SE / conservative denoise",
             scale = 2,
             targetBackend = "ncnn · Vulkan",
-            downloadSize = 2_578_409,
             capabilities = listOf("2× 超分", "线条修复", "保守降噪"),
             recommendedFor = listOf("JPEG 压缩页", "有噪扫描稿"),
             license = "代码仓库 MIT；模型权重许可未验证",
@@ -116,7 +120,6 @@ object EnhancementModelCatalog {
             variant = "UpConv7 anime style art RGB",
             scale = 2,
             targetBackend = "ncnn · Vulkan",
-            downloadSize = 1_107_295,
             capabilities = listOf("2× 超分", "动漫线条增强"),
             recommendedFor = listOf("动漫风彩图", "较低性能设备"),
             license = "代码仓库 MIT；模型权重许可未验证",
@@ -139,64 +142,110 @@ object EnhancementModelCatalog {
         EnhancementModelDescriptor(
             id = "realesrgan-animevideov3-2x",
             displayName = "Real-ESRGAN AnimeVideo-v3 2x",
-            family = "Real-ESRGAN",
-            version = "v0.2.5.0 · adapter 37026f4",
+            family = REAL_ESRGAN_FAMILY,
+            version = REAL_ESRGAN_VERSION,
             variant = "AnimeVideo-v3 / native 2×",
             scale = 2,
-            targetBackend = "ncnn · Vulkan / CPU",
-            downloadSize = realEsrganNcnnArchive.bytes,
+            targetBackend = REAL_ESRGAN_BACKEND,
             capabilities = listOf("2× 超分", "动漫线条增强", "轻量 GAN 修复"),
             recommendedFor = listOf("漫画阅读实时增强", "动漫彩图", "性能较低设备"),
-            license = "主项目 BSD-3-Clause；ncnn 实现 MIT；模型权重未单独声明",
-            sourceUrl = "https://github.com/xinntao/Real-ESRGAN",
+            license = REAL_ESRGAN_LICENSE,
+            sourceUrl = REAL_ESRGAN_SOURCE_URL,
             artifacts = listOf(
-                EnhancementModelArtifact(
+                realEsrganArtifact(
+                    modelDirectory = "animevideov3-x2",
                     filename = "realesr-animevideov3-x2.bin",
-                    url = "${realEsrganNcnnArchive.url}#models/realesr-animevideov3-x2.bin",
                     bytes = 1_247_368,
                     sha256 = "548a36f9c3f4ab8da56cd3b13badf23968bee207b396dad14d04b830e5f2ab2d",
-                    archiveEntry = "models/realesr-animevideov3-x2.bin",
                 ),
-                EnhancementModelArtifact(
+                realEsrganArtifact(
+                    modelDirectory = "animevideov3-x2",
                     filename = "realesr-animevideov3-x2.param",
-                    url = "${realEsrganNcnnArchive.url}#models/realesr-animevideov3-x2.param",
                     bytes = 3_173,
                     sha256 = "b88ff4f00ebf019a7fdac17fdd45a7fd3665d37509efc5baf2e4da2e24420a04",
-                    archiveEntry = "models/realesr-animevideov3-x2.param",
                 ),
             ),
-            archive = realEsrganNcnnArchive,
+        ),
+        EnhancementModelDescriptor(
+            id = "realesrgan-animevideov3-4x",
+            displayName = "Real-ESRGAN AnimeVideo-v3 4x",
+            family = REAL_ESRGAN_FAMILY,
+            version = REAL_ESRGAN_VERSION,
+            variant = "AnimeVideo-v3 / native 4×",
+            scale = 4,
+            targetBackend = REAL_ESRGAN_BACKEND,
+            capabilities = listOf("4× 超分", "动漫线条增强", "轻量 GAN 修复"),
+            recommendedFor = listOf("小尺寸漫画页", "动漫彩图", "高倍率阅读"),
+            license = REAL_ESRGAN_LICENSE,
+            sourceUrl = REAL_ESRGAN_SOURCE_URL,
+            artifacts = listOf(
+                realEsrganArtifact(
+                    modelDirectory = "animevideov3-x4",
+                    filename = "realesr-animevideov3-x4.bin",
+                    bytes = 1_247_368,
+                    sha256 = "548a36f9c3f4ab8da56cd3b13badf23968bee207b396dad14d04b830e5f2ab2d",
+                ),
+                realEsrganArtifact(
+                    modelDirectory = "animevideov3-x4",
+                    filename = "realesr-animevideov3-x4.param",
+                    bytes = 3_077,
+                    sha256 = "850a248e7c14c27e5bd8cf7265113a9441036a7db63963bb8aa5169d788a435e",
+                ),
+            ),
         ),
         EnhancementModelDescriptor(
             id = "realesrgan-x4plus-anime-4x",
             displayName = "Real-ESRGAN x4plus Anime 4x",
-            family = "Real-ESRGAN",
-            version = "v0.2.5.0 · adapter 37026f4",
+            family = REAL_ESRGAN_FAMILY,
+            version = REAL_ESRGAN_VERSION,
             variant = "x4plus Anime 6B / native 4×",
             scale = 4,
-            targetBackend = "ncnn · Vulkan / CPU",
-            downloadSize = realEsrganNcnnArchive.bytes,
+            targetBackend = REAL_ESRGAN_BACKEND,
             capabilities = listOf("4× 超分", "动漫插画增强", "高质量 GAN 修复"),
             recommendedFor = listOf("小尺寸漫画页", "动漫插画", "高性能 Vulkan 设备"),
-            license = "主项目 BSD-3-Clause；ncnn 实现 MIT；模型权重未单独声明",
-            sourceUrl = "https://github.com/xinntao/Real-ESRGAN",
+            license = REAL_ESRGAN_LICENSE,
+            sourceUrl = REAL_ESRGAN_SOURCE_URL,
             artifacts = listOf(
-                EnhancementModelArtifact(
+                realEsrganArtifact(
+                    modelDirectory = "x4plus-anime",
                     filename = "realesrgan-x4plus-anime.bin",
-                    url = "${realEsrganNcnnArchive.url}#models/realesrgan-x4plus-anime.bin",
                     bytes = 8_943_500,
                     sha256 = "fe01c269cfd10cdef8e018ab66ebe750cf79c7af4d1f9c16c737e1295229bacc",
-                    archiveEntry = "models/realesrgan-x4plus-anime.bin",
                 ),
-                EnhancementModelArtifact(
+                realEsrganArtifact(
+                    modelDirectory = "x4plus-anime",
                     filename = "realesrgan-x4plus-anime.param",
-                    url = "${realEsrganNcnnArchive.url}#models/realesrgan-x4plus-anime.param",
                     bytes = 30_290,
                     sha256 = "2b8fb6e0ae4d2d85704ca08c119a2f5ea40add4f2ecd512eb7f4cd44b6127ed4",
-                    archiveEntry = "models/realesrgan-x4plus-anime.param",
                 ),
             ),
-            archive = realEsrganNcnnArchive,
+        ),
+        EnhancementModelDescriptor(
+            id = "realesrgan-x4plus-4x",
+            displayName = "Real-ESRGAN x4plus 4x",
+            family = REAL_ESRGAN_FAMILY,
+            version = REAL_ESRGAN_VERSION,
+            variant = "x4plus / native 4×",
+            scale = 4,
+            targetBackend = REAL_ESRGAN_BACKEND,
+            capabilities = listOf("4× 超分", "通用图像增强", "高质量 GAN 修复"),
+            recommendedFor = listOf("写实彩漫", "照片型封面", "纹理较多的页面"),
+            license = REAL_ESRGAN_LICENSE,
+            sourceUrl = REAL_ESRGAN_SOURCE_URL,
+            artifacts = listOf(
+                realEsrganArtifact(
+                    modelDirectory = "x4plus",
+                    filename = "realesrgan-x4plus.bin",
+                    bytes = 33_424_520,
+                    sha256 = "713ee713b0353afaa27976f0563a64a5043bd70b9bd8936c2e26e25ebcdbcddf",
+                ),
+                realEsrganArtifact(
+                    modelDirectory = "x4plus",
+                    filename = "realesrgan-x4plus.param",
+                    bytes = 116_029,
+                    sha256 = "35330ececcea33b6c397a72548e788d5d53becee4734c50b7fada36e89f10a86",
+                ),
+            ),
         ),
     )
 

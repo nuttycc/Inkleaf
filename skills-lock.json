@@ -1,6 +1,18 @@
 {
   "version": 1,
   "skills": {
+    "exa-contents": {
+      "source": "exa-labs/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/exa-contents/SKILL.md",
+      "computedHash": "195eb40893f1f66dc75df4778da420f72c01a5ac1472659bf4a53ec40a08a27f"
+    },
+    "exa-search": {
+      "source": "exa-labs/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/exa-search/SKILL.md",
+      "computedHash": "c8132c4f821aa26915454f927bfc6691ddf4631633147b1603f62ee4eb9c6d52"
+    },
     "grill-me": {
       "source": "mattpocock/skills",
       "sourceType": "github",

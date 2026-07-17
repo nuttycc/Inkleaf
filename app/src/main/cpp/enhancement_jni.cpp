@@ -32,8 +32,27 @@ enum class ModelKind {
     RealCuganNoSe,
     RealCuganConservative,
     Waifu2xUpconv7,
-    RealEsrganAnimeVideoV3,
+    RealEsrganAnimeVideoV3X2,
+    RealEsrganAnimeVideoV3X4,
     RealEsrganX4PlusAnime,
+    RealEsrganX4Plus,
+};
+
+struct ModelSpec {
+    const char* id;
+    ModelKind kind;
+    int scale;
+    bool uses_realesrgan;
+};
+
+constexpr ModelSpec MODEL_SPECS[] = {
+    {"realcugan-2x-nose", ModelKind::RealCuganNoSe, 2, false},
+    {"realcugan-2x-conservative", ModelKind::RealCuganConservative, 2, false},
+    {"waifu2x-upconv7-anime-2x", ModelKind::Waifu2xUpconv7, 2, false},
+    {"realesrgan-animevideov3-2x", ModelKind::RealEsrganAnimeVideoV3X2, 2, true},
+    {"realesrgan-animevideov3-4x", ModelKind::RealEsrganAnimeVideoV3X4, 4, true},
+    {"realesrgan-x4plus-anime-4x", ModelKind::RealEsrganX4PlusAnime, 4, true},
+    {"realesrgan-x4plus-4x", ModelKind::RealEsrganX4Plus, 4, true},
 };
 
 struct EnhancementSession {
@@ -73,19 +92,11 @@ private:
     const char* chars_ = nullptr;
 };
 
-ModelKind parse_model_kind(const std::string& model_id, bool* valid) {
-    *valid = true;
-    if (model_id == "realcugan-2x-nose") return ModelKind::RealCuganNoSe;
-    if (model_id == "realcugan-2x-conservative") return ModelKind::RealCuganConservative;
-    if (model_id == "waifu2x-upconv7-anime-2x") return ModelKind::Waifu2xUpconv7;
-    if (model_id == "realesrgan-animevideov3-2x") return ModelKind::RealEsrganAnimeVideoV3;
-    if (model_id == "realesrgan-x4plus-anime-4x") return ModelKind::RealEsrganX4PlusAnime;
-    *valid = false;
-    return ModelKind::RealCuganNoSe;
-}
-
-int model_scale(ModelKind kind) {
-    return kind == ModelKind::RealEsrganX4PlusAnime ? 4 : 2;
+const ModelSpec* find_model_spec(const std::string& model_id) {
+    for (const ModelSpec& spec : MODEL_SPECS) {
+        if (model_id == spec.id) return &spec;
+    }
+    return nullptr;
 }
 
 int choose_realesrgan_tile_size(bool uses_vulkan, int scale) {
@@ -106,7 +117,7 @@ int choose_tile_size(bool uses_vulkan) {
 }
 
 EnhancementSession* create_session(
-    ModelKind kind,
+    const ModelSpec& spec,
     const char* param_path,
     const char* model_path,
     bool prefer_vulkan
@@ -114,28 +125,24 @@ EnhancementSession* create_session(
     const bool use_vulkan = prefer_vulkan && ncnn::get_gpu_count() > 0;
     const int gpu_id = use_vulkan ? 0 : -1;
     const int thread_count = std::max(1, std::min(4, ncnn::get_big_cpu_count()));
-    const bool is_realesrgan =
-        kind == ModelKind::RealEsrganAnimeVideoV3 ||
-        kind == ModelKind::RealEsrganX4PlusAnime;
-    const int scale = model_scale(kind);
-    const int tile_size = is_realesrgan
-        ? choose_realesrgan_tile_size(use_vulkan, scale)
+    const int tile_size = spec.uses_realesrgan
+        ? choose_realesrgan_tile_size(use_vulkan, spec.scale)
         : choose_tile_size(use_vulkan);
 
     EnhancementSession* session =
-        new (std::nothrow) EnhancementSession(kind, use_vulkan, scale);
+        new (std::nothrow) EnhancementSession(spec.kind, use_vulkan, spec.scale);
     if (!session) return nullptr;
 
     int load_result = -1;
-    if (is_realesrgan) {
+    if (spec.uses_realesrgan) {
         session->realesrgan = new (std::nothrow) RealESRGAN(gpu_id, false, thread_count);
         if (session->realesrgan) {
             load_result = session->realesrgan->load(param_path, model_path);
-            session->realesrgan->scale = scale;
+            session->realesrgan->scale = spec.scale;
             session->realesrgan->tilesize = tile_size;
             session->realesrgan->prepadding = 10;
         }
-    } else if (kind == ModelKind::Waifu2xUpconv7) {
+    } else if (spec.kind == ModelKind::Waifu2xUpconv7) {
         session->waifu2x = new (std::nothrow) Waifu2x(gpu_id, false, thread_count);
         if (session->waifu2x) {
             load_result = session->waifu2x->load(param_path, model_path);
@@ -148,12 +155,12 @@ EnhancementSession* create_session(
         session->realcugan = new (std::nothrow) RealCUGAN(gpu_id, false, thread_count);
         if (session->realcugan) {
             load_result = session->realcugan->load(param_path, model_path);
-            session->realcugan->noise = kind == ModelKind::RealCuganNoSe ? 0 : -1;
+            session->realcugan->noise = spec.kind == ModelKind::RealCuganNoSe ? 0 : -1;
             session->realcugan->scale = 2;
             session->realcugan->tilesize = tile_size;
             session->realcugan->prepadding = 18;
             session->realcugan->syncgap =
-                kind == ModelKind::RealCuganConservative ? 3 : 0;
+                spec.kind == ModelKind::RealCuganConservative ? 3 : 0;
         }
     }
 
@@ -326,18 +333,17 @@ Java_com_exio_inkleaf_data_enhancement_NativeEnhancementBridge_nativeCreateSessi
     UtfChars model_path_chars(env, model_path);
     if (!model_id_chars.get() || !param_path_chars.get() || !model_path_chars.get()) return 0;
 
-    bool valid = false;
-    const ModelKind kind = parse_model_kind(model_id_chars.get(), &valid);
-    if (!valid) return 0;
+    const ModelSpec* spec = find_model_spec(model_id_chars.get());
+    if (!spec) return 0;
 
     EnhancementSession* session = create_session(
-        kind,
+        *spec,
         param_path_chars.get(),
         model_path_chars.get(),
         prefer_vulkan == JNI_TRUE
     );
     if (!session && prefer_vulkan == JNI_TRUE) {
-        session = create_session(kind, param_path_chars.get(), model_path_chars.get(), false);
+        session = create_session(*spec, param_path_chars.get(), model_path_chars.get(), false);
     }
     return reinterpret_cast<jlong>(session);
 }
