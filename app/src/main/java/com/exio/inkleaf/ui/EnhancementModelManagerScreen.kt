@@ -242,8 +242,8 @@ private fun ModelDetailsSheet(model: EnhancementModelDescriptor) {
             if (model.isBundled) "内置大小" else "下载大小",
             formatFileSize(model.downloadSize),
         )
-        DetailRow("能力", model.capabilities.joinToString(" · "))
-        DetailRow("推荐场景", model.recommendedFor.joinToString(" · "))
+        DetailRow("增强效果", model.capabilities.joinToString("、"))
+        DetailRow("适合", model.recommendedUse)
         DetailRow("许可证", model.license)
 
         Text(

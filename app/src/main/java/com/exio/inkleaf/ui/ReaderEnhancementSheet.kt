@@ -94,26 +94,21 @@ internal fun ReaderEnhancementSheet(
                     }
                 }
 
-                item { ReaderSheetSectionLabel("显示方式") }
                 item {
-                    BuiltInEnhancementRow(
+                    EnhancementOptionRow(
                         title = "原图",
-                        description = "不进行显示处理",
                         selected = selectedId == EnhancementSelectionIds.ORIGINAL,
-                        onClick = { onSelect(EnhancementSelectionIds.ORIGINAL) },
+                        onSelect = { onSelect(EnhancementSelectionIds.ORIGINAL) },
+                        supportingContent = {
+                            Text("不使用 AI 增强")
+                        },
                     )
                 }
 
-                item {
-                    ModelRuntimeNotice(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp),
-                    )
-                }
-                item { ReaderSheetSectionLabel("AI 模型") }
                 if (installedModels.isEmpty()) {
                     item {
                         Text(
-                            text = "暂无已安装模型，可前往管理模型页面下载。",
+                            text = "没有已安装的 AI 模型，可前往管理模型下载。",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
@@ -135,19 +130,19 @@ internal fun ReaderEnhancementSheet(
 }
 
 @Composable
-private fun BuiltInEnhancementRow(
+private fun EnhancementOptionRow(
     title: String,
-    description: String,
     selected: Boolean,
-    onClick: () -> Unit,
+    onSelect: () -> Unit,
+    supportingContent: @Composable () -> Unit,
 ) {
     ListItem(
         headlineContent = { Text(title, style = MaterialTheme.typography.titleMedium) },
-        supportingContent = { Text(description) },
+        supportingContent = supportingContent,
         leadingContent = { ReaderRadioButton(selected) },
         modifier = Modifier.selectable(
             selected = selected,
-            onClick = onClick,
+            onClick = onSelect,
             role = Role.RadioButton,
         ),
     )
@@ -160,17 +155,17 @@ private fun ReaderModelRow(
     selected: Boolean,
     onSelect: () -> Unit,
 ) {
-    ListItem(
-        headlineContent = { Text(model.displayName, style = MaterialTheme.typography.titleMedium) },
+    EnhancementOptionRow(
+        title = model.displayName,
+        selected = selected,
+        onSelect = onSelect,
         supportingContent = {
-            ModelSummaryContent(model, state)
+            ModelSummaryContent(
+                model = model,
+                state = state,
+                showDownloadStatus = false,
+            )
         },
-        leadingContent = { ReaderRadioButton(selected) },
-        modifier = Modifier.selectable(
-            selected = selected,
-            onClick = onSelect,
-            role = Role.RadioButton,
-        ),
     )
 }
 
@@ -183,15 +178,5 @@ private fun ReaderRadioButton(selected: Boolean) {
             selectedColor = MaterialTheme.colorScheme.primary,
             unselectedColor = MaterialTheme.colorScheme.onSurfaceVariant,
         ),
-    )
-}
-
-@Composable
-private fun ReaderSheetSectionLabel(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 16.dp, top = 24.dp, bottom = 4.dp),
     )
 }

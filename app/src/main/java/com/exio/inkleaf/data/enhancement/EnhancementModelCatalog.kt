@@ -8,6 +8,16 @@ data class EnhancementModelArtifact(
     val bundledFilename: String? = null,
 )
 
+/**
+ * Relative processing speed compared with other catalog models on the same device.
+ * Actual time also depends on the device and source image dimensions.
+ */
+enum class EnhancementModelSpeed(val label: String) {
+    FAST("较快"),
+    MEDIUM("中等"),
+    SLOW("较慢"),
+}
+
 data class EnhancementModelDescriptor(
     val id: String,
     val displayName: String,
@@ -16,8 +26,9 @@ data class EnhancementModelDescriptor(
     val variant: String,
     val scale: Int,
     val targetBackend: String,
+    val speed: EnhancementModelSpeed,
     val capabilities: List<String>,
-    val recommendedFor: List<String>,
+    val recommendedUse: String,
     val license: String,
     val sourceUrl: String,
     val artifacts: List<EnhancementModelArtifact>,
@@ -75,8 +86,9 @@ object EnhancementModelCatalog {
             variant = "NoSE / no denoise",
             scale = 2,
             targetBackend = "ncnn · Vulkan",
-            capabilities = listOf("2× 超分", "线条修复", "不降噪"),
-            recommendedFor = listOf("干净线稿", "轻微模糊漫画"),
+            speed = EnhancementModelSpeed.MEDIUM,
+            capabilities = listOf("改善线条", "保留原有噪点"),
+            recommendedUse = "线条清晰或轻微模糊的漫画",
             license = "MIT（nihui/realcugan-ncnn-vulkan；模型源自 bilibili/ailab Real-CUGAN）",
             sourceUrl = "https://github.com/nihui/realcugan-ncnn-vulkan",
             artifacts = listOf(
@@ -102,8 +114,9 @@ object EnhancementModelCatalog {
             variant = "SE / conservative denoise",
             scale = 2,
             targetBackend = "ncnn · Vulkan",
-            capabilities = listOf("2× 超分", "线条修复", "保守降噪"),
-            recommendedFor = listOf("JPEG 压缩页", "有噪扫描稿"),
+            speed = EnhancementModelSpeed.MEDIUM,
+            capabilities = listOf("改善线条", "减少部分噪点"),
+            recommendedUse = "有压缩痕迹或噪点的扫描漫画",
             license = "MIT（nihui/realcugan-ncnn-vulkan；模型源自 bilibili/ailab Real-CUGAN）",
             sourceUrl = "https://github.com/nihui/realcugan-ncnn-vulkan",
             artifacts = listOf(
@@ -130,8 +143,9 @@ object EnhancementModelCatalog {
             variant = "UpConv7 anime style art RGB",
             scale = 2,
             targetBackend = "ncnn · Vulkan",
-            capabilities = listOf("2× 超分", "动漫线条增强"),
-            recommendedFor = listOf("动漫风彩图", "较低性能设备"),
+            speed = EnhancementModelSpeed.FAST,
+            capabilities = listOf("改善动漫风格线条"),
+            recommendedUse = "动漫风格的彩色图片",
             license = "MIT（nihui/waifu2x-ncnn-vulkan；模型源自 nagadomi/waifu2x）",
             sourceUrl = "https://github.com/nihui/waifu2x-ncnn-vulkan",
             artifacts = listOf(
@@ -158,8 +172,9 @@ object EnhancementModelCatalog {
             variant = "AnimeVideo-v3 / native 2×",
             scale = 2,
             targetBackend = REAL_ESRGAN_BACKEND,
-            capabilities = listOf("2× 超分", "动漫线条增强", "轻量 GAN 修复"),
-            recommendedFor = listOf("漫画阅读实时增强", "动漫彩图", "性能较低设备"),
+            speed = EnhancementModelSpeed.FAST,
+            capabilities = listOf("改善动漫风格线条", "改善轻微失真"),
+            recommendedUse = "漫画和动漫风格图片",
             license = REAL_ESRGAN_LICENSE,
             sourceUrl = REAL_ESRGAN_SOURCE_URL,
             artifacts = listOf(
@@ -187,8 +202,9 @@ object EnhancementModelCatalog {
             variant = "AnimeVideo-v3 / native 4×",
             scale = 4,
             targetBackend = REAL_ESRGAN_BACKEND,
-            capabilities = listOf("4× 超分", "动漫线条增强", "轻量 GAN 修复"),
-            recommendedFor = listOf("小尺寸漫画页", "动漫彩图", "高倍率阅读"),
+            speed = EnhancementModelSpeed.MEDIUM,
+            capabilities = listOf("改善动漫风格线条", "改善轻微失真"),
+            recommendedUse = "尺寸较小的漫画和动漫风格图片",
             license = REAL_ESRGAN_LICENSE,
             sourceUrl = REAL_ESRGAN_SOURCE_URL,
             artifacts = listOf(
@@ -216,8 +232,9 @@ object EnhancementModelCatalog {
             variant = "x4plus Anime 6B / native 4×",
             scale = 4,
             targetBackend = REAL_ESRGAN_BACKEND,
-            capabilities = listOf("4× 超分", "动漫插画增强", "高质量 GAN 修复"),
-            recommendedFor = listOf("小尺寸漫画页", "动漫插画", "高性能 Vulkan 设备"),
+            speed = EnhancementModelSpeed.SLOW,
+            capabilities = listOf("增强动漫插画细节", "改善明显失真"),
+            recommendedUse = "需要放大细节的漫画和动漫插画",
             license = REAL_ESRGAN_LICENSE,
             sourceUrl = REAL_ESRGAN_SOURCE_URL,
             artifacts = listOf(
@@ -243,8 +260,9 @@ object EnhancementModelCatalog {
             variant = "x4plus / native 4×",
             scale = 4,
             targetBackend = REAL_ESRGAN_BACKEND,
-            capabilities = listOf("4× 超分", "通用图像增强", "高质量 GAN 修复"),
-            recommendedFor = listOf("写实彩漫", "照片型封面", "纹理较多的页面"),
+            speed = EnhancementModelSpeed.SLOW,
+            capabilities = listOf("增强图片细节", "改善明显失真"),
+            recommendedUse = "写实风格漫画、照片和纹理较多的图片",
             license = REAL_ESRGAN_LICENSE,
             sourceUrl = REAL_ESRGAN_SOURCE_URL,
             artifacts = listOf(

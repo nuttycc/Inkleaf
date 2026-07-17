@@ -23,7 +23,7 @@ import com.exio.inkleaf.data.enhancement.EnhancementModelInstallState
 import com.exio.inkleaf.data.enhancement.ModelOperation
 
 internal const val MODEL_RUNTIME_MESSAGE =
-    "应用使用内置的 ncnn CPU/Vulkan 推理引擎。内置或下载的模型包会在页面加载时进行本机处理；不支持 Vulkan 的设备会自动使用 CPU。"
+    "AI 增强在设备上完成。"
 
 internal fun formatFileSize(bytes: Long): String = when {
     bytes >= 1L shl 30 -> "%.1f GB".format(bytes / (1024f * 1024f * 1024f))
@@ -32,8 +32,8 @@ internal fun formatFileSize(bytes: Long): String = when {
     else -> "$bytes B"
 }.replace(".0 ", " ")
 
-internal fun EnhancementModelDescriptor.metadataLine(): String =
-    "$targetBackend · ${scale}× · ${formatFileSize(downloadSize)}"
+internal fun EnhancementModelDescriptor.summaryLine(): String =
+    "${formatFileSize(downloadSize)} · ${speed.label}"
 
 @Composable
 internal fun ModelRuntimeNotice(modifier: Modifier = Modifier) {
@@ -49,14 +49,17 @@ internal fun ModelRuntimeNotice(modifier: Modifier = Modifier) {
 internal fun ModelSummaryContent(
     model: EnhancementModelDescriptor,
     state: EnhancementModelInstallState,
+    showDownloadStatus: Boolean = true,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(model.metadataLine())
+        Text(model.summaryLine())
         Text(
-            text = model.recommendedFor.joinToString(" · "),
+            text = "适合${model.recommendedUse}",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        ModelDownloadStatus(model, state)
+        if (showDownloadStatus) {
+            ModelDownloadStatus(model, state)
+        }
     }
 }
 
@@ -156,9 +159,9 @@ internal fun ModelDownloadStatus(
 
         is EnhancementModelInstallState.Installed -> Text(
             text = if (model.isBundled) {
-                "应用内置 · ${formatFileSize(state.bytes)}"
+                "应用内置"
             } else {
-                "模型包已下载 · ${formatFileSize(state.bytes)}"
+                "已下载"
             },
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.primary,
