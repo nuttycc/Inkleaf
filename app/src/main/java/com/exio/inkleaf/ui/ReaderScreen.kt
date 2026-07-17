@@ -294,6 +294,7 @@ fun ReaderScreen(
         ReaderEnhancementSheet(
             selectedId = viewModel.enhancementSelectionId,
             modelStates = modelStates,
+            cacheTask = enhancementCacheTask,
             accent = readerAccentColor(),
             onDismiss = { showEnhancementSheet = false },
             onOpenManager = {

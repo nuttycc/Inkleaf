@@ -5,6 +5,7 @@
 - Persist enhanced page results on disk and consult them before source decoding or inference.
 - Keep transient reader/prefetch results separate from user-requested persistent results.
 - Let the user start an inclusive global-page range from the reader UI.
+- Make the range-cache entry visually distinct from model selection and expose its task state.
 - Run the range as a user-triggered foreground WorkManager task with progress notification.
 - Support pause, resume, and cancel while preserving completed page results.
 - Keep foreground reading higher priority than background range caching.
@@ -38,6 +39,8 @@
   retaining an unbounded bitmap backlog.
 - Pinned writes reserve 1% of the storage volume, clamped to 256 MiB–1 GiB, plus the output bitmap's
   uncompressed size. A range task fails clearly instead of filling internal storage.
+- The enhancement sheet uses a full-width tonal action row with an icon, explanatory copy, a
+  navigation affordance, and inline progress for active cache tasks.
 
 ## Verification
 
