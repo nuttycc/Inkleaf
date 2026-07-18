@@ -17,6 +17,7 @@ internal data class ReaderPageContentKeys(
         val isCurrentPage: Boolean,
         val enhancementSelectionId: String,
         val enhancementModelInstalled: Boolean,
+        val pinForActiveTask: Boolean,
     )
 }
 
@@ -27,6 +28,7 @@ internal fun readerPageContentKeys(
     isCurrentPage: Boolean,
     enhancementSelectionId: String,
     enhancementModelInstalled: Boolean,
+    pinForActiveTask: Boolean,
 ): ReaderPageContentKeys = ReaderPageContentKeys(
     stateReset = ReaderPageContentKeys.StateReset(
         volumeToken = volumeToken,
@@ -37,5 +39,6 @@ internal fun readerPageContentKeys(
         isCurrentPage = isCurrentPage,
         enhancementSelectionId = enhancementSelectionId,
         enhancementModelInstalled = enhancementModelInstalled,
+        pinForActiveTask = pinForActiveTask,
     ),
 )

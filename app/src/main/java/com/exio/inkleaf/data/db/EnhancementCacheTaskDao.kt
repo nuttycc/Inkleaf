@@ -4,91 +4,251 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import kotlinx.coroutines.flow.Flow
 
+sealed interface EnhancementCachePageCompletion {
+    data object NotApplicable : EnhancementCachePageCompletion
+
+    data class Applied(
+        val task: EnhancementCacheTaskEntity,
+        val newlyCompleted: Boolean,
+    ) : EnhancementCachePageCompletion
+}
+
+sealed interface EnhancementCacheTaskReplacementDecision {
+    data class Replaced(
+        val previousTask: EnhancementCacheTaskEntity,
+    ) : EnhancementCacheTaskReplacementDecision
+
+    data class ActiveTaskChanged(
+        val activeTask: EnhancementCacheTaskEntity?,
+    ) : EnhancementCacheTaskReplacementDecision
+}
+
 @Dao
-interface EnhancementCacheTaskDao {
+abstract class EnhancementCacheTaskDao {
     @Query("SELECT * FROM enhancement_cache_tasks WHERE id = :id")
-    suspend fun getById(id: String): EnhancementCacheTaskEntity?
+    abstract suspend fun getById(id: String): EnhancementCacheTaskEntity?
 
     @Query(
         "SELECT * FROM enhancement_cache_tasks WHERE comicId = :comicId " +
-                "ORDER BY updatedAt DESC LIMIT 1"
+                "ORDER BY CASE WHEN activeSlot = 1 THEN 0 ELSE 1 END, " +
+                "updatedAt DESC, createdAt DESC, id DESC LIMIT 1"
     )
-    fun observeLatestForComic(comicId: Long): Flow<EnhancementCacheTaskEntity?>
+    abstract fun observeLatestForComic(comicId: Long): Flow<EnhancementCacheTaskEntity?>
 
     @Query(
         "SELECT * FROM enhancement_cache_tasks WHERE comicId = :comicId " +
-                "ORDER BY updatedAt DESC LIMIT 1"
+                "ORDER BY CASE WHEN activeSlot = 1 THEN 0 ELSE 1 END, " +
+                "updatedAt DESC, createdAt DESC, id DESC LIMIT 1"
     )
-    suspend fun getLatestForComic(comicId: Long): EnhancementCacheTaskEntity?
+    abstract suspend fun getLatestForComic(comicId: Long): EnhancementCacheTaskEntity?
 
     @Query(
-        "SELECT * FROM enhancement_cache_tasks WHERE comicId = :comicId " +
-                "AND status IN ('queued', 'running', 'waiting_for_reader', 'paused') " +
-                "ORDER BY updatedAt DESC LIMIT 1"
+        "SELECT * FROM enhancement_cache_tasks WHERE comicId = :comicId AND activeSlot = 1 " +
+                "ORDER BY updatedAt DESC, createdAt DESC, id DESC LIMIT 1"
     )
-    suspend fun getActiveForComic(comicId: Long): EnhancementCacheTaskEntity?
+    abstract suspend fun getActiveForComic(comicId: Long): EnhancementCacheTaskEntity?
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsert(task: EnhancementCacheTaskEntity)
+    @Query("SELECT * FROM enhancement_cache_tasks WHERE activeSlot = 1 LIMIT 1")
+    abstract suspend fun getAnyActive(): EnhancementCacheTaskEntity?
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    protected abstract suspend fun insert(task: EnhancementCacheTaskEntity)
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    protected abstract suspend fun insertCompletedPage(
+        page: EnhancementCacheCompletedPageEntity,
+    ): Long
+
+    @Transaction
+    open suspend fun insertIfNoActive(
+        task: EnhancementCacheTaskEntity,
+    ): EnhancementCacheTaskEntity? {
+        val active = getAnyActive()
+        if (active != null) return active
+        insert(task)
+        return null
+    }
+
+    /**
+     * Replaces only the task the caller previously observed, so a stale confirmation cannot cancel
+     * a newer task created by another request.
+     */
+    @Transaction
+    open suspend fun replaceActive(
+        expectedActiveTaskId: String,
+        replacement: EnhancementCacheTaskEntity,
+        updatedAt: Long,
+    ): EnhancementCacheTaskReplacementDecision {
+        val active = getAnyActive()
+        if (active?.id != expectedActiveTaskId) {
+            return EnhancementCacheTaskReplacementDecision.ActiveTaskChanged(active)
+        }
+        cancelIfActive(active.id, updatedAt)
+        insert(replacement)
+        return EnhancementCacheTaskReplacementDecision.Replaced(active)
+    }
 
     @Query(
-        "UPDATE enhancement_cache_tasks SET status = 'running', updatedAt = :updatedAt, " +
-                "lastError = NULL WHERE id = :id " +
-                "AND status IN ('queued', 'running', 'waiting_for_reader')"
+        "SELECT * FROM enhancement_cache_tasks WHERE activeSlot = 1 " +
+                "AND (:taskId IS NULL OR id = :taskId) " +
+                "AND comicId = :comicId AND modelId = :modelId " +
+                "AND modelRevision = :modelRevision AND sourceRevision = :sourceRevision " +
+                "AND :page BETWEEN startPageInclusive AND endPageInclusive LIMIT 1"
     )
-    suspend fun markRunning(id: String, updatedAt: Long): Int
+    protected abstract suspend fun getActiveMatchingPage(
+        taskId: String?,
+        comicId: Long,
+        modelId: String,
+        modelRevision: String,
+        sourceRevision: String,
+        page: Int,
+    ): EnhancementCacheTaskEntity?
 
     @Query(
-        "UPDATE enhancement_cache_tasks SET status = 'waiting_for_reader', " +
-                "updatedAt = :updatedAt WHERE id = :id AND status = 'running'"
+        "UPDATE enhancement_cache_tasks SET completedPages = :completedPages, " +
+                "nextPage = :nextPage, " +
+                "status = CASE WHEN :isComplete THEN 'completed' ELSE status END, " +
+                "activeSlot = CASE WHEN :isComplete THEN NULL ELSE activeSlot END, " +
+                "updatedAt = :updatedAt, lastError = NULL WHERE id = :id"
     )
-    suspend fun waitForReaderIfRunning(id: String, updatedAt: Long): Int
-
-    @Query(
-        "UPDATE enhancement_cache_tasks SET nextPage = :nextPage, " +
-                "completedPages = :completedPages, updatedAt = :updatedAt, " +
-                "lastError = NULL WHERE id = :id AND status = 'running'"
-    )
-    suspend fun checkpointIfRunning(
+    protected abstract suspend fun refreshProgress(
         id: String,
-        nextPage: Int,
         completedPages: Int,
+        nextPage: Int,
+        isComplete: Boolean,
         updatedAt: Long,
     ): Int
 
-    @Query(
-        "UPDATE enhancement_cache_tasks SET status = 'paused', updatedAt = :updatedAt " +
-                "WHERE id = :id AND status IN ('queued', 'running', 'waiting_for_reader')"
-    )
-    suspend fun pauseIfActive(id: String, updatedAt: Long): Int
+    @Transaction
+    open suspend fun markPageCompleted(
+        taskId: String?,
+        comicId: Long,
+        modelId: String,
+        modelRevision: String,
+        sourceRevision: String,
+        page: Int,
+        completedAt: Long,
+    ): EnhancementCachePageCompletion {
+        val task = getActiveMatchingPage(
+            taskId = taskId,
+            comicId = comicId,
+            modelId = modelId,
+            modelRevision = modelRevision,
+            sourceRevision = sourceRevision,
+            page = page,
+        ) ?: return EnhancementCachePageCompletion.NotApplicable
+        val newlyCompleted = insertCompletedPage(
+            EnhancementCacheCompletedPageEntity(
+                taskId = task.id,
+                page = page,
+                completedAt = completedAt,
+            )
+        ) != -1L
+        if (newlyCompleted) {
+            val completedPages = countCompletedPages(task.id)
+            val isComplete = completedPages >= task.totalPages
+            val nextPage = if (isComplete) {
+                task.endPageInclusive + 1
+            } else if (!isPageCompleted(task.id, task.nextPage)) {
+                task.nextPage
+            } else {
+                firstMissingPageAfterCompleted(
+                    taskId = task.id,
+                    startPage = task.nextPage,
+                    endPageInclusive = task.endPageInclusive,
+                ) ?: task.endPageInclusive + 1
+            }
+            refreshProgress(
+                id = task.id,
+                completedPages = completedPages,
+                nextPage = nextPage,
+                isComplete = isComplete,
+                updatedAt = completedAt,
+            )
+        }
+        return EnhancementCachePageCompletion.Applied(
+            task = getById(task.id) ?: return EnhancementCachePageCompletion.NotApplicable,
+            newlyCompleted = newlyCompleted,
+        )
+    }
 
     @Query(
-        "UPDATE enhancement_cache_tasks SET status = 'queued', updatedAt = :updatedAt, " +
-                "lastError = NULL WHERE id = :id AND status = 'paused'"
+        "SELECT page FROM enhancement_cache_completed_pages WHERE taskId = :taskId " +
+                "ORDER BY page ASC"
     )
-    suspend fun resumeIfPaused(id: String, updatedAt: Long): Int
+    abstract suspend fun getCompletedPages(taskId: String): List<Int>
 
     @Query(
-        "UPDATE enhancement_cache_tasks SET status = 'cancelled', updatedAt = :updatedAt " +
-                "WHERE id = :id AND status IN " +
-                "('queued', 'running', 'waiting_for_reader', 'paused')"
+        "SELECT COUNT(*) FROM enhancement_cache_completed_pages WHERE taskId = :taskId"
     )
-    suspend fun cancelIfActive(id: String, updatedAt: Long): Int
+    protected abstract suspend fun countCompletedPages(taskId: String): Int
 
     @Query(
-        "UPDATE enhancement_cache_tasks SET nextPage = endPageInclusive + 1, " +
-                "completedPages = totalPages, status = 'completed', updatedAt = :updatedAt, " +
-                "lastError = NULL WHERE id = :id AND status = 'running'"
+        "SELECT MIN(completed.page + 1) FROM enhancement_cache_completed_pages AS completed " +
+                "WHERE completed.taskId = :taskId " +
+                "AND completed.page BETWEEN :startPage AND (:endPageInclusive - 1) " +
+                "AND NOT EXISTS (SELECT 1 FROM enhancement_cache_completed_pages AS next " +
+                "WHERE next.taskId = completed.taskId AND next.page = completed.page + 1)"
     )
-    suspend fun completeIfRunning(id: String, updatedAt: Long): Int
+    protected abstract suspend fun firstMissingPageAfterCompleted(
+        taskId: String,
+        startPage: Int,
+        endPageInclusive: Int,
+    ): Int?
 
     @Query(
-        "UPDATE enhancement_cache_tasks SET status = :status, updatedAt = :updatedAt, " +
-                "lastError = :lastError WHERE id = :id AND status IN ('queued', 'running')"
+        "SELECT EXISTS(SELECT 1 FROM enhancement_cache_completed_pages " +
+                "WHERE taskId = :taskId AND page = :page)"
     )
-    suspend fun finishWithErrorIfActive(
+    abstract suspend fun isPageCompleted(taskId: String, page: Int): Boolean
+
+    @Query(
+        "UPDATE enhancement_cache_tasks SET status = 'running', updatedAt = :updatedAt, " +
+                "lastError = NULL WHERE id = :id AND activeSlot = 1 " +
+                "AND status IN ('queued', 'running', 'waiting_for_reader')"
+    )
+    abstract suspend fun markRunning(id: String, updatedAt: Long): Int
+
+    @Query(
+        "UPDATE enhancement_cache_tasks SET status = 'paused', updatedAt = :updatedAt, " +
+                "lastError = NULL WHERE id = :id AND activeSlot = 1 " +
+                "AND status IN ('queued', 'running', 'waiting_for_reader', 'paused_low_storage')"
+    )
+    abstract suspend fun pauseIfActive(id: String, updatedAt: Long): Int
+
+    @Query(
+        "UPDATE enhancement_cache_tasks SET status = 'paused_low_storage', " +
+                "updatedAt = :updatedAt, lastError = :lastError WHERE id = :id " +
+                "AND activeSlot = 1 AND status IN ('queued', 'running', 'waiting_for_reader')"
+    )
+    abstract suspend fun pauseForLowStorage(
+        id: String,
+        updatedAt: Long,
+        lastError: String,
+    ): Int
+
+    @Query(
+        "UPDATE enhancement_cache_tasks SET status = 'queued', activeSlot = 1, " +
+                "updatedAt = :updatedAt, lastError = NULL WHERE id = :id AND activeSlot = 1 " +
+                "AND status IN ('paused', 'paused_low_storage')"
+    )
+    abstract suspend fun resumeIfPaused(id: String, updatedAt: Long): Int
+
+    @Query(
+        "UPDATE enhancement_cache_tasks SET status = 'cancelled', activeSlot = NULL, " +
+                "updatedAt = :updatedAt WHERE id = :id AND activeSlot = 1"
+    )
+    abstract suspend fun cancelIfActive(id: String, updatedAt: Long): Int
+
+    @Query(
+        "UPDATE enhancement_cache_tasks SET status = :status, activeSlot = NULL, " +
+                "updatedAt = :updatedAt, lastError = :lastError WHERE id = :id " +
+                "AND status IN ('queued', 'running', 'waiting_for_reader')"
+    )
+    abstract suspend fun finishWithErrorIfActive(
         id: String,
         status: String,
         updatedAt: Long,
@@ -96,5 +256,5 @@ interface EnhancementCacheTaskDao {
     ): Int
 
     @Query("DELETE FROM enhancement_cache_tasks WHERE comicId = :comicId")
-    suspend fun deleteForComic(comicId: Long)
+    abstract suspend fun deleteForComic(comicId: Long)
 }

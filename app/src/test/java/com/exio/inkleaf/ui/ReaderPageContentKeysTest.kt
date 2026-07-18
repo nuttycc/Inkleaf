@@ -44,6 +44,15 @@ class ReaderPageContentKeysTest {
     }
 
     @Test
+    fun `active task pinning changes restart without resetting state`() {
+        val before = keys(pinForActiveTask = false)
+        val after = keys(pinForActiveTask = true)
+
+        assertEquals(before.stateReset, after.stateReset)
+        assertNotEquals(before.producerRestart, after.producerRestart)
+    }
+
+    @Test
     fun `page identity changes use a new state holder`() {
         val before = keys()
 
@@ -59,6 +68,7 @@ class ReaderPageContentKeysTest {
         isCurrentPage: Boolean = true,
         enhancementSelectionId: String = "model-a",
         enhancementModelInstalled: Boolean = true,
+        pinForActiveTask: Boolean = false,
     ): ReaderPageContentKeys = readerPageContentKeys(
         volumeToken = volumeToken,
         page = page,
@@ -66,5 +76,6 @@ class ReaderPageContentKeysTest {
         isCurrentPage = isCurrentPage,
         enhancementSelectionId = enhancementSelectionId,
         enhancementModelInstalled = enhancementModelInstalled,
+        pinForActiveTask = pinForActiveTask,
     )
 }

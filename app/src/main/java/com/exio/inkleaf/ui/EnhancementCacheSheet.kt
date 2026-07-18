@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearProgressIndicator
@@ -25,6 +26,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.exio.inkleaf.data.db.EnhancementCacheTaskEntity
 import com.exio.inkleaf.data.db.EnhancementCacheTaskStatus
+import com.exio.inkleaf.data.enhancement.EnhancementModelCatalog
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -134,6 +136,80 @@ internal fun EnhancementCacheSheet(
 }
 
 @Composable
+internal fun EnhancementCacheReplacementDialog(
+    replacement: PendingEnhancementCacheReplacement,
+    currentComicId: Long,
+    replacementInProgress: Boolean,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val activeTask = replacement.activeTask
+    val request = replacement.request
+    val activeModelName = EnhancementModelCatalog
+        .find(activeTask.modelId)
+        ?.displayName
+        ?: activeTask.modelId
+    val requestedModelName = EnhancementModelCatalog
+        .find(request.modelId)
+        ?.displayName
+        ?: request.modelId
+    val activeScope = if (activeTask.comicId == currentComicId) "本书" else "其他漫画"
+
+    AlertDialog(
+        onDismissRequest = {
+            if (!replacementInProgress) onDismiss()
+        },
+        title = { Text("替换正在进行的缓存任务？") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (replacement.activeTaskChanged) {
+                    Text(
+                        text = "缓存任务在确认期间已发生变化。下面显示的是当前任务，请重新确认。",
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+                Text(
+                    text = "同一时间只能执行一个 AI 增强缓存任务。开始新任务会停止当前任务。",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    text = "当前任务（$activeScope）\n" +
+                            "$activeModelName · ${activeTask.completedPages} / " +
+                            "${activeTask.totalPages} 页 · " +
+                            "范围 ${activeTask.startPageInclusive + 1}～" +
+                            "${activeTask.endPageInclusive + 1}",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    text = "新任务\n$requestedModelName · " +
+                            "范围 ${request.startPageInclusive + 1}～" +
+                            "${request.endPageInclusive + 1}",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onConfirm,
+                enabled = !replacementInProgress,
+            ) {
+                Text(if (replacementInProgress) "正在替换…" else "停止并开始新任务")
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                enabled = !replacementInProgress,
+            ) {
+                Text("保留当前任务")
+            }
+        },
+    )
+}
+
+@Composable
 private fun EnhancementCacheTaskContent(
     task: EnhancementCacheTaskEntity,
     onPause: (String) -> Unit,
@@ -158,14 +234,12 @@ private fun EnhancementCacheTaskContent(
         Text(it, color = MaterialTheme.colorScheme.error)
     }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        when (task.status) {
-            EnhancementCacheTaskStatus.QUEUED,
-            EnhancementCacheTaskStatus.RUNNING,
-            EnhancementCacheTaskStatus.WAITING_FOR_READER -> TextButton(
+        when {
+            task.status in EnhancementCacheTaskStatus.pausable -> TextButton(
                 onClick = { onPause(task.id) }
             ) { Text("暂停") }
 
-            EnhancementCacheTaskStatus.PAUSED -> TextButton(
+            task.status in EnhancementCacheTaskStatus.resumable -> TextButton(
                 onClick = { onResume(task.id) }
             ) { Text("继续") }
         }
@@ -178,8 +252,9 @@ private fun EnhancementCacheTaskContent(
 private fun taskStatusLabel(task: EnhancementCacheTaskEntity): String = when (task.status) {
     EnhancementCacheTaskStatus.QUEUED -> "等待开始"
     EnhancementCacheTaskStatus.RUNNING -> "正在缓存"
-    EnhancementCacheTaskStatus.WAITING_FOR_READER -> "等待退出阅读器后继续"
+    EnhancementCacheTaskStatus.WAITING_FOR_READER -> "正在缓存"
     EnhancementCacheTaskStatus.PAUSED -> "已暂停"
+    EnhancementCacheTaskStatus.PAUSED_LOW_STORAGE -> "存储空间不足，已暂停"
     EnhancementCacheTaskStatus.COMPLETED -> "缓存完成"
     EnhancementCacheTaskStatus.CANCELLED -> "已取消"
     EnhancementCacheTaskStatus.EXPIRED -> "源文件或模型已变化"

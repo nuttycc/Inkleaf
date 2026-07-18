@@ -2,10 +2,10 @@ package com.exio.inkleaf.data.enhancement
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.os.SystemClock
 import android.util.LruCache
 import androidx.annotation.Keep
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -13,6 +13,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -23,6 +24,16 @@ import kotlin.math.sqrt
 enum class EnhancementInferenceBackend { VULKAN, CPU, DISK_CACHE }
 
 enum class EnhancementRequestPriority { CURRENT_PAGE, PREFETCH, BULK_CACHE }
+
+enum class EnhancementSourceOwnership { TRANSFERRED, BORROWED }
+
+enum class EnhancementPersistenceStatus {
+    NONE,
+    PINNED,
+    LOW_STORAGE,
+    INVALIDATED,
+    WRITE_FAILED,
+}
 
 internal fun calculateInferenceSampleSize(
     width: Int,
@@ -59,10 +70,13 @@ internal fun calculateBitmapCacheKilobytes(maxMemoryBytes: Long): Int =
         .toInt()
 
 sealed interface EnhancementInferenceOutcome {
+    /** The bitmap is a shared borrowed result and must not be recycled by callers. */
     data class Success(
         val bitmap: Bitmap,
         val backend: EnhancementInferenceBackend,
         val memoryCached: Boolean,
+        val persistenceStatus: EnhancementPersistenceStatus =
+            EnhancementPersistenceStatus.NONE,
     ) : EnhancementInferenceOutcome
 
     data class Failure(val message: String) : EnhancementInferenceOutcome
@@ -134,7 +148,9 @@ object NcnnEnhancementEngine {
     )
 
     private val sessionMutex = Mutex()
-    private val inferenceScheduler = EnhancementInferenceScheduler()
+    private val pageJobScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val pageJobs = EnhancementPageJobCoordinator<EnhancementInferenceOutcome>(pageJobScope)
+    private val foregroundQuietWindow = EnhancementForegroundQuietWindow()
     private val sessions = mutableMapOf<String, Session>()
     private val disabledModelsLock = Any()
     private val disabledModels = mutableSetOf<String>()
@@ -146,8 +162,6 @@ object NcnnEnhancementEngine {
         override fun sizeOf(key: String, value: CachedBitmap): Int =
             (value.bitmap.allocationByteCount / 1024).coerceAtLeast(1)
     }
-    private val inFlightRequests =
-        InFlightRequestRegistry<String, EnhancementInferenceOutcome>()
     private val diskWriteScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val diskWriteQueue = Channel<TransientDiskWrite>(
         capacity = 1,
@@ -159,7 +173,7 @@ object NcnnEnhancementEngine {
             var lastBudgetEnforcementAt = 0L
             for (request in diskWriteQueue) {
                 if (
-                    request.diskCache.writeTransient(
+                    request.diskCache.writeTransientUnlessPinned(
                         request.key,
                         request.bitmap,
                         request.token,
@@ -184,6 +198,16 @@ object NcnnEnhancementEngine {
         else -> "ncnn · CPU"
     }
 
+    fun recordForegroundRequest(modelId: String) {
+        foregroundQuietWindow.record(modelId)
+    }
+
+    /**
+     * By default transfers [source] ownership to the shared page job. Borrowed sources remain
+     * caller-owned and are only read by the selected producer. Attached duplicate requests discard
+     * only transferred sources; the selected producer keeps its source reachable even if the
+     * original requesting coroutine is cancelled.
+     */
     suspend fun enhance(
         context: Context,
         key: EnhancementPageKey,
@@ -192,29 +216,109 @@ object NcnnEnhancementEngine {
         persistTransient: Boolean = true,
         priority: EnhancementRequestPriority = EnhancementRequestPriority.CURRENT_PAGE,
         cacheInMemory: Boolean = true,
+        sourceOwnership: EnhancementSourceOwnership = EnhancementSourceOwnership.TRANSFERRED,
     ): EnhancementInferenceOutcome {
-        cached(key.modelId, key.value)?.let { return it }
-        val requestKey = "${priority.name}\u0000${key.modelId}\u0000${key.value}"
-        return inFlightRequests.run(requestKey) {
-            cached(key.modelId, key.value) ?: enhanceUncached(
-                context = context,
-                modelId = key.modelId,
-                source = source,
-                cacheKey = key.value,
-                preferVulkan = preferVulkan,
+        val recycleSource = sourceOwnership == EnhancementSourceOwnership.TRANSFERRED
+        var sourceTransferred = false
+        try {
+            val persistenceRequirement = if (persistTransient) {
+                EnhancementPersistenceRequirement.TRANSIENT
+            } else {
+                EnhancementPersistenceRequirement.PINNED
+            }
+            if (priority == EnhancementRequestPriority.BULK_CACHE) {
+                foregroundQuietWindow.awaitBulkTurn(key.modelId)
+            } else {
+                foregroundQuietWindow.record(key.modelId)
+            }
+            val diskCache = EnhancedImageDiskCache.getInstance(context)
+            val writeToken = diskCache.writeToken(key)
+            sourceTransferred = true
+            return pageJobs.request(
+                key = key,
                 priority = priority,
-                cacheInMemory = cacheInMemory,
-            ).also { outcome ->
-                if (persistTransient && outcome is EnhancementInferenceOutcome.Success) {
-                    val diskCache = EnhancedImageDiskCache.getInstance(context)
-                    diskWriteQueue.trySend(
-                        TransientDiskWrite(
-                            diskCache = diskCache,
-                            token = diskCache.writeToken(key),
-                            key = key,
-                            bitmap = outcome.bitmap,
-                        )
+                persistenceRequirement = persistenceRequirement,
+                discardProducer = { if (recycleSource) recycleSafely(source) },
+                finalizer = { outcome, required ->
+                    finalizePersistence(diskCache, writeToken, key, outcome, required)
+                },
+            ) {
+                try {
+                    cached(context, key) ?: enhanceUncached(
+                        context = context,
+                        modelId = key.modelId,
+                        source = source,
+                        cacheKey = key.value,
+                        preferVulkan = preferVulkan,
+                        cacheInMemory = cacheInMemory,
                     )
+                } finally {
+                    if (recycleSource) recycleSafely(source)
+                }
+            }
+        } finally {
+            if (!sourceTransferred && recycleSource) recycleSafely(source)
+        }
+    }
+
+    suspend fun pinCached(
+        context: Context,
+        key: EnhancementPageKey,
+        cached: EnhancementInferenceOutcome.Success,
+        priority: EnhancementRequestPriority,
+    ): EnhancementInferenceOutcome {
+        val diskCache = EnhancedImageDiskCache.getInstance(context)
+        val writeToken = diskCache.writeToken(key)
+        return pageJobs.request(
+            key = key,
+            priority = priority,
+            persistenceRequirement = EnhancementPersistenceRequirement.PINNED,
+            retainWithoutWaiters = priority == EnhancementRequestPriority.BULK_CACHE,
+            finalizer = { outcome, required ->
+                finalizePersistence(diskCache, writeToken, key, outcome, required)
+            },
+        ) {
+            cached
+        }
+    }
+
+    /**
+     * Defers bulk source decoding until this page owns the single producer slot. The non-cancellable
+     * await keeps caller-owned book resources valid until that page boundary finishes; pause and
+     * cancel are observed before the next page is submitted.
+     */
+    suspend fun enhanceBulk(
+        context: Context,
+        key: EnhancementPageKey,
+        preferVulkan: Boolean = true,
+        sourceLoader: suspend () -> Bitmap,
+    ): EnhancementInferenceOutcome {
+        foregroundQuietWindow.awaitBulkTurn(key.modelId)
+        val diskCache = EnhancedImageDiskCache.getInstance(context)
+        val writeToken = diskCache.writeToken(key)
+        return withContext(NonCancellable) {
+            pageJobs.request(
+                key = key,
+                priority = EnhancementRequestPriority.BULK_CACHE,
+                persistenceRequirement = EnhancementPersistenceRequirement.PINNED,
+                retainWithoutWaiters = true,
+                finalizer = { outcome, required ->
+                    finalizePersistence(diskCache, writeToken, key, outcome, required)
+                },
+            ) {
+                cached(context, key) ?: sourceLoader().let { source ->
+                    try {
+                        enhanceUncached(
+                            context = context,
+                            modelId = key.modelId,
+                            source = source,
+                            cacheKey = key.value,
+                            preferVulkan = preferVulkan,
+                            cacheInMemory = false,
+                        )
+                    } finally {
+                        recycleSafely(source)
+                    }
                 }
             }
         }
@@ -269,7 +373,6 @@ object NcnnEnhancementEngine {
         source: Bitmap,
         cacheKey: String,
         preferVulkan: Boolean,
-        priority: EnhancementRequestPriority,
         cacheInMemory: Boolean,
     ): EnhancementInferenceOutcome {
         val requestGeneration = activeModelGeneration(modelId)
@@ -284,68 +387,67 @@ object NcnnEnhancementEngine {
             var prepared: Bitmap? = null
             var unownedOutput: Bitmap? = null
             try {
-                inferenceScheduler.withPermit(priority) {
-                    currentCoroutineContext().ensureActive()
-                    cached(modelId, cacheKey)?.let { return@withPermit it }
-                    val session = sessionFor(context, modelId, preferVulkan)
-                        ?: return@withPermit EnhancementInferenceOutcome.Failure(
-                            "模型加载失败，请重新下载模型包。"
-                        )
-                    prepared = prepareInput(source, session.scale)
-                        ?: return@withPermit EnhancementInferenceOutcome.Failure(
-                            "页面尺寸过大，无法安全创建推理位图。"
-                        )
-                    val inferenceInput = requireNotNull(prepared)
-                    unownedOutput = Bitmap.createBitmap(
-                        inferenceInput.width * session.scale,
-                        inferenceInput.height * session.scale,
-                        Bitmap.Config.ARGB_8888,
-                    ).apply { setHasAlpha(inferenceInput.hasAlpha()) }
-                    val inferenceOutput = requireNotNull(unownedOutput)
+                currentCoroutineContext().ensureActive()
+                cached(modelId, cacheKey)?.let { return@withContext it }
+                val session = sessionFor(context, modelId, preferVulkan)
+                    ?: return@withContext EnhancementInferenceOutcome.Failure(
+                        "模型加载失败，请重新下载模型包。"
+                    )
+                prepared = prepareInput(source, session.scale)
+                    ?: return@withContext EnhancementInferenceOutcome.Failure(
+                        "页面尺寸过大，无法安全创建推理位图。"
+                    )
+                val inferenceInput = requireNotNull(prepared)
+                unownedOutput = Bitmap.createBitmap(
+                    inferenceInput.width * session.scale,
+                    inferenceInput.height * session.scale,
+                    Bitmap.Config.ARGB_8888,
+                ).apply { setHasAlpha(inferenceInput.hasAlpha()) }
+                val inferenceOutput = requireNotNull(unownedOutput)
 
-                    val resultCode = session.inferenceMutex.withLock {
-                        when {
-                            session.closed -> NATIVE_ERROR_SESSION_CLOSED
-                            !isModelGenerationCurrent(modelId, requestGeneration) ->
-                                NATIVE_ERROR_MODEL_DISABLED
-                            else -> NativeEnhancementBridge.enhance(
-                                session.handle,
-                                inferenceInput,
-                                inferenceOutput,
-                            )
-                        }
-                    }
-                    currentCoroutineContext().ensureActive()
-                    if (resultCode != NATIVE_RESULT_OK) {
-                        return@withPermit EnhancementInferenceOutcome.Failure(
-                            "AI 推理失败（错误码 $resultCode），已显示原图。"
+                val resultCode = session.inferenceMutex.withLock {
+                    when {
+                        session.closed -> NATIVE_ERROR_SESSION_CLOSED
+                        !isModelGenerationCurrent(modelId, requestGeneration) ->
+                            NATIVE_ERROR_MODEL_DISABLED
+
+                        else -> NativeEnhancementBridge.enhance(
+                            session.handle,
+                            inferenceInput,
+                            inferenceOutput,
                         )
                     }
-                    if (!isModelGenerationCurrent(modelId, requestGeneration)) {
-                        return@withPermit EnhancementInferenceOutcome.Failure(
-                            "模型已被移除，已显示原图。"
-                        )
-                    }
-                    if (cacheInMemory) {
-                        synchronized(bitmapCache) {
-                            if (!isModelGenerationCurrent(modelId, requestGeneration)) {
-                                return@withPermit EnhancementInferenceOutcome.Failure(
-                                    "模型已被移除，已显示原图。"
-                                )
-                            }
-                            bitmapCache.put(
-                                cacheKey,
-                                CachedBitmap(modelId, inferenceOutput, session.backend),
-                            )
-                        }
-                    }
-                    unownedOutput = null
-                    EnhancementInferenceOutcome.Success(
-                        bitmap = inferenceOutput,
-                        backend = session.backend,
-                        memoryCached = cacheInMemory,
+                }
+                currentCoroutineContext().ensureActive()
+                if (resultCode != NATIVE_RESULT_OK) {
+                    return@withContext EnhancementInferenceOutcome.Failure(
+                        "AI 推理失败（错误码 $resultCode），已显示原图。"
                     )
                 }
+                if (!isModelGenerationCurrent(modelId, requestGeneration)) {
+                    return@withContext EnhancementInferenceOutcome.Failure(
+                        "模型已被移除，已显示原图。"
+                    )
+                }
+                if (cacheInMemory) {
+                    synchronized(bitmapCache) {
+                        if (!isModelGenerationCurrent(modelId, requestGeneration)) {
+                            return@withContext EnhancementInferenceOutcome.Failure(
+                                "模型已被移除，已显示原图。"
+                            )
+                        }
+                        bitmapCache.put(
+                            cacheKey,
+                            CachedBitmap(modelId, inferenceOutput, session.backend),
+                        )
+                    }
+                }
+                unownedOutput = null
+                EnhancementInferenceOutcome.Success(
+                    bitmap = inferenceOutput,
+                    backend = session.backend,
+                    memoryCached = cacheInMemory,
+                )
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: OutOfMemoryError) {
@@ -475,64 +577,78 @@ object NcnnEnhancementEngine {
     fun maxInputPixels(scale: Int = 2): Long =
         calculateMaxInputPixels(Runtime.getRuntime().maxMemory(), scale)
 
+    private suspend fun finalizePersistence(
+        diskCache: EnhancedImageDiskCache,
+        writeToken: EnhancedImageDiskCacheWriteToken,
+        key: EnhancementPageKey,
+        outcome: EnhancementInferenceOutcome,
+        requirement: EnhancementPersistenceRequirement,
+    ): EnhancementInferenceOutcome {
+        val success = outcome as? EnhancementInferenceOutcome.Success ?: return outcome
+        if (requirement == EnhancementPersistenceRequirement.TRANSIENT) {
+            if (success.backend != EnhancementInferenceBackend.DISK_CACHE) {
+                diskWriteQueue.trySend(
+                    TransientDiskWrite(
+                        diskCache = diskCache,
+                        token = writeToken,
+                        key = key,
+                        bitmap = success.bitmap,
+                    )
+                )
+            }
+            return success
+        }
+        if (diskCache.containsPinned(key)) {
+            return success.copy(persistenceStatus = EnhancementPersistenceStatus.PINNED)
+        }
+        val persistenceStatus = when (
+            diskCache.writePinnedResult(key, success.bitmap, writeToken)
+        ) {
+            EnhancedImagePinnedWriteResult.WRITTEN -> EnhancementPersistenceStatus.PINNED
+            EnhancedImagePinnedWriteResult.INVALIDATED -> EnhancementPersistenceStatus.INVALIDATED
+            EnhancedImagePinnedWriteResult.LOW_STORAGE -> EnhancementPersistenceStatus.LOW_STORAGE
+            EnhancedImagePinnedWriteResult.FAILED -> EnhancementPersistenceStatus.WRITE_FAILED
+        }
+        return success.copy(persistenceStatus = persistenceStatus)
+    }
+
+    private fun recycleSafely(bitmap: Bitmap) {
+        if (!bitmap.isRecycled) bitmap.recycle()
+    }
+
     // Includes source/prepared overlap, native input/output, Java output, and headroom.
     private const val NATIVE_RESULT_OK = 0
     private const val NATIVE_ERROR_SESSION_CLOSED = -1
     private const val NATIVE_ERROR_MODEL_DISABLED = -2
 }
 
-internal class EnhancementInferenceScheduler {
-    private data class Waiter(
-        val priority: EnhancementRequestPriority,
-        val signal: CompletableDeferred<Unit> = CompletableDeferred(),
-    )
+internal class EnhancementForegroundQuietWindow(
+    private val now: () -> Long = SystemClock::elapsedRealtime,
+    private val pause: suspend (Long) -> Unit = { delay(it) },
+) {
+    private val lock = Any()
+    private var lastForegroundModelId: String? = null
+    private var lastForegroundRequestAt = Long.MIN_VALUE
 
-    private val mutex = Mutex()
-    private val waiters = mutableListOf<Waiter>()
-    private var active = false
-
-    suspend fun <T> withPermit(
-        priority: EnhancementRequestPriority,
-        block: suspend () -> T,
-    ): T {
-        val waiter = mutex.withLock {
-            if (!active) {
-                active = true
-                null
-            } else {
-                Waiter(priority).also(waiters::add)
-            }
-        }
-        if (waiter != null) {
-            try {
-                waiter.signal.await()
-            } catch (cancelled: CancellationException) {
-                withContext(NonCancellable) {
-                    val hadPermit = mutex.withLock { !waiters.remove(waiter) }
-                    if (hadPermit) release()
-                }
-                throw cancelled
-            }
-        }
-
-        try {
-            return block()
-        } finally {
-            withContext(NonCancellable) { release() }
+    fun record(modelId: String) {
+        synchronized(lock) {
+            lastForegroundModelId = modelId
+            lastForegroundRequestAt = now()
         }
     }
 
-    private suspend fun release() {
-        val next = mutex.withLock {
-            if (waiters.isEmpty()) {
-                active = false
-                null
-            } else {
-                val nextIndex = waiters.indices.minBy { waiters[it].priority.ordinal }
-                waiters.removeAt(nextIndex)
+    suspend fun awaitBulkTurn(modelId: String) {
+        while (true) {
+            val remaining = synchronized(lock) {
+                if (lastForegroundModelId == null || lastForegroundModelId == modelId) {
+                    0L
+                } else {
+                    DIFFERENT_MODEL_QUIET_WINDOW_MS - (now() - lastForegroundRequestAt)
+                }
             }
+            if (remaining <= 0L) return
+            pause(remaining.coerceAtMost(QUIET_WINDOW_POLL_MS))
         }
-        next?.signal?.complete(Unit)
     }
 }
 
@@ -544,3 +660,5 @@ private const val CACHE_HEAP_DIVISOR = 10L
 private const val MAX_INFERENCE_BYTES = 64L * 1024 * 1024
 private const val MAX_CACHE_BYTES = 48L * 1024 * 1024
 private const val TRANSIENT_BUDGET_INTERVAL_MS = 30_000L
+private const val DIFFERENT_MODEL_QUIET_WINDOW_MS = 2_000L
+private const val QUIET_WINDOW_POLL_MS = 100L

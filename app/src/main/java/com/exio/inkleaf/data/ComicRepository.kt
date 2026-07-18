@@ -725,7 +725,7 @@ class ComicRepository(context: Context) {
             File(appContext.filesDir, "albums/${comic.id}").deleteRecursively()
         }
         ReaderCache.wipeBook(appContext, comic.id)
-        EnhancementCacheTaskRepository(appContext).deleteForComic(comic.id)
+        EnhancementCacheTaskRepository.getInstance(appContext).deleteForComic(comic.id)
         EnhancedImageDiskCache.getInstance(appContext).deleteComic(comic.id)
     }
 

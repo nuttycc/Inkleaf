@@ -17,8 +17,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ComicGroupEntity::class,
         AlbumPageEntity::class,
         EnhancementCacheTaskEntity::class,
+        EnhancementCacheCompletedPageEntity::class,
     ],
-    version = 9,
+    version = 10,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -43,7 +44,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "comic_reader.db",
                 )
-                    .addMigrations(MIGRATION_8_9)
+                    .addMigrations(MIGRATION_8_9, MIGRATION_9_10)
                     .fallbackToDestructiveMigration(dropAllTables = true)
                     .build()
                     .also { instance = it }
@@ -74,6 +75,32 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL(
                     "CREATE INDEX IF NOT EXISTS index_enhancement_cache_tasks_comicId " +
                             "ON enhancement_cache_tasks(comicId)"
+                )
+            }
+        }
+
+        private val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE enhancement_cache_tasks ADD COLUMN activeSlot INTEGER")
+                // Version 9 tracked only a contiguous cursor. Resetting task metadata avoids
+                // inventing completion rows that could overstate durable out-of-order progress.
+                db.execSQL("DELETE FROM enhancement_cache_tasks")
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS " +
+                            "index_enhancement_cache_tasks_activeSlot " +
+                            "ON enhancement_cache_tasks(activeSlot)"
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS enhancement_cache_completed_pages (
+                        taskId TEXT NOT NULL,
+                        page INTEGER NOT NULL,
+                        completedAt INTEGER NOT NULL,
+                        PRIMARY KEY(taskId, page),
+                        FOREIGN KEY(taskId) REFERENCES enhancement_cache_tasks(id)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent()
                 )
             }
         }

@@ -14,7 +14,7 @@ class EnhancementCacheActionReceiver : BroadcastReceiver() {
         val pendingResult = goAsync()
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
-                val repository = EnhancementCacheTaskRepository(context)
+                val repository = EnhancementCacheTaskRepository.getInstance(context)
                 when (intent.action) {
                     EnhancementCacheNotifications.ACTION_PAUSE -> repository.pause(taskId)
                     EnhancementCacheNotifications.ACTION_RESUME -> repository.resume(taskId)

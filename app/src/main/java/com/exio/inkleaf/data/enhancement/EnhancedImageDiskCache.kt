@@ -15,6 +15,13 @@ internal data class EnhancedImageDiskCacheWriteToken(
     val modelGeneration: Long,
 )
 
+internal enum class EnhancedImagePinnedWriteResult {
+    WRITTEN,
+    INVALIDATED,
+    LOW_STORAGE,
+    FAILED,
+}
+
 /** Stores enhanced pages in transient or user-pinned private app storage. */
 internal class EnhancedImageDiskCache private constructor(context: Context) {
     private val store = EnhancedImageDiskCacheStore(
@@ -39,22 +46,33 @@ internal class EnhancedImageDiskCache private constructor(context: Context) {
             )
         }
 
-    suspend fun writeTransient(
+    suspend fun writeTransientUnlessPinned(
         key: EnhancementPageKey,
         bitmap: Bitmap,
         token: EnhancedImageDiskCacheWriteToken = writeToken(key),
     ): Boolean = mutationMutex.withLock {
         if (!isCurrent(token, key)) return@withLock false
-        store.writeTransient(key.toDiskEntry(), bitmap)
+        val entry = key.toDiskEntry()
+        if (store.containsPinned(entry)) return@withLock false
+        store.writeTransient(entry, bitmap)
     }
 
-    suspend fun writePinned(
+    suspend fun writePinnedResult(
         key: EnhancementPageKey,
         bitmap: Bitmap,
         token: EnhancedImageDiskCacheWriteToken = writeToken(key),
-    ): Boolean = mutationMutex.withLock {
-        if (!isCurrent(token, key) || !hasPinnedHeadroom(bitmap)) return@withLock false
-        store.writePinned(key.toDiskEntry(), bitmap)
+    ): EnhancedImagePinnedWriteResult = mutationMutex.withLock {
+        if (!isCurrent(token, key)) {
+            return@withLock EnhancedImagePinnedWriteResult.INVALIDATED
+        }
+        if (!hasPinnedHeadroom(bitmap)) {
+            return@withLock EnhancedImagePinnedWriteResult.LOW_STORAGE
+        }
+        if (store.writePinned(key.toDiskEntry(), bitmap)) {
+            EnhancedImagePinnedWriteResult.WRITTEN
+        } else {
+            EnhancedImagePinnedWriteResult.FAILED
+        }
     }
 
     suspend fun containsPinned(key: EnhancementPageKey): Boolean = mutationMutex.withLock {
@@ -111,7 +129,7 @@ internal class EnhancedImageDiskCache private constructor(context: Context) {
     private fun hasPinnedHeadroom(bitmap: Bitmap): Boolean {
         if (bitmap.isRecycled) return false
         val usableBytes = store.pinnedUsableSpace()
-        if (usableBytes <= 0L) return true
+        if (usableBytes <= 0L) return false
         val totalBytes = store.pinnedTotalSpace()
         val reserveBytes = (totalBytes / PINNED_STORAGE_RESERVE_DIVISOR)
             .coerceIn(MIN_PINNED_STORAGE_RESERVE_BYTES, MAX_PINNED_STORAGE_RESERVE_BYTES)

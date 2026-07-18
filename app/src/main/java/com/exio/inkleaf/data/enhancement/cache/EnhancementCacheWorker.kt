@@ -6,12 +6,14 @@ import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.exio.inkleaf.data.ComicRepository
 import com.exio.inkleaf.data.db.AppDatabase
+import com.exio.inkleaf.data.db.EnhancementCachePageCompletion
 import com.exio.inkleaf.data.db.EnhancementCacheTaskEntity
 import com.exio.inkleaf.data.db.EnhancementCacheTaskStatus
 import com.exio.inkleaf.data.enhancement.EnhancedImageDiskCache
 import com.exio.inkleaf.data.enhancement.EnhancementInferenceOutcome
 import com.exio.inkleaf.data.enhancement.EnhancementModelCatalog
 import com.exio.inkleaf.data.enhancement.EnhancementModelRepository
+import com.exio.inkleaf.data.enhancement.EnhancementPersistenceStatus
 import com.exio.inkleaf.data.enhancement.EnhancementRequestPriority
 import com.exio.inkleaf.data.enhancement.NcnnEnhancementEngine
 import com.exio.inkleaf.data.enhancement.buildEnhancementPageKey
@@ -32,12 +34,7 @@ class EnhancementCacheWorker(
         val database = AppDatabase.getInstance(applicationContext)
         val taskDao = database.enhancementCacheTaskDao()
         var task = taskDao.getById(taskId) ?: return Result.failure()
-        if (task.status !in setOf(
-                EnhancementCacheTaskStatus.QUEUED,
-                EnhancementCacheTaskStatus.RUNNING,
-                EnhancementCacheTaskStatus.WAITING_FOR_READER,
-            )
-        ) {
+        if (task.status !in EnhancementCacheTaskStatus.schedulable) {
             return Result.success()
         }
 
@@ -96,121 +93,134 @@ class EnhancementCacheWorker(
                 val writeToken = diskCache.writeToken(
                     buildEnhancementPageKey(task.comicId, volume, task.startPageInclusive, model)
                 )
-                var page = task.nextPage.coerceAtLeast(task.startPageInclusive)
-                var completedPages = task.completedPages
+                var page = task.nextPage
                 var lastProgressPublishedAt = 0L
                 while (page <= task.endPageInclusive) {
                     currentCoroutineContext().ensureActive()
                     val latest = taskDao.getById(task.id) ?: return@withLock Result.success()
-                    if (latest.status in setOf(
-                            EnhancementCacheTaskStatus.PAUSED,
-                            EnhancementCacheTaskStatus.CANCELLED,
-                        )
-                    ) {
+                    if (latest.status != EnhancementCacheTaskStatus.RUNNING) {
                         return@withLock Result.success()
                     }
-                    if (EnhancementReaderActivity.isReaderVisible) {
-                        return@withLock if (
-                            taskDao.waitForReaderIfRunning(
-                                task.id,
-                                System.currentTimeMillis(),
-                            ) > 0
-                        ) {
-                            Result.retry()
-                        } else {
-                            Result.success()
-                        }
-                    }
-
+                    task = latest
+                    page = page.coerceAtLeast(task.nextPage)
+                    if (page > task.endPageInclusive) break
                     val key = buildEnhancementPageKey(task.comicId, volume, page, model)
                     val ready = diskCache.containsPinned(key) ||
                             diskCache.promoteToPinned(key, writeToken)
                     if (!ready) {
                         val cached = NcnnEnhancementEngine.cached(applicationContext, key)
-                        if (cached != null) {
-                            if (!diskCache.writePinned(key, cached.bitmap, writeToken)) {
-                                throw IOException("增强结果写入失败或存储空间不足")
-                            }
+                        val outcome = if (cached != null) {
+                            NcnnEnhancementEngine.pinCached(
+                                context = applicationContext,
+                                key = key,
+                                cached = cached,
+                                priority = EnhancementRequestPriority.BULK_CACHE,
+                            )
                         } else {
-                            val source = loadEnhancementSourceBitmap(volume, page, model.scale)
-                            try {
-                                when (
-                                    val outcome = NcnnEnhancementEngine.enhance(
-                                        context = applicationContext,
-                                        key = key,
-                                        source = source,
-                                        persistTransient = false,
-                                        priority = EnhancementRequestPriority.BULK_CACHE,
-                                        cacheInMemory = false,
-                                    )
-                                ) {
-                                    is EnhancementInferenceOutcome.Success -> {
-                                        try {
-                                            if (!diskCache.writePinned(
-                                                    key,
-                                                    outcome.bitmap,
-                                                    writeToken
-                                                )
-                                            ) {
-                                                throw IOException("增强结果写入失败或存储空间不足")
-                                            }
-                                        } finally {
-                                            if (!outcome.memoryCached && !outcome.bitmap.isRecycled) {
-                                                outcome.bitmap.recycle()
-                                            }
-                                        }
-                                    }
+                            NcnnEnhancementEngine.enhanceBulk(
+                                context = applicationContext,
+                                key = key,
+                            ) {
+                                loadEnhancementSourceBitmap(volume, page, model.scale)
+                            }
+                        }
+                        when (outcome) {
+                            is EnhancementInferenceOutcome.Success -> when (
+                                outcome.persistenceStatus
+                            ) {
+                                EnhancementPersistenceStatus.PINNED -> Unit
+                                EnhancementPersistenceStatus.LOW_STORAGE ->
+                                    throw EnhancementCacheLowStorageException()
 
-                                    is EnhancementInferenceOutcome.Failure -> {
-                                        throw IOException(outcome.message)
-                                    }
-                                }
-                            } finally {
-                                if (!source.isRecycled) source.recycle()
+                                EnhancementPersistenceStatus.INVALIDATED ->
+                                    throw IOException("增强缓存目标已失效")
+
+                                EnhancementPersistenceStatus.WRITE_FAILED,
+                                EnhancementPersistenceStatus.NONE ->
+                                    throw IOException("增强结果写入失败")
+                            }
+
+                            is EnhancementInferenceOutcome.Failure -> {
+                                throw IOException(outcome.message)
                             }
                         }
                     }
 
-                    completedPages++
-                    page++
                     val updatedAt = System.currentTimeMillis()
-                    if (
-                        taskDao.checkpointIfRunning(
-                            id = task.id,
-                            nextPage = page,
-                            completedPages = completedPages,
-                            updatedAt = updatedAt,
-                        ) == 0
+                    when (
+                        val completion = taskDao.markPageCompleted(
+                            taskId = task.id,
+                            comicId = task.comicId,
+                            modelId = task.modelId,
+                            modelRevision = task.modelRevision,
+                            sourceRevision = task.sourceRevision,
+                            page = page,
+                            completedAt = updatedAt,
+                        )
                     ) {
+                        EnhancementCachePageCompletion.NotApplicable -> {
+                            return@withLock Result.success()
+                        }
+
+                        is EnhancementCachePageCompletion.Applied -> {
+                            task = completion.task
+                        }
+                    }
+                    if (task.status == EnhancementCacheTaskStatus.COMPLETED) {
+                        EnhancementCacheNotifications.showCompleted(
+                            applicationContext,
+                            task,
+                            comic.title,
+                        )
                         return@withLock Result.success()
                     }
-                    task = task.copy(
-                        nextPage = page,
-                        completedPages = completedPages,
-                        status = EnhancementCacheTaskStatus.RUNNING,
-                        updatedAt = updatedAt,
-                        lastError = null,
-                    )
+                    page = task.nextPage
                     if (updatedAt - lastProgressPublishedAt >= PROGRESS_PUBLISH_INTERVAL_MS) {
                         publishProgress(task, comic.title)
                         lastProgressPublishedAt = updatedAt
                     }
                 }
 
-                if (taskDao.completeIfRunning(task.id, System.currentTimeMillis()) == 0) {
-                    return@withLock Result.success()
-                }
                 task = taskDao.getById(task.id) ?: return@withLock Result.success()
-                EnhancementCacheNotifications.showCompleted(applicationContext, task, comic.title)
-                Result.success()
+                if (task.status == EnhancementCacheTaskStatus.COMPLETED) {
+                    EnhancementCacheNotifications.showCompleted(
+                        applicationContext,
+                        task,
+                        comic.title,
+                    )
+                    Result.success()
+                } else {
+                    fail(task, "缓存进度状态不一致", comic.title)
+                }
             } catch (cancelled: CancellationException) {
                 throw cancelled
+            } catch (error: EnhancementCacheLowStorageException) {
+                pauseForLowStorage(task, error.message ?: "存储空间不足")
             } catch (error: Exception) {
                 fail(task, error.message ?: "缓存失败", comic.title)
             } finally {
                 volume.close()
             }
         }
+    }
+
+    private suspend fun pauseForLowStorage(
+        task: EnhancementCacheTaskEntity,
+        message: String,
+    ): Result {
+        val dao = AppDatabase.getInstance(applicationContext).enhancementCacheTaskDao()
+        if (
+            dao.pauseForLowStorage(
+                id = task.id,
+                updatedAt = System.currentTimeMillis(),
+                lastError = message,
+            ) == 0
+        ) {
+            return Result.success()
+        }
+        val paused = dao.getById(task.id) ?: return Result.failure()
+        EnhancementCacheNotifications.showPaused(applicationContext, paused)
+        return Result.success()
     }
 
     private suspend fun fail(
@@ -289,3 +299,6 @@ class EnhancementCacheWorker(
         private val workerMutex = Mutex()
     }
 }
+
+private class EnhancementCacheLowStorageException :
+    IOException("增强结果无法持久化，存储空间可能不足")

@@ -211,8 +211,9 @@ private fun EnhancementCacheEntry(
 private fun cacheEntryTitle(task: EnhancementCacheTaskEntity?): String = when (task?.status) {
     EnhancementCacheTaskStatus.QUEUED -> "AI 增强缓存等待开始"
     EnhancementCacheTaskStatus.RUNNING -> "正在批量缓存 AI 增强"
-    EnhancementCacheTaskStatus.WAITING_FOR_READER -> "退出阅读器后继续缓存"
+    EnhancementCacheTaskStatus.WAITING_FOR_READER -> "正在批量缓存 AI 增强"
     EnhancementCacheTaskStatus.PAUSED -> "AI 增强缓存已暂停"
+    EnhancementCacheTaskStatus.PAUSED_LOW_STORAGE -> "存储空间不足，缓存已暂停"
     EnhancementCacheTaskStatus.COMPLETED -> "AI 增强缓存已完成"
     EnhancementCacheTaskStatus.FAILED,
     EnhancementCacheTaskStatus.EXPIRED -> "AI 增强缓存需要处理"
@@ -226,6 +227,9 @@ private fun cacheEntryDescription(task: EnhancementCacheTaskEntity?): String = w
 
     task.status == EnhancementCacheTaskStatus.COMPLETED ->
         "已缓存 ${task.completedPages} 页 · 点击查看或创建新任务"
+
+    task.status == EnhancementCacheTaskStatus.PAUSED_LOW_STORAGE ->
+        "${task.completedPages} / ${task.totalPages} 页 · 释放存储空间后可继续"
 
     task.status == EnhancementCacheTaskStatus.FAILED ||
             task.status == EnhancementCacheTaskStatus.EXPIRED ->
