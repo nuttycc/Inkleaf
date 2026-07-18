@@ -17,3 +17,4 @@ local.properties
 .junie/
 .kotlin/
 .wiki/
+/ppocr-sdk/build/
