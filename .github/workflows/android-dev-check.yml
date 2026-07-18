@@ -2,6 +2,16 @@ name: Android Dev Check
 
 on:
   workflow_dispatch:
+    inputs:
+      task:
+        description: Check level
+        required: true
+        default: check
+        type: choice
+        options:
+          - check
+          - apk
+          - full
   push:
     branches:
       - "codex/**"
@@ -16,9 +26,11 @@ concurrency:
 
 jobs:
   compile:
-    name: Compile Kotlin sources
+    name: Run development check
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
+    env:
+      CHECK_LEVEL: ${{ github.event_name == 'workflow_dispatch' && inputs.task || 'check' }}
 
     steps:
       - name: Checkout
@@ -38,5 +50,42 @@ jobs:
       - name: Make Gradle wrapper executable
         run: chmod +x gradlew
 
-      - name: Compile main and unit test Kotlin sources
-        run: ./gradlew :app:compileDebugKotlin :app:compileDebugUnitTestKotlin
+      - name: Install native toolchain
+        if: env.CHECK_LEVEL == 'apk' || env.CHECK_LEVEL == 'full'
+        run: sdkmanager "ndk;29.0.14206865" "cmake;3.30.5"
+
+      - name: Run selected check
+        run: |
+          case "$CHECK_LEVEL" in
+            check)
+              ./gradlew testDebugUnitTest lintDebug
+              ;;
+            apk)
+              ./gradlew assembleDebug
+              ;;
+            full)
+              ./gradlew assembleDebug testDebugUnitTest lintDebug
+              ;;
+            *)
+              echo "Unsupported check level: $CHECK_LEVEL" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Upload debug APK
+        if: env.CHECK_LEVEL == 'apk' || env.CHECK_LEVEL == 'full'
+        uses: actions/upload-artifact@v4
+        with:
+          name: inkleaf-debug-${{ github.sha }}
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload lint report
+        if: failure() && (env.CHECK_LEVEL == 'check' || env.CHECK_LEVEL == 'full')
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-report-${{ github.sha }}
+          path: app/build/reports/lint-results-debug.html
+          if-no-files-found: ignore
+          retention-days: 7
