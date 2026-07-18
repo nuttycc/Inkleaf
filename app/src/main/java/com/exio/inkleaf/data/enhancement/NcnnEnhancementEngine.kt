@@ -35,24 +35,6 @@ enum class EnhancementPersistenceStatus {
     WRITE_FAILED,
 }
 
-internal fun calculateInferenceSampleSize(
-    width: Int,
-    height: Int,
-    maxPixels: Long,
-): Int {
-    require(width > 0 && height > 0)
-    require(maxPixels > 0)
-    var sampleSize = 1L
-    while (true) {
-        val sampledWidth = (width.toLong() + sampleSize - 1L) / sampleSize
-        val sampledHeight = (height.toLong() + sampleSize - 1L) / sampleSize
-        if (sampledWidth * sampledHeight <= maxPixels) {
-            return sampleSize.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-        }
-        sampleSize *= 2L
-    }
-}
-
 internal fun calculateMaxInputPixels(maxMemoryBytes: Long, scale: Int = 2): Long {
     require(scale > 0)
     val estimatedBytesPerInputPixel = 16L + 8L * scale * scale

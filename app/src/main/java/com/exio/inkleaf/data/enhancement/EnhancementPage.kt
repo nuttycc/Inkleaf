@@ -6,6 +6,7 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import com.exio.inkleaf.data.ComicOpenException
 import com.exio.inkleaf.data.ComicVolume
 import com.exio.inkleaf.data.ReaderPageCacheKey
+import com.exio.inkleaf.data.calculateInferenceSampleSize
 
 data class EnhancementPageKey(
     val comicId: Long,

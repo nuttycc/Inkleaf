@@ -3,8 +3,11 @@ package com.exio.inkleaf.ui
 import android.Manifest
 import android.app.Activity
 import android.content.Context
+import android.content.ClipboardManager
+import android.content.ClipData
 import android.content.pm.PackageManager
 import android.os.Build
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -34,6 +37,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -57,6 +61,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -65,6 +72,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -95,6 +103,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
@@ -125,6 +135,11 @@ import com.exio.inkleaf.data.enhancement.EnhancementSourceOwnership
 import com.exio.inkleaf.data.enhancement.NcnnEnhancementEngine
 import com.exio.inkleaf.data.enhancement.buildEnhancementPageKey
 import com.exio.inkleaf.data.enhancement.loadEnhancementSourceBitmap
+import com.exio.inkleaf.data.ocr.OcrPageResult
+import com.exio.inkleaf.data.ocr.OcrSelectionSession
+import com.exio.inkleaf.data.ocr.PaddleOcrEngine
+import com.exio.inkleaf.data.ocr.loadOcrPageBitmap
+import com.exio.inkleaf.data.ocr.selectedOcrText
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -132,6 +147,8 @@ import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
+
+private const val OCR_SESSION_CACHE_PAGES = 8
 
 @Composable
 fun ReaderScreen(
@@ -250,6 +267,9 @@ fun ReaderScreen(
                     .show(WindowInsetsCompat.Type.systemBars())
             }
         }
+    }
+    DisposableEffect(Unit) {
+        onDispose { PaddleOcrEngine.releaseWhenIdle() }
     }
 
     // 整个阅读页（含 Loading/Error）统一黑底：从书架进入只有一次
@@ -379,12 +399,84 @@ private fun ComicPager(
     var zoomToggleAnchor by remember { mutableStateOf(Offset.Unspecified) }
     var enhancementReport by remember { mutableStateOf<PageEnhancementReport?>(null) }
     var enhancementCompletion by remember { mutableStateOf<PageEnhancementCompletion?>(null) }
+    val ocrResults = remember { mutableStateMapOf<Int, OcrPageResult>() }
+    val ocrResultOrder = remember { ArrayDeque<Int>() }
+    val snackbarHostState = remember { SnackbarHostState() }
+    var ocrProcessingPage by remember { mutableStateOf<Int?>(null) }
+    var ocrSelection by remember { mutableStateOf(OcrSelectionSession()) }
+    var showOcrLongPressMenu by remember { mutableStateOf(false) }
+    var ocrLongPressAnchor by remember { mutableStateOf(Offset.Zero) }
     val activeEnhancementCacheTask = enhancementCacheTask?.takeIf { task ->
         task.status in EnhancementCacheTaskStatus.schedulable
     }
 
     LaunchedEffect(pagerState.currentPage) {
         zoomedPage = null
+        ocrSelection = ocrSelection.onPageChanged(pagerState.currentPage)
+        showOcrLongPressMenu = false
+    }
+
+    fun recognizePage(page: Int) {
+        val cached = ocrResults[page]?.takeIf { it.regions.isNotEmpty() }
+        if (cached != null) {
+            ocrSelection = ocrSelection.enter(page)
+        } else if (ocrProcessingPage == null) {
+            ocrProcessingPage = page
+            scope.launch {
+                val source = runCatching { loadOcrPageBitmap(volume, page) }
+                val outcome = source.mapCatching { bitmap ->
+                    try {
+                        PaddleOcrEngine.recognize(context, bitmap)
+                    } finally {
+                        if (!bitmap.isRecycled) bitmap.recycle()
+                    }
+                }
+                ocrProcessingPage = null
+                outcome.onSuccess { result ->
+                    Log.d(
+                        "InkleafOcr",
+                        "page=$page lines=${result.regions.size} totalMs=${result.totalTimeMs}",
+                    )
+                    ocrResultOrder.remove(page)
+                    if (result.regions.isEmpty()) {
+                        ocrResults.remove(page)
+                    } else {
+                        ocrResults[page] = result
+                        ocrResultOrder.addLast(page)
+                        while (ocrResultOrder.size > OCR_SESSION_CACHE_PAGES) {
+                            ocrResults.remove(ocrResultOrder.removeFirst())
+                        }
+                    }
+                    if (pagerState.currentPage == page) {
+                        if (result.regions.isEmpty()) {
+                            snackbarHostState.showSnackbar("当前页未识别到文字")
+                        } else {
+                            ocrSelection = ocrSelection.enter(page)
+                        }
+                    }
+                }.onFailure { error ->
+                    if (error is CancellationException) throw error
+                    Log.e("InkleafOcr", "Current-page OCR failed for page=$page", error)
+                    val feedback = snackbarHostState.showSnackbar(
+                        message = "文字识别失败",
+                        actionLabel = "重试",
+                    )
+                    if (feedback == SnackbarResult.ActionPerformed && pagerState.currentPage == page) {
+                        recognizePage(page)
+                    }
+                }
+            }
+        }
+    }
+
+    BackHandler(
+        enabled = ocrSelection.activePage == pagerState.currentPage || ocrSelection.detailText != null,
+    ) {
+        if (ocrSelection.detailText != null) {
+            ocrSelection = ocrSelection.dismissText()
+        } else {
+            ocrSelection = ocrSelection.exit()
+        }
     }
 
     // 当前页对应的章节信息，用于多章书籍的界面提示
@@ -464,14 +556,20 @@ private fun ComicPager(
             // 1x 时 Pager 接管单指拖动；放大后由当前页接管平移。
             // 点按检测在移动超过阈值时自动作废，工具栏上的按钮/滑杆会消费
             // 自己的事件，也不会误触发这里。
-            .pointerInput(pagerState.currentPage, zoomedPage) {
+            .pointerInput(pagerState.currentPage, zoomedPage, ocrSelection.activePage) {
                 detectTapGestures(
+                    onLongPress = { anchor ->
+                        ocrLongPressAnchor = anchor
+                        showOcrLongPressMenu = true
+                    },
                     onDoubleTap = { anchor ->
+                        if (ocrSelection.activePage == pagerState.currentPage) return@detectTapGestures
                         zoomToggleAnchor = anchor
                         zoomTogglePage = pagerState.currentPage
                         zoomToggleRequest++
                     },
                     onTap = { offset ->
+                        if (ocrSelection.activePage == pagerState.currentPage) return@detectTapGestures
                         val third = size.width / 3f
                         when {
                             zoomedPage == pagerState.currentPage && offset.x !in third..(third * 2) -> Unit
@@ -486,7 +584,8 @@ private fun ComicPager(
         HorizontalPager(
             state = pagerState,
             beyondViewportPageCount = 1,
-            userScrollEnabled = zoomedPage != pagerState.currentPage,
+            userScrollEnabled = zoomedPage != pagerState.currentPage &&
+                    ocrSelection.activePage != pagerState.currentPage,
             modifier = Modifier.fillMaxSize(),
         ) { page ->
             ComicPage(
@@ -518,6 +617,17 @@ private fun ComicPager(
                         )
                     } == true,
                 onPinnedEnhancement = onPinnedEnhancement,
+                ocrResult = ocrResults[page],
+                ocrMode = ocrSelection.activePage == page,
+                selectedOcrIds = if (ocrSelection.activePage == page) {
+                    ocrSelection.selectedIds
+                } else {
+                    emptySet()
+                },
+                onOcrRegionTapped = { regionId ->
+                    ocrSelection = ocrSelection.toggle(regionId)
+                },
+                onOcrEmptyTapped = { ocrSelection = ocrSelection.clearSelection() },
                 onEnhancementCompleted = { page, selectionId, success ->
                     if (
                         page == pagerState.currentPage &&
@@ -546,7 +656,81 @@ private fun ComicPager(
             )
         }
 
-        if (!showControls) {
+        if (showOcrLongPressMenu) {
+            Box(
+                modifier = Modifier.offset {
+                    IntOffset(
+                        x = ocrLongPressAnchor.x.roundToInt(),
+                        y = ocrLongPressAnchor.y.roundToInt(),
+                    )
+                },
+            ) {
+                DropdownMenu(
+                    expanded = true,
+                    onDismissRequest = { showOcrLongPressMenu = false },
+                    offset = DpOffset.Zero,
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("识别当前页文字") },
+                        enabled = ocrProcessingPage == null,
+                        onClick = {
+                            showOcrLongPressMenu = false
+                            recognizePage(pagerState.currentPage)
+                        },
+                    )
+                }
+            }
+        }
+
+        if (ocrProcessingPage == pagerState.currentPage) {
+            ReaderOcrProcessingStatus(
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
+        }
+
+        val activeOcrResult = ocrResults[pagerState.currentPage]
+            ?.takeIf { ocrSelection.activePage == pagerState.currentPage }
+        if (activeOcrResult != null) {
+            val selectedText = remember(activeOcrResult, ocrSelection.selectedIds) {
+                selectedOcrText(activeOcrResult.regions, ocrSelection.selectedIds)
+            }
+            ReaderOcrSelectionBar(
+                selectedText = selectedText,
+                selectedCount = ocrSelection.selectedIds.size,
+                totalCount = activeOcrResult.regions.size,
+                onSelectAll = {
+                    ocrSelection = if (
+                        ocrSelection.selectedIds.size == activeOcrResult.regions.size
+                    ) {
+                        ocrSelection.clearSelection()
+                    } else {
+                        ocrSelection.copy(
+                            selectedIds = activeOcrResult.regions.mapTo(linkedSetOf()) { it.id },
+                        )
+                    }
+                },
+                onShowText = { ocrSelection = ocrSelection.showText(selectedText) },
+                onCopy = {
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    clipboard.setPrimaryClip(ClipData.newPlainText("OCR 文字", selectedText))
+                    scope.launch { snackbarHostState.showSnackbar("已复制所选文字") }
+                },
+                onExit = {
+                    ocrSelection = ocrSelection.exit()
+                },
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
+        }
+
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = if (activeOcrResult == null) 16.dp else 96.dp),
+        )
+
+        if (!showControls && ocrProcessingPage != pagerState.currentPage && activeOcrResult == null) {
             val pageCountLabel = "${pagerState.currentPage + 1} / ${volume.totalPageCount}"
             val pageLabel = if (volume.chapterCount > 1) {
                 "$chapterTitle · $pageCountLabel"
@@ -575,6 +759,8 @@ private fun ComicPager(
             onOpenEnhancement = onOpenEnhancement,
             onToggleFavorite = { onToggleFavorite(pagerState.currentPage) },
             onSetCover = { onSetCover(pagerState.currentPage) },
+            onRecognizePage = { recognizePage(pagerState.currentPage) },
+            ocrBusy = ocrProcessingPage != null,
             onResetZoom = {
                 zoomResetPage = pagerState.currentPage
                 zoomResetRequest++
@@ -589,6 +775,13 @@ private fun ComicPager(
             thumbnails = thumbnails,
             onNeedThumbnail = onNeedThumbnail,
             modifier = Modifier.align(Alignment.BottomCenter),
+        )
+    }
+
+    ocrSelection.detailText?.let { text ->
+        ReaderOcrTextSheet(
+            text = text,
+            onDismiss = { ocrSelection = ocrSelection.dismissText() },
         )
     }
 }
@@ -606,6 +799,8 @@ private fun ReaderTopBar(
     onOpenEnhancement: () -> Unit,
     onToggleFavorite: () -> Unit,
     onSetCover: () -> Unit,
+    onRecognizePage: () -> Unit,
+    ocrBusy: Boolean,
     onResetZoom: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -722,6 +917,14 @@ private fun ReaderTopBar(
                     expanded = showMoreMenu,
                     onDismissRequest = { showMoreMenu = false },
                 ) {
+                    DropdownMenuItem(
+                        text = { Text(if (ocrBusy) "正在识别文字…" else "识别当前页文字") },
+                        enabled = !ocrBusy,
+                        onClick = {
+                            showMoreMenu = false
+                            onRecognizePage()
+                        },
+                    )
                     DropdownMenuItem(
                         text = { Text("设为封面") },
                         leadingIcon = {
@@ -1076,6 +1279,11 @@ private fun ComicPage(
     enhancementModelInstalled: Boolean,
     pinForActiveTask: Boolean,
     onPinnedEnhancement: (EnhancementPageKey, Int) -> Unit,
+    ocrResult: OcrPageResult?,
+    ocrMode: Boolean,
+    selectedOcrIds: Set<Int>,
+    onOcrRegionTapped: (Int) -> Unit,
+    onOcrEmptyTapped: () -> Unit,
     onEnhancementCompleted: (Int, String, Boolean) -> Unit,
     onEnhancementStatusChanged: (Int, String, PageEnhancementStatus?) -> Unit,
     modifier: Modifier = Modifier,
@@ -1420,6 +1628,18 @@ private fun ComicPage(
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
+            }
+
+            if (ocrMode && ocrResult != null) {
+                ReaderOcrPageOverlay(
+                    result = ocrResult,
+                    selectedIds = selectedOcrIds,
+                    zoomScale = scale,
+                    accent = readerAccentColor(),
+                    onRegionTapped = onOcrRegionTapped,
+                    onEmptyTapped = onOcrEmptyTapped,
+                    modifier = Modifier.fillMaxSize(),
+                )
             }
         }
     }

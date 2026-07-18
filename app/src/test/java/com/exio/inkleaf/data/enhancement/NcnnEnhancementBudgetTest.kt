@@ -1,5 +1,6 @@
 package com.exio.inkleaf.data.enhancement
 
+import com.exio.inkleaf.data.calculateInferenceSampleSize
 import org.junit.Assert.assertEquals
 import org.junit.Test
 

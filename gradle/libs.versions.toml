@@ -22,6 +22,9 @@ materialKolor = "4.1.1"
 ahmerPdfium = "1.9.2"
 reorderable = "3.1.0"
 workManager = "2.11.2"
+onnxruntime = "1.27.0"
+opencv = "5.0.0.1"
+coroutines = "1.9.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -56,9 +59,14 @@ material-kolor = { group = "com.materialkolor", name = "material-kolor", version
 ahmer-pdfium = { group = "io.github.ahmerafzal1", name = "ahmer-pdfium", version.ref = "ahmerPdfium" }
 reorderable = { module = "sh.calvin.reorderable:reorderable", version.ref = "reorderable" }
 androidx-work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "workManager" }
+onnxruntime-android = { group = "com.microsoft.onnxruntime", name = "onnxruntime-android", version.ref = "onnxruntime" }
+opencv-android = { group = "org.opencv", name = "opencv", version.ref = "opencv" }
+kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
+android-library = { id = "com.android.library", version.ref = "agp" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 google-devtools-ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }

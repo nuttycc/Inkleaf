@@ -33,12 +33,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
-            abiFilters += listOf(
-                "arm64-v8a",
-                "armeabi-v7a",
-                "x86",
-                "x86_64",
-            )
+            abiFilters += "arm64-v8a"
         }
 
         externalNativeBuild {
@@ -61,6 +56,11 @@ android {
     }
 
     buildTypes {
+        debug {
+            ndk {
+                abiFilters += listOf("armeabi-v7a", "x86", "x86_64")
+            }
+        }
         release {
             signingConfig = if (hasReleaseSigning) {
                 signingConfigs.getByName("release")
@@ -82,6 +82,13 @@ android {
     buildFeatures {
         compose = true
     }
+    packaging {
+        jniLibs {
+            // Pdfium and OpenCV both bundle a 16 KB-aligned C++ runtime. Keep one shared copy;
+            // verify the selected library in the next manually built release artifact.
+            pickFirsts += "lib/**/libc++_shared.so"
+        }
+    }
     externalNativeBuild {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
@@ -91,6 +98,7 @@ android {
 }
 
 dependencies {
+    implementation(project(":ppocr-sdk"))
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material3)
