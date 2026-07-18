@@ -1,0 +1,43 @@
+name: Android Dev Check
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "codex/**"
+      - "dev/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-dev-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compile:
+    name: Compile Kotlin sources
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4.0.1
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6.2.0
+
+      - name: Make Gradle wrapper executable
+        run: chmod +x gradlew
+
+      - name: Compile main and unit test Kotlin sources
+        run: ./gradlew :app:compileDebugKotlin :app:compileDebugUnitTestKotlin
