@@ -14,6 +14,7 @@ Write documentation that lives with the code it describes. Plain language. No ja
 accurate because they're updated together.
 
 **Write for three audiences:**
+
 1. Future you, six months from now
 2. Teammates reading unfamiliar code
 3. AI assistants (Claude, Copilot) who see one file at a time
@@ -51,6 +52,7 @@ system.
 ```
 
 **Include:**
+
 - What this file/module is responsible for
 - Why it exists (if not obvious from the name)
 - Key relationships to other parts of the codebase
@@ -88,6 +90,7 @@ def sync_user_preferences(user_id: str, prefs: dict) -> SyncResult:
 ```
 
 **Include:**
+
 - What the function accomplishes (not how)
 - Non-obvious parameter constraints or edge cases
 - What the return value means, especially for ambiguous cases
@@ -169,6 +172,7 @@ Make them actionable and traceable.
 ## Language-Specific Patterns
 
 See [references/language-examples.md](references/language-examples.md) for detailed examples in:
+
 - TypeScript/JavaScript (JSDoc, TSDoc patterns)
 - Swift (documentation comments, MARK pragmas)
 - Python (docstrings, type hint documentation)
