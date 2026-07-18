@@ -20,6 +20,7 @@ import com.exio.inkleaf.data.GridColumnsMode
 import com.exio.inkleaf.data.GroupWriteOutcome
 import com.exio.inkleaf.data.LibraryScanner
 import com.exio.inkleaf.data.ScanResult
+import com.exio.inkleaf.data.SeriesScanConfirmation
 import com.exio.inkleaf.data.ShelfGroupFilterKind
 import com.exio.inkleaf.data.ShelfGroupSelection
 import com.exio.inkleaf.data.ShelfLayoutSettings
@@ -45,6 +46,7 @@ data class ScanState(
     val isScanning: Boolean = false,
     val isManual: Boolean = false,
     val message: String? = null,
+    val seriesConfirmations: List<SeriesScanConfirmation> = emptyList(),
 )
 
 class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycleObserver {
@@ -141,11 +143,13 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycle
         scanJob = viewModelScope.launch {
             _scanState.value = ScanState(isScanning = true, isManual = manual)
             val result = repo.syncAllFolders()
+            val problems = result.failedFolders + result.warnings
             _scanState.value = ScanState(
                 isScanning = false,
+                isManual = manual,
+                seriesConfirmations = result.seriesConfirmations.takeIf { manual }.orEmpty(),
                 message = when {
-                    result.failedFolders.isNotEmpty() ->
-                        "无法访问目录：${result.failedFolders.joinToString("、")}，请检查或重新添加"
+                    problems.isNotEmpty() -> problems.joinToString("；")
                     // 只有手动刷新才汇报变化；自动扫描静默，无变化也不打扰
                     manual -> summarize(result)
                     else -> null
@@ -166,6 +170,13 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycle
             if (result.restored > 0) add("恢复 ${result.restored} 本")
         }
         return if (parts.isEmpty()) null else parts.joinToString("，")
+    }
+
+    private fun scanLimitLabel(limit: LibraryScanner.ScanLimit): String = when (limit) {
+        LibraryScanner.ScanLimit.PDFS -> "PDF 数量"
+        LibraryScanner.ScanLimit.DIRECTORIES -> "目录数量"
+        LibraryScanner.ScanLimit.ENTRIES -> "文件项目数量"
+        LibraryScanner.ScanLimit.DEPTH -> "目录深度"
     }
 
     fun consumeMessage() {
@@ -254,22 +265,91 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycle
     /**
      * 添加 PDF 章节目录：把目录内 PDF 作为一本书导入。
      */
-    fun addSeriesFolder(uri: Uri) {
-        viewModelScope.launch {
+    fun addSeriesFolder(uri: Uri, approvedLargeScan: Boolean = false) {
+        if (scanJob?.isActive == true) return
+        scanJob = viewModelScope.launch {
+            _scanState.value = ScanState(isScanning = true, isManual = true)
             val msg = try {
-                when (val outcome = repo.addSeriesFolderAndSync(uri)) {
+                when (val outcome = repo.addSeriesFolderAndSync(uri, approvedLargeScan)) {
                     is AddSeriesFolderOutcome.Duplicate -> "该目录已在漫画库中"
-                    is AddSeriesFolderOutcome.Empty -> "所选目录中没有 PDF 文件"
-                    is AddSeriesFolderOutcome.Added ->
-                        "已导入《${outcome.comic.title}》，共 ${outcome.chaptersAdded} 章"
+                    is AddSeriesFolderOutcome.Empty -> buildString {
+                        append("所选目录中没有可导入的 PDF 文件")
+                        if (outcome.inaccessibleDirectoryCount > 0) {
+                            append("；${outcome.inaccessibleDirectoryCount} 个目录无法扫描")
+                        }
+                        if (outcome.skippedVirtualPdfCount > 0) {
+                            append("；跳过 ${outcome.skippedVirtualPdfCount} 个虚拟 PDF")
+                        }
+                    }
+
+                    is AddSeriesFolderOutcome.Added -> buildString {
+                        append("已导入《${outcome.comic.title}》，共 ${outcome.chaptersAdded} 章")
+                        if (outcome.duplicateNameCount > 0) {
+                            append("；${outcome.duplicateNameCount} 个同名章节已用路径区分")
+                        }
+                        if (outcome.inaccessibleDirectoryCount > 0) {
+                            append("；跳过 ${outcome.inaccessibleDirectoryCount} 个无法扫描的目录")
+                        }
+                        if (outcome.skippedVirtualPdfCount > 0) {
+                            append("；跳过 ${outcome.skippedVirtualPdfCount} 个虚拟 PDF")
+                        }
+                    }
+
+                    is AddSeriesFolderOutcome.NeedsConfirmation -> {
+                        _scanState.value = ScanState(
+                            seriesConfirmations = listOf(outcome.request),
+                        )
+                        return@launch
+                    }
+
+                    is AddSeriesFolderOutcome.HardLimit ->
+                        "目录超过安全扫描上限（${scanLimitLabel(outcome.limit)}）"
+
+                    is AddSeriesFolderOutcome.Overlap ->
+                        "与《${outcome.comicTitle}》有 ${outcome.fileCount} 个重复 PDF，未导入"
+
+                    is AddSeriesFolderOutcome.Incomplete ->
+                        "扫描不完整：已发现 ${outcome.discoveredPdfCount} 个 PDF，但有 " +
+                                "${outcome.inaccessibleDirectoryCount} 个目录无法访问，请稍后重试"
                 }
             } catch (e: SecurityException) {
                 "无法获得该目录的持久访问权限"
             } catch (e: LibraryScanner.FolderAccessException) {
                 "无法访问该目录，可能权限被撤销或目录已被删除"
             }
-            _scanState.value = _scanState.value.copy(message = msg)
+            _scanState.value = ScanState(message = msg)
         }
+    }
+
+    fun confirmSeriesScan() {
+        val confirmations = _scanState.value.seriesConfirmations
+        val request = confirmations.firstOrNull() ?: return
+        val remaining = confirmations.drop(1)
+        _scanState.value = ScanState(seriesConfirmations = remaining)
+        request.folderId?.let { folderId ->
+            if (scanJob?.isActive == true) return
+            scanJob = viewModelScope.launch {
+                _scanState.value = ScanState(isScanning = true, isManual = true)
+                val result = repo.approveSeriesFolderExpansion(folderId)
+                _scanState.value = ScanState(
+                    message = (result.failedFolders + result.warnings).joinToString("；")
+                        .ifBlank { "目录同步完成" },
+                    seriesConfirmations = remaining,
+                )
+            }
+        } ?: addSeriesFolder(Uri.parse(request.treeUri), approvedLargeScan = true)
+    }
+
+    fun dismissSeriesScanConfirmation() {
+        val confirmations = _scanState.value.seriesConfirmations
+        if (confirmations.isEmpty()) return
+        _scanState.value = ScanState(seriesConfirmations = confirmations.drop(1))
+    }
+
+    fun cancelScan() {
+        scanJob?.cancel()
+        scanJob = null
+        _scanState.value = ScanState(message = "已取消扫描")
     }
 
     fun deleteComic(comic: ComicEntity) {

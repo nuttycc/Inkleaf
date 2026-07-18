@@ -19,7 +19,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         EnhancementCacheTaskEntity::class,
         EnhancementCacheCompletedPageEntity::class,
     ],
-    version = 10,
+    version = 11,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {

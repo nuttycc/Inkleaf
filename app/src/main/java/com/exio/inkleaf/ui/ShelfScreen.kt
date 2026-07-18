@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -60,6 +61,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -90,6 +92,7 @@ import com.exio.inkleaf.data.ShelfLayoutSettings
 import com.exio.inkleaf.data.db.BookSourceType
 import com.exio.inkleaf.data.db.ComicEntity
 import com.exio.inkleaf.data.db.GroupWithCount
+import kotlinx.coroutines.delay
 import java.io.File
 
 /** 书架内容区的三态：作为 Crossfade 的 key，列表内容增删不触发整区动画 */
@@ -123,7 +126,16 @@ fun ShelfScreen(
     var showLayoutSheet by remember { mutableStateOf(false) }
     var pendingSaveAlbumId by rememberSaveable { mutableStateOf<Long?>(null) }
     var pendingSaveAlbumTitle by rememberSaveable { mutableStateOf<String?>(null) }
+    var showScanProgress by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(scanState.isScanning, scanState.isManual) {
+        showScanProgress = false
+        if (scanState.isScanning && scanState.isManual) {
+            delay(2_000)
+            showScanProgress = true
+        }
+    }
 
     // OpenMultipleDocuments：系统多文件选择器。取消返回空列表而非 null，
     // 所以用 isNotEmpty() 判空——照搬旧的单选判空会触发空批量调用
@@ -166,6 +178,34 @@ fun ShelfScreen(
         hostState = snackbarHostState,
         onConsumed = viewModel::consumeMessage,
     )
+
+    scanState.seriesConfirmations.firstOrNull()?.let { request ->
+        ConfirmDialog(
+            title = "继续扫描大型 PDF 目录？",
+            text = buildString {
+                append("「${request.displayName}」已扫描到至少 ")
+                append("${request.metrics.pdfCount} 个 PDF、")
+                append("${request.metrics.directoryCount} 个目录和 ")
+                append("${request.metrics.entryCount} 个项目。\n\n")
+                append("继续后会重新扫描，并允许达到绝对安全上限。")
+            },
+            confirmLabel = "继续扫描",
+            onConfirm = viewModel::confirmSeriesScan,
+            onDismiss = viewModel::dismissSeriesScanConfirmation,
+        )
+    }
+
+    if (showScanProgress && scanState.isScanning && scanState.isManual) {
+        AlertDialog(
+            onDismissRequest = viewModel::cancelScan,
+            icon = { CircularProgressIndicator() },
+            title = { Text("正在扫描 PDF 目录") },
+            text = { Text("正在读取目录结构。大型或云端目录可能需要一些时间。") },
+            confirmButton = {
+                TextButton(onClick = viewModel::cancelScan) { Text("取消扫描") }
+            },
+        )
+    }
 
     Scaffold(
         modifier = modifier,

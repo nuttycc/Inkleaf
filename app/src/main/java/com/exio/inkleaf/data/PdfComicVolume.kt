@@ -2,19 +2,18 @@ package com.exio.inkleaf.data
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.net.Uri
 import android.os.ParcelFileDescriptor
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.documentfile.provider.DocumentFile
 import com.ahmer.pdfium.PdfiumCore
+import com.exio.inkleaf.data.PdfComicVolume.Companion.pdfiumLock
 import com.exio.inkleaf.data.db.ChapterEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.util.concurrent.locks.ReentrantLock
-import kotlin.coroutines.coroutineContext
 import kotlin.concurrent.withLock
+import kotlin.coroutines.coroutineContext
 import kotlin.math.sqrt
 
 /**
@@ -33,17 +32,13 @@ class PdfComicVolume(
 
     private var closed = false
 
-    /** 每个章节对应的已打开 PDF 渲染核心 */
-    private val cores = mutableMapOf<Int, PdfiumCore>()
-
-    /** 每个章节对应的已打开 PDF 文档句柄 */
-    private val documents = mutableMapOf<Int, com.ahmer.pdfium.PdfDocument>()
-
-    /** 每个章节对应的 ParcelFileDescriptor，需独立关闭（PdfiumCore.close 不会替我们关） */
-    private val pfds = mutableMapOf<Int, ParcelFileDescriptor>()
+    /** Access-order cache bounds native documents independently of the chapter count. */
+    private val openChapters = LinkedHashMap<Int, OpenChapter>(OPEN_CHAPTER_LIMIT, 0.75f, true)
 
     /** 每个章节的页数；index 与 chapters 一致 */
-    private val pageCounts = IntArray(chapters.size) { -1 }
+    private val pageCounts = IntArray(chapters.size) { index ->
+        chapters[index].pageCount.takeIf { it > 0 } ?: -1
+    }
 
     /** 章节起始全局页号缓存 */
     private var startPages: IntArray? = null
@@ -58,13 +53,10 @@ class PdfComicVolume(
         buildList {
             add("pdf-series")
             chapters.forEach { chapter ->
-                val document = runCatching {
-                    DocumentFile.fromSingleUri(appContext, Uri.parse(chapter.uri))
-                }.getOrNull()
                 add(chapter.fileKey)
                 add(chapter.uri)
-                add((document?.length() ?: -1L).toString())
-                add((document?.lastModified() ?: -1L).toString())
+                add((chapter.size ?: -1L).toString())
+                add((chapter.lastModified ?: -1L).toString())
             }
         }
     )
@@ -172,11 +164,8 @@ class PdfComicVolume(
             // 显式按"核心 → PFD"顺序释放。PdfiumCore.close() 关 native 文档，
             // 但 ParcelFileDescriptor 是我们开的、不会被他代关——不显式 close 会
             // 泄漏文件描述符，多本 PDF 书反复打开最终会撞系统 fd 上限。
-            cores.values.forEach { runCatching { it.close() } }
-            pfds.values.forEach { runCatching { it.close() } }
-            cores.clear()
-            documents.clear()
-            pfds.clear()
+            openChapters.values.forEach(::closeOpenChapter)
+            openChapters.clear()
         }
     }
 
@@ -195,23 +184,37 @@ class PdfComicVolume(
     private fun ensurePageCount(chapterIndex: Int) {
         pdfiumLock.withLock {
             if (pageCounts[chapterIndex] >= 0 || closed) return
-            val doc = openDocumentLocked(chapterIndex) ?: return
-            pageCounts[chapterIndex] = doc.totalPages
+            val cached = openChapters[chapterIndex]
+            if (cached != null) {
+                pageCounts[chapterIndex] = cached.document.totalPages
+                return
+            }
+            val temporary = createOpenChapter(chapterIndex) ?: return
+            try {
+                pageCounts[chapterIndex] = temporary.document.totalPages
+            } finally {
+                // Page-count discovery must not turn chapter count into open file-descriptor count.
+                closeOpenChapter(temporary)
+            }
         }
     }
 
-    private fun openDocumentLocked(chapterIndex: Int): com.ahmer.pdfium.PdfDocument? {
+    private fun openDocumentLocked(chapterIndex: Int): OpenChapter? {
         if (closed) return null
-        documents[chapterIndex]?.let { return it }
+        openChapters[chapterIndex]?.let { return it }
+        val opened = createOpenChapter(chapterIndex) ?: return null
+        openChapters[chapterIndex] = opened
+        trimOpenChaptersLocked()
+        return opened
+    }
+
+    private fun createOpenChapter(chapterIndex: Int): OpenChapter? {
         val chapter = chapters.getOrNull(chapterIndex) ?: return null
         val pfd = pfdResolver(chapter.uri) ?: return null
         return try {
             val core = PdfiumCore(appContext)
             val doc = core.newDocument(pfd)
-            cores[chapterIndex] = core
-            documents[chapterIndex] = doc
-            pfds[chapterIndex] = pfd
-            doc
+            OpenChapter(core = core, document = doc, pfd = pfd)
         } catch (e: Exception) {
             // 打开失败（损坏/加密/权限）：关掉 pfd，pageCounts 留 -1。
             // 后续 chapterPageCount 会返回 0，globalToChapterPage 落在第 0 页，
@@ -219,6 +222,19 @@ class PdfComicVolume(
             runCatching { pfd.close() }
             null
         }
+    }
+
+    private fun trimOpenChaptersLocked() {
+        while (openChapters.size > OPEN_CHAPTER_LIMIT) {
+            val eldest = openChapters.entries.iterator().next()
+            openChapters.remove(eldest.key)
+            closeOpenChapter(eldest.value)
+        }
+    }
+
+    private fun closeOpenChapter(opened: OpenChapter) {
+        runCatching { opened.core.close() }
+        runCatching { opened.pfd.close() }
     }
 
     private suspend fun renderPageToPng(
@@ -272,8 +288,9 @@ class PdfComicVolume(
         maxPixels: Long?,
     ): Bitmap? {
         if (closed) return null
-        val core = cores[chapterIndex] ?: return null
-        val doc = documents[chapterIndex] ?: return null
+        val opened = openDocumentLocked(chapterIndex) ?: return null
+        val core = opened.core
+        val doc = opened.document
 
         doc.openPage(pageIndex)
         val width = core.getPageWidthPoint(pageIndex)
@@ -303,7 +320,14 @@ class PdfComicVolume(
 
     private companion object {
         val pdfiumLock = ReentrantLock()
+        const val OPEN_CHAPTER_LIMIT = 3
     }
+
+    private data class OpenChapter(
+        val core: PdfiumCore,
+        val document: com.ahmer.pdfium.PdfDocument,
+        val pfd: ParcelFileDescriptor,
+    )
 }
 
 internal data class PdfRenderSize(val width: Int, val height: Int)

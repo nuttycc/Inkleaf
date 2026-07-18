@@ -13,6 +13,9 @@ abstract class ChapterDao {
     @Query("SELECT * FROM chapters WHERE comicId = :comicId ORDER BY chapterIndex")
     abstract suspend fun getByComicId(comicId: Long): List<ChapterEntity>
 
+    @Query("SELECT * FROM chapters WHERE comicId = :comicId AND isMissing = 0 ORDER BY chapterIndex")
+    abstract suspend fun getReadableByComicId(comicId: Long): List<ChapterEntity>
+
     @Query("SELECT * FROM chapters WHERE comicId = :comicId ORDER BY chapterIndex")
     abstract fun observeByComicId(comicId: Long): kotlinx.coroutines.flow.Flow<List<ChapterEntity>>
 
@@ -24,6 +27,9 @@ abstract class ChapterDao {
 
     @Query("SELECT COUNT(*) FROM chapters WHERE comicId = :comicId")
     abstract suspend fun countByComicId(comicId: Long): Int
+
+    @Query("SELECT * FROM chapters WHERE fileKey IN (:fileKeys)")
+    abstract suspend fun getByFileKeys(fileKeys: List<String>): List<ChapterEntity>
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     abstract suspend fun insert(chapter: ChapterEntity): Long

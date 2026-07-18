@@ -39,6 +39,11 @@ data class ChapterEntity(
     val fileKey: String,
     /** 展示标题，通常取文件名去掉扩展名 */
     val title: String,
+    /** Path below the granted series root; used for deterministic ordering and duplicate titles. */
+    val relativePath: String = title,
+    val mimeType: String? = null,
+    val size: Long? = null,
+    val lastModified: Long? = null,
     /** 该章节 PDF 的总页数；0 表示尚未成功打开 */
     val pageCount: Int = 0,
     /** 文件缺失标记，与 ComicEntity.isMissing 语义一致 */

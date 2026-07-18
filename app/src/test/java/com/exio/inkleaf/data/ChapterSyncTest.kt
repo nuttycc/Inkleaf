@@ -36,6 +36,7 @@ class ChapterSyncTest {
         uri = "uri://$fileKey",
         fileKey = fileKey,
         title = title,
+        relativePath = fileKey,
         pageCount = pageCount,
         isMissing = isMissing,
     )
@@ -218,6 +219,53 @@ class ChapterSyncTest {
         assertEquals("3.pdf", diff.toInsert[0].fileKey)
         assertEquals(2, diff.toInsert[0].chapterIndex)
         assertTrue(diff.toUpdate.isEmpty())
+    }
+
+    @Test
+    fun `duplicate display names use shortest unique relative path titles`() {
+        val scanned = listOf(
+            scanned("1.pdf", "a").copy(relativePath = "part-a/1.pdf"),
+            scanned("1.pdf", "b").copy(relativePath = "part-b/1.pdf"),
+        )
+
+        val diff = ChapterSync.computeDiff(emptyList(), scanned, comicId, titleOf)
+
+        assertEquals(listOf("part-a/1", "part-b/1"), diff.toInsert.map { it.title })
+    }
+
+    @Test
+    fun `partial scan defers new chapters and removals until a complete scan`() {
+        val existing = listOf(
+            existing(id = 1, index = 0, fileKey = "1.pdf"),
+            existing(id = 2, index = 1, fileKey = "2.pdf"),
+        )
+        val scanned = listOf(scanned("3.pdf"))
+
+        val diff = ChapterSync.computeDiff(
+            existing = existing,
+            scanned = scanned,
+            comicId = comicId,
+            titleOf = titleOf,
+            completeScan = false,
+        )
+
+        assertTrue(diff.toInsert.isEmpty())
+        assertTrue(diff.toUpdate.isEmpty())
+        assertTrue(diff.toMarkMissing.isEmpty())
+        assertTrue(diff.toDelete.isEmpty())
+    }
+
+    @Test
+    fun `changed file metadata invalidates cached page count`() {
+        val existing = existing(id = 1, index = 0, fileKey = "1.pdf").copy(
+            size = 100,
+            lastModified = 10,
+        )
+        val scanned = scanned("1.pdf").copy(size = 120, lastModified = 11)
+
+        val diff = ChapterSync.computeDiff(listOf(existing), listOf(scanned), comicId, titleOf)
+
+        assertEquals(0, diff.toUpdate.single().pageCount)
     }
 
     // ===== 进度重映射 =====

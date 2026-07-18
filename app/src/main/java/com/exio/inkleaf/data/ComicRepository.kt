@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
+import androidx.room.withTransaction
 import com.exio.inkleaf.data.db.AppDatabase
 import com.exio.inkleaf.data.db.BookSourceType
 import com.exio.inkleaf.data.db.ComicEntity
@@ -16,6 +17,7 @@ import com.exio.inkleaf.data.enhancement.EnhancedImageDiskCache
 import com.exio.inkleaf.data.enhancement.EnhancementModelCatalog
 import com.exio.inkleaf.data.enhancement.EnhancementSelectionIds
 import com.exio.inkleaf.data.enhancement.cache.EnhancementCacheTaskRepository
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
@@ -32,6 +34,16 @@ data class ScanResult(
     val restored: Int,
     val alreadyInLibrary: Int,
     val failedFolders: List<String>, // 无法访问的目录名
+    val warnings: List<String> = emptyList(),
+    val seriesConfirmations: List<SeriesScanConfirmation> = emptyList(),
+)
+
+data class SeriesScanConfirmation(
+    val treeUri: String,
+    val folderId: Long?,
+    val displayName: String,
+    val metrics: LibraryScanner.ScanMetrics,
+    val limit: LibraryScanner.ScanLimit,
 )
 
 /** addFolderAndSync 的结果：目录是新加入的（携带首扫汇总）还是已存在 */
@@ -51,9 +63,30 @@ sealed interface AddComicOutcome {
 
 /** addSeriesFolderAndSync 的结果：已添加（含章节数）、目录已存在、或没有 PDF */
 sealed interface AddSeriesFolderOutcome {
-    data class Added(val comic: ComicEntity, val chaptersAdded: Int) : AddSeriesFolderOutcome
+    data class Added(
+        val comic: ComicEntity,
+        val chaptersAdded: Int,
+        val duplicateNameCount: Int,
+        val inaccessibleDirectoryCount: Int,
+        val skippedVirtualPdfCount: Int,
+    ) : AddSeriesFolderOutcome
+
+    data class NeedsConfirmation(val request: SeriesScanConfirmation) : AddSeriesFolderOutcome
+    data class HardLimit(
+        val metrics: LibraryScanner.ScanMetrics,
+        val limit: LibraryScanner.ScanLimit,
+    ) : AddSeriesFolderOutcome
+
+    data class Overlap(val comicTitle: String, val fileCount: Int) : AddSeriesFolderOutcome
+    data class Incomplete(
+        val discoveredPdfCount: Int,
+        val inaccessibleDirectoryCount: Int,
+    ) : AddSeriesFolderOutcome
     data object Duplicate : AddSeriesFolderOutcome
-    data object Empty : AddSeriesFolderOutcome
+    data class Empty(
+        val inaccessibleDirectoryCount: Int = 0,
+        val skippedVirtualPdfCount: Int = 0,
+    ) : AddSeriesFolderOutcome
 }
 
 sealed interface GroupWriteOutcome {
@@ -74,6 +107,16 @@ class ComicRepository(context: Context) {
     private val folderDao = db.libraryFolderDao()
     private val groupDao = db.comicGroupDao()
     private val scanner = LibraryScanner(appContext)
+
+    private sealed interface SeriesFolderSyncOutcome {
+        data class Success(val added: Int, val warning: String? = null) : SeriesFolderSyncOutcome
+        data class NeedsConfirmation(
+            val request: SeriesScanConfirmation,
+            val warning: String?,
+        ) : SeriesFolderSyncOutcome
+
+        data class Failed(val message: String?) : SeriesFolderSyncOutcome
+    }
 
     // ===== 漫画条目 =====
 
@@ -102,7 +145,7 @@ class ComicRepository(context: Context) {
                 title = comic.title,
             )
         }
-        val chapters = db.chapterDao().getByComicId(comic.id)
+        val chapters = db.chapterDao().getReadableByComicId(comic.id)
         return if (comic.sourceType == BookSourceType.PDF_SERIES || chapters.isNotEmpty()) {
             PdfComicVolume(
                 context = appContext,
@@ -249,7 +292,7 @@ class ComicRepository(context: Context) {
         // PDF 目录需回填各章节页数；单文件漫画（zip/cbz）chapterCount=1，没有章节行，
         // 直接跳过这次 DB 查询，避免每次开书都白跑一趟。
         if (comic.sourceType == BookSourceType.PDF_SERIES && volume.chapterCount > 1) {
-            val chapters = db.chapterDao().getByComicId(comic.id)
+            val chapters = db.chapterDao().getReadableByComicId(comic.id)
             chapters.forEach { chapter ->
                 val actual = volume.chapterPageCount(chapter.chapterIndex)
                 if (actual > 0 && chapter.pageCount != actual) {
@@ -380,39 +423,110 @@ class ComicRepository(context: Context) {
     }
 
     /**
-     * 添加 PDF 章节目录：把目录内直接子 PDF 文件作为一本书的章节。
-     * 目录已存在时返回 Duplicate；没有 PDF 文件时返回 Empty（调用方应提示用户）。
-     * 目录打不开（权限被撤销/被删）时抛 [LibraryScanner.FolderAccessException]，
-     * 由调用方提示用户——首次导入就失败时不留库目录记录。
+     * Scans and validates a PDF tree before committing any library rows. A confirmed large import
+     * repeats the metadata-only scan with soft limits disabled; no Cursor or provider state is kept
+     * across the confirmation dialog.
      */
-    suspend fun addSeriesFolderAndSync(treeUri: Uri): AddSeriesFolderOutcome {
-        if (!addFolder(treeUri, LibraryFolderType.SERIES)) return AddSeriesFolderOutcome.Duplicate
+    suspend fun addSeriesFolderAndSync(
+        treeUri: Uri,
+        approvedLargeScan: Boolean = false,
+    ): AddSeriesFolderOutcome {
+        if (folderDao.getByTreeUri(treeUri.toString()) != null) {
+            return AddSeriesFolderOutcome.Duplicate
+        }
+        val displayName = DocumentFile.fromTreeUri(appContext, treeUri)?.name ?: "未命名目录"
+        val scan = try {
+            scanner.scanPdfsRecursively(
+                treeUri = treeUri,
+                confirmationThresholds = if (approvedLargeScan) null
+                else LibraryScanner.SOFT_SCAN_THRESHOLDS,
+            )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: LibraryScanner.FolderAccessException) {
+            throw error
+        }
 
-        val pdfs = try {
-            scanner.scanPdfs(treeUri)
-        } catch (e: LibraryScanner.FolderAccessException) {
-            // 目录刚加进库就打不开：回滚库目录记录，避免下次 sync 又抛错
-            folderDao.getByTreeUri(treeUri.toString())?.let { folderDao.deleteById(it.id) }
-            releaseTreePermission(treeUri)
-            throw e
-        }
-        if (pdfs.isEmpty()) {
-            // 没有 PDF 时不留下空目录记录，避免用户之后无法重新导入同一目录
-            folderDao.getByTreeUri(treeUri.toString())?.let { folderDao.deleteById(it.id) }
-            releaseTreePermission(treeUri)
-            return AddSeriesFolderOutcome.Empty
+        when (scan.stopReason) {
+            LibraryScanner.ScanStopReason.CONFIRMATION_REQUIRED -> {
+                return AddSeriesFolderOutcome.NeedsConfirmation(
+                    SeriesScanConfirmation(
+                        treeUri = treeUri.toString(),
+                        folderId = null,
+                        displayName = displayName,
+                        metrics = scan.metrics,
+                        limit = requireNotNull(scan.limit),
+                    )
+                )
+            }
+
+            LibraryScanner.ScanStopReason.HARD_LIMIT_REACHED -> {
+                return AddSeriesFolderOutcome.HardLimit(
+                    metrics = scan.metrics,
+                    limit = requireNotNull(scan.limit),
+                )
+            }
+
+            null -> Unit
         }
 
-        return syncMutex.withLock {
-            val folder = folderDao.getByTreeUri(treeUri.toString())
-                ?: return@withLock AddSeriesFolderOutcome.Duplicate
-            val comic = ensureSeriesComic(folder, treeUri)
-            val added = syncSeriesChapters(comic, pdfs)
-            AddSeriesFolderOutcome.Added(comic, added)
-        }.also {
-            // 首扫成功后尝试补封面（失败不阻断结果提示）
-            backfillSeriesCover(it)
+        if (!scan.isComplete) {
+            return AddSeriesFolderOutcome.Incomplete(
+                discoveredPdfCount = scan.files.size,
+                inaccessibleDirectoryCount = scan.inaccessibleDirectoryCount,
+            )
         }
+
+        if (scan.files.isEmpty()) {
+            return AddSeriesFolderOutcome.Empty(
+                inaccessibleDirectoryCount = scan.inaccessibleDirectoryCount,
+                skippedVirtualPdfCount = scan.skippedVirtualPdfCount,
+            )
+        }
+        findSeriesOverlap(scan.files, excludeComicId = null)?.let { overlap ->
+            return AddSeriesFolderOutcome.Overlap(overlap.first, overlap.second)
+        }
+
+        // Persist only after the user has approved the final scan size and validation succeeded.
+        appContext.contentResolver.takePersistableUriPermission(
+            treeUri,
+            Intent.FLAG_GRANT_READ_URI_PERMISSION,
+        )
+
+        val outcome = syncMutex.withLock {
+            if (folderDao.getByTreeUri(treeUri.toString()) != null) {
+                return@withLock AddSeriesFolderOutcome.Duplicate
+            }
+            db.withTransaction {
+                val metrics = scan.metrics.takeIf { approvedLargeScan }
+                val issue = seriesScanIssue(displayName, 0, scan.skippedVirtualPdfCount)
+                val folderId = folderDao.insert(
+                    LibraryFolderEntity(
+                        treeUri = treeUri.toString(),
+                        displayName = displayName,
+                        addedAt = System.currentTimeMillis(),
+                        type = LibraryFolderType.SERIES,
+                        approvedPdfCount = metrics?.pdfCount ?: 0,
+                        approvedDirectoryCount = metrics?.directoryCount ?: 0,
+                        approvedEntryCount = metrics?.entryCount ?: 0,
+                        scanIssueKey = issue?.first,
+                        scanIssue = issue?.second,
+                    )
+                )
+                val folder = folderDao.getAll().first { it.id == folderId }
+                val comic = ensureSeriesComic(folder, treeUri)
+                val added = syncSeriesChapters(comic, scan.files, completeScan = true)
+                AddSeriesFolderOutcome.Added(
+                    comic = comic,
+                    chaptersAdded = added,
+                    duplicateNameCount = duplicateDisplayNameCount(scan.files),
+                    inaccessibleDirectoryCount = scan.inaccessibleDirectoryCount,
+                    skippedVirtualPdfCount = scan.skippedVirtualPdfCount,
+                )
+            }
+        }
+        backfillSeriesCover(outcome)
+        return outcome
     }
 
     /**
@@ -430,11 +544,21 @@ class ComicRepository(context: Context) {
         var restored = 0
         var alreadyInLibrary = 0
         val failed = mutableListOf<String>()
+        val warnings = mutableListOf<String>()
+        val confirmations = mutableListOf<SeriesScanConfirmation>()
 
         for (folder in folderDao.getAll()) {
             when (folder.type) {
                 LibraryFolderType.SERIES -> {
-                    if (syncSeriesFolder(folder) == null) failed.add(folder.displayName)
+                    when (val outcome = syncSeriesFolder(folder, approvedExpansion = false)) {
+                        is SeriesFolderSyncOutcome.Success -> outcome.warning?.let(warnings::add)
+                        is SeriesFolderSyncOutcome.NeedsConfirmation -> {
+                            confirmations.add(outcome.request)
+                            outcome.warning?.let(warnings::add)
+                        }
+
+                        is SeriesFolderSyncOutcome.Failed -> outcome.message?.let(failed::add)
+                    }
                 }
                 LibraryFolderType.LIBRARY -> {
                     val partial = syncLibraryFolder(folder)
@@ -451,7 +575,22 @@ class ComicRepository(context: Context) {
             restored = restored,
             alreadyInLibrary = alreadyInLibrary,
             failedFolders = failed,
+            warnings = warnings,
+            seriesConfirmations = confirmations,
         )
+    }
+
+    suspend fun approveSeriesFolderExpansion(folderId: Long): ScanResult = syncMutex.withLock {
+        val folder = folderDao.getAll().firstOrNull { it.id == folderId }
+            ?: return@withLock ScanResult(0, 0, 0, 0, listOf("目录不存在"))
+        val warnings = mutableListOf<String>()
+        val failed = mutableListOf<String>()
+        when (val outcome = syncSeriesFolder(folder, approvedExpansion = true)) {
+            is SeriesFolderSyncOutcome.Success -> outcome.warning?.let(warnings::add)
+            is SeriesFolderSyncOutcome.NeedsConfirmation -> outcome.warning?.let(warnings::add)
+            is SeriesFolderSyncOutcome.Failed -> outcome.message?.let(failed::add)
+        }
+        ScanResult(0, 0, 0, 0, failed, warnings)
     }
 
     /**
@@ -523,25 +662,100 @@ class ComicRepository(context: Context) {
         return ScanResult(added, markedMissing, restored, alreadyInLibrary, emptyList())
     }
 
-    /**
-     * 同步单个 PDF 章节目录：目录内每个 PDF 是一本书的章节。
-     * 返回新增章节数；返回 null 表示目录无法访问。
-     */
-    private suspend fun syncSeriesFolder(folder: LibraryFolderEntity): Int? {
-        val pdfs = try {
-            scanner.scanPdfs(Uri.parse(folder.treeUri))
-        } catch (e: LibraryScanner.FolderAccessException) {
-            return null
+    private suspend fun syncSeriesFolder(
+        folder: LibraryFolderEntity,
+        approvedExpansion: Boolean,
+    ): SeriesFolderSyncOutcome {
+        val treeUri = Uri.parse(folder.treeUri)
+        val scan = try {
+            scanner.scanPdfsRecursively(
+                treeUri = treeUri,
+                confirmationThresholds = if (approvedExpansion) null
+                else confirmationThresholdsFor(folder),
+            )
+        } catch (_: LibraryScanner.FolderAccessException) {
+            val message = "无法访问目录：${folder.displayName}"
+            val changed = updateFolderIssue(folder, "root-inaccessible", message)
+            return SeriesFolderSyncOutcome.Failed(message.takeIf { changed })
         }
 
-        val comic = ensureSeriesComic(folder, Uri.parse(folder.treeUri))
-        if (pdfs.isEmpty()) {
-            // 目录里的 PDF 全被删光：把漫画标为失效，但不删记录和进度
-            if (!comic.isMissing) dao.setMissing(listOf(comic.id), true)
-            return 0
+        when (scan.stopReason) {
+            LibraryScanner.ScanStopReason.CONFIRMATION_REQUIRED -> {
+                val issue = "《${folder.displayName}》目录规模显著增加，需要确认后继续扫描"
+                val changed = updateFolderIssue(
+                    folder,
+                    "confirmation:${scan.limit}:${scan.metrics}",
+                    issue,
+                )
+                return SeriesFolderSyncOutcome.NeedsConfirmation(
+                    request = SeriesScanConfirmation(
+                        treeUri = folder.treeUri,
+                        folderId = folder.id,
+                        displayName = folder.displayName,
+                        metrics = scan.metrics,
+                        limit = requireNotNull(scan.limit),
+                    ),
+                    warning = issue.takeIf { changed },
+                )
+            }
+
+            LibraryScanner.ScanStopReason.HARD_LIMIT_REACHED -> {
+                val issue = "《${folder.displayName}》超过安全扫描上限"
+                val changed = updateFolderIssue(
+                    folder,
+                    "hard-limit:${scan.limit}",
+                    issue,
+                )
+                return SeriesFolderSyncOutcome.Failed(issue.takeIf { changed })
+            }
+
+            null -> Unit
         }
-        if (comic.isMissing) dao.setMissing(listOf(comic.id), false)
-        return syncSeriesChapters(comic, pdfs)
+
+        return db.withTransaction {
+            val comic = ensureSeriesComic(folder, treeUri)
+            findSeriesOverlap(scan.files, excludeComicId = comic.id)?.let { overlap ->
+                val issue =
+                    "《${folder.displayName}》与《${overlap.first}》有 ${overlap.second} 个重复 PDF"
+                val changed = updateFolderIssue(
+                    folder,
+                    "overlap:${overlap.first}:${overlap.second}",
+                    issue,
+                )
+                return@withTransaction SeriesFolderSyncOutcome.Failed(issue.takeIf { changed })
+            }
+
+            var added = 0
+            if (scan.files.isEmpty() && scan.isComplete) {
+                if (!comic.isMissing) dao.setMissing(listOf(comic.id), true)
+            } else if (scan.files.isNotEmpty()) {
+                if (comic.isMissing) dao.setMissing(listOf(comic.id), false)
+                added = syncSeriesChapters(comic, scan.files, scan.isComplete)
+            }
+
+            var updatedFolder = folder
+            if (approvedExpansion) {
+                updatedFolder = updatedFolder.copy(
+                    approvedPdfCount = scan.metrics.pdfCount,
+                    approvedDirectoryCount = scan.metrics.directoryCount,
+                    approvedEntryCount = scan.metrics.entryCount,
+                )
+            }
+            val incompleteIssue = seriesScanIssue(
+                folder.displayName,
+                scan.inaccessibleDirectoryCount,
+                scan.skippedVirtualPdfCount,
+            )
+            val issueChanged = folder.scanIssueKey != incompleteIssue?.first ||
+                    folder.scanIssue != incompleteIssue?.second
+            val finalFolder = updatedFolder.copy(
+                scanIssueKey = incompleteIssue?.first,
+                scanIssue = incompleteIssue?.second,
+            )
+            if (finalFolder != folder) folderDao.update(finalFolder)
+            val warning = incompleteIssue?.second?.takeIf { issueChanged }
+            SeriesFolderSyncOutcome.Success(added = added, warning = warning)
+        }
     }
 
     /**
@@ -576,6 +790,7 @@ class ComicRepository(context: Context) {
     private suspend fun syncSeriesChapters(
         comic: ComicEntity,
         scannedPdfs: List<LibraryScanner.ScannedFile>,
+        completeScan: Boolean = true,
     ): Int {
         val chapterDao = db.chapterDao()
         val existing = chapterDao.getByComicId(comic.id)
@@ -584,6 +799,7 @@ class ComicRepository(context: Context) {
             scanned = scannedPdfs,
             comicId = comic.id,
             titleOf = ::titleFromFileName,
+            completeScan = completeScan,
         )
         chapterDao.applyDiff(diff)
 
@@ -596,6 +812,79 @@ class ComicRepository(context: Context) {
         }
 
         return diff.addedCount
+    }
+
+    private suspend fun findSeriesOverlap(
+        files: List<LibraryScanner.ScannedFile>,
+        excludeComicId: Long?,
+    ): Pair<String, Int>? {
+        val conflicts = files
+            .map { it.fileKey }
+            .chunked(SQLITE_MAX_VARIABLES)
+            .flatMap { keys -> db.chapterDao().getByFileKeys(keys) }
+            .filter { excludeComicId == null || it.comicId != excludeComicId }
+        if (conflicts.isEmpty()) return null
+        val firstComicId = conflicts.first().comicId
+        val title = dao.getById(firstComicId)?.title ?: "另一部漫画"
+        return title to conflicts.map { it.fileKey }.distinct().size
+    }
+
+    private fun duplicateDisplayNameCount(files: List<LibraryScanner.ScannedFile>): Int =
+        groupScannedFilesByDisplayName(files)
+            .values
+            .filter { it.size > 1 }
+            .sumOf { it.size }
+
+    private fun seriesScanIssue(
+        displayName: String,
+        inaccessibleDirectoryCount: Int,
+        skippedVirtualPdfCount: Int,
+    ): Pair<String, String>? {
+        if (inaccessibleDirectoryCount <= 0 && skippedVirtualPdfCount <= 0) return null
+        val details = buildList {
+            if (inaccessibleDirectoryCount > 0) {
+                add("$inaccessibleDirectoryCount 个目录暂时无法扫描")
+            }
+            if (skippedVirtualPdfCount > 0) {
+                add("$skippedVirtualPdfCount 个虚拟 PDF 无法直接打开")
+            }
+        }.joinToString("，")
+        return "scan-warning:$inaccessibleDirectoryCount:$skippedVirtualPdfCount" to
+                "《$displayName》$details"
+    }
+
+    private suspend fun updateFolderIssue(
+        folder: LibraryFolderEntity,
+        issueKey: String?,
+        issue: String?,
+    ): Boolean {
+        val changed = folder.scanIssueKey != issueKey || folder.scanIssue != issue
+        if (changed) folderDao.update(folder.copy(scanIssueKey = issueKey, scanIssue = issue))
+        return changed
+    }
+
+    private fun confirmationThresholdsFor(
+        folder: LibraryFolderEntity,
+    ): LibraryScanner.ScanThresholds {
+        fun next(approved: Int, soft: Int, hard: Int): Int {
+            if (approved <= 0) return soft
+            return (approved.toLong() * APPROVAL_GROWTH_FACTOR)
+                .coerceAtLeast(soft.toLong())
+                .coerceAtMost(hard.toLong() + 1L)
+                .toInt()
+        }
+
+        val soft = LibraryScanner.SOFT_SCAN_THRESHOLDS
+        val hard = LibraryScanner.HARD_SCAN_THRESHOLDS
+        return LibraryScanner.ScanThresholds(
+            pdfCount = next(folder.approvedPdfCount, soft.pdfCount, hard.pdfCount),
+            directoryCount = next(
+                folder.approvedDirectoryCount,
+                soft.directoryCount,
+                hard.directoryCount,
+            ),
+            entryCount = next(folder.approvedEntryCount, soft.entryCount, hard.entryCount),
+        )
     }
 
     /**
@@ -748,5 +1037,6 @@ class ComicRepository(context: Context) {
         /** Repository 实例随处构造（自身无状态），扫描锁必须放进程级单例处 */
         private val syncMutex = Mutex()
         private const val SQLITE_MAX_VARIABLES = 500
+        private const val APPROVAL_GROWTH_FACTOR = 2L
     }
 }

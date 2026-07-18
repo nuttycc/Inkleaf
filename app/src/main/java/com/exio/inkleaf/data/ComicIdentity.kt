@@ -6,6 +6,7 @@ import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.system.Os
 import android.system.OsConstants
+import com.exio.inkleaf.data.ComicIdentity.fileKey
 
 /**
  * Stable identity for a comic file.
@@ -43,7 +44,12 @@ object ComicIdentity {
     private fun safKey(uri: Uri): String {
         val documentId = runCatching { DocumentsContract.getDocumentId(uri) }.getOrNull()
         if (documentId.isNullOrBlank()) return "uri:${uri.normalizeScheme()}"
-        val provider = uri.authority?.takeIf { it.isNotBlank() } ?: "unknown"
+        return safDocumentKey(uri.authority, documentId)
+    }
+
+    /** Cheap descendant identity for SAF enumeration; unlike [fileKey], this never opens the file. */
+    fun safDocumentKey(authority: String?, documentId: String): String {
+        val provider = authority?.takeIf { it.isNotBlank() } ?: "unknown"
         return "saf:$provider:$documentId"
     }
 

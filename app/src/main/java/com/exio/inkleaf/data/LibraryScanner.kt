@@ -1,15 +1,22 @@
 package com.exio.inkleaf.data
 
 import android.content.Context
+import android.database.Cursor
 import android.net.Uri
+import android.os.CancellationSignal
 import android.provider.DocumentsContract
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.job
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.coroutineContext
 
 /**
- * 漫画库目录扫描器：输入一个目录树 Uri，输出其中所有 .cbz/.zip 文件。
- * 只负责遍历文件系统，不接触数据库——diff 同步逻辑在 ComicRepository。
+ * Enumerates user-granted SAF trees without touching the database.
+ *
+ * Directory queries stay serial because document providers may be remote, Binder-backed, or both.
+ * The scanner exposes completeness and limit state so callers never interpret a truncated tree as
+ * authoritative deletion evidence.
  */
 class LibraryScanner(context: Context) {
     private val appContext = context.applicationContext
@@ -19,54 +26,101 @@ class LibraryScanner(context: Context) {
         val uri: String,
         val fileKey: String,
         val displayName: String,
+        val relativePath: String = displayName,
+        val mimeType: String? = null,
+        val size: Long? = null,
+        val lastModified: Long? = null,
+        val flags: Int = 0,
     )
 
-    /** 目录本身打不开（权限被撤销/目录被删）时抛出，调用方按目录粒度处理 */
+    data class ScanThresholds(
+        val pdfCount: Int,
+        val directoryCount: Int,
+        val entryCount: Int,
+    )
+
+    data class ScanMetrics(
+        val pdfCount: Int = 0,
+        val directoryCount: Int = 1,
+        val entryCount: Int = 0,
+    )
+
+    enum class ScanLimit {
+        PDFS,
+        DIRECTORIES,
+        ENTRIES,
+        DEPTH,
+    }
+
+    enum class ScanStopReason {
+        CONFIRMATION_REQUIRED,
+        HARD_LIMIT_REACHED,
+    }
+
+    data class PdfScanResult(
+        val files: List<ScannedFile>,
+        val metrics: ScanMetrics,
+        val inaccessibleDirectoryCount: Int,
+        val skippedVirtualPdfCount: Int = 0,
+        val stopReason: ScanStopReason? = null,
+        val limit: ScanLimit? = null,
+    ) {
+        val isComplete: Boolean
+            get() = inaccessibleDirectoryCount == 0 && stopReason == null
+    }
+
+    /** The selected root itself is inaccessible or no longer granted. */
     class FolderAccessException(message: String, cause: Throwable? = null) :
         Exception(message, cause)
 
     /**
-     * 递归列出 treeUri 下所有漫画压缩包；跳过 . 开头的隐藏目录和文件。
-     *
-     * 为什么不用 DocumentFile.listFiles() 递归？SAF 底层是 ContentProvider，
-     * DocumentFile 的每个属性访问（.name / .isDirectory）都是一次跨进程查询，
-     * 一个文件要 2~3 次 IPC，几百个文件就要慢上数秒。直接用 DocumentsContract
-     * query 一次 cursor 就能拿到整个目录所有孩子的名字和类型。
+     * Recursively lists archive comics. This retains the existing archive-library semantics while
+     * sharing the cancellable, one-query-per-directory traversal used by PDF scanning.
      */
     suspend fun scanFolder(treeUri: Uri): List<ScannedFile> = withContext(Dispatchers.IO) {
         val found = mutableListOf<ScannedFile>()
-        // (目录 docId, 深度) 队列做迭代式递归：不爆栈、好限深、好取消
-        val queue = ArrayDeque<Pair<String, Int>>()
-        queue.add(DocumentsContract.getTreeDocumentId(treeUri) to 0)
+        val rootDocId = DocumentsContract.getTreeDocumentId(treeUri)
+        val queue = ArrayDeque<PendingDirectory>()
+        val visitedDirectories = mutableSetOf(documentVisitKey(treeUri, rootDocId))
+        queue.add(PendingDirectory(rootDocId, relativePath = "", depth = 0))
 
         while (queue.isNotEmpty()) {
             coroutineContext.ensureActive()
-            val (docId, depth) = queue.removeFirst()
-
-            val children = try {
-                queryChildren(treeUri, docId)
-            } catch (e: Exception) {
-                if (depth == 0) {
-                    // 根目录都打不开 = 整个目录失效。必须抛错而不是返回空列表，
-                    // 否则调用方会把该目录的所有书误标为"已失效"
-                    throw FolderAccessException("无法访问该目录", e)
-                }
-                continue // 个别子目录查询失败：跳过，不影响其余部分
-            }
-
-            for (child in children) {
-                if (child.name.startsWith(".")) continue
-                if (child.isDirectory) {
-                    if (depth < MAX_DEPTH) queue.add(child.docId to depth + 1)
-                } else if (COMIC_EXT.matches(child.name)) {
-                    val fileUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, child.docId)
-                    found.add(
-                        ScannedFile(
-                            uri = fileUri.toString(),
-                            fileKey = ComicIdentity.fileKey(appContext, fileUri),
-                            displayName = child.name,
+            val directory = queue.removeFirst()
+            try {
+                visitChildren(treeUri, directory.docId) { child ->
+                    if (child.name.startsWith(".")) return@visitChildren true
+                    val relativePath = joinRelativePath(directory.relativePath, child.name)
+                    if (child.isDirectory) {
+                        if (directory.depth < MAX_DEPTH) {
+                            val visitKey = documentVisitKey(treeUri, child.docId)
+                            if (visitedDirectories.add(visitKey)) {
+                                queue.add(
+                                    PendingDirectory(
+                                        docId = child.docId,
+                                        relativePath = relativePath,
+                                        depth = directory.depth + 1,
+                                    )
+                                )
+                            }
+                        }
+                    } else if (COMIC_EXT.matches(child.name)) {
+                        val fileUri =
+                            DocumentsContract.buildDocumentUriUsingTree(treeUri, child.docId)
+                        found.add(
+                            child.toScannedFile(
+                                treeUri = treeUri,
+                                relativePath = relativePath,
+                                fileKey = ComicIdentity.fileKey(appContext, fileUri),
+                            )
                         )
-                    )
+                    }
+                    true
+                }
+            } catch (error: Exception) {
+                coroutineContext.ensureActive()
+                if (directory.depth == 0) {
+                    throw FolderAccessException("无法访问该目录", error)
                 }
             }
         }
@@ -74,70 +128,213 @@ class LibraryScanner(context: Context) {
     }
 
     /**
-     * 只扫描 treeUri 根目录下的 PDF 文件（不递归子目录），作为一本书的章节。
-     * 返回结果按调用方期望的顺序排列——这里保持自然文件名顺序。
+     * Recursively scans every PDF below [treeUri]. Reaching a confirmation threshold stops before
+     * database work; callers can repeat the metadata-only scan with a higher approved threshold.
      */
-    suspend fun scanPdfs(treeUri: Uri): List<ScannedFile> = withContext(Dispatchers.IO) {
+    suspend fun scanPdfsRecursively(
+        treeUri: Uri,
+        confirmationThresholds: ScanThresholds? = SOFT_SCAN_THRESHOLDS,
+    ): PdfScanResult = withContext(Dispatchers.IO) {
+        confirmationThresholds?.let(::requireThresholds)
         val rootDocId = DocumentsContract.getTreeDocumentId(treeUri)
-        val children = try {
-            queryChildren(treeUri, rootDocId)
-        } catch (e: Exception) {
-            throw FolderAccessException("无法访问该目录", e)
+        val queue = ArrayDeque<PendingDirectory>()
+        val visitedDirectories = mutableSetOf(documentVisitKey(treeUri, rootDocId))
+        val visitedFiles = mutableSetOf<String>()
+        val found = mutableListOf<ScannedFile>()
+        var metrics = ScanMetrics()
+        var inaccessibleDirectories = 0
+        var skippedVirtualPdfs = 0
+        var stopReason: ScanStopReason? = null
+        var stopLimit: ScanLimit? = null
+
+        queue.add(PendingDirectory(rootDocId, relativePath = "", depth = 0))
+
+        scan@ while (queue.isNotEmpty()) {
+            coroutineContext.ensureActive()
+            val directory = queue.removeFirst()
+            try {
+                val providerStillLoading = visitChildren(treeUri, directory.docId) { child ->
+                    metrics = metrics.copy(entryCount = metrics.entryCount + 1)
+                    evaluateLimit(metrics, confirmationThresholds)?.let { decision ->
+                        stopReason = decision.first
+                        stopLimit = decision.second
+                        return@visitChildren false
+                    }
+
+                    if (child.name.startsWith(".")) return@visitChildren true
+                    val relativePath = joinRelativePath(directory.relativePath, child.name)
+                    if (child.isDirectory) {
+                        if (directory.depth >= MAX_DEPTH) {
+                            stopReason = ScanStopReason.HARD_LIMIT_REACHED
+                            stopLimit = ScanLimit.DEPTH
+                            return@visitChildren false
+                        }
+                        val visitKey = documentVisitKey(treeUri, child.docId)
+                        if (visitedDirectories.add(visitKey)) {
+                            metrics = metrics.copy(directoryCount = metrics.directoryCount + 1)
+                            evaluateLimit(metrics, confirmationThresholds)?.let { decision ->
+                                stopReason = decision.first
+                                stopLimit = decision.second
+                                return@visitChildren false
+                            }
+                            queue.add(
+                                PendingDirectory(
+                                    docId = child.docId,
+                                    relativePath = relativePath,
+                                    depth = directory.depth + 1,
+                                )
+                            )
+                        }
+                    } else if (isPdf(child.name, child.mimeType)) {
+                        if (
+                            child.flags and DocumentsContract.Document.FLAG_VIRTUAL_DOCUMENT != 0
+                        ) {
+                            skippedVirtualPdfs++
+                            return@visitChildren true
+                        }
+                        val fileKey = ComicIdentity.safDocumentKey(treeUri.authority, child.docId)
+                        if (visitedFiles.add(fileKey)) {
+                            found.add(child.toScannedFile(treeUri, relativePath, fileKey))
+                            metrics = metrics.copy(pdfCount = metrics.pdfCount + 1)
+                            evaluateLimit(metrics, confirmationThresholds)?.let { decision ->
+                                stopReason = decision.first
+                                stopLimit = decision.second
+                                return@visitChildren false
+                            }
+                        }
+                    }
+                    true
+                }
+                if (providerStillLoading) inaccessibleDirectories++
+                if (stopReason != null) break@scan
+            } catch (error: Exception) {
+                coroutineContext.ensureActive()
+                if (directory.depth == 0) {
+                    throw FolderAccessException("无法访问该目录", error)
+                }
+                inaccessibleDirectories++
+            }
         }
 
-        children
-            .asSequence()
-            .filter { !it.isDirectory && !it.name.startsWith(".") && PDF_EXT.matches(it.name) }
-            .map { child ->
-                val fileUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, child.docId)
-                ScannedFile(
-                    uri = fileUri.toString(),
-                    fileKey = ComicIdentity.fileKey(appContext, fileUri),
-                    displayName = child.name,
-                )
-            }
-            .sortedWith { a, b -> ChapterSort.compareNatural(a.displayName, b.displayName) }
-            .toList()
+        PdfScanResult(
+            files = sortPdfs(found),
+            metrics = metrics,
+            inaccessibleDirectoryCount = inaccessibleDirectories,
+            skippedVirtualPdfCount = skippedVirtualPdfs,
+            stopReason = stopReason,
+            limit = stopLimit,
+        )
     }
 
-    private data class Child(val docId: String, val name: String, val isDirectory: Boolean)
-
-    /** 一次跨进程查询拿到一个目录的全部孩子 */
-    private fun queryChildren(treeUri: Uri, parentDocId: String): List<Child> {
-        val childrenUri =
-            DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentDocId)
-        val result = mutableListOf<Child>()
-        val cursor = resolver.query(
-            childrenUri,
-            arrayOf(
-                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
-                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-                DocumentsContract.Document.COLUMN_MIME_TYPE,
-            ),
-            null, null, null,
-        ) ?: throw IllegalStateException("provider 返回了 null cursor")
-        cursor.use {
-            while (it.moveToNext()) {
-                val docId = it.getString(0) ?: continue
-                val name = it.getString(1) ?: continue
-                val mime = it.getString(2)
-                result.add(
-                    Child(docId, name, mime == DocumentsContract.Document.MIME_TYPE_DIR)
-                )
-            }
+    /** Compatibility path for old callers. New synchronization code must inspect structured state. */
+    suspend fun scanPdfs(treeUri: Uri): List<ScannedFile> {
+        val result = scanPdfsRecursively(treeUri, confirmationThresholds = null)
+        if (result.stopReason != null) {
+            throw FolderAccessException("目录内容超过安全扫描上限")
         }
-        return result
+        return result.files
+    }
+
+    private data class PendingDirectory(
+        val docId: String,
+        val relativePath: String,
+        val depth: Int,
+    )
+
+    private data class Child(
+        val docId: String,
+        val name: String,
+        val mimeType: String?,
+        val flags: Int,
+        val size: Long?,
+        val lastModified: Long?,
+    ) {
+        val isDirectory: Boolean
+            get() = mimeType == DocumentsContract.Document.MIME_TYPE_DIR
+
+        fun toScannedFile(
+            treeUri: Uri,
+            relativePath: String,
+            fileKey: String = ComicIdentity.safDocumentKey(treeUri.authority, docId),
+        ): ScannedFile {
+            val fileUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
+            return ScannedFile(
+                uri = fileUri.toString(),
+                fileKey = fileKey,
+                displayName = name,
+                relativePath = relativePath,
+                mimeType = mimeType,
+                size = size,
+                lastModified = lastModified,
+                flags = flags,
+            )
+        }
+    }
+
+    /** Returns true when the provider reports that this directory is still loading. */
+    private suspend fun visitChildren(
+        treeUri: Uri,
+        parentDocId: String,
+        visitor: (Child) -> Boolean,
+    ): Boolean {
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentDocId)
+        val signal = CancellationSignal()
+        val job = coroutineContext.job
+        val cancellationHandle = job.invokeOnCompletion {
+            if (job.isCancelled) signal.cancel()
+        }
+        try {
+            val cursor = resolver.query(
+                childrenUri,
+                CHILD_PROJECTION,
+                null,
+                null,
+                null,
+                signal,
+            ) ?: throw IllegalStateException("provider 返回了 null cursor")
+            cursor.use {
+                while (it.moveToNext()) {
+                    coroutineContext.ensureActive()
+                    val child = it.readChild() ?: continue
+                    if (!visitor(child)) break
+                }
+                return runCatching {
+                    it.extras.getBoolean(DocumentsContract.EXTRA_LOADING, false)
+                }.getOrDefault(false)
+            }
+        } finally {
+            cancellationHandle.dispose()
+        }
+    }
+
+    private fun Cursor.readChild(): Child? {
+        val docId = getString(0) ?: return null
+        val name = getString(1) ?: return null
+        return Child(
+            docId = docId,
+            name = name,
+            mimeType = getString(2),
+            flags = if (isNull(3)) 0 else getInt(3),
+            size = if (isNull(4)) null else getLong(4),
+            lastModified = if (isNull(5)) null else getLong(5),
+        )
     }
 
     companion object {
         private val COMIC_EXT = Regex(".*\\.(cbz|zip)$", RegexOption.IGNORE_CASE)
         private val PDF_EXT = Regex(".*\\.pdf$", RegexOption.IGNORE_CASE)
 
-        /**
-         * SAF 单文件选择器的 MIME 过滤，与 COMIC_EXT 描述同一组格式（zip/cbz），
-         * 放在一起是为了支持新格式时两份定义一起改。
-         * octet-stream 兜底：不少文档提供方对 .cbz 只报通用二进制类型
-         */
+        val SOFT_SCAN_THRESHOLDS = ScanThresholds(
+            pdfCount = 500,
+            directoryCount = 1_000,
+            entryCount = 10_000,
+        )
+        val HARD_SCAN_THRESHOLDS = ScanThresholds(
+            pdfCount = 2_000,
+            directoryCount = 5_000,
+            entryCount = 50_000,
+        )
+
         val COMIC_PICKER_MIME_TYPES = arrayOf(
             "application/zip",
             "application/x-cbz",
@@ -145,6 +342,68 @@ class LibraryScanner(context: Context) {
             "application/octet-stream",
         )
 
-        private const val MAX_DEPTH = 15 // 防御环形/超深目录结构
+        internal fun isPdf(displayName: String, mimeType: String?): Boolean =
+            mimeType.equals("application/pdf", ignoreCase = true) || PDF_EXT.matches(displayName)
+
+        internal fun sortPdfs(files: List<ScannedFile>): List<ScannedFile> =
+            files.sortedWith { first, second ->
+                ChapterSort.compareNatural(first.displayName, second.displayName)
+                    .takeIf { it != 0 }
+                    ?: ChapterSort.compareNatural(first.relativePath, second.relativePath)
+                        .takeIf { it != 0 }
+                    ?: first.fileKey.compareTo(second.fileKey)
+            }
+
+        internal fun evaluateLimit(
+            metrics: ScanMetrics,
+            confirmationThresholds: ScanThresholds?,
+        ): Pair<ScanStopReason, ScanLimit>? {
+            exceededHardLimit(metrics)?.let {
+                return ScanStopReason.HARD_LIMIT_REACHED to it
+            }
+            confirmationThresholds?.let { thresholds ->
+                reachedLimit(metrics, thresholds)?.let {
+                    return ScanStopReason.CONFIRMATION_REQUIRED to it
+                }
+            }
+            return null
+        }
+
+        private fun reachedLimit(metrics: ScanMetrics, limits: ScanThresholds): ScanLimit? = when {
+            metrics.pdfCount >= limits.pdfCount -> ScanLimit.PDFS
+            metrics.directoryCount >= limits.directoryCount -> ScanLimit.DIRECTORIES
+            metrics.entryCount >= limits.entryCount -> ScanLimit.ENTRIES
+            else -> null
+        }
+
+        private fun exceededHardLimit(metrics: ScanMetrics): ScanLimit? = when {
+            metrics.pdfCount > HARD_SCAN_THRESHOLDS.pdfCount -> ScanLimit.PDFS
+            metrics.directoryCount > HARD_SCAN_THRESHOLDS.directoryCount -> ScanLimit.DIRECTORIES
+            metrics.entryCount > HARD_SCAN_THRESHOLDS.entryCount -> ScanLimit.ENTRIES
+            else -> null
+        }
+
+        private fun requireThresholds(thresholds: ScanThresholds) {
+            require(thresholds.pdfCount in 1..(HARD_SCAN_THRESHOLDS.pdfCount + 1))
+            require(thresholds.directoryCount in 1..(HARD_SCAN_THRESHOLDS.directoryCount + 1))
+            require(thresholds.entryCount in 1..(HARD_SCAN_THRESHOLDS.entryCount + 1))
+        }
+
+        private fun joinRelativePath(parent: String, child: String): String =
+            if (parent.isEmpty()) child else "$parent/$child"
+
+        private fun documentVisitKey(treeUri: Uri, docId: String): String =
+            ComicIdentity.safDocumentKey(treeUri.authority, docId)
+
+        private const val MAX_DEPTH = 15
+
+        private val CHILD_PROJECTION = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE,
+            DocumentsContract.Document.COLUMN_FLAGS,
+            DocumentsContract.Document.COLUMN_SIZE,
+            DocumentsContract.Document.COLUMN_LAST_MODIFIED,
+        )
     }
 }

@@ -15,4 +15,11 @@ data class LibraryFolderEntity(
     val displayName: String,   // 目录名，列表展示用
     val addedAt: Long,
     val type: LibraryFolderType = LibraryFolderType.LIBRARY,
+    /** High-water marks approved by the user for large recursive PDF scans. */
+    val approvedPdfCount: Int = 0,
+    val approvedDirectoryCount: Int = 0,
+    val approvedEntryCount: Int = 0,
+    /** Persisted issue text keeps folder management informative across process restarts. */
+    val scanIssueKey: String? = null,
+    val scanIssue: String? = null,
 )

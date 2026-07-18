@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Embedded
 import androidx.room.Insert
 import androidx.room.Query
+import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -36,6 +37,9 @@ interface LibraryFolderDao {
 
     @Insert
     suspend fun insert(folder: LibraryFolderEntity): Long
+
+    @Update
+    suspend fun update(folder: LibraryFolderEntity)
 
     @Query("DELETE FROM library_folders WHERE id = :id")
     suspend fun deleteById(id: Long)

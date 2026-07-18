@@ -117,20 +117,29 @@ fun FoldersSheetContent(
                                     )
                                 },
                                 supportingContent = {
-                                    // 计数随扫描入库实时变化（刚添加的目录会从 0
-                                    // 涨到 N）：淡入淡出把"跳变"软化成"更新"
-                                    AnimatedContent(
-                                        targetState = item.comicCount,
-                                        transitionSpec = {
-                                            fadeIn(tween(150)) togetherWith fadeOut(tween(150))
-                                        },
-                                        label = "folderCount",
-                                    ) { count ->
-                                        val typeLabel = when (item.folder.type) {
-                                            LibraryFolderType.SERIES -> "PDF 章节目录"
-                                            LibraryFolderType.LIBRARY -> "漫画库"
+                                    Column {
+                                        // 计数随扫描入库实时变化（刚添加的目录会从 0
+                                        // 涨到 N）：淡入淡出把"跳变"软化成"更新"
+                                        AnimatedContent(
+                                            targetState = item.comicCount,
+                                            transitionSpec = {
+                                                fadeIn(tween(150)) togetherWith fadeOut(tween(150))
+                                            },
+                                            label = "folderCount",
+                                        ) { count ->
+                                            val typeLabel = when (item.folder.type) {
+                                                LibraryFolderType.SERIES -> "PDF 章节目录"
+                                                LibraryFolderType.LIBRARY -> "漫画库"
+                                            }
+                                            Text("$typeLabel · $count 本漫画")
                                         }
-                                        Text("$typeLabel · $count 本漫画")
+                                        item.folder.scanIssue?.let { issue ->
+                                            Text(
+                                                text = issue,
+                                                color = MaterialTheme.colorScheme.error,
+                                                style = MaterialTheme.typography.bodySmall,
+                                            )
+                                        }
                                     }
                                 },
                                 trailingContent = {
