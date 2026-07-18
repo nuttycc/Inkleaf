@@ -1,6 +1,12 @@
 {
   "version": 1,
   "skills": {
+    "code-comments": {
+      "source": "petekp/claude-code-setup",
+      "sourceType": "github",
+      "skillPath": "skills/code-comments/SKILL.md",
+      "computedHash": "d4d2290d56f7971b9e1ad213f716178d1e887512792acc02497f1da5c4e68271"
+    },
     "exa-contents": {
       "source": "exa-labs/agent-skills",
       "sourceType": "github",
