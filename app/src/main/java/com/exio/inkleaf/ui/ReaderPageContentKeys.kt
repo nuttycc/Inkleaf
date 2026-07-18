@@ -1,5 +1,7 @@
 package com.exio.inkleaf.ui
 
+import com.exio.inkleaf.data.PageRenderRequest
+
 /**
  * Separates changes that invalidate the displayed page from changes that only refresh its processing.
  */
@@ -15,6 +17,7 @@ internal data class ReaderPageContentKeys(
 
     internal data class ProducerRestart(
         val isCurrentPage: Boolean,
+        val pageRenderRequest: PageRenderRequest?,
         val enhancementSelectionId: String,
         val enhancementModelInstalled: Boolean,
         val pinForActiveTask: Boolean,
@@ -26,6 +29,7 @@ internal fun readerPageContentKeys(
     page: Int,
     cacheKeyPrefix: String,
     isCurrentPage: Boolean,
+    pageRenderRequest: PageRenderRequest?,
     enhancementSelectionId: String,
     enhancementModelInstalled: Boolean,
     pinForActiveTask: Boolean,
@@ -37,6 +41,7 @@ internal fun readerPageContentKeys(
     ),
     producerRestart = ReaderPageContentKeys.ProducerRestart(
         isCurrentPage = isCurrentPage,
+        pageRenderRequest = pageRenderRequest,
         enhancementSelectionId = enhancementSelectionId,
         enhancementModelInstalled = enhancementModelInstalled,
         pinForActiveTask = pinForActiveTask,

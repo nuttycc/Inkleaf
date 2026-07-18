@@ -29,9 +29,11 @@ import com.exio.inkleaf.data.enhancement.cache.EnhancementCacheTaskReplacementRe
 import com.exio.inkleaf.data.enhancement.cache.EnhancementCacheTaskRepository
 import com.exio.inkleaf.data.enhancement.cache.EnhancementCacheTaskStartResult
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
@@ -508,10 +510,14 @@ class ReaderViewModel(
      * 注意旋转屏幕不会走到这里——这正是资源不被重复释放/创建的关键。
      */
     override fun onCleared() {
-        volume?.close()
+        val closingVolume = volume
+        volume = null
+        volumeCleanupScope.launch { closingVolume?.close() }
     }
 
     companion object {
+        private val volumeCleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
         /** 缩略图解码目标宽度（px）：56dp 格子在 3x 屏上约 168px */
         private const val THUMB_TARGET_WIDTH = 168
 

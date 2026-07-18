@@ -1,5 +1,6 @@
 package com.exio.inkleaf.ui
 
+import com.exio.inkleaf.data.PageRenderRequest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Test
@@ -53,6 +54,15 @@ class ReaderPageContentKeysTest {
     }
 
     @Test
+    fun `PDF render request changes restart without resetting displayed state`() {
+        val before = keys(pageRenderRequest = renderRequest(1080, 1920))
+        val after = keys(pageRenderRequest = renderRequest(3240, 5760))
+
+        assertEquals(before.stateReset, after.stateReset)
+        assertNotEquals(before.producerRestart, after.producerRestart)
+    }
+
+    @Test
     fun `page identity changes use a new state holder`() {
         val before = keys()
 
@@ -66,6 +76,7 @@ class ReaderPageContentKeysTest {
         page: Int = 7,
         cacheKeyPrefix: String = "comic-1",
         isCurrentPage: Boolean = true,
+        pageRenderRequest: PageRenderRequest? = null,
         enhancementSelectionId: String = "model-a",
         enhancementModelInstalled: Boolean = true,
         pinForActiveTask: Boolean = false,
@@ -74,8 +85,16 @@ class ReaderPageContentKeysTest {
         page = page,
         cacheKeyPrefix = cacheKeyPrefix,
         isCurrentPage = isCurrentPage,
+        pageRenderRequest = pageRenderRequest,
         enhancementSelectionId = enhancementSelectionId,
         enhancementModelInstalled = enhancementModelInstalled,
         pinForActiveTask = pinForActiveTask,
+    )
+
+    private fun renderRequest(width: Int, height: Int) = PageRenderRequest(
+        maxWidthPx = width,
+        maxHeightPx = height,
+        maxPixels = 8_000_000,
+        maxDimensionPx = 4096,
     )
 }

@@ -4,6 +4,20 @@ import android.graphics.Bitmap
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 
+/** Physical-pixel bounds for formats, such as PDF, that can render at a requested resolution. */
+data class PageRenderRequest(
+    val maxWidthPx: Int,
+    val maxHeightPx: Int,
+    val maxPixels: Long,
+    val maxDimensionPx: Int,
+) {
+    init {
+        require(maxWidthPx > 0 && maxHeightPx > 0)
+        require(maxPixels > 0)
+        require(maxDimensionPx > 0)
+    }
+}
+
 /**
  * 一本已打开的漫画，对 UI 层隐藏底层是 zip/cbz 还是 PDF 目录。
  *
@@ -43,6 +57,10 @@ interface ComicVolume {
     /** 读取第 [globalPage] 页的原始图片字节（zip/cbz 是压缩图片数据，PDF 是渲染后的 PNG） */
     suspend fun loadPageBytes(globalPage: Int): ByteArray
 
+    /** Whether this volume can rasterize a page for the reader's current physical viewport. */
+    val supportsTargetedPageBitmap: Boolean
+        get() = false
+
     /**
      * 直接读取第 [globalPage] 页的位图，跳过 [loadPageBytes] 的"渲染→压缩→UI 再解码"往返。
      *
@@ -52,7 +70,10 @@ interface ComicVolume {
      *
      * 返回 null 时调用方应 fallback 到 [loadPageBytes]。
      */
-    suspend fun loadPageBitmap(globalPage: Int): ImageBitmap? = null
+    suspend fun loadPageBitmap(
+        globalPage: Int,
+        request: PageRenderRequest? = null,
+    ): ImageBitmap? = null
 
     /**
      * Loads a bitmap for memory-sensitive inference without exceeding [maxPixels] when the
