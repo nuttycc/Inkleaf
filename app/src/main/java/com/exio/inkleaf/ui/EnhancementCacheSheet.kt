@@ -64,6 +64,11 @@ internal fun EnhancementCacheSheet(
                 .padding(horizontal = 20.dp, vertical = 12.dp),
         ) {
             Text("缓存 AI 增强页面", style = MaterialTheme.typography.titleLarge)
+            Text(
+                text = "选择页码范围并在后台处理，之后翻页直接显示",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium,
+            )
 
             if (task != null) {
                 EnhancementCacheTaskContent(
