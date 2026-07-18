@@ -4,8 +4,9 @@ package com.exio.inkleaf.data.ocr
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
-import android.media.ExifInterface
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.core.graphics.scale
+import androidx.exifinterface.media.ExifInterface
 import com.exio.inkleaf.data.ComicOpenException
 import com.exio.inkleaf.data.ComicVolume
 import com.exio.inkleaf.data.calculateInferenceSampleSize
@@ -57,12 +58,12 @@ suspend fun loadOcrPageBitmap(
 private fun Bitmap.scaledForOcr(): Bitmap {
     val longEdge = max(width, height)
     if (longEdge <= OCR_MAX_LONG_EDGE) return this
-    val scale = OCR_MAX_LONG_EDGE.toFloat() / longEdge
-    val targetWidth = (width * scale).roundToInt().coerceAtLeast(1)
-    val targetHeight = (height * scale).roundToInt().coerceAtLeast(1)
+    val scaleFactor = OCR_MAX_LONG_EDGE.toFloat() / longEdge
+    val targetWidth = (width * scaleFactor).roundToInt().coerceAtLeast(1)
+    val targetHeight = (height * scaleFactor).roundToInt().coerceAtLeast(1)
     var scaled: Bitmap? = null
     try {
-        val created = Bitmap.createScaledBitmap(this, targetWidth, targetHeight, true)
+        val created = scale(targetWidth, targetHeight)
         scaled = created
         return created
     } finally {

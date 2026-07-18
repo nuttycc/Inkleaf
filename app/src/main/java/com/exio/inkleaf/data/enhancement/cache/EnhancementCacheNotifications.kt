@@ -1,13 +1,18 @@
 package com.exio.inkleaf.data.enhancement.cache
 
+import android.Manifest
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import androidx.work.ForegroundInfo
 import com.exio.inkleaf.MainActivity
 import com.exio.inkleaf.R
@@ -76,10 +81,7 @@ object EnhancementCacheNotifications {
                 actionIntent(context, task.id, ACTION_CANCEL),
             )
             .build()
-        runCatching {
-            NotificationManagerCompat.from(context)
-                .notify(pausedNotificationId(task.id), notification)
-        }
+        postNotification(context, pausedNotificationId(task.id), notification)
     }
 
     fun showCompleted(
@@ -96,9 +98,7 @@ object EnhancementCacheNotifications {
             .setAutoCancel(true)
             .build()
         cancelPaused(context, task.id)
-        runCatching {
-            NotificationManagerCompat.from(context).notify(notificationId(task.id), notification)
-        }
+        postNotification(context, notificationId(task.id), notification)
     }
 
     fun showFailed(
@@ -116,9 +116,7 @@ object EnhancementCacheNotifications {
             .setAutoCancel(true)
             .build()
         cancelPaused(context, task.id)
-        runCatching {
-            NotificationManagerCompat.from(context).notify(notificationId(task.id), notification)
-        }
+        postNotification(context, notificationId(task.id), notification)
     }
 
     fun cancel(context: Context, taskId: String) {
@@ -128,6 +126,32 @@ object EnhancementCacheNotifications {
 
     private fun progressText(task: EnhancementCacheTaskEntity): String =
         "${task.completedPages} / ${task.totalPages} 页"
+
+    private fun postNotification(
+        context: Context,
+        id: Int,
+        notification: Notification,
+    ): Boolean {
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS,
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            return false
+        }
+
+        val manager = NotificationManagerCompat.from(context)
+        if (!manager.areNotificationsEnabled()) return false
+
+        return try {
+            manager.notify(id, notification)
+            true
+        } catch (_: SecurityException) {
+            false
+        }
+    }
 
     private fun createChannel(context: Context): Boolean {
         if (channelCreated.get()) return true

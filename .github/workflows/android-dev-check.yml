@@ -1,5 +1,7 @@
 name: Android Dev Check
 
+run-name: Android Dev Check (${{ github.event_name == 'workflow_dispatch' && inputs.task || 'check' }})
+
 on:
   workflow_dispatch:
     inputs:
@@ -62,7 +64,7 @@ jobs:
         run: |
           case "$CHECK_LEVEL" in
             check)
-              ./gradlew testDebugUnitTest lintDebug
+              ./gradlew :app:compileDebugKotlin testDebugUnitTest lintDebug
               ;;
             apk)
               ./gradlew assembleDebug
