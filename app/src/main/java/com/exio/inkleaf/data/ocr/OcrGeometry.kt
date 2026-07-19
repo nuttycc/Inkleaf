@@ -4,8 +4,12 @@ package com.exio.inkleaf.data.ocr
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.unit.IntSize
+import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.pow
+
+private const val OCR_SPOTLIGHT_OUTSET_RATIO = 0.12f
+private const val OCR_SPOTLIGHT_MITER_LIMIT = 4f
 
 data class OcrImageLayout(
     val rect: Rect,
@@ -38,6 +42,86 @@ fun calculateOcrImageLayout(
     val top = (viewport.height - height) / 2f
     return OcrImageLayout(Rect(left, top, left + width, top + height))
 }
+
+fun calculateOcrSpotlightOutset(
+    shortEdgePx: Float,
+    minimumPx: Float,
+    maximumPx: Float,
+): Float {
+    require(shortEdgePx >= 0f)
+    require(minimumPx >= 0f && maximumPx >= minimumPx)
+    return (shortEdgePx * OCR_SPOTLIGHT_OUTSET_RATIO).coerceIn(minimumPx, maximumPx)
+}
+
+fun expandOcrViewportQuad(
+    points: List<Offset>,
+    outsetPx: Float,
+): List<Offset> {
+    require(points.size == 4)
+    require(outsetPx >= 0f)
+    if (outsetPx == 0f) return points
+    val signedArea = points.indices.sumOf { index ->
+        val current = points[index]
+        val next = points[(index + 1) % points.size]
+        (current.x * next.y - next.x * current.y).toDouble()
+    }.toFloat() / 2f
+    if (abs(signedArea) <= 0.0001f) return points
+
+    val edgeDirections = points.indices.map { index ->
+        points[(index + 1) % points.size] - points[index]
+    }
+    if (edgeDirections.any { direction -> direction.getDistance() <= 0.0001f }) return points
+
+    val offsetEdges = points.indices.map { index ->
+        val start = points[index]
+        val direction = edgeDirections[index]
+        val length = direction.getDistance()
+        val outwardNormal = if (signedArea > 0f) {
+            Offset(direction.y, -direction.x) / length
+        } else {
+            Offset(-direction.y, direction.x) / length
+        }
+        OffsetEdge(
+            start = start + outwardNormal * outsetPx,
+            direction = direction,
+            outwardNormal = outwardNormal,
+        )
+    }
+    return points.indices.flatMap { index ->
+        val previous = offsetEdges[(index - 1 + points.size) % points.size]
+        val current = offsetEdges[index]
+        val intersection = intersectLines(previous, current)
+        if (
+            intersection != null &&
+            (intersection - points[index]).getDistance() <= outsetPx * OCR_SPOTLIGHT_MITER_LIMIT
+        ) {
+            listOf(intersection)
+        } else {
+            listOf(
+                points[index] + previous.outwardNormal * outsetPx,
+                points[index] + current.outwardNormal * outsetPx,
+            )
+        }
+    }
+}
+
+private data class OffsetEdge(
+    val start: Offset,
+    val direction: Offset,
+    val outwardNormal: Offset,
+)
+
+private fun intersectLines(first: OffsetEdge, second: OffsetEdge): Offset? {
+    val denominator = first.direction.cross(second.direction)
+    if (abs(denominator) <= 0.0001f) return null
+    val distance = (second.start - first.start).cross(second.direction) / denominator
+    return first.start + first.direction * distance
+}
+
+private fun Offset.cross(other: Offset): Float = x * other.y - y * other.x
+
+fun OcrPageResult.spotlightPolygons(): List<List<OcrPoint>> =
+    lines.map(OcrTextLine::points).ifEmpty { regions.map(OcrRegion::points) }
 
 fun OcrRegion.contains(point: OcrPoint): Boolean {
     var inside = false

@@ -17,11 +17,22 @@ data class OcrRegion(
     }
 }
 
+// Detector line boxes stay separate from CTC character boxes because CTC timing is accurate enough
+// for hit testing but too tight and approximate to define the visible spotlight boundary.
+data class OcrTextLine(
+    val points: List<OcrPoint>,
+) {
+    init {
+        require(points.size == 4)
+    }
+}
+
 data class OcrPageResult(
     val regions: List<OcrRegion>,
     val totalTimeMs: Long,
     val imageWidth: Int,
     val imageHeight: Int,
+    val lines: List<OcrTextLine> = emptyList(),
     val tileCount: Int = 1,
     val rawRegionCount: Int = regions.size,
 )

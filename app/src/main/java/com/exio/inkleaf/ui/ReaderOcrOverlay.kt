@@ -57,9 +57,13 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.exio.inkleaf.data.ocr.OcrPageResult
 import com.exio.inkleaf.data.ocr.OcrImageLayout
+import com.exio.inkleaf.data.ocr.OcrPoint
 import com.exio.inkleaf.data.ocr.OcrRegion
 import com.exio.inkleaf.data.ocr.calculateOcrImageLayout
+import com.exio.inkleaf.data.ocr.calculateOcrSpotlightOutset
+import com.exio.inkleaf.data.ocr.expandOcrViewportQuad
 import com.exio.inkleaf.data.ocr.hitTestOcrRegion
+import com.exio.inkleaf.data.ocr.spotlightPolygons
 
 @Composable
 internal fun ReaderOcrFocusLayer(
@@ -68,6 +72,7 @@ internal fun ReaderOcrFocusLayer(
     modifier: Modifier = Modifier,
 ) {
     val canBlur = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+    val density = LocalDensity.current
     Box(
         modifier = modifier
             .clearAndSetSemantics { }
@@ -82,7 +87,17 @@ internal fun ReaderOcrFocusLayer(
                 }
                 val spotlightPath = Path().apply {
                     fillType = PathFillType.NonZero
-                    result.regions.forEach { region -> addPath(region.toViewportPath(layout)) }
+                    val minimumOutsetPx = with(density) { 2.dp.toPx() }
+                    val maximumOutsetPx = with(density) { 6.dp.toPx() }
+                    result.spotlightPolygons().forEach { points ->
+                        addPath(
+                            points.toSpotlightViewportPath(
+                                layout = layout,
+                                minimumOutsetPx = minimumOutsetPx,
+                                maximumOutsetPx = maximumOutsetPx,
+                            )
+                        )
+                    }
                 }
                 val backgroundMask = Path.combine(
                     PathOperation.Difference,
@@ -138,11 +153,11 @@ internal fun ReaderOcrPageOverlay(
                 imageWidth = result.imageWidth,
                 imageHeight = result.imageHeight,
             )
-            val visualInsetPx = with(density) { 1.dp.toPx() }
+            val visualOutsetPx = with(density) { 1.dp.toPx() }
             val normalStroke = Stroke(width = with(density) { 1.dp.toPx() })
             val selectedStroke = Stroke(width = with(density) { 2.dp.toPx() })
             val regionPaths = result.regions.map { region ->
-                region to region.toViewportPath(layout, visualInsetPx)
+                region to region.points.toViewportPath(layout, visualOutsetPx)
             }
             onDrawBehind {
                 regionPaths.forEach { (region, path) ->
@@ -278,22 +293,37 @@ private fun OcrRegionSemantics(
     }
 }
 
-private fun OcrRegion.toViewportPath(
+private fun List<OcrPoint>.toViewportPath(
     layout: OcrImageLayout,
-    insetPx: Float = 0f,
-): Path = Path().apply {
-    val mappedPoints = points.map(layout::pageToViewport)
-    val center = Offset(
-        x = mappedPoints.sumOf { it.x.toDouble() }.toFloat() / mappedPoints.size,
-        y = mappedPoints.sumOf { it.y.toDouble() }.toFloat() / mappedPoints.size,
-    )
-    mappedPoints.forEachIndexed { index, point ->
-        val distance = (center - point).getDistance()
-        val fraction = if (distance == 0f) 0f else (insetPx / distance).coerceAtMost(0.2f)
-        val mapped = point + (center - point) * fraction
-        if (index == 0) moveTo(mapped.x, mapped.y) else lineTo(mapped.x, mapped.y)
+    outsetPx: Float = 0f,
+): Path = map(layout::pageToViewport).toClosedPath(outsetPx)
+
+private fun List<OcrPoint>.toSpotlightViewportPath(
+    layout: OcrImageLayout,
+    minimumOutsetPx: Float,
+    maximumOutsetPx: Float,
+): Path {
+    val mappedPoints = map(layout::pageToViewport)
+    val shortestEdgePx = mappedPoints.indices.minOf { index ->
+        val next = mappedPoints[(index + 1) % mappedPoints.size]
+        (next - mappedPoints[index]).getDistance()
     }
-    close()
+    val outsetPx = calculateOcrSpotlightOutset(
+        shortEdgePx = shortestEdgePx,
+        minimumPx = minimumOutsetPx,
+        maximumPx = maximumOutsetPx,
+    )
+    return mappedPoints.toClosedPath(outsetPx)
+}
+
+private fun List<Offset>.toClosedPath(outsetPx: Float = 0f): Path {
+    val pathPoints = if (outsetPx > 0f) expandOcrViewportQuad(this, outsetPx) else this
+    return Path().apply {
+        pathPoints.forEachIndexed { index, point ->
+            if (index == 0) moveTo(point.x, point.y) else lineTo(point.x, point.y)
+        }
+        close()
+    }
 }
 
 private fun hitTestCharacter(

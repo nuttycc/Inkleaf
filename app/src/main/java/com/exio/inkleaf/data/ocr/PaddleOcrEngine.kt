@@ -86,17 +86,15 @@ object PaddleOcrEngine {
                                 id = readingOrder,
                                 text = character.text,
                                 confidence = character.confidence,
-                                points = character.points.map { point ->
-                                    OcrPoint(
-                                        x = (point.x / width).coerceIn(0f, 1f),
-                                        y = (point.y / height).coerceIn(0f, 1f),
-                                    )
-                                },
+                                points = character.points.normalize(width, height),
                             )
                         },
                     totalTimeMs = totalTimeMs,
                     imageWidth = source.width,
                     imageHeight = source.height,
+                    lines = mergedRegions.map { region ->
+                        OcrTextLine(points = region.points.normalize(width, height))
+                    },
                     tileCount = tiles.size,
                     rawRegionCount = pixelRegions.size,
                 )
@@ -124,6 +122,16 @@ object PaddleOcrEngine {
             detModelAssetPath = model.detAssetPath,
             recModelAssetPath = model.recAssetPath,
             recConfigAssetPath = model.recConfigAssetPath,
+        )
+    }
+
+    private fun List<OcrPoint>.normalize(
+        width: Float,
+        height: Float,
+    ): List<OcrPoint> = map { point ->
+        OcrPoint(
+            x = (point.x / width).coerceIn(0f, 1f),
+            y = (point.y / height).coerceIn(0f, 1f),
         )
     }
 }

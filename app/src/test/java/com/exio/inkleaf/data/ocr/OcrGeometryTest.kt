@@ -25,6 +25,127 @@ class OcrGeometryTest {
     }
 
     @Test
+    fun spotlightPolygonExpandsOutsideDetectedTextBounds() {
+        val original = listOf(
+            Offset(10f, 10f),
+            Offset(30f, 10f),
+            Offset(30f, 110f),
+            Offset(10f, 110f),
+        )
+
+        val expanded = expandOcrViewportQuad(original, outsetPx = 2f)
+
+        assertEquals(8f, expanded.minOf(Offset::x), 0.01f)
+        assertEquals(8f, expanded.minOf(Offset::y), 0.01f)
+        assertEquals(32f, expanded.maxOf(Offset::x), 0.01f)
+        assertEquals(112f, expanded.maxOf(Offset::y), 0.01f)
+    }
+
+    @Test
+    fun spotlightExpansionSupportsReversePointWinding() {
+        val original = listOf(
+            Offset(10f, 10f),
+            Offset(10f, 110f),
+            Offset(30f, 110f),
+            Offset(30f, 10f),
+        )
+
+        val expanded = expandOcrViewportQuad(original, outsetPx = 2f)
+
+        assertEquals(8f, expanded.minOf(Offset::x), 0.01f)
+        assertEquals(8f, expanded.minOf(Offset::y), 0.01f)
+        assertEquals(32f, expanded.maxOf(Offset::x), 0.01f)
+        assertEquals(112f, expanded.maxOf(Offset::y), 0.01f)
+    }
+
+    @Test
+    fun spotlightExpansionLeavesDegenerateQuadUnchanged() {
+        val degenerate = listOf(
+            Offset(10f, 10f),
+            Offset(20f, 10f),
+            Offset(30f, 10f),
+            Offset(40f, 10f),
+        )
+
+        assertEquals(degenerate, expandOcrViewportQuad(degenerate, outsetPx = 2f))
+    }
+
+    @Test
+    fun spotlightExpansionOffsetsEveryEdgeOfPerspectiveQuad() {
+        val original = listOf(
+            Offset(90f, 0f),
+            Offset(100f, 0f),
+            Offset(100f, 10f),
+            Offset(0f, 10f),
+        )
+
+        val expanded = expandOcrViewportQuad(original, outsetPx = 2f)
+
+        original.indices.forEach { index ->
+            val midpoint = (original[index] + original[(index + 1) % original.size]) / 2f
+            assertTrue(minimumDistanceToEdges(midpoint, expanded) >= 1.99f)
+        }
+    }
+
+    @Test
+    fun characterOutlineOutsetKeepsTwoPixelStrokeOutsideOriginalQuad() {
+        val original = listOf(
+            Offset(10f, 10f),
+            Offset(30f, 10f),
+            Offset(30f, 30f),
+            Offset(10f, 30f),
+        )
+        val outlinePath = expandOcrViewportQuad(original, outsetPx = 1f)
+
+        original.indices.forEach { index ->
+            val midpoint = (original[index] + original[(index + 1) % original.size]) / 2f
+            assertTrue(minimumDistanceToEdges(midpoint, outlinePath) >= 0.99f)
+        }
+    }
+
+    @Test
+    fun spotlightOutsetUsesLineThicknessWithSafeMinimumAndMaximum() {
+        assertEquals(2f, calculateOcrSpotlightOutset(8f, 2f, 6f), 0.01f)
+        assertEquals(3f, calculateOcrSpotlightOutset(25f, 2f, 6f), 0.01f)
+        assertEquals(6f, calculateOcrSpotlightOutset(80f, 2f, 6f), 0.01f)
+    }
+
+    @Test
+    fun spotlightGeometryPrefersDetectedLineOverTightCharacterBox() {
+        val character = rectangleRegion(1, 0.45f, 0.2f, 0.55f, 0.8f, "字")
+        val line = OcrTextLine(
+            points = listOf(
+                OcrPoint(0.4f, 0.1f),
+                OcrPoint(0.6f, 0.1f),
+                OcrPoint(0.6f, 0.9f),
+                OcrPoint(0.4f, 0.9f),
+            ),
+        )
+        val result = OcrPageResult(
+            regions = listOf(character),
+            lines = listOf(line),
+            totalTimeMs = 1,
+            imageWidth = 100,
+            imageHeight = 100,
+        )
+
+        assertEquals(listOf(line.points), result.spotlightPolygons())
+    }
+
+    @Test
+    fun spotlightGeometryFallsBackToCharactersWithoutLineMetadata() {
+        val character = rectangleRegion(1, 0.45f, 0.2f, 0.55f, 0.8f, "字")
+        val result = OcrPageResult(
+            regions = listOf(character),
+            totalTimeMs = 1,
+            imageWidth = 100,
+            imageHeight = 100,
+        )
+
+        assertEquals(listOf(character.points), result.spotlightPolygons())
+    }
+
+    @Test
     fun polygonHitTestHandlesRotatedRegion() {
         val region = OcrRegion(
             id = 1,
@@ -319,4 +440,21 @@ class OcrGeometryTest {
             OcrPoint(left, bottom),
         ),
     )
+
+    private fun distanceToSegment(point: Offset, start: Offset, end: Offset): Float {
+        val edge = end - start
+        val lengthSquared = edge.x * edge.x + edge.y * edge.y
+        val projection = if (lengthSquared == 0f) {
+            0f
+        } else {
+            (((point.x - start.x) * edge.x + (point.y - start.y) * edge.y) / lengthSquared)
+                .coerceIn(0f, 1f)
+        }
+        return (point - (start + edge * projection)).getDistance()
+    }
+
+    private fun minimumDistanceToEdges(point: Offset, polygon: List<Offset>): Float =
+        polygon.indices.minOf { index ->
+            distanceToSegment(point, polygon[index], polygon[(index + 1) % polygon.size])
+        }
 }
