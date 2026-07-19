@@ -1,6 +1,6 @@
 name: Android Dev Check
 
-run-name: Android Dev Check (${{ github.event_name == 'workflow_dispatch' && inputs.task || 'check' }})
+run-name: Android Dev Check (${{ inputs.task }})
 
 on:
   workflow_dispatch:
@@ -14,10 +14,6 @@ on:
           - check
           - apk
           - full
-  push:
-    branches:
-      - "codex/**"
-      - "dev/**"
 
 permissions:
   contents: read
@@ -32,7 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      CHECK_LEVEL: ${{ github.event_name == 'workflow_dispatch' && inputs.task || 'check' }}
+      CHECK_LEVEL: ${{ inputs.task }}
 
     steps:
       - name: Checkout
