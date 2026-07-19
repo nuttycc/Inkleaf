@@ -149,6 +149,7 @@ import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
+import com.composables.icons.materialsymbols.outlined.R as MaterialSymbolsOutlinedR
 
 private const val OCR_SESSION_CACHE_PAGES = 8
 
@@ -895,9 +896,11 @@ private fun ReaderTopBar(
                             )
                         }
                         Icon(
-                            painter = painterResource(R.drawable.ic_image_sparkles),
+                            painter = painterResource(
+                                MaterialSymbolsOutlinedR.drawable
+                                    .materialsymbols_ic_photo_filter_outlined,
+                            ),
                             contentDescription = null,
-                            modifier = Modifier.size(20.dp),
                             tint = if (
                                 enhancementSelectionId != EnhancementSelectionIds.ORIGINAL
                             ) {
@@ -932,6 +935,15 @@ private fun ReaderTopBar(
                 ) {
                     DropdownMenuItem(
                         text = { Text(if (ocrBusy) "正在识别文字…" else "识别当前页文字") },
+                        leadingIcon = {
+                            Icon(
+                                painter = painterResource(
+                                    MaterialSymbolsOutlinedR.drawable
+                                        .materialsymbols_ic_document_scanner_outlined,
+                                ),
+                                contentDescription = null,
+                            )
+                        },
                         enabled = !ocrBusy,
                         onClick = {
                             showMoreMenu = false
