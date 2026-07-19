@@ -12,6 +12,7 @@ import org.opencv.core.Mat
 import org.opencv.core.MatOfPoint
 import org.opencv.core.MatOfPoint2f
 import org.opencv.core.Size
+import org.opencv.geometry.Geometry
 import org.opencv.imgproc.Imgproc
 import kotlin.math.max
 import kotlin.math.min
@@ -93,8 +94,8 @@ internal fun detectComicPanels(
             val contour2f = MatOfPoint2f(*contour.toArray())
             val approximation = MatOfPoint2f()
             try {
-                val perimeter = Imgproc.arcLength(contour2f, true)
-                Imgproc.approxPolyDP(
+                val perimeter = Geometry.arcLength(contour2f, true)
+                Geometry.approxPolyDP(
                     contour2f,
                     approximation,
                     perimeter * PANEL_APPROXIMATION_RATIO,
@@ -102,7 +103,7 @@ internal fun detectComicPanels(
                 )
                 if (approximation.total() != 4L) return@mapNotNull null
 
-                val rect = Imgproc.boundingRect(contour)
+                val rect = Geometry.boundingRect(contour)
                 val areaRatio = rect.area() / previewArea
                 if (areaRatio !in MIN_PANEL_AREA_RATIO..MAX_PANEL_AREA_RATIO) {
                     return@mapNotNull null
@@ -113,7 +114,7 @@ internal fun detectComicPanels(
                 ) {
                     return@mapNotNull null
                 }
-                val rectangularity = Imgproc.contourArea(contour) / rect.area().coerceAtLeast(1.0)
+                val rectangularity = Geometry.contourArea(contour) / rect.area().coerceAtLeast(1.0)
                 if (rectangularity < 0.55) return@mapNotNull null
 
                 PixelOcrPanel(
