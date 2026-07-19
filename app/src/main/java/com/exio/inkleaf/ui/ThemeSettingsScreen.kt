@@ -32,6 +32,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -48,7 +49,6 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -439,7 +439,21 @@ private fun AdvancedColorSheetContent(
         scrollState = scrollState,
         selectable = true,
     ) {
-        StandardSheetTitle("调色参数")
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "调色参数",
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.weight(1f),
+            )
+            IconButton(onClick = onReset) {
+                Icon(Icons.Filled.Refresh, contentDescription = "恢复推荐值")
+            }
+        }
         if (settings.useWallpaper) {
             InkleafInfoListItem(
                 headline = "动态配色正在生效",
@@ -463,14 +477,6 @@ private fun AdvancedColorSheetContent(
                 onClick = { onPickContrast(contrast) },
                 supportingContent = { Text(contrast.description) },
             )
-        }
-        TextButton(
-            onClick = onReset,
-            modifier = Modifier
-                .align(Alignment.End)
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-        ) {
-            Text("恢复推荐值")
         }
     }
 }
