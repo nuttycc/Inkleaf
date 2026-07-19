@@ -18,6 +18,8 @@ data class PageRenderRequest(
     }
 }
 
+data class PagePixelSize(val width: Int, val height: Int)
+
 /**
  * 一本已打开的漫画，对 UI 层隐藏底层是 zip/cbz 还是 PDF 目录。
  *
@@ -84,6 +86,18 @@ interface ComicVolume {
         globalPage: Int,
         maxPixels: Long,
     ): ImageBitmap? = null
+
+    /** Returns the page size used by a source's region-based OCR renderer, when supported. */
+    suspend fun ocrPageSize(globalPage: Int): PagePixelSize? = null
+
+    /** Renders one OCR region without allocating the complete page, when supported. */
+    suspend fun loadOcrPageRegion(
+        globalPage: Int,
+        left: Int,
+        top: Int,
+        width: Int,
+        height: Int,
+    ): Bitmap? = null
 
     /** 缩略图专用读取通道 */
     suspend fun loadThumbnailPageBytes(globalPage: Int): ByteArray

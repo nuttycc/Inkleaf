@@ -22,4 +22,6 @@ data class OcrPageResult(
     val totalTimeMs: Long,
     val imageWidth: Int,
     val imageHeight: Int,
+    val tileCount: Int = 1,
+    val rawRegionCount: Int = regions.size,
 )

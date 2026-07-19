@@ -48,7 +48,11 @@ class OCREngine(
             throw t
         }
         detectionEngine = DetectionEngine(ortManager, config)
-        recognitionEngine = RecognitionEngine(ortManager, configured.characterList)
+        recognitionEngine = RecognitionEngine(
+            ortManager = ortManager,
+            characterList = configured.characterList,
+            imageMode = configured.imageMode,
+        )
     }
 
     fun run(bitmap: Bitmap): OCREngineResult {
@@ -115,17 +119,28 @@ class OCREngine(
             while (next < sortedBoxes.size && batchCrops.size < batchSize) {
                 val crop = QuadTextCrop.crop(srcMat, sortedBoxes[next])
                 if (crop.rows() > 0 && crop.cols() > 0) {
+                    if (QuadTextCrop.isVertical(crop) && batchCrops.isNotEmpty()) {
+                        crop.release()
+                        break
+                    }
                     batchCrops.add(crop)
                     batchBoxIndices.add(next)
+                    next++
+                    if (QuadTextCrop.isVertical(crop)) break
                 } else {
                     crop.release()
+                    next++
                 }
-                next++
             }
 
             try {
                 if (batchCrops.isNotEmpty()) {
-                    val batchResult = recognitionEngine.recognize(batchCrops)
+                    val batchResult =
+                        if (batchCrops.size == 1 && QuadTextCrop.isVertical(batchCrops[0])) {
+                            recognitionEngine.recognizeVertical(batchCrops[0])
+                        } else {
+                            recognitionEngine.recognize(batchCrops)
+                        }
                     totalRecPreMs += batchResult.preprocessMs
                     totalRecInfMs += batchResult.inferenceMs
                     totalRecPostMs += batchResult.postprocessMs

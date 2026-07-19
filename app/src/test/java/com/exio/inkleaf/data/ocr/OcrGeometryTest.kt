@@ -2,6 +2,7 @@ package com.exio.inkleaf.data.ocr
 
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.IntSize
+import androidx.exifinterface.media.ExifInterface
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -82,6 +83,55 @@ class OcrGeometryTest {
         assertEquals(listOf(7, 2), state.selectedIds.toList())
     }
 
+    @Test
+    fun tilingCoversPageAndKeepsOverlap() {
+        val tiles = calculateOcrTiles(pageWidth = 3000, pageHeight = 2000)
+
+        assertTrue(tiles.size > 1)
+        assertEquals(0, tiles.first().left)
+        assertEquals(0, tiles.first().top)
+        assertTrue(tiles.any { it.left + it.width == 3000 })
+        assertTrue(tiles.any { it.top + it.height == 2000 })
+    }
+
+    @Test
+    fun overlappingTileResultsAreMerged() {
+        val firstTile = OcrTileBounds(0, 0, 500, 500)
+        val secondTile = OcrTileBounds(300, 0, 500, 500)
+        val first = pixelRectangle(350f, 100f, 480f, 180f, confidence = 0.8f, tile = firstTile)
+        val duplicate = pixelRectangle(352f, 103f, 482f, 182f, confidence = 0.9f, tile = secondTile)
+        val separate = pixelRectangle(600f, 400f, 760f, 480f, confidence = 0.7f, tile = secondTile)
+
+        val merged = mergeOverlappingOcrRegions(listOf(first, duplicate, separate))
+
+        assertEquals(2, merged.size)
+        assertTrue(merged.contains(duplicate))
+        assertTrue(merged.contains(separate))
+    }
+
+    @Test
+    fun overlappingResultsFromSameTileAreNotMerged() {
+        val tile = OcrTileBounds(0, 0, 500, 500)
+        val first = pixelRectangle(100f, 100f, 300f, 180f, 0.8f, tile)
+        val second = pixelRectangle(105f, 103f, 302f, 182f, 0.9f, tile)
+
+        assertEquals(2, mergeOverlappingOcrRegions(listOf(first, second)).size)
+    }
+
+    @Test
+    fun exifRotationMapsOrientedTileBackToEncodedPixels() {
+        val tile = OcrTileBounds(left = 10, top = 20, width = 30, height = 40)
+
+        assertEquals(
+            OcrPixelRect(left = 20, top = 60, right = 60, bottom = 90),
+            mapOrientedRectToSource(tile, ExifInterface.ORIENTATION_ROTATE_90, 200, 100),
+        )
+        assertEquals(
+            OcrPixelRect(left = 140, top = 10, right = 180, bottom = 40),
+            mapOrientedRectToSource(tile, ExifInterface.ORIENTATION_ROTATE_270, 200, 100),
+        )
+    }
+
     private fun rectangleRegion(
         id: Int,
         left: Float,
@@ -99,5 +149,24 @@ class OcrGeometryTest {
             OcrPoint(right, bottom),
             OcrPoint(left, bottom),
         ),
+    )
+
+    private fun pixelRectangle(
+        left: Float,
+        top: Float,
+        right: Float,
+        bottom: Float,
+        confidence: Float,
+        tile: OcrTileBounds,
+    ) = PixelOcrRegion(
+        text = "text",
+        confidence = confidence,
+        points = listOf(
+            OcrPoint(left, top),
+            OcrPoint(right, top),
+            OcrPoint(right, bottom),
+            OcrPoint(left, bottom),
+        ),
+        sourceTile = tile,
     )
 }

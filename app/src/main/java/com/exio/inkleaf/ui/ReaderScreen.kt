@@ -2,9 +2,9 @@ package com.exio.inkleaf.ui
 
 import android.Manifest
 import android.app.Activity
-import android.content.Context
-import android.content.ClipboardManager
 import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.util.Log
@@ -102,9 +102,9 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntSize
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.DpOffset
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
@@ -138,7 +138,7 @@ import com.exio.inkleaf.data.enhancement.loadEnhancementSourceBitmap
 import com.exio.inkleaf.data.ocr.OcrPageResult
 import com.exio.inkleaf.data.ocr.OcrSelectionSession
 import com.exio.inkleaf.data.ocr.PaddleOcrEngine
-import com.exio.inkleaf.data.ocr.loadOcrPageBitmap
+import com.exio.inkleaf.data.ocr.openOcrPageSource
 import com.exio.inkleaf.data.ocr.selectedOcrText
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
@@ -423,19 +423,21 @@ private fun ComicPager(
         } else if (ocrProcessingPage == null) {
             ocrProcessingPage = page
             scope.launch {
-                val source = runCatching { loadOcrPageBitmap(volume, page) }
-                val outcome = source.mapCatching { bitmap ->
+                val source = runCatching { openOcrPageSource(volume, page) }
+                val outcome = source.mapCatching { pageSource ->
                     try {
-                        PaddleOcrEngine.recognize(context, bitmap)
+                        PaddleOcrEngine.recognize(context, pageSource)
                     } finally {
-                        if (!bitmap.isRecycled) bitmap.recycle()
+                        pageSource.close()
                     }
                 }
                 ocrProcessingPage = null
                 outcome.onSuccess { result ->
                     Log.d(
                         "InkleafOcr",
-                        "page=$page lines=${result.regions.size} totalMs=${result.totalTimeMs}",
+                        "page=$page image=${result.imageWidth}x${result.imageHeight} " +
+                                "tiles=${result.tileCount} raw=${result.rawRegionCount} " +
+                                "lines=${result.regions.size} totalMs=${result.totalTimeMs}",
                     )
                     ocrResultOrder.remove(page)
                     if (result.regions.isEmpty()) {

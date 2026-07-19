@@ -76,12 +76,9 @@ object QuadTextCrop {
         )
         m.release()
 
-        if (dst.rows().toDouble() / dst.cols() >= VERTICAL_CROP_RATIO) {
-            val rotated = Mat()
-            Core.rotate(dst, rotated, Core.ROTATE_90_COUNTERCLOCKWISE)
-            dst.release()
-            return rotated
-        }
         return dst
     }
+
+    fun isVertical(crop: Mat): Boolean =
+        crop.cols() > 0 && crop.rows().toDouble() / crop.cols() >= VERTICAL_CROP_RATIO
 }

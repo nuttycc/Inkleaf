@@ -16,11 +16,13 @@ package com.paddle.ocr.engine
 
 import com.paddle.ocr.postprocess.CTCDecoder
 import com.paddle.ocr.preprocess.RecPreprocessor
+import org.opencv.core.Core
 import org.opencv.core.Mat
 
 class RecognitionEngine(
     private val ortManager: ORTSessionManager,
     private val characterList: List<String>,
+    private val imageMode: String,
 ) {
     data class RecognitionResult(
         val texts: List<Pair<String, Float>>,
@@ -34,7 +36,7 @@ class RecognitionEngine(
     fun recognize(crops: List<Mat>): RecognitionResult {
         // Preprocess
         val preStart = System.currentTimeMillis()
-        val preResult = RecPreprocessor.preprocessBatch(crops)
+        val preResult = RecPreprocessor.preprocessBatch(crops, imageMode)
         val preprocessMs = System.currentTimeMillis() - preStart
 
         // Inference
@@ -56,6 +58,38 @@ class RecognitionEngine(
             postprocessMs = postprocessMs,
             timeMs = timeMs,
             inputShape = inputShape,
+        )
+    }
+
+    fun recognizeVertical(crop: Mat): RecognitionResult {
+        val clockwise = Mat()
+        Core.rotate(crop, clockwise, Core.ROTATE_90_CLOCKWISE)
+        val clockwiseResult = try {
+            recognize(listOf(clockwise))
+        } finally {
+            clockwise.release()
+        }
+
+        val counterClockwise = Mat()
+        Core.rotate(crop, counterClockwise, Core.ROTATE_90_COUNTERCLOCKWISE)
+        val counterClockwiseResult = try {
+            recognize(listOf(counterClockwise))
+        } finally {
+            counterClockwise.release()
+        }
+
+        val clockwiseConfidence = clockwiseResult.texts.firstOrNull()?.second ?: 0f
+        val counterClockwiseConfidence = counterClockwiseResult.texts.firstOrNull()?.second ?: 0f
+        val chosen = if (clockwiseConfidence >= counterClockwiseConfidence) {
+            clockwiseResult
+        } else {
+            counterClockwiseResult
+        }
+        return chosen.copy(
+            preprocessMs = clockwiseResult.preprocessMs + counterClockwiseResult.preprocessMs,
+            inferenceMs = clockwiseResult.inferenceMs + counterClockwiseResult.inferenceMs,
+            postprocessMs = clockwiseResult.postprocessMs + counterClockwiseResult.postprocessMs,
+            timeMs = clockwiseResult.timeMs + counterClockwiseResult.timeMs,
         )
     }
 }

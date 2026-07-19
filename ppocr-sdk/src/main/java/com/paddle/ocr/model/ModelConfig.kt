@@ -19,6 +19,7 @@ import com.paddle.ocr.util.YamlUtils
 
 data class ModelConfig(
     val characterList: List<String>,
+    val imageMode: String,
 ) {
     companion object {
         fun parse(context: Context, assetPath: String): ModelConfig {
@@ -38,8 +39,21 @@ data class ModelConfig(
                 if (lastOrNull() != " ") add(" ")
             }
 
-            return ModelConfig(characterList = charListWithSpace)
+            return ModelConfig(
+                characterList = charListWithSpace,
+                imageMode = extractImageMode(content),
+            )
         }
+
+        private fun extractImageMode(content: String): String = content
+            .lineSequence()
+            .map { it.trim() }
+            .firstOrNull { it.startsWith("img_mode:") }
+            ?.substringAfter(':')
+            ?.trim()
+            ?.uppercase()
+            ?.takeIf { it == "BGR" || it == "RGB" }
+            ?: "RGB"
 
         private fun extractCharacterDict(content: String, assetPath: String): List<String> {
             val lines = content.replace("\r\n", "\n").replace('\r', '\n').lines()

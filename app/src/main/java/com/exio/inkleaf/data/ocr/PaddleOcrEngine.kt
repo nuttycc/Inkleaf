@@ -2,7 +2,6 @@
 package com.exio.inkleaf.data.ocr
 
 import android.content.Context
-import android.graphics.Bitmap
 import com.paddle.ocr.EngineConfig
 import com.paddle.ocr.PaddleOCR
 import com.paddle.ocr.PaddleOCRConfig
@@ -31,18 +30,46 @@ object PaddleOcrEngine {
     private val releaseScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var engine: PaddleOCR? = null
 
-    suspend fun recognize(context: Context, bitmap: Bitmap): OcrPageResult = mutex.withLock {
+    internal suspend fun recognize(context: Context, source: OcrPageSource): OcrPageResult =
+        mutex.withLock {
         val ocr = engine ?: create(context).also { engine = it }
-        val result = ocr.recognize(bitmap)
-        val width = bitmap.width.toFloat()
-        val height = bitmap.height.toFloat()
+            val width = source.width.toFloat()
+            val height = source.height.toFloat()
+            val pixelRegions = mutableListOf<PixelOcrRegion>()
+            var totalTimeMs = 0L
+
+            val tiles = calculateOcrTiles(source.width, source.height)
+            tiles.forEach { tileBounds ->
+                val tile = source.load(tileBounds)
+                try {
+                    val tileResult = ocr.recognize(tile)
+                    totalTimeMs += tileResult.totalTimeMs
+                    pixelRegions += tileResult.results.map { item ->
+                        PixelOcrRegion(
+                            text = item.text,
+                            confidence = item.confidence,
+                            points = item.box.points.map { point ->
+                                OcrPoint(
+                                    x = point.x + tileBounds.left,
+                                    y = point.y + tileBounds.top,
+                                )
+                            },
+                            sourceTile = tileBounds,
+                        )
+                    }
+                } finally {
+                    tile.recycle()
+                }
+            }
+
+            val mergedRegions = mergeOverlappingOcrRegions(pixelRegions)
         return@withLock OcrPageResult(
-            regions = result.results.mapIndexed { index, item ->
+            regions = mergedRegions.mapIndexed { index, item ->
                 OcrRegion(
                     id = index,
                     text = item.text,
                     confidence = item.confidence,
-                    points = item.box.points.map { point ->
+                    points = item.points.map { point ->
                         OcrPoint(
                             x = (point.x / width).coerceIn(0f, 1f),
                             y = (point.y / height).coerceIn(0f, 1f),
@@ -50,9 +77,11 @@ object PaddleOcrEngine {
                     },
                 )
             },
-            totalTimeMs = result.totalTimeMs,
-            imageWidth = bitmap.width,
-            imageHeight = bitmap.height,
+            totalTimeMs = totalTimeMs,
+            imageWidth = source.width,
+            imageHeight = source.height,
+            tileCount = tiles.size,
+            rawRegionCount = pixelRegions.size,
         )
     }
 

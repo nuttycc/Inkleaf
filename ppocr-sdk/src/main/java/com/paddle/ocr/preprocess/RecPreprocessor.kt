@@ -30,20 +30,28 @@ object RecPreprocessor {
     private const val FIXED_HEIGHT = 48
     private const val MAX_IMG_W = 3200
 
-    fun preprocessBatch(crops: List<Mat>): RecPreprocessResult {
-        // Convert BGR to RGB and resize to fixed height while preserving aspect ratio
+    fun preprocessBatch(crops: List<Mat>, imageMode: String): RecPreprocessResult {
         val resizedMats = mutableListOf<Mat>()
         for (crop in crops) {
-            // Convert BGR to RGB (model expects RGB input)
-            val rgb = Mat()
-            Imgproc.cvtColor(crop, rgb, Imgproc.COLOR_BGR2RGB)
-            val h = rgb.rows()
-            val w = rgb.cols()
+            val input = if (imageMode == "RGB") {
+                Mat().also { Imgproc.cvtColor(crop, it, Imgproc.COLOR_BGR2RGB) }
+            } else {
+                crop
+            }
+            val h = input.rows()
+            val w = input.cols()
             val aspectRatio = if (h > 0) w.toDouble() / h else 1.0
             val newW = ceil(FIXED_HEIGHT * aspectRatio).toInt().coerceAtMost(MAX_IMG_W)
             val dst = Mat()
-            Imgproc.resize(rgb, dst, Size(newW.toDouble(), FIXED_HEIGHT.toDouble()), 0.0, 0.0, Imgproc.INTER_LINEAR)
-            rgb.release()
+            Imgproc.resize(
+                input,
+                dst,
+                Size(newW.toDouble(), FIXED_HEIGHT.toDouble()),
+                0.0,
+                0.0,
+                Imgproc.INTER_LINEAR
+            )
+            if (input !== crop) input.release()
             resizedMats.add(dst)
         }
 

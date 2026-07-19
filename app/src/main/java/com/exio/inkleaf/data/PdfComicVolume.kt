@@ -16,6 +16,8 @@ import kotlin.concurrent.withLock
 import kotlin.coroutines.coroutineContext
 import kotlin.math.sqrt
 
+private const val OCR_PDF_RENDER_SCALE = 4.0
+
 /**
  * 把包含多个 PDF 文件的目录作为一本书来阅读。
  *
@@ -150,6 +152,51 @@ class PdfComicVolume(
             request = null,
             maxPixels = maxPixels,
         )?.asImageBitmap()
+    }
+
+    override suspend fun ocrPageSize(globalPage: Int): PagePixelSize? =
+        withContext(Dispatchers.IO) {
+            val (chapter, page) = globalToChapterPage(globalPage)
+            pdfiumLock.withLock {
+                val opened = openDocumentLocked(chapter) ?: return@withLock null
+                opened.document.openPage(page)
+                calculateOcrPdfPageSize(
+                    pageWidthPoints = opened.core.getPageWidthPoint(page),
+                    pageHeightPoints = opened.core.getPageHeightPoint(page),
+                )
+            }
+        }
+
+    override suspend fun loadOcrPageRegion(
+        globalPage: Int,
+        left: Int,
+        top: Int,
+        width: Int,
+        height: Int,
+    ): Bitmap? = withContext(Dispatchers.IO) {
+        val (chapter, page) = globalToChapterPage(globalPage)
+        pdfiumLock.withLock {
+            val opened = openDocumentLocked(chapter) ?: return@withLock null
+            opened.document.openPage(page)
+            val pageSize = calculateOcrPdfPageSize(
+                pageWidthPoints = opened.core.getPageWidthPoint(page),
+                pageHeightPoints = opened.core.getPageHeightPoint(page),
+            )
+            require(left >= 0 && top >= 0 && width > 0 && height > 0)
+            require(left + width <= pageSize.width && top + height <= pageSize.height)
+            Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { bitmap ->
+                bitmap.eraseColor(android.graphics.Color.WHITE)
+                opened.core.renderPageBitmap(
+                    page,
+                    bitmap,
+                    -left,
+                    -top,
+                    pageSize.width,
+                    pageSize.height,
+                    true,
+                )
+            }
+        }
     }
 
     override suspend fun loadThumbnailPageBytes(globalPage: Int): ByteArray = withContext(Dispatchers.IO) {
@@ -329,6 +376,12 @@ class PdfComicVolume(
         val pfd: ParcelFileDescriptor,
     )
 }
+
+internal fun calculateOcrPdfPageSize(pageWidthPoints: Int, pageHeightPoints: Int): PagePixelSize =
+    PagePixelSize(
+        width = (pageWidthPoints * OCR_PDF_RENDER_SCALE).toInt().coerceAtLeast(1),
+        height = (pageHeightPoints * OCR_PDF_RENDER_SCALE).toInt().coerceAtLeast(1),
+    )
 
 internal data class PdfRenderSize(val width: Int, val height: Int)
 
