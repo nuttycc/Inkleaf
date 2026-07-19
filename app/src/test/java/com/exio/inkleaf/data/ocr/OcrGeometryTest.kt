@@ -54,13 +54,61 @@ class OcrGeometryTest {
     }
 
     @Test
-    fun selectedTextUsesClickOrder() {
+    fun selectedTextUsesPageReadingOrderWithoutLineBreaks() {
         val regions = listOf(
-            rectangleRegion(1, 0f, 0f, 0.2f, 0.2f, "first"),
-            rectangleRegion(2, 0.3f, 0.3f, 0.5f, 0.5f, "second"),
+            rectangleRegion(1, 0f, 0f, 0.2f, 0.2f, "先"),
+            rectangleRegion(2, 0.3f, 0.3f, 0.5f, 0.5f, "后"),
         )
 
-        assertEquals("second\nfirst", selectedOcrText(regions, listOf(2, 1)))
+        assertEquals("先后", selectedOcrText(regions, setOf(2, 1)))
+    }
+
+    @Test
+    fun selectedVerticalTextReadsTopToBottomThenRightToLeft() {
+        val regions = listOf(
+            rectangleRegion(
+                id = 1,
+                left = 0.7f,
+                top = 0.1f,
+                right = 0.8f,
+                bottom = 0.2f,
+                text = "右",
+            ),
+            rectangleRegion(
+                id = 2,
+                left = 0.7f,
+                top = 0.25f,
+                right = 0.8f,
+                bottom = 0.35f,
+                text = "列",
+            ),
+            rectangleRegion(
+                id = 3,
+                left = 0.4f,
+                top = 0.1f,
+                right = 0.5f,
+                bottom = 0.2f,
+                text = "左",
+            ),
+        )
+
+        assertEquals("右列左", selectedOcrText(regions, setOf(3, 2, 1)))
+    }
+
+    @Test
+    fun expandedHitTestChoosesCharacterNearestTouchPoint() {
+        val left = rectangleRegion(1, 0.1f, 0.4f, 0.2f, 0.6f)
+        val right = rectangleRegion(2, 0.3f, 0.4f, 0.4f, 0.6f)
+
+        assertEquals(
+            2,
+            hitTestOcrRegion(
+                regions = listOf(left, right),
+                point = OcrPoint(0.29f, 0.5f),
+                expansionX = 0.12f,
+                expansionY = 0.12f,
+            )?.id,
+        )
     }
 
     @Test
@@ -81,6 +129,38 @@ class OcrGeometryTest {
             .toggle(regionId = 2)
 
         assertEquals(listOf(7, 2), state.selectedIds.toList())
+    }
+
+    @Test
+    fun dragSelectionOnlyAddsCharacters() {
+        val state = OcrSelectionSession()
+            .enter(page = 1)
+            .toggle(regionId = 7)
+            .add(regionId = 7)
+            .add(regionId = 2)
+
+        assertEquals(listOf(7, 2), state.selectedIds.toList())
+    }
+
+    @Test
+    fun clearingAfterCopyKeepsOcrOverlayActive() {
+        val state = OcrSelectionSession()
+            .enter(page = 1)
+            .toggle(regionId = 7)
+            .clearSelection()
+
+        assertEquals(1, state.activePage)
+        assertTrue(state.selectedIds.isEmpty())
+    }
+
+    @Test
+    fun exitingDropsPendingSelection() {
+        val state = OcrSelectionSession()
+            .enter(page = 1)
+            .toggle(regionId = 7)
+            .exit()
+
+        assertEquals(OcrSelectionSession(), state)
     }
 
     @Test
@@ -116,6 +196,57 @@ class OcrGeometryTest {
         val second = pixelRectangle(105f, 103f, 302f, 182f, 0.9f, tile)
 
         assertEquals(2, mergeOverlappingOcrRegions(listOf(first, second)).size)
+    }
+
+    @Test
+    fun overlappingTileLineFragmentsKeepUniqueCharactersAndRemoveDuplicates() {
+        val firstTile = OcrTileBounds(0, 0, 500, 500)
+        val secondTile = OcrTileBounds(300, 0, 500, 500)
+        val first = pixelRectangle(300f, 100f, 500f, 180f, 0.9f, firstTile).copy(
+            characters = listOf(
+                pixelCharacter("A", 320f, 100f, 370f, 180f),
+                pixelCharacter("B", 400f, 100f, 450f, 180f),
+            ),
+        )
+        val second = pixelRectangle(400f, 100f, 600f, 180f, 0.8f, secondTile).copy(
+            characters = listOf(
+                pixelCharacter("B", 402f, 102f, 452f, 182f),
+                pixelCharacter("C", 520f, 100f, 570f, 180f),
+            ),
+        )
+
+        val mergedCharacters = mergeOverlappingOcrRegions(listOf(first, second))
+            .flatMap(PixelOcrRegion::characters)
+
+        assertEquals("ABC", mergedCharacters.joinToString("") { it.text })
+    }
+
+    @Test
+    fun horizontalReadingOrderKeepsJitteredRowLeftToRight() {
+        val tile = OcrTileBounds(0, 0, 1000, 1000)
+        val right = pixelRectangle(400f, 100f, 600f, 160f, 0.9f, tile)
+        val left = pixelRectangle(100f, 104f, 300f, 164f, 0.9f, tile)
+
+        assertEquals(
+            listOf(left, right),
+            sortPixelOcrRegionsInReadingOrder(listOf(right, left)),
+        )
+    }
+
+    @Test
+    fun verticalReadingOrderKeepsColumnsRightToLeft() {
+        val tile = OcrTileBounds(0, 0, 1000, 1000)
+        val left = pixelRectangle(
+            100f, 50f, 160f, 350f, 0.9f, tile, isVertical = true,
+        )
+        val right = pixelRectangle(
+            400f, 120f, 460f, 420f, 0.9f, tile, isVertical = true,
+        )
+
+        assertEquals(
+            listOf(right, left),
+            sortPixelOcrRegionsInReadingOrder(listOf(left, right)),
+        )
     }
 
     @Test
@@ -158,8 +289,8 @@ class OcrGeometryTest {
         bottom: Float,
         confidence: Float,
         tile: OcrTileBounds,
+        isVertical: Boolean = false,
     ) = PixelOcrRegion(
-        text = "text",
         confidence = confidence,
         points = listOf(
             OcrPoint(left, top),
@@ -168,5 +299,24 @@ class OcrGeometryTest {
             OcrPoint(left, bottom),
         ),
         sourceTile = tile,
+        characters = listOf(pixelCharacter("text", left, top, right, bottom)),
+        isVertical = isVertical,
+    )
+
+    private fun pixelCharacter(
+        text: String,
+        left: Float,
+        top: Float,
+        right: Float,
+        bottom: Float,
+    ) = PixelOcrCharacter(
+        text = text,
+        confidence = 0.9f,
+        points = listOf(
+            OcrPoint(left, top),
+            OcrPoint(right, top),
+            OcrPoint(right, bottom),
+            OcrPoint(left, bottom),
+        ),
     )
 }

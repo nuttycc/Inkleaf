@@ -16,10 +16,17 @@ internal data class OcrTileBounds(
 )
 
 internal data class PixelOcrRegion(
-    val text: String,
     val confidence: Float,
     val points: List<OcrPoint>,
     val sourceTile: OcrTileBounds,
+    val characters: List<PixelOcrCharacter> = emptyList(),
+    val isVertical: Boolean = false,
+)
+
+internal data class PixelOcrCharacter(
+    val text: String,
+    val confidence: Float,
+    val points: List<OcrPoint>,
 )
 
 internal fun calculateOcrTiles(
@@ -50,14 +57,118 @@ internal fun mergeOverlappingOcrRegions(regions: List<PixelOcrRegion>): List<Pix
     val accepted = mutableListOf<PixelOcrRegion>()
     regions.sortedWith(
         compareByDescending<PixelOcrRegion> { distanceFromTileEdge(it) }
+            .thenByDescending { it.characters.size }
             .thenByDescending { it.confidence }
     ).forEach { candidate ->
-        if (accepted.none { existing -> samePhysicalRegion(existing, candidate) }) {
+        if (accepted.none { existing -> candidateDuplicatesExisting(existing, candidate) }) {
             accepted += candidate
         }
     }
-    return accepted.sortedWith(compareBy({ boundsOf(it).top }, { boundsOf(it).left }))
+    return sortPixelOcrRegionsInReadingOrder(deduplicateCharacters(accepted))
 }
+
+private fun candidateDuplicatesExisting(
+    existing: PixelOcrRegion,
+    candidate: PixelOcrRegion,
+): Boolean = samePhysicalRegion(existing, candidate) &&
+        candidate.characters.isNotEmpty() &&
+        candidate.characters.all { candidateCharacter ->
+            existing.characters.any { existingCharacter ->
+                samePhysicalCharacter(existingCharacter, candidateCharacter)
+            }
+        }
+
+private fun deduplicateCharacters(
+    regions: List<PixelOcrRegion>,
+): List<PixelOcrRegion> {
+    val acceptedCharacters = mutableListOf<Pair<OcrTileBounds, PixelOcrCharacter>>()
+    return regions.mapNotNull { region ->
+        val uniqueCharacters = region.characters.filter { candidate ->
+            acceptedCharacters.none { (sourceTile, existing) ->
+                sourceTile != region.sourceTile &&
+                        tilesOverlap(sourceTile, region.sourceTile) &&
+                        samePhysicalCharacter(existing, candidate)
+            }
+        }
+        uniqueCharacters.forEach { character ->
+            acceptedCharacters += region.sourceTile to character
+        }
+        region.copy(characters = uniqueCharacters).takeIf { uniqueCharacters.isNotEmpty() }
+    }
+}
+
+private fun samePhysicalCharacter(
+    first: PixelOcrCharacter,
+    second: PixelOcrCharacter,
+): Boolean {
+    val a = boundsOf(first)
+    val b = boundsOf(second)
+    val intersectionWidth = max(0f, min(a.right, b.right) - max(a.left, b.left))
+    val intersectionHeight = max(0f, min(a.bottom, b.bottom) - max(a.top, b.top))
+    val intersection = intersectionWidth * intersectionHeight
+    if (intersection <= 0f) return false
+
+    val overlapOfSmaller = intersection / min(a.area, b.area).coerceAtLeast(1f)
+    val centerDistance = hypot(a.centerX - b.centerX, a.centerY - b.centerY)
+    val maxDimension = max(max(a.width, a.height), max(b.width, b.height)).coerceAtLeast(1f)
+    return overlapOfSmaller >= 0.45f && centerDistance <= maxDimension * 0.4f
+}
+
+internal fun sortPixelOcrRegionsInReadingOrder(
+    regions: List<PixelOcrRegion>,
+): List<PixelOcrRegion> {
+    val verticalCharacterCount = regions
+        .filter(PixelOcrRegion::isVertical)
+        .sumOf { region -> region.characters.size.coerceAtLeast(1) }
+    val horizontalCharacterCount = regions
+        .filterNot(PixelOcrRegion::isVertical)
+        .sumOf { region -> region.characters.size.coerceAtLeast(1) }
+    return if (verticalCharacterCount > horizontalCharacterCount) {
+        val sorted = regions.sortedWith(
+            compareByDescending<PixelOcrRegion> { boundsOf(it).centerX }
+                .thenBy { boundsOf(it).top }
+        ).toMutableList()
+        bubbleNearbyLines(sorted) { previous, current ->
+            sameColumn(previous, current) && current.top < previous.top
+        }
+        sorted
+    } else {
+        val sorted = regions.sortedWith(
+            compareBy<PixelOcrRegion> { boundsOf(it).top }
+                .thenBy { boundsOf(it).left }
+        ).toMutableList()
+        bubbleNearbyLines(sorted) { previous, current ->
+            sameRow(previous, current) && current.left < previous.left
+        }
+        sorted
+    }
+}
+
+private fun bubbleNearbyLines(
+    regions: MutableList<PixelOcrRegion>,
+    shouldSwap: (RegionBounds, RegionBounds) -> Boolean,
+) {
+    for (index in 1 until regions.size) {
+        var currentIndex = index
+        while (currentIndex > 0) {
+            val previousBounds = boundsOf(regions[currentIndex - 1])
+            val currentBounds = boundsOf(regions[currentIndex])
+            if (!shouldSwap(previousBounds, currentBounds)) break
+            val previous = regions[currentIndex - 1]
+            regions[currentIndex - 1] = regions[currentIndex]
+            regions[currentIndex] = previous
+            currentIndex--
+        }
+    }
+}
+
+private fun sameRow(first: RegionBounds, second: RegionBounds): Boolean =
+    kotlin.math.abs(first.centerY - second.centerY) <=
+            min(first.height, second.height).coerceAtLeast(1f) * 0.5f
+
+private fun sameColumn(first: RegionBounds, second: RegionBounds): Boolean =
+    kotlin.math.abs(first.centerX - second.centerX) <=
+            min(first.width, second.width).coerceAtLeast(1f) * 0.5f
 
 private fun tileStarts(length: Int, tileSize: Int, overlap: Int): List<Int> {
     if (length <= tileSize) return listOf(0)
@@ -123,7 +234,11 @@ private data class RegionBounds(
     val right: Float,
     val bottom: Float,
 ) {
+    val width: Float get() = (right - left).coerceAtLeast(0f)
+    val height: Float get() = (bottom - top).coerceAtLeast(0f)
     val area: Float get() = (right - left).coerceAtLeast(0f) * (bottom - top).coerceAtLeast(0f)
+    val centerX: Float get() = (left + right) / 2f
+    val centerY: Float get() = (top + bottom) / 2f
 }
 
 private fun boundsOf(region: PixelOcrRegion): RegionBounds = RegionBounds(
@@ -131,4 +246,11 @@ private fun boundsOf(region: PixelOcrRegion): RegionBounds = RegionBounds(
     top = region.points.minOf { it.y },
     right = region.points.maxOf { it.x },
     bottom = region.points.maxOf { it.y },
+)
+
+private fun boundsOf(character: PixelOcrCharacter): RegionBounds = RegionBounds(
+    left = character.points.minOf { it.x },
+    top = character.points.minOf { it.y },
+    right = character.points.maxOf { it.x },
+    bottom = character.points.maxOf { it.y },
 )

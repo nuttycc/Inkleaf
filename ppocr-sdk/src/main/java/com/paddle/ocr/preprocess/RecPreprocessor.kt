@@ -24,6 +24,7 @@ import kotlin.math.ceil
 data class RecPreprocessResult(
     val tensorData: FloatArray,
     val shape: LongArray,
+    val resizedWidths: IntArray,
 )
 
 object RecPreprocessor {
@@ -69,7 +70,8 @@ object RecPreprocessor {
         }
         resizedMats.clear()
 
-        val maxW = floatMats.maxOf { it.cols() }
+        val resizedWidths = IntArray(floatMats.size) { index -> floatMats[index].cols() }
+        val maxW = resizedWidths.maxOrNull() ?: error("Recognition batch must not be empty")
         val n = floatMats.size
 
         // Pad to max width
@@ -108,6 +110,7 @@ object RecPreprocessor {
         return RecPreprocessResult(
             tensorData = tensorData,
             shape = longArrayOf(n.toLong(), 3, FIXED_HEIGHT.toLong(), maxW.toLong()),
+            resizedWidths = resizedWidths,
         )
     }
 }

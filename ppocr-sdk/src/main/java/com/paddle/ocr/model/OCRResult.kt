@@ -19,4 +19,17 @@ data class OCRResult(
     val text: String,
     val confidence: Float,
     val wordBoxes: List<OCRBox>? = null,
+    val characters: List<OCRCharacter> = emptyList(),
+    val orientation: OCRTextOrientation = OCRTextOrientation.HORIZONTAL,
 )
+
+data class OCRCharacter(
+    val text: String,
+    val confidence: Float,
+    val box: OCRBox,
+)
+
+enum class OCRTextOrientation {
+    HORIZONTAL,
+    VERTICAL,
+}

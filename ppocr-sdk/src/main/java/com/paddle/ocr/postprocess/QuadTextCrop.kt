@@ -15,6 +15,8 @@
 package com.paddle.ocr.postprocess
 
 import com.paddle.ocr.model.OCRBox
+import com.paddle.ocr.model.OCRTextOrientation
+import android.graphics.PointF
 import org.opencv.core.Core
 import org.opencv.core.CvType
 import org.opencv.core.Mat
@@ -29,18 +31,17 @@ import kotlin.math.max
 object QuadTextCrop {
     private const val VERTICAL_CROP_RATIO = 1.5
 
+    data class CharacterRange(
+        val startFraction: Float,
+        val endFraction: Float,
+    )
+
     fun crop(src: Mat, box: OCRBox): Mat {
         // Align with PaddleX CropByPolys.get_minarea_rect_crop: recompute minAreaRect
         // from the detected quad before perspective transform.
-        val rectPoints = box.points.map { Point(it.x.toDouble(), it.y.toDouble()) }
-        val rectInput = MatOfPoint2f()
-        rectInput.fromList(rectPoints)
-        val boundingBox = Geometry.minAreaRect(rectInput)
-        rectInput.release()
-
-        val boxPoints = Array(4) { Point() }
-        boundingBox.points(boxPoints)
-        val ordered = QuadGeometry.orderMinAreaRectPoints(boxPoints)
+        val ordered = orderedPoints(box).map { point ->
+            Point(point.x.toDouble(), point.y.toDouble())
+        }
 
         val widthTop = hypot(ordered[0].x - ordered[1].x, ordered[0].y - ordered[1].y)
         val widthBottom = hypot(ordered[2].x - ordered[3].x, ordered[2].y - ordered[3].y)
@@ -81,4 +82,57 @@ object QuadTextCrop {
 
     fun isVertical(crop: Mat): Boolean =
         crop.cols() > 0 && crop.rows().toDouble() / crop.cols() >= VERTICAL_CROP_RATIO
+
+    fun characterBoxes(
+        lineBox: OCRBox,
+        ranges: List<CharacterRange>,
+        orientation: OCRTextOrientation,
+    ): List<OCRBox> {
+        val ordered = orderedPoints(lineBox)
+        val topLeft = ordered[0]
+        val topRight = ordered[1]
+        val bottomRight = ordered[2]
+        val bottomLeft = ordered[3]
+        return ranges.map { range ->
+            val start = range.startFraction.coerceIn(0f, 1f)
+            val end = range.endFraction.coerceIn(start, 1f)
+            if (orientation == OCRTextOrientation.VERTICAL) {
+                OCRBox(
+                    listOf(
+                        lerp(topLeft, bottomLeft, start),
+                        lerp(topRight, bottomRight, start),
+                        lerp(topRight, bottomRight, end),
+                        lerp(topLeft, bottomLeft, end),
+                    )
+                )
+            } else {
+                OCRBox(
+                    listOf(
+                        lerp(topLeft, topRight, start),
+                        lerp(topLeft, topRight, end),
+                        lerp(bottomLeft, bottomRight, end),
+                        lerp(bottomLeft, bottomRight, start),
+                    )
+                )
+            }
+        }
+    }
+
+    private fun orderedPoints(box: OCRBox): List<PointF> {
+        val rectInput = MatOfPoint2f()
+        rectInput.fromList(box.points.map { Point(it.x.toDouble(), it.y.toDouble()) })
+        val boundingBox = Geometry.minAreaRect(rectInput)
+        rectInput.release()
+
+        val boxPoints = Array(4) { Point() }
+        boundingBox.points(boxPoints)
+        return QuadGeometry.orderMinAreaRectPoints(boxPoints).map { point ->
+            PointF(point.x.toFloat(), point.y.toFloat())
+        }
+    }
+
+    private fun lerp(start: PointF, end: PointF, fraction: Float): PointF = PointF(
+        start.x + (end.x - start.x) * fraction,
+        start.y + (end.y - start.y) * fraction,
+    )
 }

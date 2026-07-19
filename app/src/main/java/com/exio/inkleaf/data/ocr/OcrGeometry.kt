@@ -5,6 +5,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.unit.IntSize
 import kotlin.math.min
+import kotlin.math.pow
 
 data class OcrImageLayout(
     val rect: Rect,
@@ -68,17 +69,29 @@ fun hitTestOcrRegion(
                     (points.maxOf(OcrPoint::y) + expansionY)
         }
     }
-    .minByOrNull { region ->
-        val xs = region.points.map(OcrPoint::x)
-        val ys = region.points.map(OcrPoint::y)
-        (xs.max() - xs.min()) * (ys.max() - ys.min())
-    }
+    .minWithOrNull(
+        compareBy<OcrRegion> { region ->
+            val centerX = region.points.sumOf { it.x.toDouble() }.toFloat() / region.points.size
+            val centerY = region.points.sumOf { it.y.toDouble() }.toFloat() / region.points.size
+            val scaleX = expansionX.coerceAtLeast(0.0001f)
+            val scaleY = expansionY.coerceAtLeast(0.0001f)
+            ((point.x - centerX) / scaleX).pow(2) +
+                    ((point.y - centerY) / scaleY).pow(2)
+        }.thenBy { region ->
+            val width = region.points.maxOf(OcrPoint::x) - region.points.minOf(OcrPoint::x)
+            val height = region.points.maxOf(OcrPoint::y) - region.points.minOf(OcrPoint::y)
+            width * height
+        }
+    )
 
 fun selectedOcrText(
     regions: List<OcrRegion>,
-    selectedIds: Collection<Int>,
+    selectedIds: Set<Int>,
 ): String {
-    val byId = regions.associateBy(OcrRegion::id)
-    return selectedIds.mapNotNull { byId[it]?.text?.trim()?.takeIf(String::isNotEmpty) }
-        .joinToString("\n")
+    return regions
+        .asSequence()
+        .filter { region -> region.id in selectedIds }
+        .map(OcrRegion::text)
+        .filter(String::isNotBlank)
+        .joinToString("")
 }

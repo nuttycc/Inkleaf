@@ -91,6 +91,8 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
@@ -113,7 +115,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import coil.compose.AsyncImage
+import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
 import com.exio.inkleaf.R
 import com.exio.inkleaf.data.ComicOpenException
@@ -552,6 +554,9 @@ private fun ComicPager(
         )
     }
 
+    val activeOcrResult = ocrResults[pagerState.currentPage]
+        ?.takeIf { ocrSelection.activePage == pagerState.currentPage }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -561,6 +566,7 @@ private fun ComicPager(
             .pointerInput(pagerState.currentPage, zoomedPage, ocrSelection.activePage) {
                 detectTapGestures(
                     onLongPress = { anchor ->
+                        if (activeOcrResult != null) return@detectTapGestures
                         ocrLongPressAnchor = anchor
                         showOcrLongPressMenu = true
                     },
@@ -621,15 +627,6 @@ private fun ComicPager(
                 onPinnedEnhancement = onPinnedEnhancement,
                 ocrResult = ocrResults[page],
                 ocrMode = ocrSelection.activePage == page,
-                selectedOcrIds = if (ocrSelection.activePage == page) {
-                    ocrSelection.selectedIds
-                } else {
-                    emptySet()
-                },
-                onOcrRegionTapped = { regionId ->
-                    ocrSelection = ocrSelection.toggle(regionId)
-                },
-                onOcrEmptyTapped = { ocrSelection = ocrSelection.clearSelection() },
                 onEnhancementCompleted = { page, selectionId, success ->
                     if (
                         page == pagerState.currentPage &&
@@ -655,6 +652,21 @@ private fun ComicPager(
                         )
                     }
                 },
+            )
+        }
+
+        if (activeOcrResult != null) {
+            ReaderOcrPageOverlay(
+                result = activeOcrResult,
+                selectedIds = ocrSelection.selectedIds,
+                accent = readerAccentColor(),
+                onRegionTapped = { regionId ->
+                    ocrSelection = ocrSelection.toggle(regionId)
+                },
+                onRegionAdded = { regionId ->
+                    ocrSelection = ocrSelection.add(regionId)
+                },
+                modifier = Modifier.fillMaxSize(),
             )
         }
 
@@ -690,8 +702,6 @@ private fun ComicPager(
             )
         }
 
-        val activeOcrResult = ocrResults[pagerState.currentPage]
-            ?.takeIf { ocrSelection.activePage == pagerState.currentPage }
         if (activeOcrResult != null) {
             val selectedText = remember(activeOcrResult, ocrSelection.selectedIds) {
                 selectedOcrText(activeOcrResult.regions, ocrSelection.selectedIds)
@@ -715,6 +725,7 @@ private fun ComicPager(
                 onCopy = {
                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     clipboard.setPrimaryClip(ClipData.newPlainText("OCR 文字", selectedText))
+                    ocrSelection = ocrSelection.clearSelection()
                     scope.launch { snackbarHostState.showSnackbar("已复制所选文字") }
                 },
                 onExit = {
@@ -751,7 +762,7 @@ private fun ComicPager(
         }
 
         ReaderTopBar(
-            visible = showControls,
+            visible = showControls && activeOcrResult == null,
             title = title,
             isFavorite = favoritePages.containsKey(pagerState.currentPage),
             isZoomed = zoomedPage == pagerState.currentPage,
@@ -771,7 +782,7 @@ private fun ComicPager(
         )
 
         ReaderBottomBar(
-            visible = showControls,
+            visible = showControls && activeOcrResult == null,
             pagerState = pagerState,
             pageCount = volume.totalPageCount,
             thumbnails = thumbnails,
@@ -1283,9 +1294,6 @@ private fun ComicPage(
     onPinnedEnhancement: (EnhancementPageKey, Int) -> Unit,
     ocrResult: OcrPageResult?,
     ocrMode: Boolean,
-    selectedOcrIds: Set<Int>,
-    onOcrRegionTapped: (Int) -> Unit,
-    onOcrEmptyTapped: () -> Unit,
     onEnhancementCompleted: (Int, String, Boolean) -> Unit,
     onEnhancementStatusChanged: (Int, String, PageEnhancementStatus?) -> Unit,
     modifier: Modifier = Modifier,
@@ -1341,6 +1349,10 @@ private fun ComicPage(
 
     LaunchedEffect(currentPage) {
         if (page != currentPage) resetZoom()
+    }
+
+    LaunchedEffect(ocrMode) {
+        if (ocrMode) resetZoom()
     }
 
     LaunchedEffect(zoomToggleRequest, zoomTogglePage) {
@@ -1549,7 +1561,7 @@ private fun ComicPage(
                 .transformable(
                     state = transformState,
                     canPan = { scale > ZOOMED_THRESHOLD },
-                    enabled = page == currentPage,
+                    enabled = page == currentPage && !ocrMode,
                 ),
             contentAlignment = Alignment.Center,
         ) {
@@ -1573,73 +1585,92 @@ private fun ComicPage(
                 )
             }
 
-            when (val c = content) {
-                is PageContent.Error -> {
-                    Text(
-                        text = c.message,
-                        color = Color.White,
-                        style = MaterialTheme.typography.bodyLarge,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(32.dp),
-                    )
-                }
-
-                PageContent.Loading -> {
-                    // 没有模糊垫底（预热未到/系统不支持）才显示转圈
-                    if (!showBlurPlaceholder) {
-                        DelayedSpinner(showDelay = 200.milliseconds)
-                    }
-                }
-
+            val pagePainter: Painter? = when (val c = content) {
                 is PageContent.Bitmap -> {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        // PDF 与 AI 增强路径直接显示 ImageBitmap。
-                        Image(
-                            bitmap = c.bitmap,
-                            contentDescription = "第 ${page + 1} 页",
-                            contentScale = ContentScale.Fit,
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                    }
-                    imageReady = true
+                    LaunchedEffect(c.bitmap) { imageReady = true }
+                    remember(c.bitmap) { BitmapPainter(c.bitmap) }
                 }
 
                 is PageContent.Bytes -> {
-                    // zip/cbz 路径：压缩字节交给 Coil 解码（本来就是压缩图片，无往返）
-                    val imageRequest = remember(context, c.bytes, cacheKeyPrefix, page) {
-                        ImageRequest.Builder(context)
-                            .data(c.bytes)
-                            .memoryCacheKey(
-                                ReaderPageCacheKey.forPage(
-                                    cacheKeyPrefix,
-                                    page,
-                                    volume.pageIdentity(page),
+                    if (viewportSize == IntSize.Zero) {
+                        null
+                    } else {
+                        val imageRequest = remember(
+                            context,
+                            c.bytes,
+                            cacheKeyPrefix,
+                            page,
+                            viewportSize,
+                        ) {
+                            ImageRequest.Builder(context)
+                                .data(c.bytes)
+                                .memoryCacheKey(
+                                    ReaderPageCacheKey.forPage(
+                                        cacheKeyPrefix,
+                                        page,
+                                        volume.pageIdentity(page),
+                                    )
                                 )
-                            )
-                            // 原图短淡入，避免加载完成时硬切；
-                            // 内存缓存命中时 Coil 自动跳过淡入，翻回已读页无延迟感
-                            .crossfade(150)
-                            .build()
+                                .size(viewportSize.width, viewportSize.height)
+                                // 原图短淡入，避免加载完成时硬切；
+                                // 内存缓存命中时 Coil 自动跳过淡入，翻回已读页无延迟感
+                                .crossfade(150)
+                                .build()
+                        }
+                        rememberAsyncImagePainter(
+                            model = imageRequest,
+                            onSuccess = { imageReady = true },
+                            onError = { imageReady = true },
+                            contentScale = ContentScale.Fit,
+                        )
                     }
-                    AsyncImage(
-                        model = imageRequest,
-                        contentDescription = "第 ${page + 1} 页",
-                        contentScale = ContentScale.Fit,
-                        onSuccess = { imageReady = true },
-                        onError = { imageReady = true },
-                        modifier = Modifier.fillMaxSize(),
-                    )
+                }
+
+                else -> null
+            }
+
+            val pageArtwork: @Composable () -> Unit = {
+                when (val c = content) {
+                    is PageContent.Error -> {
+                        Text(
+                            text = c.message,
+                            color = Color.White,
+                            style = MaterialTheme.typography.bodyLarge,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(32.dp),
+                        )
+                    }
+
+                    PageContent.Loading -> {
+                        // 没有模糊垫底（预热未到/系统不支持）才显示转圈
+                        if (!showBlurPlaceholder) {
+                            DelayedSpinner(showDelay = 200.milliseconds)
+                        }
+                    }
+
+                    is PageContent.Bitmap, is PageContent.Bytes -> {
+                        if (pagePainter == null) {
+                            DelayedSpinner(showDelay = 200.milliseconds)
+                        } else {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Image(
+                                    painter = pagePainter,
+                                    contentDescription = "第 ${page + 1} 页",
+                                    contentScale = ContentScale.Fit,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            }
+                        }
+                    }
                 }
             }
 
-            if (ocrMode && ocrResult != null) {
-                ReaderOcrPageOverlay(
+            pageArtwork()
+
+            if (ocrMode && ocrResult != null && pagePainter != null) {
+                ReaderOcrFocusLayer(
                     result = ocrResult,
-                    selectedIds = selectedOcrIds,
-                    zoomScale = scale,
-                    accent = readerAccentColor(),
-                    onRegionTapped = onOcrRegionTapped,
-                    onEmptyTapped = onOcrEmptyTapped,
+                    painter = pagePainter,
                     modifier = Modifier.fillMaxSize(),
                 )
             }

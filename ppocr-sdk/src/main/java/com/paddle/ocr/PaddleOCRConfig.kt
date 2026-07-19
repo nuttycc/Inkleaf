@@ -27,5 +27,6 @@ data class PaddleOCRConfig(
     val detScoreMode: String = "fast",
     val detBoxType: String = "quad",
     val recScoreThresh: Float = 0.0f,
+    val charScoreThresh: Float = 0.55f,
     val recBatchSize: Int = 1,
 )

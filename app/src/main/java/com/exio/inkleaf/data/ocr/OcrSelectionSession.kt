@@ -14,6 +14,14 @@ data class OcrSelectionSession(
         return copy(selectedIds = updated, detailText = null)
     }
 
+    fun add(regionId: Int): OcrSelectionSession {
+        if (regionId in selectedIds) return this
+        return copy(
+            selectedIds = LinkedHashSet(selectedIds).apply { add(regionId) },
+            detailText = null,
+        )
+    }
+
     fun clearSelection(): OcrSelectionSession = copy(selectedIds = emptySet(), detailText = null)
 
     fun showText(text: String): OcrSelectionSession = copy(detailText = text)

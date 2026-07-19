@@ -17,18 +17,47 @@ package com.paddle.ocr.postprocess
 object CTCDecoder {
     private const val BLANK_IDX = 0
 
-    fun decode(output: FloatArray, shape: LongArray, characterList: List<String>): List<Pair<String, Float>> {
+    data class DecodedCharacter(
+        val text: String,
+        val confidence: Float,
+        val startFraction: Float,
+        val endFraction: Float,
+    )
+
+    data class DecodedText(
+        val text: String,
+        val confidence: Float,
+        val characters: List<DecodedCharacter>,
+    )
+
+    private data class CharacterRun(
+        val text: String,
+        val confidence: Float,
+        val startStep: Int,
+        val endStep: Int,
+    )
+
+    fun decode(
+        output: FloatArray,
+        shape: LongArray,
+        characterList: List<String>,
+        validTimeSteps: IntArray? = null,
+    ): List<DecodedText> {
         val batchSize = shape[0].toInt()
         val timeSteps = shape[1].toInt()
         val numClasses = shape[2].toInt()
 
-        val results = mutableListOf<Pair<String, Float>>()
+        val results = mutableListOf<DecodedText>()
         for (b in 0 until batchSize) {
             val baseOffset = b * timeSteps * numClasses
+            val sampleTimeSteps = validTimeSteps
+                ?.getOrNull(b)
+                ?.coerceIn(1, timeSteps)
+                ?: timeSteps
 
-            val indices = IntArray(timeSteps)
-            val probs = FloatArray(timeSteps)
-            for (t in 0 until timeSteps) {
+            val indices = IntArray(sampleTimeSteps)
+            val probs = FloatArray(sampleTimeSteps)
+            for (t in 0 until sampleTimeSteps) {
                 val offset = baseOffset + t * numClasses
                 var maxIdx = 0
                 var maxVal = output[offset]
@@ -43,24 +72,73 @@ object CTCDecoder {
                 probs[t] = maxVal
             }
 
-            val keptProbs = mutableListOf<Float>()
-            val sb = StringBuilder()
-            var prevIdx = -1
-            for (t in 0 until timeSteps) {
-                val idx = indices[t]
-                if (idx != BLANK_IDX && idx != prevIdx) {
-                    val charIdx = idx - 1
-                    if (charIdx >= 0 && charIdx < characterList.size) {
-                        sb.append(characterList[charIdx])
-                        keptProbs.add(probs[t])
-                    }
-                }
-                prevIdx = idx
+            val runs = mutableListOf<CharacterRun>()
+            var activeIndex = BLANK_IDX
+            var activeStart = 0
+            var activeConfidence = 0f
+
+            fun finishRun(endStep: Int) {
+                if (activeIndex == BLANK_IDX) return
+                val characterIndex = activeIndex - 1
+                val token = characterList.getOrNull(characterIndex) ?: return
+                runs += CharacterRun(
+                    text = token,
+                    confidence = activeConfidence,
+                    startStep = activeStart,
+                    endStep = endStep,
+                )
             }
 
-            val confidence = if (keptProbs.isNotEmpty()) keptProbs.average().toFloat() else 0f
-            results.add(Pair(sb.toString(), confidence))
+            for (t in 0 until sampleTimeSteps) {
+                val idx = indices[t]
+                if (idx != activeIndex) {
+                    finishRun(t)
+                    activeIndex = idx
+                    activeStart = t
+                    activeConfidence = probs[t]
+                }
+            }
+            finishRun(sampleTimeSteps)
+
+            val decodedCharacters = runs.flatMapIndexed { index, run ->
+                val startStep = if (index == 0) {
+                    run.startStep.toFloat()
+                } else {
+                    (runs[index - 1].endStep + run.startStep) / 2f
+                }
+                val endStep = if (index == runs.lastIndex) {
+                    run.endStep.toFloat()
+                } else {
+                    (run.endStep + runs[index + 1].startStep) / 2f
+                }
+                val tokens = splitToken(run.text)
+                tokens.mapIndexedNotNull { tokenIndex, token ->
+                    if (token.isBlank()) return@mapIndexedNotNull null
+                    val tokenStart = startStep + (endStep - startStep) * tokenIndex / tokens.size
+                    val tokenEnd = startStep + (endStep - startStep) * (tokenIndex + 1) / tokens.size
+                    DecodedCharacter(
+                        text = token,
+                        confidence = run.confidence,
+                        startFraction = (tokenStart / sampleTimeSteps).coerceIn(0f, 1f),
+                        endFraction = (tokenEnd / sampleTimeSteps).coerceIn(0f, 1f),
+                    )
+                }
+            }
+            val confidence = if (decodedCharacters.isEmpty()) {
+                0f
+            } else {
+                decodedCharacters.map(DecodedCharacter::confidence).average().toFloat()
+            }
+            results += DecodedText(
+                text = decodedCharacters.joinToString("") { it.text },
+                confidence = confidence,
+                characters = decodedCharacters,
+            )
         }
         return results
     }
+
+    private fun splitToken(token: String): List<String> = token.codePoints()
+        .toArray()
+        .map { codePoint -> String(Character.toChars(codePoint)) }
 }

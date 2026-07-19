@@ -19,6 +19,7 @@ import android.graphics.Bitmap
 import com.paddle.ocr.EngineConfig
 import com.paddle.ocr.PaddleOCRConfig
 import com.paddle.ocr.model.ModelConfig
+import com.paddle.ocr.model.OCRCharacter
 import com.paddle.ocr.model.OCRError
 import com.paddle.ocr.model.OCRResult
 import com.paddle.ocr.postprocess.BoxSorter
@@ -52,6 +53,7 @@ class OCREngine(
             ortManager = ortManager,
             characterList = configured.characterList,
             imageMode = configured.imageMode,
+            characterScoreThreshold = config.charScoreThresh,
         )
     }
 
@@ -152,13 +154,48 @@ class OCREngine(
 
                     for (j in batchResult.texts.indices) {
                         val boxIdx = batchBoxIndices[j]
-                        val (text, confidence) = batchResult.texts[j]
-                        if (confidence >= config.recScoreThresh) {
+                        val recognized = batchResult.texts[j]
+                        val acceptedCharacters = recognized.characters
+                            .filter { character ->
+                                character.confidence >= config.charScoreThresh &&
+                                        character.text.isNotBlank()
+                            }
+                        val characterBoxes = if (acceptedCharacters.isEmpty()) {
+                            emptyList()
+                        } else {
+                            QuadTextCrop.characterBoxes(
+                                lineBox = sortedBoxes[boxIdx],
+                                ranges = acceptedCharacters.map { character ->
+                                    QuadTextCrop.CharacterRange(
+                                        startFraction = character.startFraction,
+                                        endFraction = character.endFraction,
+                                    )
+                                },
+                                orientation = recognized.orientation,
+                            )
+                        }
+                        val characters = acceptedCharacters.zip(characterBoxes) {
+                            character, characterBox ->
+                            OCRCharacter(
+                                text = character.text,
+                                confidence = character.confidence,
+                                box = characterBox,
+                            )
+                        }
+                        val confidence = if (characters.isEmpty()) {
+                            0f
+                        } else {
+                            characters.map(OCRCharacter::confidence).average().toFloat()
+                        }
+                        if (characters.isNotEmpty() && confidence >= config.recScoreThresh) {
                             allResults.add(
                                 OCRResult(
                                     box = sortedBoxes[boxIdx],
-                                    text = text,
+                                    text = characters.joinToString("") { it.text },
                                     confidence = confidence,
+                                    wordBoxes = characters.map(OCRCharacter::box),
+                                    characters = characters,
+                                    orientation = recognized.orientation,
                                 )
                             )
                         }
