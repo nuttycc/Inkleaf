@@ -42,6 +42,7 @@
 - [x] Reader enhancement controls migrated to the new selected list-item API.
 - [x] Coroutines API review and read-only deferred ownership boundary.
 - [x] Static verification and CI handoff notes.
+- [x] Shelf app bar corrected to keep the group selector and actions on one compact row.
 
 ## Review
 
@@ -56,6 +57,9 @@
 
 ## Deviations
 
+- The shelf uses a compact `TopAppBar` instead of a flexible app bar. The flexible expanded state
+  deliberately places actions on the top row and the title on a lower row, which split the shelf's
+  interactive group selector from its related actions and consumed excessive phone screen space.
 - Compose UI test v2 APIs were not added. The project has no Compose UI test harness today; adding
   a new instrumented test architecture would broaden this dependency experiment and consume CI
   quota. Existing unit and instrumented suites remain the conservative verification path.

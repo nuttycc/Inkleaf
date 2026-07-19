@@ -42,7 +42,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.MediumFlexibleTopAppBar
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
@@ -53,6 +52,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
@@ -67,7 +67,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -202,13 +201,13 @@ fun ShelfScreen(
         )
     }
 
-    val topAppBarScrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
-
     Scaffold(
-        modifier = modifier.nestedScroll(topAppBarScrollBehavior.nestedScrollConnection),
+        modifier = modifier,
         contentWindowInsets = WindowInsets(0),
         topBar = {
-            MediumFlexibleTopAppBar(
+            // The shelf filter is a compact control, not a page heading. Keep it on the
+            // same row as the actions instead of using the flexible bar's expanded title row.
+            TopAppBar(
                 title = {
                     Row(
                         modifier = Modifier
@@ -252,7 +251,6 @@ fun ShelfScreen(
                     containerColor = Color.Transparent,
                     scrolledContainerColor = Color.Transparent,
                 ),
-                scrollBehavior = topAppBarScrollBehavior,
             )
         },
         snackbarHost = {
