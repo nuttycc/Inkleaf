@@ -3,12 +3,15 @@ package com.exio.inkleaf.data.enhancement
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.asDeferred
 import java.util.concurrent.atomic.AtomicReference
 
 internal enum class EnhancementPersistenceRequirement {
@@ -39,6 +42,7 @@ internal class EnhancementPageJobCoordinator<T>(
         val value: T,
     )
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     private class PageJob<T>(
         val key: EnhancementPageKey,
         initialPriority: EnhancementRequestPriority,
@@ -55,7 +59,10 @@ internal class EnhancementPageJobCoordinator<T>(
         override val priority: EnhancementRequestPriority
             get() = promotedPriority.get()
 
-        val result = CompletableDeferred<T>()
+        private val completion = CompletableDeferred<T>()
+
+        // Callers can await a page but cannot complete coordinator-owned work themselves.
+        val result: Deferred<T> = completion.asDeferred()
         var producerStarted = false
         var waiterCount = 0
         var retainWithoutWaiters = initialRetainWithoutWaiters
@@ -75,6 +82,14 @@ internal class EnhancementPageJobCoordinator<T>(
             if (required == EnhancementPersistenceRequirement.PINNED) {
                 persistence.set(EnhancementPersistenceRequirement.PINNED)
             }
+        }
+
+        fun complete(value: T) {
+            completion.complete(value)
+        }
+
+        fun completeExceptionally(error: Throwable) {
+            completion.completeExceptionally(error)
         }
     }
 
@@ -197,7 +212,7 @@ internal class EnhancementPageJobCoordinator<T>(
             val producedValue = produced.getOrElse { error ->
                 synchronized(stateLock) {
                     if (closedCause == null && jobs[next.key] === next) {
-                        next.result.completeExceptionally(error)
+                        next.completeExceptionally(error)
                         jobs.remove(next.key)
                     }
                 }
@@ -221,11 +236,11 @@ internal class EnhancementPageJobCoordinator<T>(
                     if (closedCause != null || jobs[next.key] !== next) {
                         true
                     } else if (finalized.isFailure) {
-                        next.result.completeExceptionally(finalized.exceptionOrNull()!!)
+                        next.completeExceptionally(finalized.exceptionOrNull()!!)
                         jobs.remove(next.key)
                         true
                     } else if (next.persistenceRequirement == finalizedFor) {
-                        next.result.complete(finalized.getOrThrow())
+                        next.complete(finalized.getOrThrow())
                         jobs.remove(next.key)
                         true
                     } else {
@@ -245,7 +260,7 @@ internal class EnhancementPageJobCoordinator<T>(
             closedCause = cancellation
             dispatcherRunning = false
             queuedJobs.filterNot { it.producerStarted }.forEach { discarded += it.discardProducer }
-            jobs.values.forEach { it.result.completeExceptionally(cancellation) }
+            jobs.values.forEach { it.completeExceptionally(cancellation) }
             jobs.clear()
             queuedJobs.clear()
         }

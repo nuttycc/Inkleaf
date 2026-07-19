@@ -27,7 +27,6 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -42,12 +41,9 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MediumFlexibleTopAppBar
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -57,7 +53,6 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
@@ -72,10 +67,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -207,11 +202,13 @@ fun ShelfScreen(
         )
     }
 
+    val topAppBarScrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+
     Scaffold(
-        modifier = modifier,
+        modifier = modifier.nestedScroll(topAppBarScrollBehavior.nestedScrollConnection),
         contentWindowInsets = WindowInsets(0),
         topBar = {
-            TopAppBar(
+            MediumFlexibleTopAppBar(
                 title = {
                     Row(
                         modifier = Modifier
@@ -251,7 +248,11 @@ fun ShelfScreen(
                 // 透明底色：顶栏不保有独立主题色，换肤瞬切才不会被 M3 内部
                 // 弹簧拖慢（策略与前提见 Theme.kt 的换肤注释）。本屏内容不会
                 // 滚到顶栏底下；若将来加 scrollBehavior 需重新评估
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.Transparent,
+                    scrolledContainerColor = Color.Transparent,
+                ),
+                scrollBehavior = topAppBarScrollBehavior,
             )
         },
         snackbarHost = {
@@ -563,16 +564,20 @@ private fun GroupPickerSheetContent(
             },
         )
         groups.orEmpty().forEach { item ->
-            ListItem(
-                headlineContent = { Text(item.group.name) },
-                supportingContent = { Text("${item.comicCount} 本漫画") },
-                leadingContent = {
-                    RadioButton(
-                        selected = selected.kind == ShelfGroupFilterKind.GROUP &&
-                                selected.groupId == item.group.id,
-                        onClick = null,
+            val isSelected = selected.kind == ShelfGroupFilterKind.GROUP &&
+                    selected.groupId == item.group.id
+            InkleafChoiceListItem(
+                headline = item.group.name,
+                selected = isSelected,
+                onClick = {
+                    onSelect(
+                        ShelfGroupSelection(
+                            kind = ShelfGroupFilterKind.GROUP,
+                            groupId = item.group.id,
+                        )
                     )
                 },
+                supportingContent = { Text("${item.comicCount} 本漫画") },
                 trailingContent = {
                     Row {
                         IconButton(onClick = { onRename(item) }) {
@@ -583,24 +588,11 @@ private fun GroupPickerSheetContent(
                         }
                     }
                 },
-                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                modifier = Modifier.selectable(
-                    selected = selected.kind == ShelfGroupFilterKind.GROUP &&
-                            selected.groupId == item.group.id,
-                    onClick = {
-                        onSelect(
-                            ShelfGroupSelection(
-                                kind = ShelfGroupFilterKind.GROUP,
-                                groupId = item.group.id,
-                            )
-                        )
-                    },
-                    role = Role.RadioButton,
-                ),
             )
         }
-        ListItem(
-            headlineContent = { Text("新建分组") },
+        InkleafActionListItem(
+            headline = "新建分组",
+            onClick = onCreate,
             leadingContent = {
                 Icon(
                     Icons.Filled.Add,
@@ -608,8 +600,6 @@ private fun GroupPickerSheetContent(
                     tint = MaterialTheme.colorScheme.primary,
                 )
             },
-            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-            modifier = Modifier.clickable(onClick = onCreate),
         )
     }
 }
@@ -621,20 +611,11 @@ private fun GroupFilterRow(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    ListItem(
-        headlineContent = { Text(title) },
-        leadingContent = {
-            RadioButton(
-                selected = selected,
-                onClick = null,
-            )
-        },
-        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        modifier = modifier.selectable(
-            selected = selected,
-            onClick = onClick,
-            role = Role.RadioButton,
-        ),
+    InkleafChoiceListItem(
+        headline = title,
+        selected = selected,
+        onClick = onClick,
+        modifier = modifier,
     )
 }
 
@@ -652,8 +633,9 @@ private fun ComicActionSheetContent(
     SheetColumn(modifier = modifier, scrollable = true) {
         StandardSheetTitle(comic.title)
         if (isAlbum) {
-            ListItem(
-                headlineContent = { Text("编辑图册") },
+            InkleafActionListItem(
+                headline = "编辑图册",
+                onClick = onEditAlbum,
                 leadingContent = {
                     Icon(
                         Icons.Filled.Edit,
@@ -661,11 +643,10 @@ private fun ComicActionSheetContent(
                         tint = MaterialTheme.colorScheme.primary,
                     )
                 },
-                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                modifier = Modifier.clickable(onClick = onEditAlbum),
             )
-            ListItem(
-                headlineContent = { Text("分享 CBZ") },
+            InkleafActionListItem(
+                headline = "分享 CBZ",
+                onClick = onShareAlbum,
                 leadingContent = {
                     Icon(
                         painterResource(R.drawable.ic_share),
@@ -673,11 +654,10 @@ private fun ComicActionSheetContent(
                         tint = MaterialTheme.colorScheme.primary,
                     )
                 },
-                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                modifier = Modifier.clickable(onClick = onShareAlbum),
             )
-            ListItem(
-                headlineContent = { Text("保存为 CBZ 文件") },
+            InkleafActionListItem(
+                headline = "保存为 CBZ 文件",
+                onClick = onSaveAlbum,
                 leadingContent = {
                     Icon(
                         painterResource(R.drawable.ic_download),
@@ -685,12 +665,11 @@ private fun ComicActionSheetContent(
                         tint = MaterialTheme.colorScheme.primary,
                     )
                 },
-                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                modifier = Modifier.clickable(onClick = onSaveAlbum),
             )
         }
-        ListItem(
-            headlineContent = { Text("设置分组") },
+        InkleafActionListItem(
+            headline = "设置分组",
+            onClick = onAssignGroup,
             leadingContent = {
                 Icon(
                     painterResource(R.drawable.ic_folder),
@@ -698,11 +677,10 @@ private fun ComicActionSheetContent(
                     tint = MaterialTheme.colorScheme.primary,
                 )
             },
-            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-            modifier = Modifier.clickable(onClick = onAssignGroup),
         )
-        ListItem(
-            headlineContent = { Text(if (isAlbum) "删除图册" else "从书架移除") },
+        InkleafActionListItem(
+            headline = if (isAlbum) "删除图册" else "从书架移除",
+            onClick = onDelete,
             leadingContent = {
                 Icon(
                     Icons.Filled.Delete,
@@ -710,8 +688,6 @@ private fun ComicActionSheetContent(
                     tint = MaterialTheme.colorScheme.error,
                 )
             },
-            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-            modifier = Modifier.clickable(onClick = onDelete),
         )
     }
 }
@@ -755,10 +731,10 @@ private fun GroupNameDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
-            OutlinedTextField(
+            InkleafNameField(
                 value = name,
                 onValueChange = { name = it },
-                label = { Text("分组名") },
+                label = "分组名",
                 singleLine = true,
                 modifier = modifier.fillMaxWidth(),
             )
@@ -796,9 +772,10 @@ private fun AddSheetContent(
 ) {
     SheetColumn(modifier = modifier, scrollable = true) {
         StandardSheetTitle("添加内容")
-        ListItem(
-            headlineContent = { Text("从图片创建图册") },
-            supportingContent = { Text("选择图片、调整顺序并制作成可分享的 CBZ") },
+        InkleafActionListItem(
+            headline = "从图片创建图册",
+            supporting = "选择图片、调整顺序并制作成可分享的 CBZ",
+            onClick = onCreateAlbum,
             leadingContent = {
                 Icon(
                     painterResource(R.drawable.ic_image),
@@ -806,12 +783,11 @@ private fun AddSheetContent(
                     tint = MaterialTheme.colorScheme.primary,
                 )
             },
-            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-            modifier = Modifier.clickable(onClick = onCreateAlbum),
         )
-        ListItem(
-            headlineContent = { Text("添加漫画目录") },
-            supportingContent = { Text("选择文件夹建立漫画库，内容变化自动同步") },
+        InkleafActionListItem(
+            headline = "添加漫画目录",
+            supporting = "选择文件夹建立漫画库，内容变化自动同步",
+            onClick = onAddFolder,
             leadingContent = {
                 Icon(
                     painterResource(R.drawable.ic_folder),
@@ -819,12 +795,11 @@ private fun AddSheetContent(
                     tint = MaterialTheme.colorScheme.primary,
                 )
             },
-            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-            modifier = Modifier.clickable(onClick = onAddFolder),
         )
-        ListItem(
-            headlineContent = { Text("添加 PDF 章节目录") },
-            supportingContent = { Text("把文件夹内多个 PDF 作为一本书的章节导入") },
+        InkleafActionListItem(
+            headline = "添加 PDF 章节目录",
+            supporting = "把文件夹内多个 PDF 作为一本书的章节导入",
+            onClick = onAddSeriesFolder,
             leadingContent = {
                 Icon(
                     painterResource(R.drawable.ic_folder),
@@ -832,12 +807,11 @@ private fun AddSheetContent(
                     tint = MaterialTheme.colorScheme.primary,
                 )
             },
-            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-            modifier = Modifier.clickable(onClick = onAddSeriesFolder),
         )
-        ListItem(
-            headlineContent = { Text("添加漫画文件") },
-            supportingContent = { Text("可多选，导入一个或多个文件到书架") },
+        InkleafActionListItem(
+            headline = "添加漫画文件",
+            supporting = "可多选，导入一个或多个文件到书架",
+            onClick = onAddFile,
             leadingContent = {
                 Icon(
                     painterResource(R.drawable.ic_file),
@@ -845,8 +819,6 @@ private fun AddSheetContent(
                     tint = MaterialTheme.colorScheme.primary,
                 )
             },
-            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-            modifier = Modifier.clickable(onClick = onAddFile),
         )
     }
 }

@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -30,20 +29,20 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MediumFlexibleTopAppBar
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -56,17 +55,21 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.exio.inkleaf.data.CacheLimit
 import com.exio.inkleaf.data.CustomStyle
 import com.exio.inkleaf.data.DarkMode
+import com.exio.inkleaf.data.ThemeColorSpec
+import com.exio.inkleaf.data.ThemeContrast
 import com.exio.inkleaf.data.ThemeSeed
 import com.exio.inkleaf.data.ThemeSettings
 import com.exio.inkleaf.ui.theme.isDarkTheme
+import com.exio.inkleaf.ui.theme.resolvedPaletteStyle
+import com.materialkolor.DynamicMaterialExpressiveTheme
 import com.materialkolor.hct.Hct
 
 /** 设置页：主题（种子色卡 / 深浅模式 / 壁纸取色）+ 漫画库目录管理 */
@@ -95,6 +98,7 @@ fun SettingsScreen(
     val autoCacheBudgetBytes = remember(context) { CacheLimit.AUTO.bytes(context) }
     var showCacheLimitSheet by remember { mutableStateOf(false) }
     var showCustomColorSheet by remember { mutableStateOf(false) }
+    var showAdvancedColorSheet by remember { mutableStateOf(false) }
     var showAboutSheet by remember { mutableStateOf(false) }
     var showLicensesSheet by remember { mutableStateOf(false) }
     // rememberSaveable：目录选择器是外部全屏 Activity，期间进程可能被杀；
@@ -109,21 +113,26 @@ fun SettingsScreen(
     ) { uri ->
         if (uri != null) foldersViewModel.addFolder(uri)
     }
+    val topAppBarScrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
     Scaffold(
-        modifier = modifier,
+        modifier = modifier.nestedScroll(topAppBarScrollBehavior.nestedScrollConnection),
         topBar = {
-            TopAppBar(
+            MediumFlexibleTopAppBar(
                 title = { Text("设置") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 },
-                // 透明底色：顶栏不保有独立主题色，换肤瞬切才不会被 M3 内部
-                // 弹簧拖慢（策略与前提见 Theme.kt 的换肤注释）。本屏内容不会
-                // 滚到顶栏底下；若将来加 scrollBehavior 需重新评估
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+                // Keep both flexible app-bar states transparent. The page background remains the
+                // single animated surface during collapse and the single instant surface on a
+                // whole-app theme change; see Theme.kt for the synchronization constraint.
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.Transparent,
+                    scrolledContainerColor = Color.Transparent,
+                ),
+                scrollBehavior = topAppBarScrollBehavior,
             )
         },
     ) { innerPadding ->
@@ -162,15 +171,16 @@ fun SettingsScreen(
             // 壁纸取色：Material You 动态色仅 Android 12+ 提供
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 ListItem(
-                    headlineContent = { Text("壁纸取色") },
+                    checked = themeSettings.useWallpaper,
+                    onCheckedChange = viewModel::setUseWallpaper,
                     supportingContent = { Text("跟随系统壁纸生成配色（Material You）") },
                     trailingContent = {
                         Switch(
                             checked = themeSettings.useWallpaper,
-                            onCheckedChange = viewModel::setUseWallpaper,
+                            onCheckedChange = null,
                         )
                     },
-                )
+                ) { Text("壁纸取色") }
             }
 
             SectionLabel("深浅模式")
@@ -190,69 +200,103 @@ fun SettingsScreen(
                 }
             }
 
-            SectionLabel("存储")
+            SectionLabel("配色规格")
+            SingleChoiceSegmentedButtonRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+            ) {
+                ThemeColorSpec.entries.forEachIndexed { index, spec ->
+                    SegmentedButton(
+                        selected = themeSettings.colorSpec == spec,
+                        onClick = { viewModel.setColorSpec(spec) },
+                        shape = SegmentedButtonDefaults.itemShape(
+                            index,
+                            ThemeColorSpec.entries.size,
+                        ),
+                    ) {
+                        Text(spec.label)
+                    }
+                }
+            }
             ListItem(
-                headlineContent = { Text("漫画缓存上限") },
-                supportingContent = {
-                    Text(
-                        "当前占用 ${formatBytes(cacheUsage)} · " +
-                                cacheLimitSummary(cacheLimit, cacheBudgetBytes) +
-                                "\n超出上限自动清理最久未读的书，不影响你的原文件"
+                checked = themeSettings.useAmoled,
+                onCheckedChange = viewModel::setUseAmoled,
+                supportingContent = { Text("深色模式使用纯黑表面") },
+                trailingContent = {
+                    Switch(
+                        checked = themeSettings.useAmoled,
+                        onCheckedChange = null,
                     )
                 },
+            ) { Text("AMOLED 黑色") }
+            InkleafActionListItem(
+                headline = "高级配色",
+                supporting = "${themeSettings.customStyle.label} · ${themeSettings.contrast.label}",
+                onClick = { showAdvancedColorSheet = true },
                 trailingContent = {
                     Icon(
                         Icons.AutoMirrored.Filled.KeyboardArrowRight,
                         contentDescription = null,
                     )
                 },
-                modifier = Modifier.clickable { showCacheLimitSheet = true },
             )
-            ListItem(
-                headlineContent = { Text("图像增强模型") },
-                supportingContent = {
-                    Text(
-                        when {
-                            modelsChecking -> "正在检查模型文件…"
-                            installedModelCount == 0 -> "已内置 $bundledModelCount 个模型包 · 可继续下载更多模型"
-                            else -> "已内置 $bundledModelCount 个 · 已下载 $installedModelCount 个 · 占用 " +
-                                    formatFileSize(installedModelBytes)
-                        }
-                    )
-                },
+
+            SectionLabel("存储")
+            InkleafActionListItem(
+                headline = "漫画缓存上限",
+                supporting = "当前占用 ${formatBytes(cacheUsage)} · " +
+                        cacheLimitSummary(cacheLimit, cacheBudgetBytes) +
+                        "\n超出上限自动清理最久未读的书，不影响你的原文件",
+                onClick = { showCacheLimitSheet = true },
                 trailingContent = {
                     Icon(
                         Icons.AutoMirrored.Filled.KeyboardArrowRight,
                         contentDescription = null,
                     )
                 },
-                modifier = Modifier.clickable(onClick = onOpenModelManager),
+            )
+            InkleafActionListItem(
+                headline = "图像增强模型",
+                supporting = when {
+                    modelsChecking -> "正在检查模型文件…"
+                    installedModelCount == 0 -> "已内置 $bundledModelCount 个模型包 · 可继续下载更多模型"
+                    else -> "已内置 $bundledModelCount 个 · 已下载 $installedModelCount 个 · 占用 " +
+                            formatFileSize(installedModelBytes)
+                },
+                onClick = onOpenModelManager,
+                trailingContent = {
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                    )
+                },
             )
 
             SectionLabel("漫画库")
-            ListItem(
-                headlineContent = { Text("漫画库目录") },
-                supportingContent = { Text("管理扫描漫画的文件夹") },
+            InkleafActionListItem(
+                headline = "漫画库目录",
+                supporting = "管理扫描漫画的文件夹",
+                onClick = { showFoldersSheet = true },
                 trailingContent = {
                     Icon(
                         Icons.AutoMirrored.Filled.KeyboardArrowRight,
                         contentDescription = null,
                     )
                 },
-                modifier = Modifier.clickable { showFoldersSheet = true },
             )
 
             SectionLabel("关于")
-            ListItem(
-                headlineContent = { Text("关于 Inkleaf") },
-                supportingContent = { Text("版本、GitHub 与项目信息") },
+            InkleafActionListItem(
+                headline = "关于 Inkleaf",
+                supporting = "版本、GitHub 与项目信息",
+                onClick = { showAboutSheet = true },
                 trailingContent = {
                     Icon(
                         Icons.AutoMirrored.Filled.KeyboardArrowRight,
                         contentDescription = null,
                     )
                 },
-                modifier = Modifier.clickable { showAboutSheet = true },
             )
         }
     }
@@ -264,11 +308,21 @@ fun SettingsScreen(
         ) {
             CustomColorSheetContent(
                 customArgb = themeSettings.customArgb,
-                customStyle = themeSettings.customStyle,
-                // 预览要和全 App 当前的深浅状态一致，复用 Theme.kt 的判定
-                isDark = themeSettings.darkMode.isDarkTheme(),
                 onPickColor = viewModel::setCustomColor,
+            )
+        }
+    }
+
+    if (showAdvancedColorSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showAdvancedColorSheet = false },
+            sheetState = rememberExpandOnlySheetState(),
+        ) {
+            AdvancedColorSheetContent(
+                settings = themeSettings,
                 onPickStyle = viewModel::setCustomStyle,
+                onPickContrast = viewModel::setContrast,
+                onReset = viewModel::resetAdvancedColorSettings,
             )
         }
     }
@@ -334,6 +388,143 @@ fun SettingsScreen(
     }
 }
 
+/**
+ * Hosts options that are useful for deliberate theme tuning but too dense for the main settings
+ * page. Changes still apply immediately; the nested preview is the only place that interpolates
+ * between schemes so whole-app theme changes remain deterministic.
+ */
+@Composable
+private fun AdvancedColorSheetContent(
+    settings: ThemeSettings,
+    onPickStyle: (CustomStyle) -> Unit,
+    onPickContrast: (ThemeContrast) -> Unit,
+    onReset: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    SheetColumn(
+        modifier = modifier,
+        scrollable = true,
+        selectable = true,
+    ) {
+        StandardSheetTitle("高级配色")
+        if (settings.useWallpaper) {
+            InkleafInfoListItem(
+                headline = "壁纸取色正在生效",
+                supporting = "高级参数会保留，并在切回预设或自定义种子色时生效",
+            )
+        }
+        AnimatedThemePreview(
+            settings = settings,
+            wallpaperActive = settings.useWallpaper,
+        )
+
+        SectionLabel("调色风格")
+        CustomStyle.entries.forEach { style ->
+            InkleafChoiceListItem(
+                headline = style.label,
+                selected = settings.customStyle == style,
+                onClick = { onPickStyle(style) },
+                supportingContent = { Text(paletteStyleDescription(style)) },
+            )
+        }
+
+        SectionLabel("对比度")
+        ThemeContrast.entries.forEach { contrast ->
+            InkleafChoiceListItem(
+                headline = contrast.label,
+                selected = settings.contrast == contrast,
+                onClick = { onPickContrast(contrast) },
+                supportingContent = { Text(contrast.description) },
+            )
+        }
+
+        TextButton(
+            onClick = onReset,
+            modifier = Modifier
+                .align(Alignment.End)
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+        ) {
+            Text("恢复推荐值")
+        }
+    }
+}
+
+/** Uses Material Kolor's animated wrapper only inside the preview, never around the app root. */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun AnimatedThemePreview(
+    settings: ThemeSettings,
+    wallpaperActive: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val isDark = settings.darkMode.isDarkTheme()
+    val seedArgb = if (settings.useCustom) {
+        settings.customArgb ?: settings.seed.argb
+    } else {
+        settings.seed.argb
+    }
+
+    DynamicMaterialExpressiveTheme(
+        seedColor = Color(seedArgb),
+        isDark = isDark,
+        isAmoled = isDark && settings.useAmoled,
+        style = resolvedPaletteStyle(seedArgb, settings.customStyle.style),
+        contrastLevel = settings.contrast.contrast.value,
+        specVersion = settings.colorSpec.specVersion,
+        animate = true,
+    ) {
+        Column(
+            modifier = modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .clip(MaterialTheme.shapes.large)
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text("Ink in Motion", style = MaterialTheme.typography.titleMedium)
+            Text(
+                if (wallpaperActive) {
+                    "切回种子色后使用的局部动画预览"
+                } else {
+                    "当前配色的局部动画预览"
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(
+                modifier = Modifier.padding(top = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                PreviewColor(MaterialTheme.colorScheme.primary)
+                PreviewColor(MaterialTheme.colorScheme.secondary)
+                PreviewColor(MaterialTheme.colorScheme.tertiary)
+                PreviewColor(MaterialTheme.colorScheme.surfaceContainerHighest)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PreviewColor(color: Color) {
+    Box(
+        modifier = Modifier
+            .size(32.dp)
+            .clip(CircleShape)
+            .background(color),
+    )
+}
+
+private fun paletteStyleDescription(style: CustomStyle): String = when (style) {
+    CustomStyle.MUTED -> "低彩度、安静的中性色调"
+    CustomStyle.STANDARD -> "平衡、熟悉的 Material 配色"
+    CustomStyle.VIVID -> "提高主色与辅助色的鲜明度"
+    CustomStyle.EXPRESSIVE -> "偏移种子色色相，获得更活跃的组合"
+    CustomStyle.FIDELITY -> "尽量保留种子色在主要容器中的外观"
+    CustomStyle.CONTENT -> "围绕内容色生成相邻与互补颜色"
+    CustomStyle.MONOCHROME -> "只使用黑、白与灰阶角色"
+}
+
 @Composable
 private fun AboutSheetContent(
     versionName: String,
@@ -344,35 +535,29 @@ private fun AboutSheetContent(
     SheetColumn(modifier = modifier) {
         StandardSheetTitle("关于 Inkleaf")
 
-        ListItem(
-            headlineContent = { Text("Inkleaf") },
-            supportingContent = { Text("本地漫画阅读器") },
-        )
-        ListItem(
-            headlineContent = { Text("版本") },
-            supportingContent = { Text(versionName) },
-        )
-        ListItem(
-            headlineContent = { Text("GitHub") },
-            supportingContent = { Text(GITHUB_URL) },
+        InkleafInfoListItem(headline = "Inkleaf", supporting = "本地漫画阅读器")
+        InkleafInfoListItem(headline = "版本", supporting = versionName)
+        InkleafActionListItem(
+            headline = "GitHub",
+            supporting = GITHUB_URL,
+            onClick = onOpenGitHub,
             trailingContent = {
                 Icon(
                     Icons.AutoMirrored.Filled.KeyboardArrowRight,
                     contentDescription = null,
                 )
             },
-            modifier = Modifier.clickable(onClick = onOpenGitHub),
         )
-        ListItem(
-            headlineContent = { Text("开源许可") },
-            supportingContent = { Text("模型版权、许可证与来源") },
+        InkleafActionListItem(
+            headline = "开源许可",
+            supporting = "模型版权、许可证与来源",
+            onClick = onOpenLicenses,
             trailingContent = {
                 Icon(
                     Icons.AutoMirrored.Filled.KeyboardArrowRight,
                     contentDescription = null,
                 )
             },
-            modifier = Modifier.clickable(onClick = onOpenLicenses),
         )
     }
 }
@@ -403,22 +588,13 @@ private fun CacheLimitSheetContent(
         StandardSheetTitle("漫画缓存上限")
 
         CacheLimit.entries.forEach { limit ->
-            ListItem(
-                headlineContent = { Text(limit.label) },
+            InkleafChoiceListItem(
+                headline = limit.label,
+                selected = selected == limit,
+                onClick = { onSelect(limit) },
                 supportingContent = {
                     Text(cacheLimitDescription(limit, autoBudgetBytes))
                 },
-                leadingContent = {
-                    RadioButton(
-                        selected = selected == limit,
-                        onClick = null,
-                    )
-                },
-                modifier = Modifier.selectable(
-                    selected = selected == limit,
-                    onClick = { onSelect(limit) },
-                    role = Role.RadioButton,
-                ),
             )
         }
     }
@@ -579,51 +755,34 @@ private fun CustomSwatch(
     }
 }
 
-/** 取色网格的色相档位：每 30° 一格，12 格覆盖整个色相环（HCT 色相空间） */
+/** Twelve canonical HCT hues cover the full color wheel in 30-degree steps. */
 private val CUSTOM_HUES = List(12) { it * 30.0 }
 
-/** 选中态的色相匹配容差：相邻格间隔 30°，取半格 */
+/** Half a grid step lets arbitrary hex colors select their nearest hue family. */
 private const val HUE_MATCH_TOLERANCE = 15.0
 
 /**
- * 自定义取色面板：离散色相网格 + 浓淡三档 + hex 兜底。
+ * Selects a custom seed through a discrete hue grid with hexadecimal input as an exact fallback.
  *
- * 为什么不是连续滑条/HSV 取色器：M3 调色只保留种子的色相，输出里
- * 可分辨的主题只有几十种——连续输入是假精度（大段拖动毫无变化）。
- * 网格每格直接显示"调色后的实际主色"，所选即所得。
+ * A continuous HSV picker suggests precision that dynamic color does not preserve. The grid owns
+ * only seed selection; spec, palette strategy, and contrast determine the final scheme, which is
+ * shown by the animated preview in advanced settings.
  *
- * 为什么没有"打开即应用"、没有本地预览状态：点格子才写入，DataStore
- * 链路让全 App（含本面板）即时换色，面板本身就是预览。打开 sheet
- * 不触发任何全局写入——之前的实现在进场动画期间 debounce 落地一次
- * 全 App 重新调色，重组正砸在动画中间，这就是进场卡顿的根因。
+ * Opening the sheet never writes to DataStore. Only an explicit pick applies a new seed, avoiding
+ * a whole-app recomposition during the sheet entrance animation.
  */
 @Composable
 private fun CustomColorSheetContent(
     customArgb: Long?,
-    customStyle: CustomStyle,
-    isDark: Boolean,
     onPickColor: (Long) -> Unit,
-    onPickStyle: (CustomStyle) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    // 选中格 = 已存颜色 HCT 色相落入容差内的格。用容差而非相等判定，
-    // hex 输入的任意颜色也能在网格上亮起"它所属的色相家族"
+    // Match by hue family so arbitrary hex seeds still select the nearest canonical swatch.
     val selectedHue = remember(customArgb) {
         customArgb
             ?.let { Hct.fromInt(it.toInt()) }
-            ?.takeIf { it.chroma > 10.0 }  // 灰色不属于任何色相格
+            ?.takeIf { it.chroma > 10.0 } // Gray does not belong to a hue family.
             ?.hue
-    }
-
-    // 每格显示"调色后的实际 primary"：单点 HCT 求解，不生成整套
-    // scheme（12 套 scheme 会在进场首帧造成可感知的组合耗时）。
-    // tone 是 M3 primary 的明暗档位；chroma 跟浓淡档对齐
-    val cellTone = if (isDark) 80.0 else 40.0
-    val cellChroma = when (customStyle) {
-        CustomStyle.MUTED -> 12.0
-        CustomStyle.STANDARD -> 36.0
-        // 超出色域的部分由 HCT 求解器钳到该色相最大可显示彩度
-        CustomStyle.VIVID -> 100.0
     }
 
     Column(
@@ -649,29 +808,11 @@ private fun CustomColorSheetContent(
             ) {
                 rowHues.forEach { hue ->
                     HueCell(
-                        color = Color(Hct.from(hue, cellChroma, cellTone).toInt()),
+                        color = Color(seedArgbOf(hue)),
                         selected = selectedHue != null &&
                                 hueDistance(selectedHue, hue) < HUE_MATCH_TOLERANCE,
                         onClick = { onPickColor(seedArgbOf(hue)) },
                     )
-                }
-            }
-        }
-
-        Text(
-            text = "浓淡",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(top = 12.dp, bottom = 8.dp),
-        )
-        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-            CustomStyle.entries.forEachIndexed { index, style ->
-                SegmentedButton(
-                    selected = customStyle == style,
-                    onClick = { onPickStyle(style) },
-                    shape = SegmentedButtonDefaults.itemShape(index, CustomStyle.entries.size),
-                ) {
-                    Text(style.label)
                 }
             }
         }
@@ -681,7 +822,7 @@ private fun CustomColorSheetContent(
         var hexText by remember(customArgb) {
             mutableStateOf(customArgb?.let(::hexOf) ?: "")
         }
-        OutlinedTextField(
+        InkleafPrecisionField(
             value = hexText,
             onValueChange = { input ->
                 val cleaned = input.trim().uppercase()
@@ -691,8 +832,8 @@ private fun CustomColorSheetContent(
                     parseHexColor(cleaned)?.let(onPickColor)
                 }
             },
-            label = { Text("Hex") },
-            placeholder = { Text("#RRGGBB") },
+            label = "Hex",
+            placeholder = "#RRGGBB",
             singleLine = true,
             modifier = Modifier
                 .fillMaxWidth()
@@ -731,9 +872,8 @@ private fun HueCell(
 }
 
 /**
- * 点选色相格时实际存储的种子：固定 chroma/tone 的规范色。三种浓淡档
- * 的调色都只取种子的色相，chroma 取 48 仅为了让色卡入口显示得鲜明、
- * 且稳过 customSeedStyle 的灰色判定
+ * Stores a canonical seed for each hue. Chroma keeps the swatch legible and safely above the
+ * low-saturation Neutral threshold; the selected palette strategy generates the final scheme.
  */
 private fun seedArgbOf(hue: Double): Long =
     Hct.from(hue, 48.0, 50.0).toInt().toLong() and 0xFFFFFFFFL

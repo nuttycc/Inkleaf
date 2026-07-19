@@ -7,7 +7,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -156,8 +155,9 @@ fun FoldersSheetContent(
                 }
             }
 
-            ListItem(
-                headlineContent = { Text("添加目录") },
+            InkleafActionListItem(
+                headline = "添加目录",
+                onClick = onAddFolder,
                 leadingContent = {
                     Icon(
                         Icons.Filled.Add,
@@ -165,8 +165,6 @@ fun FoldersSheetContent(
                         tint = MaterialTheme.colorScheme.primary,
                     )
                 },
-                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                modifier = Modifier.clickable(onClick = onAddFolder),
             )
         }
 

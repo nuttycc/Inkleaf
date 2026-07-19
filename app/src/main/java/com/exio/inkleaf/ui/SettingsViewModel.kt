@@ -10,6 +10,8 @@ import com.exio.inkleaf.data.DarkMode
 import com.exio.inkleaf.data.ReaderCache
 import com.exio.inkleaf.data.ThemeSeed
 import com.exio.inkleaf.data.ThemeSettingsRepository
+import com.exio.inkleaf.data.ThemeColorSpec
+import com.exio.inkleaf.data.ThemeContrast
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -53,6 +55,22 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setDarkMode(mode: DarkMode) {
         viewModelScope.launch { themeRepo.setDarkMode(mode) }
+    }
+
+    fun setColorSpec(spec: ThemeColorSpec) {
+        viewModelScope.launch { themeRepo.setColorSpec(spec) }
+    }
+
+    fun setContrast(contrast: ThemeContrast) {
+        viewModelScope.launch { themeRepo.setContrast(contrast) }
+    }
+
+    fun setUseAmoled(use: Boolean) {
+        viewModelScope.launch { themeRepo.setUseAmoled(use) }
+    }
+
+    fun resetAdvancedColorSettings() {
+        viewModelScope.launch { themeRepo.resetAdvancedColorSettings() }
     }
 
     fun setUseWallpaper(use: Boolean) {

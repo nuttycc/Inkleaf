@@ -7,17 +7,13 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.PlainTooltip
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TooltipAnchorPosition
 import androidx.compose.material3.TooltipBox
@@ -30,7 +26,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.exio.inkleaf.data.enhancement.EnhancementModelCatalog
 import com.exio.inkleaf.data.enhancement.EnhancementModelDescriptor
@@ -182,15 +177,11 @@ private fun EnhancementOptionRow(
     onSelect: () -> Unit,
     supportingContent: @Composable () -> Unit,
 ) {
-    ListItem(
-        headlineContent = { Text(title, style = MaterialTheme.typography.titleMedium) },
+    InkleafChoiceListItem(
+        headline = title,
+        selected = selected,
+        onClick = onSelect,
         supportingContent = supportingContent,
-        leadingContent = { ReaderRadioButton(selected) },
-        modifier = Modifier.selectable(
-            selected = selected,
-            onClick = onSelect,
-            role = Role.RadioButton,
-        ),
     )
 }
 
@@ -212,17 +203,5 @@ private fun ReaderModelRow(
                 showDownloadStatus = false,
             )
         },
-    )
-}
-
-@Composable
-private fun ReaderRadioButton(selected: Boolean) {
-    RadioButton(
-        selected = selected,
-        onClick = null,
-        colors = RadioButtonDefaults.colors(
-            selectedColor = MaterialTheme.colorScheme.primary,
-            unselectedColor = MaterialTheme.colorScheme.onSurfaceVariant,
-        ),
     )
 }

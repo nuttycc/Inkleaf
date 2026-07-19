@@ -19,11 +19,11 @@ import com.materialkolor.rememberDynamicColorScheme
 import android.graphics.Color as AndroidColor
 
 /**
- * 自定义种子色的实际调色风格。复用 INK 预设的经验：低饱和的颜色
- * （hex 输入进来的灰/米白等）必须走 Neutral，TonalSpot/Vibrant 会把
- * 灰"提纯"成紫灰；有彩度的照用户选的浓淡档。
+ * Applies the selected palette style unless the seed is nearly neutral. Material's chromatic
+ * variants can turn gray seeds purple, so low-saturation colors always use Neutral regardless of
+ * the advanced setting.
  */
-private fun customSeedStyle(argb: Long, preferred: PaletteStyle): PaletteStyle {
+internal fun resolvedPaletteStyle(argb: Long, preferred: PaletteStyle): PaletteStyle {
     val hsv = FloatArray(3)
     AndroidColor.colorToHSV(argb.toInt(), hsv)
     return if (hsv[1] < 0.15f) PaletteStyle.Neutral else preferred
@@ -76,13 +76,19 @@ fun InkleafTheme(
         settings.useCustom && settings.customArgb != null -> rememberDynamicColorScheme(
             seedColor = Color(settings.customArgb),
             isDark = isDark,
-            style = customSeedStyle(settings.customArgb, settings.customStyle.style),
+            isAmoled = isDark && settings.useAmoled,
+            style = resolvedPaletteStyle(settings.customArgb, settings.customStyle.style),
+            contrastLevel = settings.contrast.contrast.value,
+            specVersion = settings.colorSpec.specVersion,
         )
 
         else -> rememberDynamicColorScheme(
             seedColor = Color(settings.seed.argb),
             isDark = isDark,
-            style = settings.seed.style,
+            isAmoled = isDark && settings.useAmoled,
+            style = resolvedPaletteStyle(settings.seed.argb, settings.customStyle.style),
+            contrastLevel = settings.contrast.contrast.value,
+            specVersion = settings.colorSpec.specVersion,
         )
     }
 

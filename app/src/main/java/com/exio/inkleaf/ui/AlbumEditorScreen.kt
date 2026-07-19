@@ -43,10 +43,9 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MediumFlexibleTopAppBar
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -54,7 +53,7 @@ import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -65,8 +64,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
@@ -173,11 +174,13 @@ fun AlbumEditorScreen(
         }
     }
 
+    val topAppBarScrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+
     Scaffold(
-        modifier = modifier,
+        modifier = modifier.nestedScroll(topAppBarScrollBehavior.nestedScrollConnection),
         contentWindowInsets = WindowInsets(0),
         topBar = {
-            TopAppBar(
+            MediumFlexibleTopAppBar(
                 title = { Text(if (state.isPersisted) "编辑图册" else "创建图册") },
                 navigationIcon = {
                     IconButton(
@@ -213,6 +216,11 @@ fun AlbumEditorScreen(
                         }
                     }
                 },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.Transparent,
+                    scrolledContainerColor = Color.Transparent,
+                ),
+                scrollBehavior = topAppBarScrollBehavior,
             )
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -297,48 +305,48 @@ fun AlbumEditorScreen(
         ) {
             SheetColumn(scrollable = true) {
                 StandardSheetTitle("添加图片")
-                ListItem(
-                    headlineContent = { Text("从系统相册选择") },
-                    supportingContent = { Text("使用照片选择器多选图片") },
+                InkleafActionListItem(
+                    headline = "从系统相册选择",
+                    supporting = "使用照片选择器多选图片",
+                    onClick = {
+                        showAddSheet = false
+                        photoPicker.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                        )
+                    },
                     leadingContent = {
                         Icon(
                             painter = painterResource(R.drawable.ic_image),
                             contentDescription = null,
                         )
                     },
-                    modifier = Modifier.clickable {
-                        showAddSheet = false
-                        photoPicker.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                        )
-                    },
                 )
-                ListItem(
-                    headlineContent = { Text("从文件中选择") },
-                    supportingContent = { Text("从文件管理器多选图片") },
+                InkleafActionListItem(
+                    headline = "从文件中选择",
+                    supporting = "从文件管理器多选图片",
+                    onClick = {
+                        showAddSheet = false
+                        filePicker.launch(arrayOf("image/*"))
+                    },
                     leadingContent = {
                         Icon(
                             painter = painterResource(R.drawable.ic_file),
                             contentDescription = null,
                         )
                     },
-                    modifier = Modifier.clickable {
-                        showAddSheet = false
-                        filePicker.launch(arrayOf("image/*"))
-                    },
                 )
-                ListItem(
-                    headlineContent = { Text("导入文件夹") },
-                    supportingContent = { Text("仅导入当前层，并按文件名排序") },
+                InkleafActionListItem(
+                    headline = "导入文件夹",
+                    supporting = "仅导入当前层，并按文件名排序",
+                    onClick = {
+                        showAddSheet = false
+                        folderPicker.launch(null)
+                    },
                     leadingContent = {
                         Icon(
                             painter = painterResource(R.drawable.ic_folder),
                             contentDescription = null,
                         )
-                    },
-                    modifier = Modifier.clickable {
-                        showAddSheet = false
-                        folderPicker.launch(null)
                     },
                 )
             }
@@ -394,15 +402,11 @@ private fun AlbumEditorContent(
     }
 
     Column(modifier = modifier.fillMaxSize()) {
-        OutlinedTextField(
+        InkleafNameField(
             value = state.title,
             onValueChange = onTitleChange,
-            label = { Text("图册标题") },
-            supportingText = if (state.title.isBlank()) {
-                { Text("请输入图册标题") }
-            } else {
-                null
-            },
+            label = "图册标题",
+            supporting = if (state.title.isBlank()) "请输入图册标题" else null,
             isError = state.title.isBlank(),
             singleLine = true,
             enabled = !state.isSaving,

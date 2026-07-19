@@ -13,7 +13,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -90,18 +89,18 @@ internal fun EnhancementCacheSheet(
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    OutlinedTextField(
+                    InkleafPrecisionField(
                         value = startText,
                         onValueChange = { value -> startText = value.filter(Char::isDigit) },
-                        label = { Text("起始页") },
+                        label = "起始页",
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.weight(1f),
                     )
-                    OutlinedTextField(
+                    InkleafPrecisionField(
                         value = endText,
                         onValueChange = { value -> endText = value.filter(Char::isDigit) },
-                        label = { Text("结束页") },
+                        label = "结束页",
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.weight(1f),
