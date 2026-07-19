@@ -56,9 +56,9 @@ import com.exio.inkleaf.data.ComicRepository
 import com.exio.inkleaf.data.ThemeSettings
 import com.exio.inkleaf.data.ThemeSettingsRepository
 import com.exio.inkleaf.ui.AlbumEditorScreen
+import com.exio.inkleaf.ui.EnhancementModelManagerScreen
 import com.exio.inkleaf.ui.FavoriteViewerScreen
 import com.exio.inkleaf.ui.FavoritesScreen
-import com.exio.inkleaf.ui.EnhancementModelManagerScreen
 import com.exio.inkleaf.ui.ReaderScreen
 import com.exio.inkleaf.ui.SettingsScreen
 import com.exio.inkleaf.ui.ShelfScreen
@@ -491,6 +491,7 @@ class MainActivity : AppCompatActivity() {
                                     appliedSettings = themeSettings,
                                     onBack = { navController.popBackStack() },
                                     onApplyTheme = { applied, committed ->
+                                        navController.popBackStack()
                                         ThemeNightModeController.applyCommittedTheme(
                                             activity = this@MainActivity,
                                             applied = applied,

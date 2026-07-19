@@ -1,14 +1,18 @@
 package com.exio.inkleaf.ui
 
+import android.app.Activity
 import android.os.Build
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -17,6 +21,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
@@ -26,8 +31,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -36,24 +40,25 @@ import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MediumFlexibleTopAppBar
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -63,11 +68,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.exio.inkleaf.isSystemCurrentlyDark
 import com.exio.inkleaf.data.CustomStyle
 import com.exio.inkleaf.data.DarkMode
 import com.exio.inkleaf.data.ThemeColorSpec
@@ -75,8 +81,11 @@ import com.exio.inkleaf.data.ThemeContrast
 import com.exio.inkleaf.data.ThemeSeed
 import com.exio.inkleaf.data.ThemeSettings
 import com.exio.inkleaf.data.resolveDark
+import com.exio.inkleaf.isSystemCurrentlyDark
 import com.exio.inkleaf.ui.theme.rememberInkleafColorScheme
 import com.materialkolor.hct.Hct
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -93,18 +102,26 @@ fun ThemeSettingsScreen(
     var draft by rememberSaveable(stateSaver = ThemeSettingsSaver) {
         mutableStateOf(appliedSettings)
     }
-    var showDiscardDialog by rememberSaveable { mutableStateOf(false) }
     var showCustomColorSheet by rememberSaveable { mutableStateOf(false) }
     var showAdvancedColorSheet by rememberSaveable { mutableStateOf(false) }
-    val isSaving by viewModel.isSaving.collectAsStateWithLifecycle()
+    var isClosing by remember { mutableStateOf(false) }
     val saveError by viewModel.saveError.collectAsStateWithLifecycle()
-    val pendingApplication by viewModel.pendingApplication.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
-    val isDirty = draft != baseline
+    val scrollState = rememberScrollState()
+    val advancedSheetScrollState = rememberScrollState()
+    val scope = rememberCoroutineScope()
+    val systemIsDark = isSystemCurrentlyDark()
+    val previewIsDark = draft.darkMode.resolveDark(systemIsDark)
+    val appliedIsDark = isSystemInDarkTheme()
+    val typography = MaterialTheme.typography
+    val previewColorScheme = rememberInkleafColorScheme(draft, previewIsDark)
 
-    // A committed draft survives Activity recreation. Uncommitted edits survive ordinary
-    // configuration changes because both values are saveable and the applied settings stay equal.
+    viewModel.initialize(appliedSettings)
+    PreviewSystemBars(isDark = previewIsDark, appliedIsDark = appliedIsDark)
+
+    // Saveable editor state survives configuration changes. Baseline tracks the Activity snapshot
+    // so a recreated Activity can adopt a newer persisted theme without overwriting active edits.
     LaunchedEffect(appliedSettings) {
         if (baseline != appliedSettings) {
             if (draft == baseline || draft == appliedSettings) {
@@ -115,279 +132,226 @@ fun ThemeSettingsScreen(
     }
     LaunchedEffect(saveError) {
         val message = saveError ?: return@LaunchedEffect
+        // A modal sheet owns a separate Dialog window and would cover the editor Snackbar.
+        showCustomColorSheet = false
+        showAdvancedColorSheet = false
         snackbarHostState.showSnackbar(message)
         viewModel.consumeSaveError()
     }
-    LaunchedEffect(pendingApplication) {
-        val committed = pendingApplication ?: return@LaunchedEffect
-        // Consume before recreation so a retained ViewModel cannot apply the same transaction twice.
-        viewModel.consumePendingApplication()
-        baseline = committed
-        if (committed != appliedSettings) {
-            onApplyTheme(appliedSettings, committed)
-        }
+    LaunchedEffect(draft) {
+        delay(THEME_AUTOSAVE_DEBOUNCE_MS)
+        viewModel.persistTheme(draft)
     }
 
     fun requestBack() {
-        when {
-            isSaving -> Unit
-            isDirty -> showDiscardDialog = true
-            else -> onBack()
+        if (isClosing) return
+        isClosing = true
+        scope.launch {
+            var latestDraft = draft
+            while (true) {
+                if (!viewModel.persistTheme(latestDraft)) {
+                    isClosing = false
+                    return@launch
+                }
+                val currentDraft = draft
+                if (currentDraft == latestDraft) break
+                latestDraft = currentDraft
+            }
+
+            if (latestDraft != appliedSettings) {
+                onApplyTheme(appliedSettings, latestDraft)
+            } else {
+                onBack()
+            }
+            isClosing = false
         }
     }
 
     BackHandler(onBack = { requestBack() })
 
-    Scaffold(
-        modifier = modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        topBar = {
-            MediumFlexibleTopAppBar(
-                title = { Text("外观与主题") },
-                navigationIcon = {
-                    IconButton(onClick = { requestBack() }, enabled = !isSaving) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
+    MaterialExpressiveTheme(colorScheme = previewColorScheme, typography = typography) {
+        key(draft, previewIsDark) {
+            Scaffold(
+                modifier = modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+                topBar = {
+                    MediumFlexibleTopAppBar(
+                        title = { Text("主题") },
+                        navigationIcon = {
+                            IconButton(onClick = { requestBack() }, enabled = !isClosing) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "返回",
+                                )
+                            }
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = Color.Transparent,
+                            scrolledContainerColor = Color.Transparent,
+                        ),
+                        scrollBehavior = scrollBehavior,
+                    )
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.Transparent,
-                    scrolledContainerColor = Color.Transparent,
-                ),
-                scrollBehavior = scrollBehavior,
-            )
-        },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        bottomBar = {
-            Surface(
-                modifier = Modifier.navigationBarsPadding(),
-                tonalElevation = 3.dp,
-            ) {
-                Button(
-                    onClick = {
-                        viewModel.applyTheme(draft)
-                    },
-                    enabled = isDirty && !isSaving,
+                snackbarHost = { SnackbarHost(snackbarHostState) },
+            ) { innerPadding ->
+                Column(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                        .fillMaxSize()
+                        .padding(innerPadding),
                 ) {
-                    Text(if (isSaving) "正在应用主题…" else "应用主题")
+                    CollapsedSpecimen(settings = draft, isDark = previewIsDark)
+
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .verticalScroll(scrollState),
+                    ) {
+                        ThemeSectionLabel("主题色")
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
+                                .selectableGroup(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            ThemeSeed.entries.forEach { seed ->
+                                SeedSwatch(
+                                    seed = seed,
+                                    selected = !draft.useWallpaper &&
+                                            !draft.useCustom &&
+                                            draft.seed == seed,
+                                    onClick = {
+                                        draft = draft.copy(
+                                            seed = seed,
+                                            useWallpaper = false,
+                                            useCustom = false,
+                                        )
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                            CustomSwatch(
+                                customArgb = draft.customArgb,
+                                selected = !draft.useWallpaper && draft.useCustom,
+                                onClick = { showCustomColorSheet = true },
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+
+                        InkleafActionListItem(
+                            headline = "调色参数",
+                            supporting = "${draft.customStyle.label} · ${draft.contrast.label}",
+                            onClick = { showAdvancedColorSheet = true },
+                            trailingContent = {
+                                Icon(Icons.Filled.KeyboardArrowUp, contentDescription = null)
+                            },
+                        )
+
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            ListItem(
+                                onClick = {
+                                    draft = draft.copy(useWallpaper = !draft.useWallpaper)
+                                },
+                                supportingContent = { Text("跟随壁纸色彩自动生成") },
+                                trailingContent = {
+                                    Switch(checked = draft.useWallpaper, onCheckedChange = null)
+                                },
+                            ) { Text("动态配色") }
+                        }
+
+                        ListItem(
+                            onClick = { draft = draft.copy(useAmoled = !draft.useAmoled) },
+                            supportingContent = { Text("深色模式下使用纯黑背景") },
+                            trailingContent = {
+                                Switch(checked = draft.useAmoled, onCheckedChange = null)
+                            },
+                        ) { Text("AMOLED 模式") }
+
+                        ThemeSectionLabel("明暗模式")
+                        SingleChoiceSegmentedButtonRow(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp),
+                        ) {
+                            DarkMode.entries.forEachIndexed { index, mode ->
+                                SegmentedButton(
+                                    selected = draft.darkMode == mode,
+                                    onClick = { draft = draft.copy(darkMode = mode) },
+                                    shape = SegmentedButtonDefaults.itemShape(
+                                        index,
+                                        DarkMode.entries.size,
+                                    ),
+                                ) {
+                                    Text(mode.label)
+                                }
+                            }
+                        }
+
+                        ThemeSectionLabel("配色方案")
+                        SingleChoiceSegmentedButtonRow(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp),
+                        ) {
+                            ThemeColorSpec.entries.forEachIndexed { index, spec ->
+                                SegmentedButton(
+                                    selected = draft.colorSpec == spec,
+                                    onClick = { draft = draft.copy(colorSpec = spec) },
+                                    shape = SegmentedButtonDefaults.itemShape(
+                                        index,
+                                        ThemeColorSpec.entries.size,
+                                    ),
+                                ) {
+                                    Text(spec.label)
+                                }
+                            }
+                        }
+                    }
                 }
             }
-        },
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .verticalScroll(rememberScrollState()),
-        ) {
-            ThemeSpecimen(settings = draft)
+        }
 
-            ThemeSectionLabel("颜色来源")
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-                    .selectableGroup(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+        if (showCustomColorSheet) {
+            val customColorSheetState = rememberExpandOnlySheetState()
+            ModalBottomSheet(
+                onDismissRequest = { showCustomColorSheet = false },
+                sheetState = customColorSheetState,
             ) {
-                ThemeSeed.entries.forEach { seed ->
-                    SeedSwatch(
-                        seed = seed,
-                        selected = !draft.useWallpaper && !draft.useCustom && draft.seed == seed,
-                        onClick = {
-                            draft = draft.copy(
-                                seed = seed,
-                                useWallpaper = false,
-                                useCustom = false,
-                            )
-                        },
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-                CustomSwatch(
+                CustomColorSheetContent(
                     customArgb = draft.customArgb,
-                    selected = !draft.useWallpaper && draft.useCustom,
-                    onClick = { showCustomColorSheet = true },
-                    modifier = Modifier.weight(1f),
+                    onPickColor = { argb ->
+                        // Close before changing the preview theme so the stable input Dialog never
+                        // contains Material components transitioning between two color schemes.
+                        showCustomColorSheet = false
+                        draft = draft.copy(
+                            customArgb = argb,
+                            useCustom = true,
+                            useWallpaper = false,
+                        )
+                    },
                 )
             }
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                ListItem(
-                    checked = draft.useWallpaper,
-                    onCheckedChange = { draft = draft.copy(useWallpaper = it) },
-                    supportingContent = { Text("使用 Android 壁纸生成配色") },
-                    trailingContent = {
-                        Switch(checked = draft.useWallpaper, onCheckedChange = null)
-                    },
-                ) { Text("壁纸取色") }
-            }
-
-            ThemeSectionLabel("明暗模式")
-            SingleChoiceSegmentedButtonRow(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-            ) {
-                DarkMode.entries.forEachIndexed { index, mode ->
-                    SegmentedButton(
-                        selected = draft.darkMode == mode,
-                        onClick = { draft = draft.copy(darkMode = mode) },
-                        shape = SegmentedButtonDefaults.itemShape(index, DarkMode.entries.size),
-                    ) {
-                        Text(mode.label)
-                    }
-                }
-            }
-
-            ThemeSectionLabel("配色规格")
-            SingleChoiceSegmentedButtonRow(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-            ) {
-                ThemeColorSpec.entries.forEachIndexed { index, spec ->
-                    SegmentedButton(
-                        selected = draft.colorSpec == spec,
-                        onClick = { draft = draft.copy(colorSpec = spec) },
-                        shape = SegmentedButtonDefaults.itemShape(
-                            index,
-                            ThemeColorSpec.entries.size,
-                        ),
-                    ) {
-                        Text(spec.label)
-                    }
-                }
-            }
-
-            ListItem(
-                checked = draft.useAmoled,
-                onCheckedChange = { draft = draft.copy(useAmoled = it) },
-                supportingContent = { Text("深色模式使用纯黑表面；浅色模式下保留此选择") },
-                trailingContent = { Switch(checked = draft.useAmoled, onCheckedChange = null) },
-            ) { Text("AMOLED 黑色") }
-
-            ThemeSectionLabel("高级")
-            InkleafActionListItem(
-                headline = "高级配色",
-                supporting = "${draft.customStyle.label} · ${draft.contrast.label}",
-                onClick = { showAdvancedColorSheet = true },
-            )
         }
-    }
 
-    if (showCustomColorSheet) {
-        ModalBottomSheet(
-            onDismissRequest = { showCustomColorSheet = false },
-            sheetState = rememberExpandOnlySheetState(),
-        ) {
-            CustomColorSheetContent(
-                customArgb = draft.customArgb,
-                onPickColor = { argb ->
-                    draft = draft.copy(
-                        customArgb = argb,
-                        useCustom = true,
-                        useWallpaper = false,
-                    )
-                },
-            )
-        }
-    }
-
-    if (showAdvancedColorSheet) {
-        ModalBottomSheet(
-            onDismissRequest = { showAdvancedColorSheet = false },
-            sheetState = rememberExpandOnlySheetState(),
-        ) {
-            AdvancedColorSheetContent(
-                settings = draft,
-                onPickStyle = { draft = draft.copy(customStyle = it) },
-                onPickContrast = { draft = draft.copy(contrast = it) },
-                onReset = {
-                    draft = draft.copy(
-                        customStyle = CustomStyle.STANDARD,
-                        contrast = ThemeContrast.DEFAULT,
-                    )
-                },
-            )
-        }
-    }
-
-    if (showDiscardDialog) {
-        AlertDialog(
-            onDismissRequest = { showDiscardDialog = false },
-            title = { Text("放弃主题修改？") },
-            text = { Text("尚未应用的主题选择会丢失。") },
-            confirmButton = {
-                TextButton(onClick = onBack) { Text("放弃修改") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDiscardDialog = false }) { Text("继续编辑") }
-            },
-        )
-    }
-}
-
-@Composable
-private fun ThemeSpecimen(settings: ThemeSettings) {
-    val systemIsDark = isSystemCurrentlyDark()
-    val previewIsDark = settings.darkMode.resolveDark(systemIsDark)
-    val typography = MaterialTheme.typography
-    val colorScheme = rememberInkleafColorScheme(settings, previewIsDark)
-
-    key(settings, previewIsDark) {
-        MaterialExpressiveTheme(colorScheme = colorScheme, typography = typography) {
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                shape = MaterialTheme.shapes.large,
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        if (showAdvancedColorSheet) {
+            val advancedColorSheetState = rememberExpandOnlySheetState()
+            ModalBottomSheet(
+                onDismissRequest = { showAdvancedColorSheet = false },
+                sheetState = advancedColorSheetState,
             ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("主题样张", style = MaterialTheme.typography.titleLarge)
-                        Text(
-                            text = previewDescription(settings, previewIsDark),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Button(onClick = {}, modifier = Modifier.weight(1f)) {
-                            Text("主要操作")
-                        }
-                        Switch(checked = true, onCheckedChange = null)
-                    }
-                    ListItem(
-                        selected = true,
-                        onClick = {},
-                        leadingContent = {
-                            RadioButton(selected = true, onClick = null)
+                key(draft, previewIsDark) {
+                    AdvancedColorSheetContent(
+                        settings = draft,
+                        scrollState = advancedSheetScrollState,
+                        onPickStyle = { draft = draft.copy(customStyle = it) },
+                        onPickContrast = { draft = draft.copy(contrast = it) },
+                        onReset = {
+                            draft = draft.copy(
+                                customStyle = CustomStyle.STANDARD,
+                                contrast = ThemeContrast.DEFAULT,
+                            )
                         },
-                        supportingContent = { Text("正文、选中态与表面层级") },
-                    ) {
-                        Text("阅读界面设置")
-                    }
-                    Surface(
-                        color = MaterialTheme.colorScheme.errorContainer,
-                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                        shape = MaterialTheme.shapes.medium,
-                    ) {
-                        Text(
-                            text = "错误与警示颜色",
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                        )
-                    }
+                    )
                 }
             }
         }
@@ -396,7 +360,7 @@ private fun ThemeSpecimen(settings: ThemeSettings) {
 
 private fun previewDescription(settings: ThemeSettings, isDark: Boolean): String {
     val source = when {
-        settings.useWallpaper && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> "壁纸取色"
+        settings.useWallpaper && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> "动态配色"
         settings.useCustom -> "自定义色"
         else -> settings.seed.label
     }
@@ -405,22 +369,84 @@ private fun previewDescription(settings: ThemeSettings, isDark: Boolean): String
 }
 
 @Composable
+private fun PreviewSystemBars(isDark: Boolean, appliedIsDark: Boolean) {
+    val view = LocalView.current
+    if (view.isInEditMode) return
+
+    fun setAppearance(dark: Boolean) {
+        val window = (view.context as? Activity)?.window ?: return
+        val controller = WindowCompat.getInsetsController(window, view)
+        controller.isAppearanceLightStatusBars = !dark
+        controller.isAppearanceLightNavigationBars = !dark
+    }
+
+    SideEffect {
+        setAppearance(isDark)
+    }
+    DisposableEffect(view, appliedIsDark) {
+        onDispose {
+            setAppearance(appliedIsDark)
+        }
+    }
+}
+
+@Composable
+private fun CollapsedSpecimen(settings: ThemeSettings, isDark: Boolean) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        val colors = MaterialTheme.colorScheme
+        listOf(
+            colors.primary,
+            colors.secondary,
+            colors.tertiary,
+            colors.surfaceContainerHighest,
+            colors.error,
+        ).forEach { color ->
+            Box(
+                modifier = Modifier
+                    .size(12.dp)
+                    .clip(CircleShape)
+                    .background(color),
+            )
+        }
+        Spacer(modifier = Modifier.width(4.dp))
+        Text(
+            text = previewDescription(settings, isDark),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
 private fun AdvancedColorSheetContent(
     settings: ThemeSettings,
+    scrollState: ScrollState,
     onPickStyle: (CustomStyle) -> Unit,
     onPickContrast: (ThemeContrast) -> Unit,
     onReset: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    SheetColumn(modifier = modifier, scrollable = true, selectable = true) {
-        StandardSheetTitle("高级配色")
+    SheetColumn(
+        modifier = modifier,
+        scrollable = true,
+        scrollState = scrollState,
+        selectable = true,
+    ) {
+        StandardSheetTitle("调色参数")
         if (settings.useWallpaper) {
             InkleafInfoListItem(
-                headline = "壁纸取色正在生效",
+                headline = "动态配色正在生效",
                 supporting = "高级参数会保留，并在切回种子色时生效",
             )
         }
-        ThemeSectionLabel("调色风格")
+        ThemeSectionLabel("风格")
         CustomStyle.entries.forEach { style ->
             InkleafChoiceListItem(
                 headline = style.label,
@@ -689,6 +715,7 @@ private val ThemeSettingsSaver = listSaver<ThemeSettings, Any>(
 private val CUSTOM_HUES = List(12) { it * 30.0 }
 private const val HUE_MATCH_TOLERANCE = 15.0
 private const val NO_CUSTOM_COLOR = Long.MIN_VALUE
+private const val THEME_AUTOSAVE_DEBOUNCE_MS = 400L
 
 private fun seedArgbOf(hue: Double): Long =
     Hct.from(hue, 48.0, 50.0).toInt().toLong() and 0xFFFFFFFFL

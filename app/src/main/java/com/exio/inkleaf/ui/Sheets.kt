@@ -1,5 +1,6 @@
 package com.exio.inkleaf.ui
 
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -51,6 +52,7 @@ internal fun StandardSheetTitle(
 internal fun SheetColumn(
     modifier: Modifier = Modifier,
     scrollable: Boolean = false,
+    scrollState: ScrollState? = null,
     selectable: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
@@ -58,7 +60,13 @@ internal fun SheetColumn(
         modifier = modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .then(if (scrollable) Modifier.verticalScroll(rememberScrollState()) else Modifier)
+            .then(
+                if (scrollable) {
+                    Modifier.verticalScroll(scrollState ?: rememberScrollState())
+                } else {
+                    Modifier
+                }
+            )
             .then(if (selectable) Modifier.selectableGroup() else Modifier)
             .padding(bottom = 12.dp),
         content = content,

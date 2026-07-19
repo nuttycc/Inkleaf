@@ -100,7 +100,7 @@ fun SettingsScreen(
         ) {
             SectionLabel("个性化")
             InkleafActionListItem(
-                headline = "外观与主题",
+                headline = "主题",
                 supporting = themeSummary(themeSettings),
                 onClick = onOpenThemeSettings,
                 trailingContent = { ForwardIcon() },

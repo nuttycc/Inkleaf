@@ -51,7 +51,7 @@ enum class ThemeColorSpec(
     val label: String,
 ) {
     MATERIAL_2025(ColorSpec.SpecVersion.SPEC_2025, "Expressive 2025"),
-    MATERIAL_2021(ColorSpec.SpecVersion.SPEC_2021, "经典 2021"),
+    MATERIAL_2021(ColorSpec.SpecVersion.SPEC_2021, "Classic 2021"),
 }
 
 /** Named contrast levels mirror Material Kolor and avoid storing raw doubles. */
