@@ -106,55 +106,23 @@ class ThemeSettingsRepository(context: Context) {
         )
     }
 
-    suspend fun setSeed(value: ThemeSeed) {
+    /** Persists the complete editor draft atomically so no partial theme can reach the next Activity. */
+    suspend fun setSettings(value: ThemeSettings) {
         dataStore.edit {
-            it[KEY_SEED] = value.name
-            // 选了具体种子就视为放弃壁纸取色/自定义色，避免"点了色卡却没反应"
-            it[KEY_USE_WALLPAPER] = false
-            it[KEY_USE_CUSTOM] = false
+            it[KEY_SEED] = value.seed.name
+            it[KEY_DARK_MODE] = value.darkMode.name
+            it[KEY_USE_WALLPAPER] = value.useWallpaper
+            if (value.customArgb == null) {
+                it.remove(KEY_CUSTOM_ARGB)
+            } else {
+                it[KEY_CUSTOM_ARGB] = value.customArgb
+            }
+            it[KEY_USE_CUSTOM] = value.useCustom
+            it[KEY_CUSTOM_STYLE] = value.customStyle.name
+            it[KEY_COLOR_SPEC] = value.colorSpec.name
+            it[KEY_CONTRAST] = value.contrast.name
+            it[KEY_USE_AMOLED] = value.useAmoled
         }
-    }
-
-    /** 设置并启用自定义种子色。与预设种子、壁纸取色互斥 */
-    suspend fun setCustomColor(argb: Long) {
-        dataStore.edit {
-            it[KEY_CUSTOM_ARGB] = argb
-            it[KEY_USE_CUSTOM] = true
-            it[KEY_USE_WALLPAPER] = false
-        }
-    }
-
-    /** Stores the shared palette style without changing which seed source is currently active. */
-    suspend fun setCustomStyle(value: CustomStyle) {
-        dataStore.edit { it[KEY_CUSTOM_STYLE] = value.name }
-    }
-
-    suspend fun setDarkMode(value: DarkMode) {
-        dataStore.edit { it[KEY_DARK_MODE] = value.name }
-    }
-
-    suspend fun setColorSpec(value: ThemeColorSpec) {
-        dataStore.edit { it[KEY_COLOR_SPEC] = value.name }
-    }
-
-    suspend fun setContrast(value: ThemeContrast) {
-        dataStore.edit { it[KEY_CONTRAST] = value.name }
-    }
-
-    suspend fun setUseAmoled(value: Boolean) {
-        dataStore.edit { it[KEY_USE_AMOLED] = value }
-    }
-
-    /** Restores the options owned by the advanced sheet without changing main-page controls. */
-    suspend fun resetAdvancedColorSettings() {
-        dataStore.edit {
-            it[KEY_CONTRAST] = ThemeContrast.DEFAULT.name
-            it[KEY_CUSTOM_STYLE] = CustomStyle.STANDARD.name
-        }
-    }
-
-    suspend fun setUseWallpaper(value: Boolean) {
-        dataStore.edit { it[KEY_USE_WALLPAPER] = value }
     }
 
     companion object {

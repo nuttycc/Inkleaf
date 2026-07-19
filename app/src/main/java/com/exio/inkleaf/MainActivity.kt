@@ -3,10 +3,11 @@ package com.exio.inkleaf
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
 import android.widget.Toast
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.animation.AnimatedContentTransitionScope.SlideDirection
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
@@ -43,7 +44,6 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
@@ -51,10 +51,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
-import com.exio.inkleaf.data.AlbumExporter
-import com.exio.inkleaf.data.AlbumRepository
 import com.exio.inkleaf.data.ComicRepository
-import com.exio.inkleaf.data.ReaderCache
 import com.exio.inkleaf.data.ThemeSettings
 import com.exio.inkleaf.data.ThemeSettingsRepository
 import com.exio.inkleaf.ui.AlbumEditorScreen
@@ -64,10 +61,13 @@ import com.exio.inkleaf.ui.EnhancementModelManagerScreen
 import com.exio.inkleaf.ui.ReaderScreen
 import com.exio.inkleaf.ui.SettingsScreen
 import com.exio.inkleaf.ui.ShelfScreen
+import com.exio.inkleaf.ui.ThemeSettingsScreen
 import com.exio.inkleaf.ui.theme.InkleafTheme
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.Serializable
 
 /**
@@ -91,6 +91,9 @@ data class FavoriteViewerRoute(val favoriteId: Long)
 
 @Serializable
 data object SettingsRoute
+
+@Serializable
+data object ThemeSettingsRoute
 
 @Serializable
 data object EnhancementModelsRoute
@@ -254,7 +257,7 @@ private fun RowScope.CompactBottomBarPlaceholder(iconRes: Int) {
     }
 }
 
-class MainActivity : ComponentActivity() {
+class MainActivity : AppCompatActivity() {
     private var externalOpenSequence = 0L
     private var externalOpenRequest by mutableStateOf<ExternalOpenRequest?>(null)
 
@@ -265,20 +268,17 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        if (savedInstanceState == null) {
+        externalOpenSequence = savedInstanceState?.getLong(STATE_EXTERNAL_OPEN_SEQUENCE) ?: 0L
+        val restoredExternalUri = savedInstanceState
+            ?.getString(STATE_EXTERNAL_OPEN_URI)
+            ?.let(Uri::parse)
+        if (restoredExternalUri != null) {
+            externalOpenRequest = ExternalOpenRequest(
+                id = savedInstanceState?.getLong(STATE_EXTERNAL_OPEN_ID) ?: 0L,
+                uri = restoredExternalUri,
+            )
+        } else if (savedInstanceState == null) {
             queueExternalOpen(intent)
-        }
-
-        // 只在冷启动时清理：旧版固定名副本 + 上次进程被杀留下的过期半成品。
-        // 旋转屏幕也会重新走 onCreate（此时 savedInstanceState != null），
-        // 而存活的 ReaderViewModel 可能正持有缓存文件——不能清。
-        // 注意按书持久化的副本是有意保留的，这里不会动它们
-        if (savedInstanceState == null) {
-            lifecycleScope.launch(Dispatchers.IO) {
-                ReaderCache.cleanupOnColdStart(this@MainActivity)
-                AlbumRepository(this@MainActivity).cleanupOnColdStart()
-                AlbumExporter.cleanupOnColdStart(this@MainActivity)
-            }
         }
 
         val themeRepo = ThemeSettingsRepository(this)
@@ -286,26 +286,52 @@ class MainActivity : ComponentActivity() {
         // 之前这里是 runBlocking 阻塞主线程换"首帧即用户主题"；现在启动
         // 画面盖住了首帧之前的空窗，同样不闪默认色，但主线程零阻塞
         var initialTheme by mutableStateOf<ThemeSettings?>(null)
-        lifecycleScope.launch { initialTheme = themeRepo.settings.first() }
+        lifecycleScope.launch {
+            val loadedTheme = try {
+                withTimeout(THEME_LOAD_TIMEOUT_MS) { themeRepo.settings.first() }
+            } catch (error: TimeoutCancellationException) {
+                Log.e(LOG_TAG, "Timed out while loading theme settings", error)
+                ThemeSettings()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                Log.e(LOG_TAG, "Failed to load theme settings", error)
+                ThemeSettings()
+            }
+            val awaitingRecreation = ThemeNightModeController.synchronizeStartup(
+                activity = this@MainActivity,
+                darkMode = loadedTheme.darkMode,
+            )
+            if (!awaitingRecreation) {
+                initialTheme = loadedTheme
+            }
+        }
 
-        // 同理预热书架首查：Room 单例在 splash 期间就打开数据库并跑完
-        // 首次查询，ShelfScreen 组合后自己的收集几乎立刻命中，
-        // "留白 → 网格"的切换被藏在启动画面背后。
-        // first() 对空表也会发射 emptyList，不存在挂死 splash 的风险
+        // Shelf warmup hides the initial empty-to-grid transition, but it is best-effort and may
+        // never keep the splash screen longer than the bounded startup budget.
         var shelfWarm by mutableStateOf(false)
         lifecycleScope.launch {
-            ComicRepository(this@MainActivity).observeAll().first()
-            shelfWarm = true
+            try {
+                withTimeout(SHELF_WARMUP_TIMEOUT_MS) {
+                    (application as InkleafApplication).awaitShelfWarmup()
+                }
+            } catch (error: TimeoutCancellationException) {
+                Log.w(LOG_TAG, "Shelf warmup timed out; continuing startup", error)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                Log.w(LOG_TAG, "Shelf warmup failed; continuing startup", error)
+            } finally {
+                shelfWarm = true
+            }
         }
         splashScreen.setKeepOnScreenCondition { initialTheme == null || !shelfWarm }
 
         setContent {
             // 主题没读到前不组合内容：此时启动画面还在屏上，用户看不到空窗
-            val startTheme = initialTheme ?: return@setContent
-            // 主题状态活在 NavHost 之上（影响所有页面，与导航平级）：
-            // 设置页写入 DataStore → 这条 Flow 发新值 → 全 App 同帧换色
-            val themeSettings by themeRepo.settings
-                .collectAsStateWithLifecycle(initialValue = startTheme)
+            // Freeze theme settings for this Activity instance. A committed theme is only observed
+            // by the recreated Activity, so components never animate from an old global scheme.
+            val themeSettings = initialTheme ?: return@setContent
 
             InkleafTheme(settings = themeSettings) {
                 val navController = rememberNavController()
@@ -313,16 +339,22 @@ class MainActivity : ComponentActivity() {
 
                 LaunchedEffect(pendingExternalOpen) {
                     val request = pendingExternalOpen ?: return@LaunchedEffect
-                    val comicId = runCatching {
+                    val comicId = try {
                         ComicRepository(this@MainActivity).addOrGetComic(request.uri).comic.id
-                    }.getOrElse {
-                        Toast.makeText(
-                            this@MainActivity,
-                            "无法打开该漫画文件",
-                            Toast.LENGTH_SHORT,
-                        ).show()
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Exception) {
+                        Log.w(LOG_TAG, "Failed to open external comic", error)
+                        if (consumeExternalOpenRequest(request)) {
+                            Toast.makeText(
+                                this@MainActivity,
+                                "无法打开该漫画文件",
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                        }
                         return@LaunchedEffect
                     }
+                    if (!consumeExternalOpenRequest(request)) return@LaunchedEffect
                     navController.navigate(ReaderRoute(comicId)) {
                         launchSingleTop = true
                     }
@@ -443,12 +475,26 @@ class MainActivity : ComponentActivity() {
                             }
                             composable<SettingsRoute> {
                                 SettingsScreen(
-                                    // 复用顶层已收集的主题状态：进设置页首帧即真实值，
-                                    // 不会出现开关从默认值滑到真实值的突变
                                     themeSettings = themeSettings,
                                     onBack = { navController.popBackStack() },
+                                    onOpenThemeSettings = {
+                                        navController.navigate(ThemeSettingsRoute)
+                                    },
                                     onOpenModelManager = {
                                         navController.navigate(EnhancementModelsRoute)
+                                    },
+                                )
+                            }
+                            composable<ThemeSettingsRoute> {
+                                ThemeSettingsScreen(
+                                    appliedSettings = themeSettings,
+                                    onBack = { navController.popBackStack() },
+                                    onApplyTheme = { applied, committed ->
+                                        ThemeNightModeController.applyCommittedTheme(
+                                            activity = this@MainActivity,
+                                            applied = applied,
+                                            committed = committed,
+                                        )
                                     },
                                 )
                             }
@@ -469,8 +515,34 @@ class MainActivity : ComponentActivity() {
         queueExternalOpen(intent)
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putLong(STATE_EXTERNAL_OPEN_SEQUENCE, externalOpenSequence)
+        externalOpenRequest?.let { request ->
+            outState.putLong(STATE_EXTERNAL_OPEN_ID, request.id)
+            outState.putString(STATE_EXTERNAL_OPEN_URI, request.uri.toString())
+        }
+        super.onSaveInstanceState(outState)
+    }
+
     private fun queueExternalOpen(intent: Intent?) {
         val uri = intent?.takeIf { it.action == Intent.ACTION_VIEW }?.data ?: return
         externalOpenRequest = ExternalOpenRequest(++externalOpenSequence, uri)
+    }
+
+    private fun consumeExternalOpenRequest(request: ExternalOpenRequest): Boolean =
+        if (externalOpenRequest?.id == request.id) {
+            externalOpenRequest = null
+            true
+        } else {
+            false
+        }
+
+    private companion object {
+        const val LOG_TAG = "MainActivity"
+        const val THEME_LOAD_TIMEOUT_MS = 5_000L
+        const val SHELF_WARMUP_TIMEOUT_MS = 3_000L
+        const val STATE_EXTERNAL_OPEN_SEQUENCE = "external_open_sequence"
+        const val STATE_EXTERNAL_OPEN_ID = "external_open_id"
+        const val STATE_EXTERNAL_OPEN_URI = "external_open_uri"
     }
 }

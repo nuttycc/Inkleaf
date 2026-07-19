@@ -5,13 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.exio.inkleaf.data.CacheLimit
 import com.exio.inkleaf.data.CacheSettingsRepository
-import com.exio.inkleaf.data.CustomStyle
-import com.exio.inkleaf.data.DarkMode
 import com.exio.inkleaf.data.ReaderCache
-import com.exio.inkleaf.data.ThemeSeed
-import com.exio.inkleaf.data.ThemeSettingsRepository
-import com.exio.inkleaf.data.ThemeColorSpec
-import com.exio.inkleaf.data.ThemeContrast
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -21,13 +15,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/**
- * 设置页状态。注意：主题状态的读取在 MainActivity 顶层（收集同一个
- * DataStore Flow 后下传给 SettingsScreen）——这里只负责写入；
- * 写入后全 App 变色是同一条数据链路的自然结果，无需手动通知。
- */
+/** Owns the non-theme settings that remain on the general settings screen. */
 class SettingsViewModel(app: Application) : AndroidViewModel(app) {
-    private val themeRepo = ThemeSettingsRepository(app)
     private val cacheRepo = CacheSettingsRepository(app)
 
     val cacheLimit: StateFlow<CacheLimit> = cacheRepo.limit
@@ -39,42 +28,6 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         refreshCacheUsage()
-    }
-
-    fun setSeed(seed: ThemeSeed) {
-        viewModelScope.launch { themeRepo.setSeed(seed) }
-    }
-
-    fun setCustomColor(argb: Long) {
-        viewModelScope.launch { themeRepo.setCustomColor(argb) }
-    }
-
-    fun setCustomStyle(style: CustomStyle) {
-        viewModelScope.launch { themeRepo.setCustomStyle(style) }
-    }
-
-    fun setDarkMode(mode: DarkMode) {
-        viewModelScope.launch { themeRepo.setDarkMode(mode) }
-    }
-
-    fun setColorSpec(spec: ThemeColorSpec) {
-        viewModelScope.launch { themeRepo.setColorSpec(spec) }
-    }
-
-    fun setContrast(contrast: ThemeContrast) {
-        viewModelScope.launch { themeRepo.setContrast(contrast) }
-    }
-
-    fun setUseAmoled(use: Boolean) {
-        viewModelScope.launch { themeRepo.setUseAmoled(use) }
-    }
-
-    fun resetAdvancedColorSettings() {
-        viewModelScope.launch { themeRepo.resetAdvancedColorSettings() }
-    }
-
-    fun setUseWallpaper(use: Boolean) {
-        viewModelScope.launch { themeRepo.setUseWallpaper(use) }
     }
 
     /**
