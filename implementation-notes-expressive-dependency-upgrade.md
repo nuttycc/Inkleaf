@@ -23,6 +23,8 @@
   `material-color-utilities-android-sources.jar`.
 - Material 3 1.5.0-alpha24 source: local Gradle cache `material3-android-1.5.0-alpha24-sources.jar`.
 - Coroutines 1.11.0 source: local Gradle cache `kotlinx-coroutines-core-jvm-1.11.0-sources.jar`.
+- The app module declares Coroutines directly because it imports Coroutines APIs itself. The
+  ppocr-sdk module's `implementation` dependency is intentionally not part of the app compile API.
 - `TopAppBarDefaults.topAppBarColors` keeps expanded and scrolled container colors independent;
   both are explicitly transparent to preserve instant theme synchronization.
 - The new Material 3 `ListItem` overloads own click, selected, and checked semantics. Migrated rows
