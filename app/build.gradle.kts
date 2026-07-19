@@ -127,6 +127,7 @@ dependencies {
     implementation(libs.ahmer.pdfium)
     implementation(libs.reorderable)
     implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.opencv.android)
 
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))

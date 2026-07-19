@@ -175,6 +175,7 @@ fun selectedOcrText(
     return regions
         .asSequence()
         .filter { region -> region.id in selectedIds }
+        .sortedBy(OcrRegion::readingOrder)
         .map(OcrRegion::text)
         .filter(String::isNotBlank)
         .joinToString("")

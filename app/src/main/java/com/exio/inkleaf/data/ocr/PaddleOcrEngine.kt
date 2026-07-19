@@ -39,65 +39,94 @@ object PaddleOcrEngine {
                 val width = source.width.toFloat()
                 val height = source.height.toFloat()
                 val pixelRegions = mutableListOf<PixelOcrRegion>()
+                val panelPreview = ComicPanelPreview(source.width, source.height)
                 var totalTimeMs = 0L
 
-                val tiles = calculateOcrTiles(source.width, source.height)
-                tiles.forEach { tileBounds ->
-                    val tile = source.load(tileBounds)
-                    try {
-                        val tileResult = ocr.recognize(tile)
-                        totalTimeMs += tileResult.totalTimeMs
-                        pixelRegions += tileResult.results.map { item ->
-                            PixelOcrRegion(
-                                confidence = item.confidence,
-                                points = item.box.points.map { point ->
-                                    OcrPoint(
-                                        x = point.x + tileBounds.left,
-                                        y = point.y + tileBounds.top,
-                                    )
-                                },
-                                sourceTile = tileBounds,
-                                characters = item.characters.map { character ->
-                                    PixelOcrCharacter(
-                                        text = character.text,
-                                        confidence = character.confidence,
-                                        points = character.box.points.map { point ->
-                                            OcrPoint(
-                                                x = point.x + tileBounds.left,
-                                                y = point.y + tileBounds.top,
-                                            )
-                                        },
-                                    )
-                                },
-                                isVertical = item.orientation == OCRTextOrientation.VERTICAL,
-                            )
+                try {
+                    val tiles = calculateOcrTiles(source.width, source.height)
+                    tiles.forEach { tileBounds ->
+                        val tile = source.load(tileBounds)
+                        try {
+                            panelPreview.addTile(tile, tileBounds)
+                            val tileResult = ocr.recognize(tile)
+                            totalTimeMs += tileResult.totalTimeMs
+                            pixelRegions += tileResult.results.map { item ->
+                                PixelOcrRegion(
+                                    confidence = item.confidence,
+                                    points = item.box.points.map { point ->
+                                        OcrPoint(
+                                            x = point.x + tileBounds.left,
+                                            y = point.y + tileBounds.top,
+                                        )
+                                    },
+                                    sourceTile = tileBounds,
+                                    characters = item.characters.map { character ->
+                                        PixelOcrCharacter(
+                                            text = character.text,
+                                            confidence = character.confidence,
+                                            points = character.box.points.map { point ->
+                                                OcrPoint(
+                                                    x = point.x + tileBounds.left,
+                                                    y = point.y + tileBounds.top,
+                                                )
+                                            },
+                                        )
+                                    },
+                                    isVertical = item.orientation == OCRTextOrientation.VERTICAL,
+                                )
+                            }
+                        } finally {
+                            tile.recycle()
                         }
-                    } finally {
-                        tile.recycle()
                     }
-                }
 
-                val mergedRegions = mergeOverlappingOcrRegions(pixelRegions)
-                return@withLock OcrPageResult(
-                    regions = mergedRegions
-                        .flatMap(PixelOcrRegion::characters)
-                        .mapIndexed { readingOrder, character ->
-                            OcrRegion(
-                                id = readingOrder,
-                                text = character.text,
-                                confidence = character.confidence,
-                                points = character.points.normalize(width, height),
+                    val mergedRegions = mergeOverlappingOcrRegions(pixelRegions)
+                    val detectedPanels = runCatching { panelPreview.detectPanels() }
+                        .getOrDefault(emptyList())
+                    val layout = orderPixelOcrLayout(
+                        regions = mergedRegions,
+                        panels = detectedPanels,
+                    )
+                    var characterReadingOrder = 0
+                    return@withLock OcrPageResult(
+                        regions = layout.lines.flatMap { line ->
+                            line.region.characters.map { character ->
+                                val readingOrder = characterReadingOrder++
+                                OcrRegion(
+                                    id = readingOrder,
+                                    text = character.text,
+                                    confidence = character.confidence,
+                                    points = character.points.normalize(width, height),
+                                    panelId = line.panelId,
+                                    lineId = line.readingOrder,
+                                    readingOrder = readingOrder,
+                                )
+                            }
+                        },
+                        totalTimeMs = totalTimeMs,
+                        imageWidth = source.width,
+                        imageHeight = source.height,
+                        panels = layout.panels.map { orderedPanel ->
+                            OcrPanel(
+                                id = orderedPanel.panel.id,
+                                points = orderedPanel.panel.points.normalize(width, height),
+                                readingOrder = orderedPanel.readingOrder,
                             )
                         },
-                    totalTimeMs = totalTimeMs,
-                    imageWidth = source.width,
-                    imageHeight = source.height,
-                    lines = mergedRegions.map { region ->
-                        OcrTextLine(points = region.points.normalize(width, height))
-                    },
-                    tileCount = tiles.size,
-                    rawRegionCount = pixelRegions.size,
-                )
+                        lines = layout.lines.map { line ->
+                            OcrTextLine(
+                                points = line.region.points.normalize(width, height),
+                                id = line.readingOrder,
+                                panelId = line.panelId,
+                                readingOrder = line.readingOrder,
+                            )
+                        },
+                        tileCount = tiles.size,
+                        rawRegionCount = pixelRegions.size,
+                    )
+                } finally {
+                    panelPreview.close()
+                }
             }
         }
 
@@ -134,6 +163,14 @@ object PaddleOcrEngine {
             y = (point.y / height).coerceIn(0f, 1f),
         )
     }
+
+    private val PixelOcrPanel.points: List<OcrPoint>
+        get() = listOf(
+            OcrPoint(left, top),
+            OcrPoint(right, top),
+            OcrPoint(right, bottom),
+            OcrPoint(left, bottom),
+        )
 }
 
 internal const val OCR_CHARACTER_SCORE_THRESHOLD = 0.55f

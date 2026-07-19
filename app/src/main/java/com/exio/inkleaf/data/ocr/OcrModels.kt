@@ -11,6 +11,9 @@ data class OcrRegion(
     val text: String,
     val confidence: Float,
     val points: List<OcrPoint>,
+    val panelId: Int? = null,
+    val lineId: Int? = null,
+    val readingOrder: Int = id,
 ) {
     init {
         require(points.size == 4)
@@ -21,6 +24,19 @@ data class OcrRegion(
 // for hit testing but too tight and approximate to define the visible spotlight boundary.
 data class OcrTextLine(
     val points: List<OcrPoint>,
+    val id: Int = 0,
+    val panelId: Int? = null,
+    val readingOrder: Int = id,
+) {
+    init {
+        require(points.size == 4)
+    }
+}
+
+data class OcrPanel(
+    val id: Int,
+    val points: List<OcrPoint>,
+    val readingOrder: Int,
 ) {
     init {
         require(points.size == 4)
@@ -32,6 +48,7 @@ data class OcrPageResult(
     val totalTimeMs: Long,
     val imageWidth: Int,
     val imageHeight: Int,
+    val panels: List<OcrPanel> = emptyList(),
     val lines: List<OcrTextLine> = emptyList(),
     val tileCount: Int = 1,
     val rawRegionCount: Int = regions.size,

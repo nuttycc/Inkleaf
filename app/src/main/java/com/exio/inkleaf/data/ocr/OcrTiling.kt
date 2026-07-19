@@ -29,6 +29,30 @@ internal data class PixelOcrCharacter(
     val points: List<OcrPoint>,
 )
 
+internal data class PixelOcrPanel(
+    val id: Int,
+    val left: Float,
+    val top: Float,
+    val right: Float,
+    val bottom: Float,
+)
+
+internal data class OrderedPixelOcrPanel(
+    val panel: PixelOcrPanel,
+    val readingOrder: Int,
+)
+
+internal data class OrderedPixelOcrLine(
+    val region: PixelOcrRegion,
+    val panelId: Int?,
+    val readingOrder: Int,
+)
+
+internal data class OrderedPixelOcrLayout(
+    val panels: List<OrderedPixelOcrPanel>,
+    val lines: List<OrderedPixelOcrLine>,
+)
+
 internal fun calculateOcrTiles(
     pageWidth: Int,
     pageHeight: Int,
@@ -116,59 +140,167 @@ private fun samePhysicalCharacter(
 
 internal fun sortPixelOcrRegionsInReadingOrder(
     regions: List<PixelOcrRegion>,
-): List<PixelOcrRegion> {
+): List<PixelOcrRegion> = orderPixelOcrLayout(regions).lines.map(OrderedPixelOcrLine::region)
+
+internal fun orderPixelOcrLayout(
+    regions: List<PixelOcrRegion>,
+    panels: List<PixelOcrPanel> = emptyList(),
+): OrderedPixelOcrLayout {
+    if (regions.isEmpty()) return OrderedPixelOcrLayout(emptyList(), emptyList())
+
     val verticalCharacterCount = regions
         .filter(PixelOcrRegion::isVertical)
         .sumOf { region -> region.characters.size.coerceAtLeast(1) }
     val horizontalCharacterCount = regions
         .filterNot(PixelOcrRegion::isVertical)
         .sumOf { region -> region.characters.size.coerceAtLeast(1) }
-    return if (verticalCharacterCount > horizontalCharacterCount) {
-        val sorted = regions.sortedWith(
-            compareByDescending<PixelOcrRegion> { boundsOf(it).centerX }
-                .thenBy { boundsOf(it).top }
-        ).toMutableList()
-        bubbleNearbyLines(sorted) { previous, current ->
-            sameColumn(previous, current) && current.top < previous.top
+    val isVerticalPage = verticalCharacterCount > horizontalCharacterCount
+    val minimumLineGap = regions
+        .map { region -> boundsOf(region).shortEdge }
+        .sorted()
+        .let { edges -> edges[edges.size / 2] * 0.75f }
+        .coerceAtLeast(1f)
+
+    val panelAssignments = regions.mapNotNull { region ->
+        bestPanelFor(boundsOf(region), panels)?.let { panel -> panel to region }
+    }.groupBy(
+        keySelector = { (panel, _) -> panel },
+        valueTransform = { (_, region) -> region },
+    )
+    val detectedPanelGroups = panels.mapNotNull { panel ->
+        panelAssignments[panel]?.takeIf { lines -> lines.isNotEmpty() }?.let { lines ->
+            LayoutGroup(panel = panel, regions = lines, bounds = boundsOf(panel))
         }
-        sorted
+    }
+    val detectedCoverage = detectedPanelGroups.flatMap(LayoutGroup::regions).distinct().size
+    val panelGroups = detectedPanelGroups.takeIf { groups ->
+        groups.size >= 2 && detectedCoverage * 2 >= regions.size
+    }.orEmpty()
+    val assignedRegions = panelGroups.flatMap(LayoutGroup::regions).toSet()
+    val unassignedGroups = regions
+        .filterNot(assignedRegions::contains)
+        .map { region -> LayoutGroup(panel = null, regions = listOf(region), bounds = boundsOf(region)) }
+    val groups = panelGroups + unassignedGroups
+    val orderedGroups = orderLayoutEntries(
+        entries = groups.map { group -> LayoutEntry(group.bounds, group) },
+        isVerticalPage = isVerticalPage,
+        minimumGap = if (panelGroups.isEmpty()) minimumLineGap else 1f,
+    )
+    val orderedPanels = orderedGroups
+        .mapNotNull(LayoutGroup::panel)
+        .distinctBy(PixelOcrPanel::id)
+        .mapIndexed { readingOrder, panel ->
+            OrderedPixelOcrPanel(panel = panel, readingOrder = readingOrder)
+        }
+    val orderedLines = orderedGroups
+        .flatMap { group ->
+            orderLayoutEntries(
+                entries = group.regions.map { region -> LayoutEntry(boundsOf(region), region) },
+                isVerticalPage = isVerticalPage,
+                minimumGap = minimumLineGap,
+            ).map { region -> group.panel?.id to region }
+        }
+        .mapIndexed { readingOrder, (panelId, region) ->
+            OrderedPixelOcrLine(
+                region = region,
+                panelId = panelId,
+                readingOrder = readingOrder,
+            )
+        }
+    return OrderedPixelOcrLayout(
+        panels = orderedPanels,
+        lines = orderedLines,
+    )
+}
+
+private data class LayoutGroup(
+    val panel: PixelOcrPanel?,
+    val regions: List<PixelOcrRegion>,
+    val bounds: RegionBounds,
+)
+
+private data class LayoutEntry<T>(
+    val bounds: RegionBounds,
+    val value: T,
+)
+
+private fun <T> orderLayoutEntries(
+    entries: List<LayoutEntry<T>>,
+    isVerticalPage: Boolean,
+    minimumGap: Float,
+): List<T> {
+    if (entries.size <= 1) return entries.map { entry -> entry.value }
+
+    splitAtLargestGap(
+        entries = entries,
+        minimumGap = minimumGap,
+        start = { entry -> entry.bounds.top },
+        end = { entry -> entry.bounds.bottom },
+    )?.let { (top, bottom) ->
+        return orderLayoutEntries(top, isVerticalPage, minimumGap) +
+                orderLayoutEntries(bottom, isVerticalPage, minimumGap)
+    }
+
+    splitAtLargestGap(
+        entries = entries,
+        minimumGap = minimumGap,
+        start = { entry -> entry.bounds.left },
+        end = { entry -> entry.bounds.right },
+    )?.let { (left, right) ->
+        return if (isVerticalPage) {
+            orderLayoutEntries(right, isVerticalPage, minimumGap) +
+                    orderLayoutEntries(left, isVerticalPage, minimumGap)
+        } else {
+            orderLayoutEntries(left, isVerticalPage, minimumGap) +
+                    orderLayoutEntries(right, isVerticalPage, minimumGap)
+        }
+    }
+
+    val comparator = if (isVerticalPage) {
+        compareByDescending<LayoutEntry<T>> { entry -> entry.bounds.centerX }
+            .thenBy { entry -> entry.bounds.top }
     } else {
-        val sorted = regions.sortedWith(
-            compareBy<PixelOcrRegion> { boundsOf(it).top }
-                .thenBy { boundsOf(it).left }
-        ).toMutableList()
-        bubbleNearbyLines(sorted) { previous, current ->
-            sameRow(previous, current) && current.left < previous.left
-        }
-        sorted
+        compareBy<LayoutEntry<T>> { entry -> entry.bounds.top }
+            .thenBy { entry -> entry.bounds.left }
     }
+    return entries.sortedWith(comparator).map { entry -> entry.value }
 }
 
-private fun bubbleNearbyLines(
-    regions: MutableList<PixelOcrRegion>,
-    shouldSwap: (RegionBounds, RegionBounds) -> Boolean,
-) {
-    for (index in 1 until regions.size) {
-        var currentIndex = index
-        while (currentIndex > 0) {
-            val previousBounds = boundsOf(regions[currentIndex - 1])
-            val currentBounds = boundsOf(regions[currentIndex])
-            if (!shouldSwap(previousBounds, currentBounds)) break
-            val previous = regions[currentIndex - 1]
-            regions[currentIndex - 1] = regions[currentIndex]
-            regions[currentIndex] = previous
-            currentIndex--
+private fun <T> splitAtLargestGap(
+    entries: List<LayoutEntry<T>>,
+    minimumGap: Float,
+    start: (LayoutEntry<T>) -> Float,
+    end: (LayoutEntry<T>) -> Float,
+): Pair<List<LayoutEntry<T>>, List<LayoutEntry<T>>>? {
+    val sorted = entries.sortedBy(start)
+    var furthestEnd = end(sorted.first())
+    var bestIndex = -1
+    var bestGap = minimumGap
+    for (index in 1 until sorted.size) {
+        val gap = start(sorted[index]) - furthestEnd
+        if (gap >= bestGap) {
+            bestGap = gap
+            bestIndex = index
         }
+        furthestEnd = max(furthestEnd, end(sorted[index]))
     }
+    if (bestIndex < 0) return null
+    return sorted.subList(0, bestIndex) to sorted.subList(bestIndex, sorted.size)
 }
 
-private fun sameRow(first: RegionBounds, second: RegionBounds): Boolean =
-    kotlin.math.abs(first.centerY - second.centerY) <=
-            min(first.height, second.height).coerceAtLeast(1f) * 0.5f
+private fun bestPanelFor(
+    region: RegionBounds,
+    panels: List<PixelOcrPanel>,
+): PixelOcrPanel? {
+    val containing = panels.filter { panel -> boundsOf(panel).contains(region.centerX, region.centerY) }
+    if (containing.isNotEmpty()) return containing.minByOrNull { panel -> boundsOf(panel).area }
 
-private fun sameColumn(first: RegionBounds, second: RegionBounds): Boolean =
-    kotlin.math.abs(first.centerX - second.centerX) <=
-            min(first.width, second.width).coerceAtLeast(1f) * 0.5f
+    return panels
+        .map { panel -> panel to boundsOf(panel).intersectionArea(region) / region.area.coerceAtLeast(1f) }
+        .filter { (_, overlap) -> overlap >= 0.5f }
+        .maxByOrNull { (_, overlap) -> overlap }
+        ?.first
+}
 
 private fun tileStarts(length: Int, tileSize: Int, overlap: Int): List<Int> {
     if (length <= tileSize) return listOf(0)
@@ -237,8 +369,15 @@ private data class RegionBounds(
     val width: Float get() = (right - left).coerceAtLeast(0f)
     val height: Float get() = (bottom - top).coerceAtLeast(0f)
     val area: Float get() = (right - left).coerceAtLeast(0f) * (bottom - top).coerceAtLeast(0f)
+    val shortEdge: Float get() = min(width, height)
     val centerX: Float get() = (left + right) / 2f
     val centerY: Float get() = (top + bottom) / 2f
+
+    fun contains(x: Float, y: Float): Boolean = x in left..right && y in top..bottom
+
+    fun intersectionArea(other: RegionBounds): Float =
+        max(0f, min(right, other.right) - max(left, other.left)) *
+                max(0f, min(bottom, other.bottom) - max(top, other.top))
 }
 
 private fun boundsOf(region: PixelOcrRegion): RegionBounds = RegionBounds(
@@ -253,4 +392,11 @@ private fun boundsOf(character: PixelOcrCharacter): RegionBounds = RegionBounds(
     top = character.points.minOf { it.y },
     right = character.points.maxOf { it.x },
     bottom = character.points.maxOf { it.y },
+)
+
+private fun boundsOf(panel: PixelOcrPanel): RegionBounds = RegionBounds(
+    left = panel.left,
+    top = panel.top,
+    right = panel.right,
+    bottom = panel.bottom,
 )

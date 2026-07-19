@@ -185,6 +185,16 @@ class OcrGeometryTest {
     }
 
     @Test
+    fun selectedTextUsesExplicitLayoutOrderInsteadOfListPosition() {
+        val later = rectangleRegion(1, 0f, 0f, 0.2f, 0.2f, "后")
+            .copy(readingOrder = 1)
+        val earlier = rectangleRegion(2, 0.3f, 0.3f, 0.5f, 0.5f, "先")
+            .copy(readingOrder = 0)
+
+        assertEquals("先后", selectedOcrText(listOf(later, earlier), setOf(1, 2)))
+    }
+
+    @Test
     fun selectedVerticalTextReadsTopToBottomThenRightToLeft() {
         val regions = listOf(
             rectangleRegion(

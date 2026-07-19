@@ -144,9 +144,8 @@ internal fun ReaderOcrPageOverlay(
     val density = LocalDensity.current
     val currentOnRegionTapped by rememberUpdatedState(onRegionTapped)
     val currentOnRegionAdded by rememberUpdatedState(onRegionAdded)
-    val currentSelectedIds = rememberUpdatedState(selectedIds)
     var magnifierCenter by remember(result) { mutableStateOf(Offset.Unspecified) }
-    val drawingModifier = remember(result, accent, density) {
+    val drawingModifier = remember(result, selectedIds, accent, density) {
         Modifier.drawWithCache {
             val layout = calculateOcrImageLayout(
                 viewport = IntSize(size.width.toInt(), size.height.toInt()),
@@ -159,17 +158,30 @@ internal fun ReaderOcrPageOverlay(
             val regionPaths = result.regions.map { region ->
                 region to region.points.toViewportPath(layout, visualOutsetPx)
             }
+            val selectedPaths = regionPaths
+                .filter { (region, _) -> region.id in selectedIds }
+                .map { (_, path) -> path }
+            val mergedSelectedPath = selectedPaths.firstOrNull()?.let { firstPath ->
+                selectedPaths.drop(1).fold(firstPath) { mergedPath, path ->
+                    Path.combine(PathOperation.Union, mergedPath, path)
+                }
+            }
             onDrawBehind {
                 regionPaths.forEach { (region, path) ->
-                    val selected = region.id in currentSelectedIds.value
-                    val color = if (selected) accent else Color.White.copy(alpha = 0.52f)
-                    if (selected) {
-                        drawPath(path, color = accent.copy(alpha = 0.18f), style = Fill)
+                    if (region.id !in selectedIds) {
+                        drawPath(
+                            path = path,
+                            color = Color.White.copy(alpha = 0.52f),
+                            style = normalStroke,
+                        )
                     }
+                }
+                mergedSelectedPath?.let { path ->
+                    drawPath(path, color = accent.copy(alpha = 0.18f), style = Fill)
                     drawPath(
                         path = path,
-                        color = color,
-                        style = if (selected) selectedStroke else normalStroke,
+                        color = accent,
+                        style = selectedStroke,
                     )
                 }
             }

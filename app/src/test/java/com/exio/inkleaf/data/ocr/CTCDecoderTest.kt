@@ -67,6 +67,40 @@ class CTCDecoderTest {
         assertEquals("B", accepted)
     }
 
+    @Test
+    fun characterCellsFillTheDetectedLineBetweenNeighborCenters() {
+        val decoded = decode(
+            winners = listOf(
+                0 to 0.9f,
+                1 to 0.9f,
+                0 to 0.9f,
+                0 to 0.9f,
+                2 to 0.9f,
+                0 to 0.9f,
+            )
+        )
+
+        assertEquals(0f, decoded.characters[0].startFraction, 0.001f)
+        assertEquals(0.5f, decoded.characters[0].endFraction, 0.001f)
+        assertEquals(0.5f, decoded.characters[1].startFraction, 0.001f)
+        assertEquals(1f, decoded.characters[1].endFraction, 0.001f)
+    }
+
+    @Test
+    fun singleCharacterCellUsesTheWholeDetectedLine() {
+        val decoded = decode(
+            winners = listOf(
+                0 to 0.9f,
+                1 to 0.9f,
+                0 to 0.9f,
+                0 to 0.9f,
+            )
+        )
+
+        assertEquals(0f, decoded.characters.single().startFraction, 0.001f)
+        assertEquals(1f, decoded.characters.single().endFraction, 0.001f)
+    }
+
     private fun decode(winners: List<Pair<Int, Float>>): CTCDecoder.DecodedText =
         CTCDecoder.decode(
             output = logits(winners),

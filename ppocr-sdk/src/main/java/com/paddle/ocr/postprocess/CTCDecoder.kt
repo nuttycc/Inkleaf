@@ -100,7 +100,7 @@ object CTCDecoder {
             }
             finishRun(sampleTimeSteps)
 
-            val decodedCharacters = runs.flatMapIndexed { index, run ->
+            val timedCharacters = runs.flatMapIndexed { index, run ->
                 val startStep = if (index == 0) {
                     run.startStep.toFloat()
                 } else {
@@ -124,6 +124,7 @@ object CTCDecoder {
                     )
                 }
             }
+            val decodedCharacters = assignCharacterCells(timedCharacters)
             val confidence = if (decodedCharacters.isEmpty()) {
                 0f
             } else {
@@ -136,6 +137,35 @@ object CTCDecoder {
             )
         }
         return results
+    }
+
+    private fun assignCharacterCells(
+        characters: List<DecodedCharacter>,
+    ): List<DecodedCharacter> {
+        if (characters.isEmpty()) return emptyList()
+        if (characters.size == 1) {
+            return listOf(characters.single().copy(startFraction = 0f, endFraction = 1f))
+        }
+
+        val centers = characters.map { character ->
+            (character.startFraction + character.endFraction) / 2f
+        }
+        val boundaries = FloatArray(characters.size + 1)
+        boundaries[0] = 0f
+        for (index in 1 until characters.size) {
+            boundaries[index] = ((centers[index - 1] + centers[index]) / 2f)
+                .coerceIn(boundaries[index - 1], 1f)
+        }
+        boundaries[characters.size] = 1f
+
+        // CTC activations locate character centers, not glyph edges. Partition the complete
+        // detector line at neighboring center midpoints so each projected box covers the glyph.
+        return characters.mapIndexed { index, character ->
+            character.copy(
+                startFraction = boundaries[index],
+                endFraction = boundaries[index + 1],
+            )
+        }
     }
 
     private fun splitToken(token: String): List<String> = token.codePoints()
