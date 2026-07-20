@@ -7,21 +7,26 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MediumFlexibleTopAppBar
 import androidx.compose.material3.PrimaryTabRow
@@ -47,13 +52,11 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
-import com.exio.inkleaf.R
 import com.exio.inkleaf.data.BookmarkResolution
 import com.exio.inkleaf.data.db.BookmarkEntity
 import com.exio.inkleaf.data.db.BookmarkWithComic
@@ -308,12 +311,14 @@ private fun BookmarkRow(
     onRemove: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var showMenu by remember { mutableStateOf(false) }
     Row(
         modifier = modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(start = 16.dp, top = 12.dp, bottom = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         BookmarkThumbnail(
             item = item,
@@ -323,7 +328,6 @@ private fun BookmarkRow(
                 .aspectRatio(2f / 3f)
                 .alpha(if (item.isMissing) 0.55f else 1f),
         )
-        Spacer(Modifier.width(12.dp))
         Column(
             verticalArrangement = Arrangement.spacedBy(4.dp),
             modifier = Modifier
@@ -335,20 +339,48 @@ private fun BookmarkRow(
                 style = MaterialTheme.typography.bodyLarge,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth(),
             )
             Text(
                 text = bookmarkLocationLabel(item.bookmark),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth(),
             )
         }
-        IconButton(onClick = onRemove) {
+        Box(modifier = Modifier.align(Alignment.Bottom)) {
             Icon(
-                painter = painterResource(R.drawable.ic_bookmark),
-                contentDescription = "移除书签",
+                imageVector = Icons.Filled.MoreVert,
+                contentDescription = "书签操作",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .offset(x = 8.dp, y = 2.dp)
+                    .clip(CircleShape)
+                    .clickable { showMenu = true }
+                    .padding(4.dp)
+                    .size(16.dp),
             )
+            DropdownMenu(
+                expanded = showMenu,
+                onDismissRequest = { showMenu = false },
+            ) {
+                DropdownMenuItem(
+                    text = { Text("跳转到此页") },
+                    onClick = {
+                        showMenu = false
+                        onClick()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("取消书签") },
+                    onClick = {
+                        showMenu = false
+                        onRemove()
+                    },
+                )
+            }
         }
     }
     HorizontalDivider(modifier = Modifier.padding(start = 84.dp))

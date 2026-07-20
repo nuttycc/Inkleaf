@@ -18,6 +18,16 @@ if (hasAnyReleaseSigningValue && !hasReleaseSigning) {
     error("INKLEAF_KEYSTORE_FILE, INKLEAF_KEYSTORE_PASSWORD, INKLEAF_KEY_ALIAS, and INKLEAF_KEY_PASSWORD must be set together.")
 }
 
+// CI release workflow injects these from the git tag (vMAJOR.MINOR.PATCH).
+// Local builds keep the defaults below when unset.
+fun envOrProperty(envName: String, propertyName: String): String? =
+    System.getenv(envName)?.takeIf { it.isNotBlank() }
+        ?: (findProperty(propertyName) as String?)?.takeIf { it.isNotBlank() }
+
+val injectedVersionName = envOrProperty("INKLEAF_VERSION_NAME", "inkleaf.versionName")
+val injectedVersionCode =
+    envOrProperty("INKLEAF_VERSION_CODE", "inkleaf.versionCode")?.toIntOrNull()
+
 android {
     namespace = "com.exio.inkleaf"
     compileSdk = 37
@@ -27,8 +37,8 @@ android {
         applicationId = "com.exio.inkleaf"
         minSdk = 29
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = injectedVersionCode ?: 1
+        versionName = injectedVersionName ?: "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

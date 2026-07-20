@@ -4,31 +4,83 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Release tag to build and publish, for example v0.1.0
+        description: Existing release tag to rebuild and publish, for example v0.2.0
         required: true
         type: string
   push:
     tags:
-      - "v*"
+      # Glob approximates semver; the job enforces strict vMAJOR.MINOR.PATCH.
+      - "v*.*.*"
 
 permissions:
   contents: write
 
 concurrency:
   group: android-release-${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build-release:
     name: Build signed APK
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
 
     steps:
+      - name: Resolve release tag
+        id: tag
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.release_tag }}"
+          else
+            TAG="${{ github.ref_name }}"
+          fi
+          echo "name=$TAG" >> "$GITHUB_OUTPUT"
+
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
+          ref: ${{ steps.tag.outputs.name }}
+          fetch-depth: 0
+
+      - name: Validate tag, main ancestry, and version
+        id: meta
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.tag.outputs.name }}"
+
+          if [[ ! "$TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "Release tag must be strict vMAJOR.MINOR.PATCH (got: $TAG)" >&2
+            exit 1
+          fi
+
+          MAJOR="${BASH_REMATCH[1]}"
+          MINOR="${BASH_REMATCH[2]}"
+          PATCH="${BASH_REMATCH[3]}"
+          VERSION_NAME="${MAJOR}.${MINOR}.${PATCH}"
+          VERSION_CODE=$((10#$MAJOR * 1000000 + 10#$MINOR * 1000 + 10#$PATCH))
+
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "Tag $TAG (commit $(git rev-parse --short HEAD)) is not an ancestor of origin/main." >&2
+            echo "Only commits on main may be released." >&2
+            exit 1
+          fi
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+              echo "workflow_dispatch only rebuilds existing tags; $TAG was not found." >&2
+              exit 1
+            fi
+          fi
+
+          {
+            echo "tag=$TAG"
+            echo "version_name=$VERSION_NAME"
+            echo "version_code=$VERSION_CODE"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Release $TAG → versionName=$VERSION_NAME versionCode=$VERSION_CODE"
 
       - name: Set up JDK
         uses: actions/setup-java@v5
@@ -38,6 +90,9 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4.0.1
+
+      - name: Install native toolchain
+        run: sdkmanager "ndk;29.0.14206865" "cmake;3.30.5"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6.2.0
@@ -62,24 +117,33 @@ jobs:
         env:
           INKLEAF_KEYSTORE_BASE64: ${{ secrets.INKLEAF_KEYSTORE_BASE64 }}
 
-      - name: Build release APK
-        run: ./gradlew assembleRelease
+      - name: Test and build release APK
+        run: ./gradlew testDebugUnitTest assembleRelease
         env:
           INKLEAF_KEYSTORE_FILE: ${{ github.workspace }}/app/inkleaf-release.jks
           INKLEAF_KEYSTORE_PASSWORD: ${{ secrets.INKLEAF_KEYSTORE_PASSWORD }}
           INKLEAF_KEY_ALIAS: ${{ secrets.INKLEAF_KEY_ALIAS }}
           INKLEAF_KEY_PASSWORD: ${{ secrets.INKLEAF_KEY_PASSWORD }}
+          INKLEAF_VERSION_NAME: ${{ steps.meta.outputs.version_name }}
+          INKLEAF_VERSION_CODE: ${{ steps.meta.outputs.version_code }}
 
-      - name: Prepare release APK
+      - name: Prepare release artifacts
         run: |
+          set -euo pipefail
           mkdir -p release
-          cp app/build/outputs/apk/release/*.apk "release/Inkleaf-${RELEASE_TAG}-release.apk"
+          cp app/build/outputs/apk/release/*.apk \
+            "release/Inkleaf-${RELEASE_TAG}-release.apk"
+          cp app/build/outputs/mapping/release/mapping.txt \
+            "release/Inkleaf-${RELEASE_TAG}-mapping.txt"
         env:
-          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+          RELEASE_TAG: ${{ steps.meta.outputs.tag }}
 
-      - name: Create GitHub Release
+      - name: Create or update GitHub Release
         uses: softprops/action-gh-release@v3.0.1
         with:
-          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
-          files: release/*.apk
+          tag_name: ${{ steps.meta.outputs.tag }}
+          files: |
+            release/Inkleaf-${{ steps.meta.outputs.tag }}-release.apk
+            release/Inkleaf-${{ steps.meta.outputs.tag }}-mapping.txt
           generate_release_notes: true
+          fail_on_unmatched_files: true
