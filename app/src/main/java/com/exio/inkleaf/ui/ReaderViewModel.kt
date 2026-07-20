@@ -105,7 +105,7 @@ class ReaderViewModel(
      */
     val thumbnails = mutableStateMapOf<Int, ImageBitmap>()
     val bookmarkPages = mutableStateMapOf<Int, BookmarkEntity>()
-    val resolvedBookmarks = mutableStateListOf<ResolvedReaderBookmark>()
+    internal val resolvedBookmarks = mutableStateListOf<ResolvedReaderBookmark>()
     val staleBookmarkIds = mutableStateMapOf<Long, Unit>()
     val favoritePages = mutableStateMapOf<Int, FavoritePageEntity>()
 
