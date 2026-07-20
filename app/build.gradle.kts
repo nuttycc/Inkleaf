@@ -18,8 +18,8 @@ if (hasAnyReleaseSigningValue && !hasReleaseSigning) {
     error("INKLEAF_KEYSTORE_FILE, INKLEAF_KEYSTORE_PASSWORD, INKLEAF_KEY_ALIAS, and INKLEAF_KEY_PASSWORD must be set together.")
 }
 
-// CI release workflow injects these from the git tag (vMAJOR.MINOR.PATCH).
-// Local builds keep the defaults below when unset.
+// CI release injects INKLEAF_VERSION_NAME / INKLEAF_VERSION_CODE from the git tag.
+// Local builds without injection keep simple defaults. Debug always shows fixed "debug".
 fun envOrProperty(envName: String, propertyName: String): String? =
     System.getenv(envName)?.takeIf { it.isNotBlank() }
         ?: (findProperty(propertyName) as String?)?.takeIf { it.isNotBlank() }
@@ -103,6 +103,18 @@ android {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
             version = "3.30.5"
+        }
+    }
+}
+
+// Debug: separate package; About shows a fixed "debug" version string.
+androidComponents {
+    onVariants(selector().withBuildType("debug")) { variant ->
+        variant.applicationId.set("com.exio.inkleaf.debug")
+        variant.applicationId.finalizeValue()
+        variant.outputs.forEach { output ->
+            output.versionName.set("debug")
+            output.versionName.finalizeValue()
         }
     }
 }
