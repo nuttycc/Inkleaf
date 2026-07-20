@@ -30,27 +30,10 @@ Heavier commands (only when required):
   for code checking.
 - `.\gradlew.bat installDebug` installs the debug app on a connected device or emulator.
 - `.\gradlew.bat connectedDebugAndroidTest` runs instrumented tests on a connected device or emulator.
-- `.\gradlew.bat assembleRelease` builds a minified APK. Signing uses debug signing unless all release signing environment variables are set. Optional overrides: `INKLEAF_VERSION_NAME` / `INKLEAF_VERSION_CODE` (or Gradle properties `inkleaf.versionName` / `inkleaf.versionCode`).
+- `.\gradlew.bat assembleRelease` builds a minified APK. Signing uses debug signing unless all release signing environment variables are set.
 
 Never run `clean` routinely; incremental builds depend on prior outputs. Add `--offline` when
 dependencies have not changed to skip network checks.
-
-## Release Process
-
-Distribution is GitHub Releases (sideload only). Signed builds are produced by
-`.github/workflows/android-release.yml`.
-
-1. Land the work on `main` (PR or merge from `dev`). `android-check` should be green on `main`.
-2. On the intended commit that is already on `main`, create a strict semver tag:
-   `vMAJOR.MINOR.PATCH` (example: `v0.2.0`). Do not use prerelease suffixes.
-3. Push the tag: `git push origin v0.2.0`. That is the normal release path.
-4. The release workflow verifies the tag commit is an ancestor of `origin/main`, runs
-   `testDebugUnitTest`, builds a signed release APK with
-   `versionName=MAJOR.MINOR.PATCH` and
-   `versionCode=MAJOR*1000000+MINOR*1000+PATCH`, then creates or updates the GitHub Release
-   with the APK and R8 mapping file.
-5. To rebuild an existing tag only, run **Android Release** via `workflow_dispatch` and pass that
-   tag. Dispatch does not create tags.
 
 ## Coding Style & Naming Conventions
 
