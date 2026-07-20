@@ -20,6 +20,11 @@ class ZipComicVolume(private val book: ComicBook, private val title: String) : C
     override fun chapterPageToGlobal(chapterIndex: Int, pageIndex: Int): Int =
         pageIndex.coerceIn(0, (book.pageCount - 1).coerceAtLeast(0))
 
+    override fun pageIdentity(globalPage: Int): String? = book.pageIdentity(globalPage)
+
+    override fun findPageByIdentity(pageIdentity: String): Int? =
+        book.findPageByIdentity(pageIdentity)
+
     override suspend fun loadPageBytes(globalPage: Int): ByteArray =
         book.loadPageBytes(globalPage.coerceIn(0, book.pageCount - 1))
 

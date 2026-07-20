@@ -122,6 +122,7 @@ import com.exio.inkleaf.data.ComicOpenException
 import com.exio.inkleaf.data.ComicVolume
 import com.exio.inkleaf.data.PageRenderRequest
 import com.exio.inkleaf.data.ReaderPageCacheKey
+import com.exio.inkleaf.data.db.BookmarkEntity
 import com.exio.inkleaf.data.db.EnhancementCacheTaskEntity
 import com.exio.inkleaf.data.db.EnhancementCacheTaskStatus
 import com.exio.inkleaf.data.db.FavoritePageEntity
@@ -299,8 +300,14 @@ fun ReaderScreen(
                     title = s.title,
                     cacheKeyPrefix = "comic-$comicId",
                     thumbnails = viewModel.thumbnails,
+                    bookmarkPages = viewModel.bookmarkPages,
+                    resolvedBookmarks = viewModel.resolvedBookmarks,
+                    staleBookmarkIds = viewModel.staleBookmarkIds.keys,
                     favoritePages = viewModel.favoritePages,
                     onNeedThumbnail = viewModel::requestThumbnail,
+                    onToggleBookmark = viewModel::toggleBookmark,
+                    onRemoveBookmark = viewModel::removeBookmark,
+                    onRestoreBookmark = viewModel::restoreBookmark,
                     onToggleFavorite = viewModel::toggleFavorite,
                     onSetCover = viewModel::setCurrentPageAsCover,
                     onPageChanged = viewModel::saveProgress,
@@ -363,6 +370,7 @@ fun ReaderScreen(
             onDismiss = viewModel::dismissEnhancementCacheReplacement,
         )
     }
+
 }
 
 @Composable
@@ -373,8 +381,14 @@ private fun ComicPager(
     title: String,
     cacheKeyPrefix: String,
     thumbnails: Map<Int, ImageBitmap>,
+    bookmarkPages: Map<Int, BookmarkEntity>,
+    resolvedBookmarks: List<ResolvedReaderBookmark>,
+    staleBookmarkIds: Set<Long>,
     favoritePages: Map<Int, FavoritePageEntity>,
     onNeedThumbnail: (Int) -> Unit,
+    onToggleBookmark: (Int) -> Unit,
+    onRemoveBookmark: suspend (BookmarkEntity) -> Unit,
+    onRestoreBookmark: suspend (BookmarkEntity) -> Unit,
     onToggleFavorite: (Int) -> Unit,
     onSetCover: (Int) -> Unit,
     onPageChanged: (Int) -> Unit,
@@ -402,6 +416,7 @@ private fun ComicPager(
     var zoomToggleAnchor by remember { mutableStateOf(Offset.Unspecified) }
     var enhancementReport by remember { mutableStateOf<PageEnhancementReport?>(null) }
     var enhancementCompletion by remember { mutableStateOf<PageEnhancementCompletion?>(null) }
+    var showBookmarks by remember { mutableStateOf(false) }
     val ocrResults = remember { mutableStateMapOf<Int, OcrPageResult>() }
     val ocrResultOrder = remember { ArrayDeque<Int>() }
     val snackbarHostState = remember { SnackbarHostState() }
@@ -765,12 +780,15 @@ private fun ComicPager(
         ReaderTopBar(
             visible = showControls && activeOcrResult == null,
             title = title,
+            isBookmarked = bookmarkPages.containsKey(pagerState.currentPage),
             isFavorite = favoritePages.containsKey(pagerState.currentPage),
             isZoomed = zoomedPage == pagerState.currentPage,
             enhancementSelectionId = enhancementSelectionId,
             enhancementStatus = currentEnhancementStatus,
             onBack = onBack,
             onOpenEnhancement = onOpenEnhancement,
+            onOpenBookmarks = { showBookmarks = true },
+            onToggleBookmark = { onToggleBookmark(pagerState.currentPage) },
             onToggleFavorite = { onToggleFavorite(pagerState.currentPage) },
             onSetCover = { onSetCover(pagerState.currentPage) },
             onRecognizePage = { recognizePage(pagerState.currentPage) },
@@ -787,8 +805,26 @@ private fun ComicPager(
             pagerState = pagerState,
             pageCount = volume.totalPageCount,
             thumbnails = thumbnails,
+            bookmarkPages = bookmarkPages,
             onNeedThumbnail = onNeedThumbnail,
             modifier = Modifier.align(Alignment.BottomCenter),
+        )
+    }
+
+    if (showBookmarks) {
+        ReaderBookmarksSheet(
+            bookmarks = resolvedBookmarks,
+            staleBookmarkIds = staleBookmarkIds,
+            thumbnails = thumbnails,
+            accent = readerAccentColor(),
+            onNeedThumbnail = onNeedThumbnail,
+            onSelect = { page ->
+                showBookmarks = false
+                scope.launch { pagerState.scrollToPage(page) }
+            },
+            onRemove = onRemoveBookmark,
+            onRestore = onRestoreBookmark,
+            onDismiss = { showBookmarks = false },
         )
     }
 
@@ -805,12 +841,15 @@ private fun ComicPager(
 private fun ReaderTopBar(
     visible: Boolean,
     title: String,
+    isBookmarked: Boolean,
     isFavorite: Boolean,
     isZoomed: Boolean,
     enhancementSelectionId: String,
     enhancementStatus: PageEnhancementStatus?,
     onBack: () -> Unit,
     onOpenEnhancement: () -> Unit,
+    onOpenBookmarks: () -> Unit,
+    onToggleBookmark: () -> Unit,
     onToggleFavorite: () -> Unit,
     onSetCover: () -> Unit,
     onRecognizePage: () -> Unit,
@@ -912,13 +951,17 @@ private fun ReaderTopBar(
                     }
                 }
             }
-            IconButton(onClick = onToggleFavorite) {
+            IconButton(onClick = onToggleBookmark) {
                 Icon(
                     painter = painterResource(
-                        if (isFavorite) R.drawable.ic_favorite else R.drawable.ic_favorite_border
+                        if (isBookmarked) {
+                            R.drawable.ic_bookmark
+                        } else {
+                            R.drawable.ic_bookmark_border
+                        }
                     ),
-                    contentDescription = if (isFavorite) "取消收藏本页" else "收藏本页",
-                    tint = if (isFavorite) accent else Color.White,
+                    contentDescription = if (isBookmarked) "移除当前页书签" else "添加当前页书签",
+                    tint = if (isBookmarked) accent else Color.White,
                 )
             }
             Box {
@@ -933,6 +976,45 @@ private fun ReaderTopBar(
                     expanded = showMoreMenu,
                     onDismissRequest = { showMoreMenu = false },
                 ) {
+                    DropdownMenuItem(
+                        text = { Text("本书书签") },
+                        leadingIcon = {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_bookmark_border),
+                                contentDescription = null,
+                            )
+                        },
+                        onClick = {
+                            showMoreMenu = false
+                            onOpenBookmarks()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = {
+                            Text(if (isFavorite) "取消收藏本页" else "收藏当前页图片")
+                        },
+                        leadingIcon = {
+                            Icon(
+                                painter = painterResource(
+                                    if (isFavorite) {
+                                        R.drawable.ic_favorite
+                                    } else {
+                                        R.drawable.ic_favorite_border
+                                    },
+                                ),
+                                contentDescription = null,
+                                tint = if (isFavorite) {
+                                    accent
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface
+                                },
+                            )
+                        },
+                        onClick = {
+                            showMoreMenu = false
+                            onToggleFavorite()
+                        },
+                    )
                     DropdownMenuItem(
                         text = { Text(if (ocrBusy) "正在识别文字…" else "识别当前页文字") },
                         leadingIcon = {
@@ -978,6 +1060,7 @@ private fun ReaderBottomBar(
     pagerState: PagerState,
     pageCount: Int,
     thumbnails: Map<Int, ImageBitmap>,
+    bookmarkPages: Map<Int, BookmarkEntity>,
     onNeedThumbnail: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -1008,6 +1091,7 @@ private fun ReaderBottomBar(
             FilmstripRow(
                 pageCount = pageCount,
                 thumbnails = thumbnails,
+                bookmarkPages = bookmarkPages,
                 onNeedThumbnail = onNeedThumbnail,
                 currentPage = shownPage,
                 accent = accent,
@@ -1114,6 +1198,7 @@ private fun ReaderBottomBar(
 private fun FilmstripRow(
     pageCount: Int,
     thumbnails: Map<Int, ImageBitmap>,
+    bookmarkPages: Map<Int, BookmarkEntity>,
     onNeedThumbnail: (Int) -> Unit,
     currentPage: Int,
     accent: Color,
@@ -1181,6 +1266,7 @@ private fun FilmstripRow(
                 thumbnail = thumbnails[page],
                 onNeedThumbnail = onNeedThumbnail,
                 selected = page == currentPage,
+                bookmarked = bookmarkPages.containsKey(page),
                 accent = accent,
                 onClick = { onPageSelected(page) },
             )
@@ -1194,6 +1280,7 @@ private fun FilmstripThumb(
     thumbnail: ImageBitmap?,
     onNeedThumbnail: (Int) -> Unit,
     selected: Boolean,
+    bookmarked: Boolean,
     accent: Color,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -1237,12 +1324,19 @@ private fun FilmstripThumb(
                     // 白描边在白底漫画页上会隐形
                     if (selected) Modifier.border(1.dp, accent, shape) else Modifier
                 )
+                .semantics {
+                    contentDescription = if (bookmarked) {
+                        "第 ${page + 1} 页缩略图，已添加书签"
+                    } else {
+                        "第 ${page + 1} 页缩略图"
+                    }
+                }
                 .clickable(onClick = onClick),
         ) {
             if (thumbnail != null) {
                 Image(
                     bitmap = thumbnail,
-                    contentDescription = "第 ${page + 1} 页缩略图",
+                    contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
                 )
@@ -1253,6 +1347,25 @@ private fun FilmstripThumb(
                     .fillMaxSize()
                     .background(Color.Black.copy(alpha = dimAlpha)),
             )
+            if (bookmarked) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .background(
+                            color = Color.Black.copy(alpha = 0.72f),
+                            shape = RoundedCornerShape(bottomStart = 4.dp),
+                        )
+                        .padding(2.dp),
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_bookmark),
+                        contentDescription = null,
+                        tint = accent,
+                        modifier = Modifier.size(14.dp),
+                    )
+                }
+            }
         }
         Text(
             text = "${page + 1}",

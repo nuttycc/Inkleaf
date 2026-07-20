@@ -111,6 +111,21 @@ class PdfComicVolume(
         return start + pageIndex.coerceIn(0, (pageCounts.getOrElse(chapterIndex) { 0 } - 1).coerceAtLeast(0))
     }
 
+    override fun pageIdentity(globalPage: Int): String? {
+        val location = globalToChapterPage(globalPage)
+        val chapter = chapters.getOrNull(location.chapterIndex) ?: return null
+        return BookmarkPageIdentity.pdf(chapter.fileKey, location.pageIndex)
+    }
+
+    override fun findPageByIdentity(pageIdentity: String): Int? {
+        val pageIndex = BookmarkPageIdentity.pdfLocalPage(pageIdentity) ?: return null
+        val chapterIndex = chapters.indexOfFirst { chapter ->
+            BookmarkPageIdentity.pdf(chapter.fileKey, pageIndex) == pageIdentity
+        }
+        if (chapterIndex < 0 || pageIndex !in 0 until chapterPageCount(chapterIndex)) return null
+        return chapterPageToGlobal(chapterIndex, pageIndex)
+    }
+
     override suspend fun loadPageBytes(globalPage: Int): ByteArray = withContext(Dispatchers.IO) {
         val (chapter, page) = globalToChapterPage(globalPage)
         renderPageToPng(chapter, page, fullQuality = true)

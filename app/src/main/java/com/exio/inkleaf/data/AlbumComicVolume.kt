@@ -47,6 +47,9 @@ class AlbumComicVolume(
 
     override fun pageIdentity(globalPage: Int): String? = pages.getOrNull(globalPage)?.id
 
+    override fun findPageByIdentity(pageIdentity: String): Int? =
+        pages.indexOfFirst { it.id == pageIdentity }.takeIf { it >= 0 }
+
     override suspend fun loadPageBytes(globalPage: Int): ByteArray = withContext(Dispatchers.IO) {
         pageFile(globalPage).readBytes()
     }

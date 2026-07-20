@@ -85,37 +85,13 @@ fun FavoritesScreen(
             },
             snackbarHost = {},
         ) { innerPadding ->
-            val list = favorites
-            when {
-                list == null -> Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding)
-                )
-
-                list.isEmpty() -> EmptyFavorites(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding),
-                )
-
-                else -> LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = GridDefaults.AdaptiveMinCellWidth),
-                    contentPadding = PaddingValues(12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding),
-                ) {
-                    items(list, key = { favorite -> favorite.id }) { favorite ->
-                        FavoriteCard(
-                            favorite = favorite,
-                            onClick = { onOpenFavorite(favorite.id) },
-                        )
-                    }
-                }
-            }
+            FavoritesContent(
+                favorites = favorites,
+                onOpenFavorite = onOpenFavorite,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding),
+            )
         }
 
         SnackbarHost(
@@ -124,6 +100,34 @@ fun FavoritesScreen(
                 .align(Alignment.BottomCenter)
                 .padding(16.dp),
         )
+    }
+}
+
+@Composable
+internal fun FavoritesContent(
+    favorites: List<FavoritePageEntity>?,
+    onOpenFavorite: (Long) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    when {
+        favorites == null -> Box(modifier = modifier)
+
+        favorites.isEmpty() -> EmptyFavorites(modifier = modifier)
+
+        else -> LazyVerticalGrid(
+            columns = GridCells.Adaptive(minSize = GridDefaults.AdaptiveMinCellWidth),
+            contentPadding = PaddingValues(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = modifier,
+        ) {
+            items(favorites, key = { favorite -> favorite.id }) { favorite ->
+                FavoriteCard(
+                    favorite = favorite,
+                    onClick = { onOpenFavorite(favorite.id) },
+                )
+            }
+        }
     }
 }
 

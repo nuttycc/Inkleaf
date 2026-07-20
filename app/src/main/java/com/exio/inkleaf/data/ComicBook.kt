@@ -31,6 +31,12 @@ class ComicBook private constructor(
 ) {
     val pageCount: Int get() = pageEntries.size
 
+    fun pageIdentity(index: Int): String? =
+        pageEntries.getOrNull(index)?.let { BookmarkPageIdentity.zip(it) }
+
+    fun findPageByIdentity(pageIdentity: String): Int? =
+        BookmarkPageIdentity.findZipPage(pageEntries, pageIdentity)
+
     /** 读取第 index 页的原始图片字节（jpg/png/webp 压缩数据） */
     suspend fun loadPageBytes(index: Int): ByteArray = withContext(Dispatchers.IO) {
         // ZipFile.getInputStream 内部有同步锁，相邻页并发预加载时自动串行，线程安全

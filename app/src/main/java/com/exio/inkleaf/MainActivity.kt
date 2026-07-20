@@ -58,8 +58,8 @@ import com.exio.inkleaf.data.ThemeSettingsRepository
 import com.exio.inkleaf.ui.AlbumEditorScreen
 import com.exio.inkleaf.ui.EnhancementModelManagerScreen
 import com.exio.inkleaf.ui.FavoriteViewerScreen
-import com.exio.inkleaf.ui.FavoritesScreen
 import com.exio.inkleaf.ui.ReaderScreen
+import com.exio.inkleaf.ui.SavedScreen
 import com.exio.inkleaf.ui.SettingsScreen
 import com.exio.inkleaf.ui.ShelfScreen
 import com.exio.inkleaf.ui.ThemeSettingsScreen
@@ -176,7 +176,7 @@ private fun InkleafBottomBar(
                             R.drawable.ic_favorite_border
                         }
                     ),
-                    contentDescription = "收藏",
+                    contentDescription = "已保存",
                     tint = tint,
                 )
             }
@@ -443,7 +443,12 @@ class MainActivity : AppCompatActivity() {
                                     },
                                     onSelectFavorites = {},
                                 ) { topLevelPadding ->
-                                    FavoritesScreen(
+                                    SavedScreen(
+                                        onOpenBookmark = { comicId, globalPage ->
+                                            navController.navigate(
+                                                ReaderRoute(comicId, globalPage),
+                                            )
+                                        },
                                         onOpenFavorite = { id ->
                                             navController.navigate(FavoriteViewerRoute(id))
                                         },

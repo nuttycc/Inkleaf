@@ -18,8 +18,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         AlbumPageEntity::class,
         EnhancementCacheTaskEntity::class,
         EnhancementCacheCompletedPageEntity::class,
+        BookmarkEntity::class,
     ],
-    version = 11,
+    version = 12,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -30,6 +31,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun comicGroupDao(): ComicGroupDao
     abstract fun albumPageDao(): AlbumPageDao
     abstract fun enhancementCacheTaskDao(): EnhancementCacheTaskDao
+    abstract fun bookmarkDao(): BookmarkDao
 
     companion object {
         @Volatile
@@ -44,7 +46,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "comic_reader.db",
                 )
-                    .addMigrations(MIGRATION_8_9, MIGRATION_9_10)
+                    .addMigrations(MIGRATION_8_9, MIGRATION_9_10, MIGRATION_11_12)
                     .fallbackToDestructiveMigration(dropAllTables = true)
                     .build()
                     .also { instance = it }
@@ -101,6 +103,41 @@ abstract class AppDatabase : RoomDatabase() {
                             ON UPDATE NO ACTION ON DELETE CASCADE
                     )
                     """.trimIndent()
+                )
+            }
+        }
+
+        private val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS bookmarks (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        comicId INTEGER NOT NULL,
+                        targetKey TEXT NOT NULL,
+                        pageIdentity TEXT,
+                        sourceRevision TEXT NOT NULL,
+                        globalPageIndex INTEGER NOT NULL,
+                        chapterIndex INTEGER NOT NULL,
+                        pageIndex INTEGER NOT NULL,
+                        chapterTitle TEXT NOT NULL,
+                        addedAt INTEGER NOT NULL,
+                        FOREIGN KEY(comicId) REFERENCES comics(id)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_bookmarks_comicId " +
+                            "ON bookmarks(comicId)"
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS index_bookmarks_comicId_targetKey " +
+                            "ON bookmarks(comicId, targetKey)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_bookmarks_addedAt " +
+                            "ON bookmarks(addedAt)"
                 )
             }
         }

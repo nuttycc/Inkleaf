@@ -3,6 +3,7 @@ package com.exio.inkleaf.ui
 import android.app.Application
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -11,6 +12,8 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.exio.inkleaf.data.BookmarkRepository
+import com.exio.inkleaf.data.BookmarkToggleResult
 import com.exio.inkleaf.data.ChapterProgress
 import com.exio.inkleaf.data.ComicOpenException
 import com.exio.inkleaf.data.ComicRepository
@@ -18,6 +21,7 @@ import com.exio.inkleaf.data.ComicVolume
 import com.exio.inkleaf.data.FavoriteRepository
 import com.exio.inkleaf.data.ReaderCache
 import com.exio.inkleaf.data.db.BookSourceType
+import com.exio.inkleaf.data.db.BookmarkEntity
 import com.exio.inkleaf.data.db.ComicEntity
 import com.exio.inkleaf.data.db.EnhancementCacheTaskEntity
 import com.exio.inkleaf.data.db.FavoritePageEntity
@@ -81,6 +85,7 @@ class ReaderViewModel(
     private val initialPageOverride: Int? = null,
 ) : AndroidViewModel(app) {
     private val repo = ComicRepository(app)
+    private val bookmarkRepo = BookmarkRepository(app)
     private val favoriteRepo = FavoriteRepository(app)
     private val enhancementCacheRepo = EnhancementCacheTaskRepository.getInstance(app)
 
@@ -99,6 +104,9 @@ class ReaderViewModel(
      * 超过 PREWARM_MAX_PAGES 的书不做全量预热（见 prewarmThumbnails）。
      */
     val thumbnails = mutableStateMapOf<Int, ImageBitmap>()
+    val bookmarkPages = mutableStateMapOf<Int, BookmarkEntity>()
+    val resolvedBookmarks = mutableStateListOf<ResolvedReaderBookmark>()
+    val staleBookmarkIds = mutableStateMapOf<Long, Unit>()
     val favoritePages = mutableStateMapOf<Int, FavoritePageEntity>()
 
     var readerMessage by mutableStateOf<String?>(null)
@@ -126,6 +134,8 @@ class ReaderViewModel(
     /** 正在加载中的页码集合，配合 Mutex 实现去重 */
     private val thumbInFlight = mutableSetOf<Int>()
     private val thumbMutex = Mutex()
+    private val bookmarkInFlight = mutableSetOf<Int>()
+    private val bookmarkMutationMutex = Mutex()
     private val favoriteInFlight = mutableSetOf<Int>()
     private var coverInFlight = false
 
@@ -159,6 +169,7 @@ class ReaderViewModel(
                 observeFavorites(comic.fileKey)
                 val opened = withContext(Dispatchers.IO) { repo.openBook(comic) }
                 volume = opened
+                observeBookmarks(opened)
                 // 首次打开回填页数和封面；Room Flow 会自动刷新书架。
                 // openBook 内部 PdfComicVolume 的 PDF 解析走 IO，这里包一层
                 // withContext 兜底，避免某些路径在主线程做 native 打开。
@@ -256,6 +267,51 @@ class ReaderViewModel(
             } finally {
                 favoriteInFlight -= page
             }
+        }
+    }
+
+    fun toggleBookmark(page: Int) {
+        if (!bookmarkInFlight.add(page)) return
+        val opened = volume
+        val source = comic
+        if (opened == null || source == null || page !in 0 until opened.totalPageCount) {
+            bookmarkInFlight -= page
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                val result = bookmarkMutationMutex.withLock {
+                    bookmarkRepo.toggle(source, opened, page)
+                }
+                when (result) {
+                    is BookmarkToggleResult.Added -> {
+                        loadThumbnail(page)
+                        readerMessage = "已添加书签"
+                    }
+
+                    is BookmarkToggleResult.Removed -> {
+                        readerMessage = "已移除书签"
+                    }
+                }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                readerMessage = e.message?.let { "书签操作失败：$it" } ?: "书签操作失败"
+            } finally {
+                bookmarkInFlight -= page
+            }
+        }
+    }
+
+    suspend fun removeBookmark(bookmark: BookmarkEntity) {
+        bookmarkMutationMutex.withLock {
+            bookmarkRepo.remove(bookmark)
+        }
+    }
+
+    suspend fun restoreBookmark(bookmark: BookmarkEntity) {
+        bookmarkMutationMutex.withLock {
+            bookmarkRepo.restore(bookmark)
         }
     }
 
@@ -460,6 +516,63 @@ class ReaderViewModel(
         }
     }
 
+    private fun observeBookmarks(opened: ComicVolume) {
+        viewModelScope.launch {
+            bookmarkRepo.observeForComic(comicId).collect { bookmarks ->
+                refreshBookmarkPages(opened, bookmarks)
+            }
+        }
+    }
+
+    private suspend fun refreshBookmarkPages(
+        opened: ComicVolume,
+        bookmarks: List<BookmarkEntity>,
+    ) {
+        val resolutions = withContext(Dispatchers.IO) {
+            bookmarks.mapNotNull { bookmark ->
+                resolveBookmarkPage(opened, bookmark)?.let { resolution ->
+                    ResolvedReaderBookmark(
+                        bookmark = bookmark,
+                        globalPage = resolution.globalPage,
+                        stale = resolution.stale,
+                    )
+                }
+            }
+        }
+
+        bookmarkPages.clear()
+        resolvedBookmarks.clear()
+        staleBookmarkIds.clear()
+        resolvedBookmarks.addAll(resolutions.sortedBy { it.globalPage })
+        resolvedBookmarks.forEach { item ->
+            if (item.stale) {
+                staleBookmarkIds[item.bookmark.id] = Unit
+            } else {
+                bookmarkPages[item.globalPage] = item.bookmark
+            }
+        }
+    }
+
+    private fun resolveBookmarkPage(
+        opened: ComicVolume,
+        bookmark: BookmarkEntity,
+    ): ReaderBookmarkResolution? {
+        if (opened.totalPageCount <= 0) return null
+        val approximatePage = bookmark.globalPageIndex.coerceIn(0, opened.totalPageCount - 1)
+        if (bookmark.sourceRevision == opened.sourceRevision) {
+            return ReaderBookmarkResolution(approximatePage, stale = false)
+        }
+        val remappedPage = bookmark.pageIdentity
+            ?.takeIf { it.isNotBlank() }
+            ?.let(opened::findPageByIdentity)
+            ?.takeIf { it in 0 until opened.totalPageCount }
+        val sourceType = comic?.sourceType
+        return ReaderBookmarkResolution(
+            globalPage = remappedPage ?: approximatePage,
+            stale = sourceType == BookSourceType.PDF_SERIES || remappedPage == null,
+        )
+    }
+
     private suspend fun loadThumbnail(page: Int) {
         val opened = volume ?: return
         if (page !in 0 until opened.totalPageCount) return
@@ -528,3 +641,14 @@ class ReaderViewModel(
         private const val PROGRESS_WRITE_INTERVAL_MS = 500L
     }
 }
+
+private data class ReaderBookmarkResolution(
+    val globalPage: Int,
+    val stale: Boolean,
+)
+
+internal data class ResolvedReaderBookmark(
+    val bookmark: BookmarkEntity,
+    val globalPage: Int,
+    val stale: Boolean,
+)
