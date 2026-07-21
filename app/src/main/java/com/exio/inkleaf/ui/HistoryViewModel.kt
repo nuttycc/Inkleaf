@@ -34,7 +34,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-internal sealed interface HistoryListItem {
+sealed interface HistoryListItem {
     val stableKey: String
 
     data class DateHeader(
@@ -49,7 +49,7 @@ internal sealed interface HistoryListItem {
     }
 }
 
-internal data class HistorySessionUi(
+data class HistorySessionUi(
     val id: String,
     val title: String,
     val coverPath: String?,
@@ -66,7 +66,7 @@ internal data class HistorySessionUi(
     val sourceType: BookSourceType,
 )
 
-internal sealed interface HistoryEvent {
+sealed interface HistoryEvent {
     data class SessionDeleted(val snapshot: ReadingSessionEntity) : HistoryEvent
     data class Message(val text: String) : HistoryEvent
     data class NavigateToReader(val comicId: Long, val page: Int) : HistoryEvent
