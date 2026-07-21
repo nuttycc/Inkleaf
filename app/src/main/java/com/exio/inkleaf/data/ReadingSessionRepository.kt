@@ -50,7 +50,9 @@ class ReadingSessionRepository private constructor(
         pagingSourceFactory = { dao.observeHistoryPaging() },
     ).flow
 
-    suspend fun getSessionEntity(id: String): ReadingSessionEntity? = dao.getById(id)
+    suspend fun getSessionEntity(id: String): ReadingSessionEntity? = mutex.withLock {
+        dao.getById(id)
+    }
 
     suspend fun deletePermanent(id: String): ReadingSessionEntity? = mutex.withLock {
         db.withTransaction {
@@ -81,7 +83,9 @@ class ReadingSessionRepository private constructor(
         }
     }
 
-    suspend fun countPermanent(): Long = dao.countPermanent()
+    suspend fun countPermanent(): Long = mutex.withLock {
+        dao.countPermanent()
+    }
 
     /**
      * Load the resumable row into the machine after process start.

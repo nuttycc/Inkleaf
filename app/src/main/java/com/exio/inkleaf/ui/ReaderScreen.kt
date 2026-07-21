@@ -232,11 +232,12 @@ fun ReaderScreen(
         }
     }
 
-    // 统一的退出路径：先恢复系统栏、再 pop。
+    // 统一的退出路径：先结算阅读会话、恢复系统栏、再 pop。
     // 若等离开组合后才恢复（onDispose），返回动画播完时 insets 才从 0 跳回，
     // 书架的 TopAppBar 会肉眼可见地向下弹一截；提前到退出瞬间恢复，
     // 跳变发生在纯黑的阅读页上，视觉无感
     val exitReader = {
+        viewModel.endReadingSession()
         if (window != null) {
             WindowCompat.getInsetsController(window, view)
                 .show(WindowInsetsCompat.Type.systemBars())

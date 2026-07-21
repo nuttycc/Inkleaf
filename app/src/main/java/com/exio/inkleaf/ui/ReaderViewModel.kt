@@ -11,6 +11,9 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.viewModelScope
 import com.exio.inkleaf.data.BookmarkRepository
 import com.exio.inkleaf.data.BookmarkToggleResult
@@ -20,6 +23,12 @@ import com.exio.inkleaf.data.ComicRepository
 import com.exio.inkleaf.data.ComicVolume
 import com.exio.inkleaf.data.FavoriteRepository
 import com.exio.inkleaf.data.ReaderCache
+import com.exio.inkleaf.data.ReadingPositionSnapshot
+import com.exio.inkleaf.data.ReadingSessionComicRef
+import com.exio.inkleaf.data.ReadingSessionEndReason
+import com.exio.inkleaf.data.ReadingSessionEvent
+import com.exio.inkleaf.data.ReadingSessionRepository
+import com.exio.inkleaf.data.ReadingSessionRules
 import com.exio.inkleaf.data.db.BookSourceType
 import com.exio.inkleaf.data.db.BookmarkEntity
 import com.exio.inkleaf.data.db.ComicEntity
@@ -88,6 +97,7 @@ class ReaderViewModel(
     private val bookmarkRepo = BookmarkRepository(app)
     private val favoriteRepo = FavoriteRepository(app)
     private val enhancementCacheRepo = EnhancementCacheTaskRepository.getInstance(app)
+    private val sessionRepo = ReadingSessionRepository.getInstance(app)
 
     var state by mutableStateOf<ReaderUiState>(ReaderUiState.Loading)
         private set
@@ -147,6 +157,23 @@ class ReaderViewModel(
     private var comic: ComicEntity? = null
     private var observedFavoriteSource: String? = null
 
+    /** True after LeaveReader was dispatched; prevents double-complete on dispose. */
+    private var sessionEnded = false
+    private var checkpointJob: Job? = null
+    private var processLifecycleAttached = false
+
+    private val processLifecycleObserver = object : DefaultLifecycleObserver {
+        override fun onResume(owner: LifecycleOwner) {
+            dispatchSessionEvent(ReadingSessionEvent.EnteredInteractiveForeground)
+            startCheckpointLoop()
+        }
+
+        override fun onPause(owner: LifecycleOwner) {
+            stopCheckpointLoop()
+            dispatchSessionEvent(ReadingSessionEvent.LeftInteractiveForeground)
+        }
+    }
+
     init {
         viewModelScope.launch {
             state = try {
@@ -166,6 +193,16 @@ class ReaderViewModel(
                         if (error is CancellationException) throw error
                     }
                 }
+                // Identify the comic before open; source revision arrives on Ready.
+                dispatchSessionEvent(
+                    ReadingSessionEvent.OpenComic(
+                        ReadingSessionComicRef(
+                            fileKey = comic.fileKey,
+                            titleSnapshot = comic.title.ifBlank { "未命名漫画" },
+                            sourceType = comic.sourceType,
+                        ),
+                    ),
+                )
                 observeFavorites(comic.fileKey)
                 val opened = withContext(Dispatchers.IO) { repo.openBook(comic) }
                 volume = opened
@@ -186,6 +223,10 @@ class ReaderViewModel(
                 )
                 val safeStartPage = startPage.coerceIn(0, opened.totalPageCount - 1)
                 currentPage = safeStartPage
+                dispatchSessionEvent(
+                    ReadingSessionEvent.ReaderReady(positionSnapshot(opened, safeStartPage)),
+                )
+                attachProcessLifecycle()
                 // 后台预热胶片缩略图：呼出工具栏时大概率已全部就绪
                 prewarmThumbnails(opened, safeStartPage)
                 ReaderUiState.Ready(
@@ -210,7 +251,13 @@ class ReaderViewModel(
      */
     fun saveProgress(globalPage: Int) {
         currentPage = globalPage
-        val progress = volume?.globalToChapterPage(globalPage) ?: ChapterProgress(0, globalPage)
+        val opened = volume
+        if (opened != null && globalPage in 0 until opened.totalPageCount) {
+            dispatchSessionEvent(
+                ReadingSessionEvent.PageVisible(positionSnapshot(opened, globalPage)),
+            )
+        }
+        val progress = opened?.globalToChapterPage(globalPage) ?: ChapterProgress(0, globalPage)
         pendingProgress = progress
         if (progressWriteJob?.isActive == true) return
         progressWriteJob = viewModelScope.launch {
@@ -241,6 +288,22 @@ class ReaderViewModel(
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * Explicit Reader leave (toolbar Back / system Back). Idempotent so
+     * BackHandler + dispose cannot complete the same session twice.
+     */
+    fun endReadingSession(
+        reason: ReadingSessionEndReason = ReadingSessionEndReason.LEFT_READER,
+    ) {
+        if (sessionEnded) return
+        sessionEnded = true
+        stopCheckpointLoop()
+        detachProcessLifecycle()
+        viewModelScope.launch(NonCancellable) {
+            sessionRepo.dispatch(ReadingSessionEvent.LeaveReader(reason))
         }
     }
 
@@ -623,9 +686,84 @@ class ReaderViewModel(
      * 注意旋转屏幕不会走到这里——这正是资源不被重复释放/创建的关键。
      */
     override fun onCleared() {
+        stopCheckpointLoop()
+        detachProcessLifecycle()
+        // Model manager / unexpected dispose: pause, do not complete.
+        // Explicit Back already called endReadingSession.
+        if (!sessionEnded) {
+            volumeCleanupScope.launch(NonCancellable) {
+                sessionRepo.dispatch(ReadingSessionEvent.LeftInteractiveForeground)
+            }
+        }
         val closingVolume = volume
         volume = null
         volumeCleanupScope.launch { closingVolume?.close() }
+    }
+
+    private fun attachProcessLifecycle() {
+        if (processLifecycleAttached || sessionEnded) return
+        processLifecycleAttached = true
+        ProcessLifecycleOwner.get().lifecycle.addObserver(processLifecycleObserver)
+        // ProcessLifecycleOwner replays current state, but default machine
+        // foreground is false — still emit enter when already resumed.
+        if (ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(
+                androidx.lifecycle.Lifecycle.State.RESUMED,
+            )
+        ) {
+            dispatchSessionEvent(ReadingSessionEvent.EnteredInteractiveForeground)
+            startCheckpointLoop()
+        }
+    }
+
+    private fun detachProcessLifecycle() {
+        if (!processLifecycleAttached) return
+        processLifecycleAttached = false
+        ProcessLifecycleOwner.get().lifecycle.removeObserver(processLifecycleObserver)
+    }
+
+    private fun startCheckpointLoop() {
+        if (checkpointJob?.isActive == true || sessionEnded) return
+        checkpointJob = viewModelScope.launch {
+            while (true) {
+                delay(ReadingSessionRules.CHECKPOINT_INTERVAL_MS)
+                if (sessionEnded) break
+                sessionRepo.dispatch(ReadingSessionEvent.CheckpointTick)
+            }
+        }
+    }
+
+    private fun stopCheckpointLoop() {
+        checkpointJob?.cancel()
+        checkpointJob = null
+    }
+
+    private fun dispatchSessionEvent(event: ReadingSessionEvent) {
+        if (sessionEnded && event !is ReadingSessionEvent.LeaveReader) return
+        viewModelScope.launch {
+            try {
+                sessionRepo.dispatch(event)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                // Session tracking must not break reading.
+            }
+        }
+    }
+
+    private fun positionSnapshot(
+        opened: ComicVolume,
+        globalPage: Int,
+    ): ReadingPositionSnapshot {
+        val page = globalPage.coerceIn(0, (opened.totalPageCount - 1).coerceAtLeast(0))
+        val location = opened.globalToChapterPage(page)
+        return ReadingPositionSnapshot(
+            pageIdentity = opened.pageIdentity(page),
+            globalPageIndex = page,
+            chapterIndex = location.chapterIndex,
+            pageIndex = location.pageIndex,
+            chapterTitle = opened.chapterTitle(location.chapterIndex),
+            sourceRevision = opened.sourceRevision,
+        )
     }
 
     companion object {
