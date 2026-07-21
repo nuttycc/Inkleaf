@@ -189,7 +189,7 @@ class ReadingSessionRulesTest {
             sourceType = BookSourceType.EXTERNAL_ARCHIVE,
         ),
         status = ReadingSessionStatus.PAUSED,
-        startedAt = lastCheckpointAt - 60_000L,
+        startedAt = (lastCheckpointAt - 60_000L).coerceAtLeast(0L),
         lastCheckpointAt = lastCheckpointAt,
         activeReadingMillis = 5_000L,
         startPosition = start,

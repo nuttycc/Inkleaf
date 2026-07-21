@@ -126,6 +126,8 @@ class ReadingSessionStateMachineTest {
     @Test
     fun `OpenComic while ACTIVE same comic settles leave and allows a new session`() {
         openReadyVisibleForeground()
+        // Page change promotes; under 30s still permanent via position change.
+        machine.onEvent(ReadingSessionEvent.PageVisible(movedPos))
         clock.advanceBy(8_000L)
         val firstId = machine.resumable!!.id
         val now = clock.nowMillis()
@@ -247,6 +249,7 @@ class ReadingSessionStateMachineTest {
     @Test
     fun `active switch settles immediately including open foreground segment`() {
         openReadyVisibleForeground()
+        machine.onEvent(ReadingSessionEvent.PageVisible(movedPos))
         clock.advanceBy(5_000L)
         val now = clock.nowMillis()
         val other = comic.copy(fileKey = "book-b", titleSnapshot = "Book B")
@@ -255,6 +258,7 @@ class ReadingSessionStateMachineTest {
         assertEquals(ReadingSessionEndReason.SWITCHED_COMIC, settled.session.endReason)
         assertEquals(now, settled.session.endedAt)
         assertEquals(5_000L, settled.session.activeReadingMillis)
+        assertEquals(movedPos, settled.session.endPosition)
         assertNull(machine.resumable)
     }
 
