@@ -11,9 +11,9 @@ This is an unreleased personal hobby project under active development. Prefer si
 ## Build, Test, and Development Commands
 
 Run from the repository root. This machine is low-spec: prefer the lightweight checks below and
-avoid full builds unless an APK is actually needed. CI (`.github/workflows/android-check.yml`) runs
-the full build, tests, and lint on push, so local verification only needs to confirm the code
-compiles.
+avoid full builds unless an APK is actually needed. GitHub Actions `android-check.yml` is manual
+only (`workflow_dispatch`: check / apk / full). CircleCI covers automatic PR/main checks. Local
+verification only needs to confirm the code compiles.
 
 Preferred lightweight checks (fast, no dexing or packaging):
 

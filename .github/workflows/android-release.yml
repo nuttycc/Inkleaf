@@ -118,7 +118,14 @@ jobs:
           INKLEAF_KEYSTORE_BASE64: ${{ secrets.INKLEAF_KEYSTORE_BASE64 }}
 
       - name: Test and build release APK
-        run: ./gradlew testDebugUnitTest assembleRelease
+        # Private ubuntu-latest is 2C/8G: one fat Gradle JVM (Kotlin in-process).
+        run: |
+          ./gradlew testDebugUnitTest assembleRelease \
+            -Dorg.gradle.jvmargs="-Xmx5g -XX:MaxMetaspaceSize=768m -XX:+UseParallelGC -Dfile.encoding=UTF-8" \
+            -Dkotlin.compiler.execution.strategy=in-process \
+            -Dorg.gradle.workers.max=2 \
+            -Dorg.gradle.parallel=true \
+            -Dorg.gradle.priority=normal
         env:
           INKLEAF_KEYSTORE_FILE: ${{ github.workspace }}/app/inkleaf-release.jks
           INKLEAF_KEYSTORE_PASSWORD: ${{ secrets.INKLEAF_KEYSTORE_PASSWORD }}
