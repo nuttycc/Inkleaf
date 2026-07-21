@@ -39,12 +39,13 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build, test, and lint
-        # Private ubuntu-latest is 2C/8G (not public 4C/16G).
+        # Private ubuntu-latest is 2C/8G: one fat Gradle JVM (Kotlin in-process).
         run: |
           ./gradlew assembleDebug testDebugUnitTest lintDebug \
-            -Dorg.gradle.jvmargs="-Xmx3g -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8" \
-            -Dkotlin.daemon.jvmargs="-Xmx1536m" \
+            -Dorg.gradle.jvmargs="-Xmx5g -XX:MaxMetaspaceSize=768m -XX:+UseParallelGC -Dfile.encoding=UTF-8" \
+            -Dkotlin.compiler.execution.strategy=in-process \
             -Dorg.gradle.workers.max=2 \
+            -Dorg.gradle.parallel=true \
             -Dorg.gradle.priority=normal
 
       - name: Upload lint report
