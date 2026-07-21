@@ -39,7 +39,13 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build, test, and lint
-        run: ./gradlew assembleDebug testDebugUnitTest lintDebug
+        # Private ubuntu-latest is 2C/8G (not public 4C/16G).
+        run: |
+          ./gradlew assembleDebug testDebugUnitTest lintDebug \
+            -Dorg.gradle.jvmargs="-Xmx3g -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8" \
+            -Dkotlin.daemon.jvmargs="-Xmx1536m" \
+            -Dorg.gradle.workers.max=2 \
+            -Dorg.gradle.priority=normal
 
       - name: Upload lint report
         if: failure()
