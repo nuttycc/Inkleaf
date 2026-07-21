@@ -10,6 +10,7 @@
 local.properties
 *.jks
 *.keystore
+!app/debug.keystore
 /app/release/
 
 .gemini/
