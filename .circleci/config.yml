@@ -5,16 +5,13 @@
 #   - Only build pull requests  → builds PRs + default branch (≈ main + PRs)
 #   - Auto-cancel redundant workflows → cancel older runs on the same branch
 #
-# resource_class: medium is enough for most check runs; raise to large if
-# jobs hit the no_output_timeout or are consistently slow.
-
 version: 2.1
 
 jobs:
   android-check:
     docker:
       - image: cimg/android:2026.07
-    resource_class: medium
+    resource_class: large
     steps:
       - checkout
 
