@@ -19,8 +19,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         EnhancementCacheTaskEntity::class,
         EnhancementCacheCompletedPageEntity::class,
         BookmarkEntity::class,
+        ReadingSessionEntity::class,
     ],
-    version = 12,
+    // v13: reading activity history. No data migration — destructive rebuild is intentional (#15).
+    version = 13,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -32,6 +34,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun albumPageDao(): AlbumPageDao
     abstract fun enhancementCacheTaskDao(): EnhancementCacheTaskDao
     abstract fun bookmarkDao(): BookmarkDao
+    abstract fun readingSessionDao(): ReadingSessionDao
 
     companion object {
         @Volatile

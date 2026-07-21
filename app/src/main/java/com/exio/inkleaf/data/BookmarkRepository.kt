@@ -274,6 +274,10 @@ internal fun bookmarkTargetKey(
     return "bookmark:${ReaderPageCacheKey.sourceRevision(parts)}"
 }
 
+/**
+ * Bookmark-facing wrapper around [ReadingPositionResolver].
+ * Keeps comicId on the resolution so Saved UI can navigate without a second lookup.
+ */
 internal fun resolveBookmarkLocation(
     comicId: Long,
     sourceType: BookSourceType,
@@ -283,27 +287,22 @@ internal fun resolveBookmarkLocation(
     currentSourceRevision: String,
     currentPageCount: Int,
     findPageByIdentity: (String) -> Int?,
-): BookmarkResolution {
-    if (currentPageCount <= 0) {
-        return BookmarkResolution.Unavailable("漫画中没有可读取的页面")
+): BookmarkResolution =
+    when (
+        val resolution = ReadingPositionResolver.resolve(
+            sourceType = sourceType,
+            storedSourceRevision = storedSourceRevision,
+            storedGlobalPage = storedGlobalPage,
+            pageIdentity = pageIdentity,
+            currentSourceRevision = currentSourceRevision,
+            currentPageCount = currentPageCount,
+            findPageByIdentity = findPageByIdentity,
+        )
+    ) {
+        is ReadingPositionResolution.Ready ->
+            BookmarkResolution.Ready(comicId, resolution.globalPage)
+        is ReadingPositionResolution.SourceChanged ->
+            BookmarkResolution.SourceChanged(comicId, resolution.approximateGlobalPage)
+        is ReadingPositionResolution.Unavailable ->
+            BookmarkResolution.Unavailable(resolution.message)
     }
-
-    val approximatePage = storedGlobalPage.coerceIn(0, currentPageCount - 1)
-    if (storedSourceRevision == currentSourceRevision) {
-        return BookmarkResolution.Ready(comicId, approximatePage)
-    }
-
-    val remappedPage = pageIdentity
-        ?.takeIf { it.isNotBlank() }
-        ?.let(findPageByIdentity)
-        ?.takeIf { it in 0 until currentPageCount }
-
-    if (sourceType == BookSourceType.PDF_SERIES) {
-        return BookmarkResolution.SourceChanged(comicId, remappedPage ?: approximatePage)
-    }
-    return if (remappedPage != null) {
-        BookmarkResolution.Ready(comicId, remappedPage)
-    } else {
-        BookmarkResolution.SourceChanged(comicId, approximatePage)
-    }
-}
