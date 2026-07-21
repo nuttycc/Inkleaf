@@ -1,0 +1,69 @@
+# Android check pipeline (parity with .github/workflows/android-check.yml).
+# Transition: GitHub Actions remains primary until CircleCI is proven stable.
+#
+# Project settings (not expressible in this file):
+#   - Only build pull requests  → builds PRs + default branch (≈ main + PRs)
+#   - Auto-cancel redundant workflows → cancel older runs on the same branch
+#
+# resource_class: medium is enough for most check runs; raise to large if
+# jobs hit the no_output_timeout or are consistently slow.
+
+version: 2.1
+
+jobs:
+  android-check:
+    docker:
+      - image: cimg/android:2026.07
+    resource_class: medium
+    steps:
+      - checkout
+
+      - run:
+          name: Accept SDK licenses and install native toolchain
+          command: |
+            set -euo pipefail
+            mkdir -p "$ANDROID_HOME/licenses"
+            # Android SDK license hashes (standard CI accept-all pattern).
+            echo -e "24333f8a63b6825ea9c5514f83c2829b004d1fee\n" > "$ANDROID_HOME/licenses/android-sdk-license"
+            echo -e "84831b9409646a918e30573bab4c9c91346d8abd\n" > "$ANDROID_HOME/licenses/android-sdk-preview-license"
+            # Image ships platforms through 35; project compileSdk is 37.
+            # NDK/CMake versions match app/build.gradle.kts and GHA.
+            sdkmanager \
+              "platforms;android-37" \
+              "ndk;29.0.14206865" \
+              "cmake;3.30.5"
+
+      - restore_cache:
+          keys:
+            - gradle-v1-{{ checksum "gradle/wrapper/gradle-wrapper.properties" }}-{{ checksum "gradle/libs.versions.toml" }}-{{ checksum "app/build.gradle.kts" }}
+            - gradle-v1-
+
+      - run:
+          name: Make Gradle wrapper executable
+          command: chmod +x gradlew
+
+      - run:
+          name: Build, test, and lint
+          command: ./gradlew assembleDebug testDebugUnitTest lintDebug --no-daemon
+          # Budget for cold SDK/NDK install + full debug check (GHA uses 30m wall).
+          no_output_timeout: 45m
+
+      - save_cache:
+          key: gradle-v1-{{ checksum "gradle/wrapper/gradle-wrapper.properties" }}-{{ checksum "gradle/libs.versions.toml" }}-{{ checksum "app/build.gradle.kts" }}
+          paths:
+            - ~/.gradle/caches
+            - ~/.gradle/wrapper
+
+      - store_test_results:
+          path: app/build/test-results
+          when: always
+
+      - store_artifacts:
+          path: app/build/reports/lint-results-debug.html
+          destination: lint-report
+          when: always
+
+workflows:
+  android-check:
+    jobs:
+      - android-check
