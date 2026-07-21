@@ -85,6 +85,13 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycle
     val layoutSettings: StateFlow<ShelfLayoutSettings> = settingsRepo.settings
         .stateIn(viewModelScope, SharingStarted.Lazily, ShelfLayoutSettings())
 
+    val lastPickedFolder: StateFlow<String?> = settingsRepo.lastPickedFolder
+        .stateIn(viewModelScope, SharingStarted.Lazily, null)
+
+    private fun rememberLastPickedFolder(uri: Uri) {
+        viewModelScope.launch { settingsRepo.rememberLastPickedFolder(uri.toString()) }
+    }
+
     fun setColumns(value: GridColumnsMode) {
         viewModelScope.launch { settingsRepo.setColumns(value) }
     }
@@ -243,6 +250,7 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycle
      * 即使"什么都没扫到"也要说一声，不能毫无动静
      */
     fun addFolder(uri: Uri) {
+        rememberLastPickedFolder(uri)
         viewModelScope.launch {
             val msg = try {
                 when (val outcome = repo.addFolderAndSync(uri)) {
@@ -267,6 +275,7 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycle
      */
     fun addSeriesFolder(uri: Uri, approvedLargeScan: Boolean = false) {
         if (scanJob?.isActive == true) return
+        if (!approvedLargeScan) rememberLastPickedFolder(uri)
         scanJob = viewModelScope.launch {
             _scanState.value = ScanState(isScanning = true, isManual = true)
             val msg = try {

@@ -5,7 +5,9 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import java.io.IOException
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 
 /**
@@ -94,6 +96,20 @@ class ShelfSettingsRepository(context: Context) {
         dataStore.edit { it[KEY_CROP] = value.name }
     }
 
+    val lastPickedFolder: Flow<String?> = dataStore.data
+        .map { it[KEY_LAST_PICKED_FOLDER] }
+        .catch { error ->
+            if (error is IOException) emit(null) else throw error
+        }
+
+    suspend fun rememberLastPickedFolder(uri: String) {
+        try {
+            dataStore.edit { it[KEY_LAST_PICKED_FOLDER] = uri }
+        } catch (_: IOException) {
+            // This hint must never block the operation the user selected.
+        }
+    }
+
     suspend fun setSelectedGroup(value: ShelfGroupSelection) {
         dataStore.edit {
             it[KEY_GROUP_FILTER_KIND] = value.kind.name
@@ -112,5 +128,6 @@ class ShelfSettingsRepository(context: Context) {
         private val KEY_CROP = stringPreferencesKey("cover_crop")
         private val KEY_GROUP_FILTER_KIND = stringPreferencesKey("group_filter_kind")
         private val KEY_GROUP_FILTER_ID = longPreferencesKey("group_filter_id")
+        private val KEY_LAST_PICKED_FOLDER = stringPreferencesKey("last_picked_folder")
     }
 }

@@ -101,6 +101,7 @@ fun AlbumEditorScreen(
         AlbumEditorViewModel(app, comicId)
     }
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val lastPickedFolder by viewModel.lastPickedFolder.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     var showAddSheet by rememberSaveable { mutableStateOf(false) }
@@ -340,7 +341,7 @@ fun AlbumEditorScreen(
                     supporting = "仅导入当前层，并按文件名排序",
                     onClick = {
                         showAddSheet = false
-                        folderPicker.launch(null)
+                        folderPicker.launch(buildFolderPickerInitialUri(lastPickedFolder))
                     },
                     leadingContent = {
                         Icon(

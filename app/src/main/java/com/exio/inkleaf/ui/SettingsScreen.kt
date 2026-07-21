@@ -66,6 +66,7 @@ fun SettingsScreen(
     var showAboutSheet by remember { mutableStateOf(false) }
     var showLicensesSheet by remember { mutableStateOf(false) }
     var showFoldersSheet by rememberSaveable { mutableStateOf(false) }
+    val lastPickedFolder by foldersViewModel.lastPickedFolder.collectAsStateWithLifecycle()
 
     val treePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree(),
@@ -167,7 +168,7 @@ fun SettingsScreen(
             sheetState = rememberExpandOnlySheetState(),
         ) {
             FoldersSheetContent(
-                onAddFolder = { treePicker.launch(null) },
+                onAddFolder = { treePicker.launch(buildFolderPickerInitialUri(lastPickedFolder)) },
                 viewModel = foldersViewModel,
             )
         }

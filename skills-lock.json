@@ -7,6 +7,12 @@
       "skillPath": "skills/in-progress/batch-grill-me/SKILL.md",
       "computedHash": "574a9c661c3ba9682f33aa924c0638a9553c5b110e45f73d4c55efab0ecbe2fe"
     },
+    "caveman-review": {
+      "source": "juliusbrussee/caveman",
+      "sourceType": "github",
+      "skillPath": "skills/caveman-review/SKILL.md",
+      "computedHash": "b9091dbc51de0f3710ea818fd4d638539f8c1784f8fda931eb159c44861e702e"
+    },
     "code-comments": {
       "source": "petekp/claude-code-setup",
       "sourceType": "github",

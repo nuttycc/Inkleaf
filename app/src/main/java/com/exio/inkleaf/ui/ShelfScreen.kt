@@ -1,6 +1,9 @@
 package com.exio.inkleaf.ui
 
 import android.content.ActivityNotFoundException
+import android.content.ContentResolver
+import android.net.Uri
+import android.provider.DocumentsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.Crossfade
@@ -92,6 +95,29 @@ import java.io.File
 /** 书架内容区的三态：作为 Crossfade 的 key，列表内容增删不触发整区动画 */
 private enum class ShelfPhase { LOADING, EMPTY, CONTENT }
 
+internal fun buildFolderPickerInitialUri(lastPickedFolder: String?): Uri? {
+    if (lastPickedFolder == null) return null
+
+    return try {
+        val treeUri = Uri.parse(lastPickedFolder)
+        if (
+            treeUri.scheme != ContentResolver.SCHEME_CONTENT ||
+            treeUri.authority.isNullOrBlank() ||
+            !DocumentsContract.isTreeUri(treeUri)
+        ) {
+            return null
+        }
+        val documentId: String? = DocumentsContract.getTreeDocumentId(treeUri)
+        if (documentId.isNullOrBlank()) return null
+        DocumentsContract.buildDocumentUriUsingTree(
+            treeUri,
+            documentId,
+        )
+    } catch (_: IllegalArgumentException) {
+        null
+    }
+}
+
 /** 首页书架：封面网格 + 目录扫描 + 排版抽屉 + 顶栏添加菜单 + 长按删除 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -109,6 +135,7 @@ fun ShelfScreen(
     val selectedGroup by viewModel.selectedGroup.collectAsStateWithLifecycle()
     val scanState by viewModel.scanState.collectAsStateWithLifecycle()
     val layout by viewModel.layoutSettings.collectAsStateWithLifecycle()
+    val lastPickedFolder by viewModel.lastPickedFolder.collectAsStateWithLifecycle()
 
     var pendingDelete by remember { mutableStateOf<ComicEntity?>(null) }
     var pendingAction by remember { mutableStateOf<ComicEntity?>(null) }
@@ -311,7 +338,9 @@ fun ShelfScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             Spacer(modifier = Modifier.height(16.dp))
-                            Button(onClick = { treePicker.launch(null) }) {
+                            Button(onClick = {
+                                treePicker.launch(buildFolderPickerInitialUri(lastPickedFolder))
+                            }) {
                                 Text("添加漫画目录")
                             }
                             TextButton(onClick = {
@@ -381,11 +410,11 @@ fun ShelfScreen(
                 },
                 onAddFolder = {
                     showAddSheet = false
-                    treePicker.launch(null)
+                    treePicker.launch(buildFolderPickerInitialUri(lastPickedFolder))
                 },
                 onAddSeriesFolder = {
                     showAddSheet = false
-                    seriesTreePicker.launch(null)
+                    seriesTreePicker.launch(buildFolderPickerInitialUri(lastPickedFolder))
                 },
                 onAddFile = {
                     showAddSheet = false

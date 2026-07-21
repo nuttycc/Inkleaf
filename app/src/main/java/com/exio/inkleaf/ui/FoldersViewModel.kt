@@ -9,6 +9,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.exio.inkleaf.data.AddFolderOutcome
 import com.exio.inkleaf.data.ComicRepository
+import com.exio.inkleaf.data.ShelfSettingsRepository
 import com.exio.inkleaf.data.db.FolderWithCount
 import com.exio.inkleaf.data.db.LibraryFolderEntity
 import kotlinx.coroutines.flow.SharingStarted
@@ -19,6 +20,7 @@ import kotlinx.coroutines.launch
 /** 目录管理 sheet 的状态持有者（与 SettingsScreen 同生命周期） */
 class FoldersViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = ComicRepository(app)
+    private val settingsRepo = ShelfSettingsRepository(app)
 
     /**
      * 目录列表（含每个目录的漫画数）；comics 表一变计数自动更新。
@@ -33,11 +35,15 @@ class FoldersViewModel(app: Application) : AndroidViewModel(app) {
     val folders: StateFlow<List<FolderWithCount>?> = repo.observeFolders()
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
+    val lastPickedFolder: StateFlow<String?> = settingsRepo.lastPickedFolder
+        .stateIn(viewModelScope, SharingStarted.Lazily, null)
+
     /** 一次性提示消息（Snackbar 展示后调 consumeMessage 清空） */
     var message by mutableStateOf<String?>(null)
         private set
 
     fun addFolder(uri: Uri) {
+        rememberLastPickedFolder(uri)
         viewModelScope.launch {
             try {
                 // 编排（插库 → 首扫 → 补封面）在 Repository，这里只映射消息；
@@ -50,6 +56,10 @@ class FoldersViewModel(app: Application) : AndroidViewModel(app) {
                 message = "无法获得该目录的持久访问权限"
             }
         }
+    }
+
+    private fun rememberLastPickedFolder(uri: Uri) {
+        viewModelScope.launch { settingsRepo.rememberLastPickedFolder(uri.toString()) }
     }
 
     fun removeFolder(folder: LibraryFolderEntity) {

@@ -6,10 +6,13 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.exio.inkleaf.data.AlbumPageDraft
 import com.exio.inkleaf.data.AlbumRepository
+import com.exio.inkleaf.data.ShelfSettingsRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 data class AlbumEditorUiState(
@@ -38,8 +41,12 @@ class AlbumEditorViewModel(
     comicId: Long?,
 ) : AndroidViewModel(app) {
     private val repository = AlbumRepository(app)
+    private val settingsRepo = ShelfSettingsRepository(app)
     private val sessionId = repository.newSessionId()
     private var currentComicId: Long? = comicId
+
+    val lastPickedFolder: StateFlow<String?> = settingsRepo.lastPickedFolder
+        .stateIn(viewModelScope, SharingStarted.Lazily, null)
 
     private val _state = MutableStateFlow(
         AlbumEditorUiState(
@@ -82,8 +89,9 @@ class AlbumEditorViewModel(
 
     fun importFolder(treeUri: Uri) {
         if (_state.value.isImporting || _state.value.isSaving) return
+        _state.value = _state.value.copy(isImporting = true)
+        rememberLastPickedFolder(treeUri)
         viewModelScope.launch {
-            _state.value = _state.value.copy(isImporting = true)
             runCatchingPreservingCancellation { repository.stageFolder(sessionId, treeUri) }
                 .onSuccess(::appendImportResult)
                 .onFailure { error ->
@@ -93,6 +101,10 @@ class AlbumEditorViewModel(
                     )
                 }
         }
+    }
+
+    private fun rememberLastPickedFolder(uri: Uri) {
+        viewModelScope.launch { settingsRepo.rememberLastPickedFolder(uri.toString()) }
     }
 
     fun movePage(movingPageId: String, targetPageId: String) {
