@@ -12,4 +12,4 @@ This is an **unreleased** personal hobby project under active development.
 ## Development Commands
 
 Prefer lightweight checks.
-CI (`.github/workflows/android-check.yml`) runs the full build, tests, and lint.
+CI: GitHub Actions `android-check.yml` is manual (`workflow_dispatch`); CircleCI runs automatic checks.
