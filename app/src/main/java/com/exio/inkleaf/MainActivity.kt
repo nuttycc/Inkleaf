@@ -11,6 +11,8 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.animation.AnimatedContentTransitionScope.SlideDirection
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -50,7 +52,9 @@ import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.hasRoute
 import androidx.navigation.toRoute
 import com.exio.inkleaf.data.ComicRepository
 import com.exio.inkleaf.data.ThemeSettings
@@ -76,6 +80,9 @@ import kotlinx.serialization.Serializable
  * 类型安全路由：路由就是普通数据类（类比 react-router 的 path + params，
  * 但参数有编译期类型保障）。@Serializable 让编译器生成参数的编解码器。
  */
+@Serializable
+data object ShellRoute
+
 @Serializable
 data object ShelfRoute
 
@@ -103,8 +110,11 @@ data object ThemeSettingsRoute
 @Serializable
 data object EnhancementModelsRoute
 
-/** 页面转场时长。全宽滑动的运动量大，350~450ms 区间体感比较合适 */
+/** 外层壳↔二级：全宽滑动的运动量大，350~450ms 区间体感比较合适 */
 private const val NAV_TRANSITION_MS = 400
+
+/** Tab↔Tab：同时交叉淡化，短于外层，避免和外层滑推抢同一套运动语言 */
+private const val TAB_TRANSITION_MS = 200
 private const val FAVORITES_RESULT_MESSAGE_KEY = "favorites_result_message"
 
 private enum class TopLevelDestination {
@@ -122,6 +132,8 @@ private data class ExternalOpenRequest(val id: Long, val uri: Uri)
 private val NavEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
 
 private fun <T> navSpec() = tween<T>(NAV_TRANSITION_MS, easing = NavEasing)
+
+private fun <T> tabNavSpec() = tween<T>(TAB_TRANSITION_MS)
 
 private fun <T : Any> NavHostController.navigateTopLevel(route: T) {
     navigate(route) {
@@ -355,7 +367,8 @@ class MainActivity : AppCompatActivity() {
             val themeSettings = initialTheme ?: return@setContent
 
             InkleafTheme(settings = themeSettings) {
-                val navController = rememberNavController()
+                // 外层：壳 ↔ 二级；内层 Tab NavController 建在 Shell 目的地里
+                val outerNavController = rememberNavController()
                 val pendingExternalOpen = externalOpenRequest
 
                 LaunchedEffect(pendingExternalOpen) {
@@ -376,7 +389,7 @@ class MainActivity : AppCompatActivity() {
                         return@LaunchedEffect
                     }
                     if (!consumeExternalOpenRequest(request)) return@LaunchedEffect
-                    navController.navigate(ReaderRoute(comicId)) {
+                    outerNavController.navigate(ReaderRoute(comicId)) {
                         launchSingleTop = true
                     }
                 }
@@ -385,16 +398,13 @@ class MainActivity : AppCompatActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    // 全局转场：全宽水平推入——前进时新页从右侧整页滑入，
-                    // 旧页同步整页滑出，两页边贴边像传送带一样移过屏幕；
-                    // 返回时方向相反。刻意不加 fade：两页全程淡化会把滑动
-                    // 藏在透明度底下，看起来仍像交叉淡化（缺乏滑动感）。
-                    // 两页位移量相同、无重叠区，因此不依赖绘制层级，任意
-                    // 两页之间都成立：新增页面无需再配转场。
-                    // slideInto/OutOfContainer 按布局方向解析 Start/End，RTL 自适应
+                    // 外层转场：全宽水平推入——前进时新页从右侧整页滑入，
+                    // 旧页同步整页滑出；返回相反。刻意不加 fade。
+                    // 底栏在壳内、内层 Tab NavHost 外，Tab 切换时不参与此外层动画；
+                    // 进二级时整壳（含底栏）一起滑走。
                     NavHost(
-                        navController = navController,
-                        startDestination = ShelfRoute,
+                        navController = outerNavController,
+                        startDestination = ShellRoute,
                         modifier = Modifier.fillMaxSize(),
                         enterTransition = {
                             slideIntoContainer(SlideDirection.Start, navSpec())
@@ -409,154 +419,161 @@ class MainActivity : AppCompatActivity() {
                             slideOutOfContainer(SlideDirection.End, navSpec())
                         },
                     ) {
-                            composable<ShelfRoute> {
-                                TopLevelScaffold(
-                                    selectedDestination = TopLevelDestination.SHELF,
-                                    onOpenShelf = {},
-                                    onOpenHistory = {
-                                        navController.navigateTopLevel(HistoryRoute)
-                                    },
-                                    onSelectFavorites = {
-                                        navController.navigateTopLevel(FavoritesRoute)
-                                    },
-                                ) { topLevelPadding ->
-                                    ShelfScreen(
-                                        onOpenComic = { id ->
-                                            navController.navigate(ReaderRoute(id))
-                                        },
-                                        onCreateAlbum = {
-                                            navController.navigate(AlbumEditorRoute())
-                                        },
-                                        onEditAlbum = { id ->
-                                            navController.navigate(AlbumEditorRoute(id))
-                                        },
-                                        onOpenSettings = {
-                                            navController.navigate(SettingsRoute)
-                                        },
-                                        modifier = Modifier.padding(topLevelPadding),
-                                    )
-                                }
+                        composable<ShellRoute> { shellEntry ->
+                            val innerNavController = rememberNavController()
+                            val innerBackStackEntry by innerNavController.currentBackStackEntryAsState()
+                            val innerDestination = innerBackStackEntry?.destination
+                            val selectedDestination = when {
+                                innerDestination?.hasRoute<HistoryRoute>() == true ->
+                                    TopLevelDestination.HISTORY
+                                innerDestination?.hasRoute<FavoritesRoute>() == true ->
+                                    TopLevelDestination.FAVORITES
+                                else -> TopLevelDestination.SHELF
                             }
-                            composable<HistoryRoute> {
-                                TopLevelScaffold(
-                                    selectedDestination = TopLevelDestination.HISTORY,
-                                    onOpenShelf = {
-                                        navController.navigateTopLevel(ShelfRoute)
-                                    },
-                                    onOpenHistory = {},
-                                    onSelectFavorites = {
-                                        navController.navigateTopLevel(FavoritesRoute)
-                                    },
-                                ) { topLevelPadding ->
-                                    HistoryScreen(
-                                        onOpenSession = { comicId, page ->
-                                            navController.navigate(
-                                                ReaderRoute(comicId, page),
-                                            )
-                                        },
-                                        modifier = Modifier.padding(topLevelPadding),
-                                    )
-                                }
-                            }
-                            composable<AlbumEditorRoute> { entry ->
-                                val route = entry.toRoute<AlbumEditorRoute>()
-                                AlbumEditorScreen(
-                                    comicId = route.comicId,
-                                    onBack = { navController.popBackStack() },
-                                )
-                            }
-                            composable<ReaderRoute> { entry ->
-                                val route = entry.toRoute<ReaderRoute>()
-                                ReaderScreen(
-                                    comicId = route.comicId,
-                                    initialPage = route.initialPage,
-                                    onBack = { navController.popBackStack() },
-                                    onOpenModelManager = {
-                                        navController.navigate(EnhancementModelsRoute)
-                                    },
-                                )
-                            }
-                            composable<FavoritesRoute> { entry ->
-                                val viewerMessage by entry.savedStateHandle
-                                    .getStateFlow<String?>(FAVORITES_RESULT_MESSAGE_KEY, null)
-                                    .collectAsStateWithLifecycle()
-                                TopLevelScaffold(
-                                    selectedDestination = TopLevelDestination.FAVORITES,
-                                    onOpenShelf = {
-                                        navController.navigateTopLevel(ShelfRoute)
-                                    },
-                                    onOpenHistory = {
-                                        navController.navigateTopLevel(HistoryRoute)
-                                    },
-                                    onSelectFavorites = {},
-                                ) { topLevelPadding ->
-                                    SavedScreen(
-                                        onOpenBookmark = { comicId, globalPage ->
-                                            navController.navigate(
-                                                ReaderRoute(comicId, globalPage),
-                                            )
-                                        },
-                                        onOpenFavorite = { id ->
-                                            navController.navigate(FavoriteViewerRoute(id))
-                                        },
-                                        modifier = Modifier.padding(topLevelPadding),
-                                        viewerMessage = viewerMessage,
-                                        onViewerMessageConsumed = {
-                                            entry.savedStateHandle.set<String?>(
-                                                FAVORITES_RESULT_MESSAGE_KEY,
-                                                null,
-                                            )
-                                        },
-                                    )
-                                }
-                            }
-                            composable<FavoriteViewerRoute> { entry ->
-                                val route = entry.toRoute<FavoriteViewerRoute>()
-                                FavoriteViewerScreen(
-                                    favoriteId = route.favoriteId,
-                                    onBack = { navController.popBackStack() },
-                                    onOpenComicPage = { id, page ->
-                                        navController.navigate(ReaderRoute(id, page))
-                                    },
-                                    onExitWithMessage = { message ->
-                                        navController.previousBackStackEntry
-                                            ?.savedStateHandle
-                                            ?.set(FAVORITES_RESULT_MESSAGE_KEY, message)
-                                        navController.popBackStack()
-                                    },
-                                )
-                            }
-                            composable<SettingsRoute> {
-                                SettingsScreen(
-                                    themeSettings = themeSettings,
-                                    onBack = { navController.popBackStack() },
-                                    onOpenThemeSettings = {
-                                        navController.navigate(ThemeSettingsRoute)
-                                    },
-                                    onOpenModelManager = {
-                                        navController.navigate(EnhancementModelsRoute)
-                                    },
-                                )
-                            }
-                            composable<ThemeSettingsRoute> {
-                                ThemeSettingsScreen(
-                                    appliedSettings = themeSettings,
-                                    onBack = { navController.popBackStack() },
-                                    onApplyTheme = { applied, committed ->
-                                        navController.popBackStack()
-                                        ThemeNightModeController.applyCommittedTheme(
-                                            activity = this@MainActivity,
-                                            applied = applied,
-                                            committed = committed,
+                            // 收藏查看结果写在外层 Shell entry 上，再桥进内层已保存页
+                            val viewerMessage by shellEntry.savedStateHandle
+                                .getStateFlow<String?>(FAVORITES_RESULT_MESSAGE_KEY, null)
+                                .collectAsStateWithLifecycle()
+
+                            TopLevelScaffold(
+                                selectedDestination = selectedDestination,
+                                onOpenShelf = {
+                                    innerNavController.navigateTopLevel(ShelfRoute)
+                                },
+                                onOpenHistory = {
+                                    innerNavController.navigateTopLevel(HistoryRoute)
+                                },
+                                onSelectFavorites = {
+                                    innerNavController.navigateTopLevel(FavoritesRoute)
+                                },
+                            ) { topLevelPadding ->
+                                NavHost(
+                                    navController = innerNavController,
+                                    startDestination = ShelfRoute,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(topLevelPadding),
+                                    enterTransition = { fadeIn(tabNavSpec()) },
+                                    exitTransition = { fadeOut(tabNavSpec()) },
+                                    popEnterTransition = { fadeIn(tabNavSpec()) },
+                                    popExitTransition = { fadeOut(tabNavSpec()) },
+                                ) {
+                                    composable<ShelfRoute> {
+                                        ShelfScreen(
+                                            onOpenComic = { id ->
+                                                outerNavController.navigate(ReaderRoute(id))
+                                            },
+                                            onCreateAlbum = {
+                                                outerNavController.navigate(AlbumEditorRoute())
+                                            },
+                                            onEditAlbum = { id ->
+                                                outerNavController.navigate(
+                                                    AlbumEditorRoute(id),
+                                                )
+                                            },
+                                            onOpenSettings = {
+                                                outerNavController.navigate(SettingsRoute)
+                                            },
                                         )
-                                    },
-                                )
+                                    }
+                                    composable<HistoryRoute> {
+                                        HistoryScreen(
+                                            onOpenSession = { comicId, page ->
+                                                outerNavController.navigate(
+                                                    ReaderRoute(comicId, page),
+                                                )
+                                            },
+                                        )
+                                    }
+                                    composable<FavoritesRoute> {
+                                        SavedScreen(
+                                            onOpenBookmark = { comicId, globalPage ->
+                                                outerNavController.navigate(
+                                                    ReaderRoute(comicId, globalPage),
+                                                )
+                                            },
+                                            onOpenFavorite = { id ->
+                                                outerNavController.navigate(
+                                                    FavoriteViewerRoute(id),
+                                                )
+                                            },
+                                            viewerMessage = viewerMessage,
+                                            onViewerMessageConsumed = {
+                                                shellEntry.savedStateHandle.set<String?>(
+                                                    FAVORITES_RESULT_MESSAGE_KEY,
+                                                    null,
+                                                )
+                                            },
+                                        )
+                                    }
+                                }
                             }
-                            composable<EnhancementModelsRoute> {
-                                EnhancementModelManagerScreen(
-                                    onBack = { navController.popBackStack() },
-                                )
-                            }
+                        }
+                        composable<AlbumEditorRoute> { entry ->
+                            val route = entry.toRoute<AlbumEditorRoute>()
+                            AlbumEditorScreen(
+                                comicId = route.comicId,
+                                onBack = { outerNavController.popBackStack() },
+                            )
+                        }
+                        composable<ReaderRoute> { entry ->
+                            val route = entry.toRoute<ReaderRoute>()
+                            ReaderScreen(
+                                comicId = route.comicId,
+                                initialPage = route.initialPage,
+                                onBack = { outerNavController.popBackStack() },
+                                onOpenModelManager = {
+                                    outerNavController.navigate(EnhancementModelsRoute)
+                                },
+                            )
+                        }
+                        composable<FavoriteViewerRoute> { entry ->
+                            val route = entry.toRoute<FavoriteViewerRoute>()
+                            FavoriteViewerScreen(
+                                favoriteId = route.favoriteId,
+                                onBack = { outerNavController.popBackStack() },
+                                onOpenComicPage = { id, page ->
+                                    outerNavController.navigate(ReaderRoute(id, page))
+                                },
+                                onExitWithMessage = { message ->
+                                    outerNavController.previousBackStackEntry
+                                        ?.savedStateHandle
+                                        ?.set(FAVORITES_RESULT_MESSAGE_KEY, message)
+                                    outerNavController.popBackStack()
+                                },
+                            )
+                        }
+                        composable<SettingsRoute> {
+                            SettingsScreen(
+                                themeSettings = themeSettings,
+                                onBack = { outerNavController.popBackStack() },
+                                onOpenThemeSettings = {
+                                    outerNavController.navigate(ThemeSettingsRoute)
+                                },
+                                onOpenModelManager = {
+                                    outerNavController.navigate(EnhancementModelsRoute)
+                                },
+                            )
+                        }
+                        composable<ThemeSettingsRoute> {
+                            ThemeSettingsScreen(
+                                appliedSettings = themeSettings,
+                                onBack = { outerNavController.popBackStack() },
+                                onApplyTheme = { applied, committed ->
+                                    outerNavController.popBackStack()
+                                    ThemeNightModeController.applyCommittedTheme(
+                                        activity = this@MainActivity,
+                                        applied = applied,
+                                        committed = committed,
+                                    )
+                                },
+                            )
+                        }
+                        composable<EnhancementModelsRoute> {
+                            EnhancementModelManagerScreen(
+                                onBack = { outerNavController.popBackStack() },
+                            )
+                        }
                     }
                 }
             }
