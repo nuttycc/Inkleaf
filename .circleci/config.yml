@@ -42,7 +42,13 @@ jobs:
 
       - run:
           name: Build, test, and lint
-          command: ./gradlew assembleDebug testDebugUnitTest lintDebug --no-daemon
+          # large = 4C/8G: leave headroom for OS, SDK tools, Kotlin daemon, NDK.
+          command: |
+            ./gradlew assembleDebug testDebugUnitTest lintDebug --no-daemon \
+              -Dorg.gradle.jvmargs="-Xmx3g -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8" \
+              -Dkotlin.daemon.jvmargs="-Xmx1536m" \
+              -Dorg.gradle.workers.max=4 \
+              -Dorg.gradle.priority=normal
           # Budget for cold SDK/NDK install + full debug check (GHA uses 30m wall).
           no_output_timeout: 45m
 
