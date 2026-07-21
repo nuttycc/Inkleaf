@@ -58,6 +58,7 @@ import com.exio.inkleaf.data.ThemeSettingsRepository
 import com.exio.inkleaf.ui.AlbumEditorScreen
 import com.exio.inkleaf.ui.EnhancementModelManagerScreen
 import com.exio.inkleaf.ui.FavoriteViewerScreen
+import com.exio.inkleaf.ui.HistoryScreen
 import com.exio.inkleaf.ui.ReaderScreen
 import com.exio.inkleaf.ui.SavedScreen
 import com.exio.inkleaf.ui.SettingsScreen
@@ -85,6 +86,9 @@ data class ReaderRoute(val comicId: Long, val initialPage: Int? = null)
 data class AlbumEditorRoute(val comicId: Long? = null)
 
 @Serializable
+data object HistoryRoute
+
+@Serializable
 data object FavoritesRoute
 
 @Serializable
@@ -105,6 +109,7 @@ private const val FAVORITES_RESULT_MESSAGE_KEY = "favorites_result_message"
 
 private enum class TopLevelDestination {
     SHELF,
+    HISTORY,
     FAVORITES,
 }
 
@@ -132,9 +137,11 @@ private fun <T : Any> NavHostController.navigateTopLevel(route: T) {
 private fun InkleafBottomBar(
     selectedDestination: TopLevelDestination,
     onOpenShelf: () -> Unit,
+    onOpenHistory: () -> Unit,
     onSelectFavorites: () -> Unit,
 ) {
     val shelfSelected = selectedDestination == TopLevelDestination.SHELF
+    val historySelected = selectedDestination == TopLevelDestination.HISTORY
     val favoritesSelected = selectedDestination == TopLevelDestination.FAVORITES
 
     Box(
@@ -161,7 +168,18 @@ private fun InkleafBottomBar(
                     tint = tint,
                 )
             }
-            CompactBottomBarPlaceholder(iconRes = R.drawable.ic_folder)
+            CompactBottomBarItem(
+                selected = historySelected,
+                onClick = {
+                    if (!historySelected) onOpenHistory()
+                },
+            ) { tint ->
+                Icon(
+                    painter = painterResource(R.drawable.ic_history),
+                    contentDescription = "历史",
+                    tint = tint,
+                )
+            }
             CompactBottomBarItem(
                 selected = favoritesSelected,
                 onClick = {
@@ -189,6 +207,7 @@ private fun InkleafBottomBar(
 private fun TopLevelScaffold(
     selectedDestination: TopLevelDestination,
     onOpenShelf: () -> Unit,
+    onOpenHistory: () -> Unit,
     onSelectFavorites: () -> Unit,
     content: @Composable (PaddingValues) -> Unit,
 ) {
@@ -200,6 +219,7 @@ private fun TopLevelScaffold(
             InkleafBottomBar(
                 selectedDestination = selectedDestination,
                 onOpenShelf = onOpenShelf,
+                onOpenHistory = onOpenHistory,
                 onSelectFavorites = onSelectFavorites,
             )
         },
@@ -393,6 +413,9 @@ class MainActivity : AppCompatActivity() {
                                 TopLevelScaffold(
                                     selectedDestination = TopLevelDestination.SHELF,
                                     onOpenShelf = {},
+                                    onOpenHistory = {
+                                        navController.navigateTopLevel(HistoryRoute)
+                                    },
                                     onSelectFavorites = {
                                         navController.navigateTopLevel(FavoritesRoute)
                                     },
@@ -409,6 +432,27 @@ class MainActivity : AppCompatActivity() {
                                         },
                                         onOpenSettings = {
                                             navController.navigate(SettingsRoute)
+                                        },
+                                        modifier = Modifier.padding(topLevelPadding),
+                                    )
+                                }
+                            }
+                            composable<HistoryRoute> {
+                                TopLevelScaffold(
+                                    selectedDestination = TopLevelDestination.HISTORY,
+                                    onOpenShelf = {
+                                        navController.navigateTopLevel(ShelfRoute)
+                                    },
+                                    onOpenHistory = {},
+                                    onSelectFavorites = {
+                                        navController.navigateTopLevel(FavoritesRoute)
+                                    },
+                                ) { topLevelPadding ->
+                                    HistoryScreen(
+                                        onOpenSession = { comicId, page ->
+                                            navController.navigate(
+                                                ReaderRoute(comicId, page),
+                                            )
                                         },
                                         modifier = Modifier.padding(topLevelPadding),
                                     )
@@ -440,6 +484,9 @@ class MainActivity : AppCompatActivity() {
                                     selectedDestination = TopLevelDestination.FAVORITES,
                                     onOpenShelf = {
                                         navController.navigateTopLevel(ShelfRoute)
+                                    },
+                                    onOpenHistory = {
+                                        navController.navigateTopLevel(HistoryRoute)
                                     },
                                     onSelectFavorites = {},
                                 ) { topLevelPadding ->
