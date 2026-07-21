@@ -21,8 +21,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         BookmarkEntity::class,
         ReadingSessionEntity::class,
     ],
-    // v13: reading activity history. No data migration — destructive rebuild is intentional (#15).
-    version = 13,
+    // v13+: reading activity history schema. No data migration — destructive rebuild is intentional (#15).
+    // Bump when the history table shape changes so identity-hash mismatches wipe cleanly.
+    version = 14,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {

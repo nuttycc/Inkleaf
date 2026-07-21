@@ -1,11 +1,13 @@
 package com.exio.inkleaf
 
 import android.app.Application
+import android.util.Log
 import com.exio.inkleaf.data.AlbumExporter
 import com.exio.inkleaf.data.AlbumRepository
 import com.exio.inkleaf.data.ComicRepository
 import com.exio.inkleaf.data.ReaderCache
 import com.exio.inkleaf.data.enhancement.cache.EnhancementCacheTaskRepository
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -30,12 +32,24 @@ class InkleafApplication : Application() {
             AlbumExporter.cleanupOnColdStart(this@InkleafApplication)
         }
         shelfWarmup = applicationScope.async {
-            ComicRepository(this@InkleafApplication).observeAll().first()
+            // Room open runs here on cold start. Uncaught dispatcher exceptions kill the
+            // process on Android — keep warmup best-effort and let the UI load empty.
+            try {
+                ComicRepository(this@InkleafApplication).observeAll().first()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                Log.w(TAG, "Shelf warmup failed", error)
+            }
             Unit
         }
     }
 
     suspend fun awaitShelfWarmup() {
         shelfWarmup.await()
+    }
+
+    private companion object {
+        const val TAG = "InkleafApp"
     }
 }
