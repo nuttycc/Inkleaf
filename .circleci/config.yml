@@ -24,12 +24,13 @@ jobs:
             set -euo pipefail
             mkdir -p "$ANDROID_HOME/licenses"
             # Android SDK license hashes (standard CI accept-all pattern).
+            # Licenses must cover packages Gradle auto-downloads (e.g. platforms;android-37).
             echo -e "24333f8a63b6825ea9c5514f83c2829b004d1fee\n" > "$ANDROID_HOME/licenses/android-sdk-license"
             echo -e "84831b9409646a918e30573bab4c9c91346d8abd\n" > "$ANDROID_HOME/licenses/android-sdk-preview-license"
-            # Image ships platforms through 35; project compileSdk is 37.
-            # NDK/CMake versions match app/build.gradle.kts and GHA.
+            # Match GHA android-check: only pin NDK/CMake. Do not preinstall
+            # platforms;android-37 — cimg/android's bundled sdkmanager index may
+            # not list it yet; AGP downloads compileSdk platforms during the build.
             sdkmanager \
-              "platforms;android-37" \
               "ndk;29.0.14206865" \
               "cmake;3.30.5"
 
