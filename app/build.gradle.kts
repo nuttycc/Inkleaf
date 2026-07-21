@@ -66,11 +66,6 @@ android {
     }
 
     buildTypes {
-        debug {
-            ndk {
-                abiFilters += listOf("armeabi-v7a", "x86", "x86_64")
-            }
-        }
         release {
             signingConfig = if (hasReleaseSigning) {
                 signingConfigs.getByName("release")
