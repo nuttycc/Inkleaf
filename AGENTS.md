@@ -18,4 +18,4 @@ This is an **unreleased** personal hobby project under active development.
 - **CI**: CI (`.github/workflows/android-check.yml`) runs the full build, tests, and lint.
 - **Research:** Verify framework behavior against the exact resolved AndroidX/Compose sources (
   BOM-pinned; sources jar from gradle cache or Google Maven into $TMPDIR/<artifact>-<version>/).
-  Never rm — OS temp cleanup owns the lifecycle.
+  Never rm — OS temp cleanup owns the lifecycle
