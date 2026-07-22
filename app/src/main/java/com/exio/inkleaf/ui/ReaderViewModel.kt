@@ -39,6 +39,7 @@ import com.exio.inkleaf.data.enhancement.EnhancementModelCatalog
 import com.exio.inkleaf.data.enhancement.EnhancementModelRepository
 import com.exio.inkleaf.data.enhancement.EnhancementPageKey
 import com.exio.inkleaf.data.enhancement.EnhancementSelectionIds
+import com.exio.inkleaf.data.enhancement.NcnnEnhancementEngine
 import com.exio.inkleaf.data.enhancement.cache.EnhancementCacheTaskReplacementResult
 import com.exio.inkleaf.data.enhancement.cache.EnhancementCacheTaskRepository
 import com.exio.inkleaf.data.enhancement.cache.EnhancementCacheTaskStartResult
@@ -712,7 +713,9 @@ class ReaderViewModel(
         }
         val closingVolume = volume
         volume = null
-        volumeCleanupScope.launch { closingVolume?.close() }
+        volumeCleanupScope.launch {
+            closingVolume?.let { NcnnEnhancementEngine.closeVolumeAfterEnhancement(it) }
+        }
     }
 
     private fun attachProcessLifecycle() {

@@ -11,7 +11,10 @@ enum class EnhancementSkipReason {
     /** Planned output pixels cannot beat the source under the inference budget. */
     RESOLUTION_BUDGET,
 
-    /** PDF keeps viewport-targeted original rendering in the first shipping cut. */
+    /** Strip input/output cannot fit the combined device memory budget. */
+    STRIP_MEMORY_BUDGET,
+
+    /** A PDF page could not provide the stable raster baseline required by strip enhancement. */
     PDF_UNSUPPORTED,
 
     /** Volume format is outside the fast whole-page raster path (not specifically PDF). */
@@ -32,7 +35,7 @@ const val DEFAULT_MIN_OUTPUT_TO_SOURCE_RATIO = 1.25
  * Returns whether a raster page is eligible for fast whole-page SR.
  *
  * [sourceWidth]/[sourceHeight] must be the true source pixel size (file bounds),
- * not a memory-capped decode. PDF must not call this — use [EnhancementSkipReason.PDF_UNSUPPORTED].
+ * not a memory-capped decode. PDF does not call this fast-path gate; it may use strip planning.
  *
  * plannedOutput = min(sourcePixels, maxInputPixels) * scale²
  * eligible when plannedOutput / sourcePixels >= minOutputToSourceRatio
@@ -69,8 +72,11 @@ fun EnhancementSkipReason.readerDescription(): String = when (this) {
     EnhancementSkipReason.RESOLUTION_BUDGET ->
         "本页分辨率较高，当前增强模式无法增加足够的输出分辨率，已保留原图"
 
+    EnhancementSkipReason.STRIP_MEMORY_BUDGET ->
+        "本页超出当前设备的增强内存预算，已保留原图"
+
     EnhancementSkipReason.PDF_UNSUPPORTED ->
-        "当前增强模式暂不处理 PDF，已保留原图"
+        "当前 PDF 页无法生成稳定的增强基线，已保留原图"
 
     EnhancementSkipReason.FAST_PATH_UNSUPPORTED ->
         "当前增强模式暂不支持此页面格式，已保留原图"

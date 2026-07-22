@@ -7,7 +7,6 @@ package com.exio.inkleaf.data.enhancement
 
 import kotlin.math.ceil
 import kotlin.math.max
-import kotlin.math.min
 
 /** Default input-side overlap between consecutive horizontal strips (pixels). */
 const val DEFAULT_ENHANCEMENT_STRIP_OVERLAP_PX = 32
@@ -38,6 +37,38 @@ data class StripOutputAllocation(
     val byteCount: Long,
 )
 
+internal data class EnhancementStripGeometry(
+    val overlap: Int,
+    val coreHeight: Int,
+)
+
+internal fun enhancementStripGeometry(
+    sourceWidth: Int,
+    sourceHeight: Int,
+    maxInputPixels: Long,
+    overlapPx: Int = DEFAULT_ENHANCEMENT_STRIP_OVERLAP_PX,
+): EnhancementStripGeometry? {
+    require(sourceWidth > 0 && sourceHeight > 0)
+    require(maxInputPixels > 0L)
+    require(overlapPx >= 0)
+
+    val maxSourceHeight = minOf(
+        sourceHeight.toLong(),
+        maxInputPixels / sourceWidth.toLong(),
+    ).toInt()
+    if (maxSourceHeight < 1) return null
+
+    val overlap = if (maxSourceHeight == sourceHeight) {
+        0
+    } else {
+        minOf(overlapPx, (maxSourceHeight - 1) / 2)
+    }
+    return EnhancementStripGeometry(
+        overlap = overlap,
+        coreHeight = maxSourceHeight - 2 * overlap,
+    )
+}
+
 /**
  * Builds horizontal strips so each source strip has at most [maxInputPixels] pixels.
  * [overlapPx] is applied on the source; output crops the leading scaled overlap.
@@ -54,25 +85,30 @@ fun planEnhancementStrips(
     require(maxInputPixels > 0L)
     require(overlapPx >= 0)
 
-    val maxStripHeight = max(
-        1,
-        min(
-            sourceHeight.toLong(),
-            maxInputPixels / sourceWidth.toLong(),
-        ).toInt(),
-    )
-    val overlap = min(overlapPx, (maxStripHeight - 1).coerceAtLeast(0))
-    val coreHeight = max(1, maxStripHeight - overlap)
+    val geometry = enhancementStripGeometry(
+        sourceWidth = sourceWidth,
+        sourceHeight = sourceHeight,
+        maxInputPixels = maxInputPixels,
+        overlapPx = overlapPx,
+    ) ?: return emptyList()
+    val overlap = geometry.overlap
+    val coreHeight = geometry.coreHeight
+    if (saturatingMultiply(sourceHeight.toLong(), scale.toLong()) > Int.MAX_VALUE) {
+        return emptyList()
+    }
     val strips = ArrayList<EnhancementStrip>()
     var coreTop = 0
     while (coreTop < sourceHeight) {
-        val coreBottom = min(sourceHeight, coreTop + coreHeight)
+        val coreBottom = minOf(
+            sourceHeight.toLong(),
+            coreTop.toLong() + coreHeight.toLong(),
+        ).toInt()
         val thisCoreHeight = coreBottom - coreTop
         val srcTop = max(0, coreTop - if (coreTop == 0) 0 else overlap)
-        val srcBottom = min(
-            sourceHeight,
-            coreBottom + if (coreBottom >= sourceHeight) 0 else overlap,
-        )
+        val srcBottom = minOf(
+            sourceHeight.toLong(),
+            coreBottom.toLong() + if (coreBottom >= sourceHeight) 0L else overlap.toLong(),
+        ).toInt()
         val srcHeight = srcBottom - srcTop
         val cropTop = (coreTop - srcTop) * scale
         strips += EnhancementStrip(
@@ -98,14 +134,24 @@ fun planStripOutputAllocation(
     maxOutputBytes: Long = DEFAULT_MAX_STRIP_OUTPUT_BYTES,
 ): StripOutputAllocation? {
     require(sourceWidth > 0 && sourceHeight > 0 && scale > 0)
-    val pixels = sourceWidth.toLong() * sourceHeight.toLong() * scale.toLong() * scale.toLong()
-    if (pixels <= 0L) return null
-    val argb = pixels * 4L
-    if (argb <= maxOutputBytes && argb <= Int.MAX_VALUE) {
+    require(maxOutputBytes >= 0L)
+    if (maxOutputBytes == 0L) return null
+    val outputWidth = saturatingMultiply(sourceWidth.toLong(), scale.toLong())
+    val outputHeight = saturatingMultiply(sourceHeight.toLong(), scale.toLong())
+    if (
+        outputWidth <= 0L ||
+        outputHeight <= 0L ||
+        outputWidth > Int.MAX_VALUE ||
+        outputHeight > Int.MAX_VALUE
+    ) {
+        return null
+    }
+    val argb = bitmapAllocationBytes(outputWidth, outputHeight, bytesPerPixel = 4)
+    if (argb != null && argb <= maxOutputBytes && argb <= Int.MAX_VALUE) {
         return StripOutputAllocation(StripOutputColorConfig.ARGB_8888, argb)
     }
-    val rgb565 = pixels * 2L
-    if (rgb565 <= maxOutputBytes && rgb565 <= Int.MAX_VALUE) {
+    val rgb565 = bitmapAllocationBytes(outputWidth, outputHeight, bytesPerPixel = 2)
+    if (rgb565 != null && rgb565 <= maxOutputBytes && rgb565 <= Int.MAX_VALUE) {
         return StripOutputAllocation(StripOutputColorConfig.RGB_565, rgb565)
     }
     return null
@@ -117,11 +163,23 @@ fun stripCountFor(
     maxInputPixels: Long,
     overlapPx: Int = DEFAULT_ENHANCEMENT_STRIP_OVERLAP_PX,
 ): Int {
-    val maxStripHeight = max(
-        1,
-        (maxInputPixels / sourceWidth.toLong()).toInt().coerceAtMost(sourceHeight),
-    )
-    val overlap = min(overlapPx, (maxStripHeight - 1).coerceAtLeast(0))
-    val core = max(1, maxStripHeight - overlap)
-    return ceil(sourceHeight.toDouble() / core.toDouble()).toInt()
+    val geometry = enhancementStripGeometry(
+        sourceWidth = sourceWidth,
+        sourceHeight = sourceHeight,
+        maxInputPixels = maxInputPixels,
+        overlapPx = overlapPx,
+    ) ?: return 0
+    return ceil(sourceHeight.toDouble() / geometry.coreHeight.toDouble()).toInt()
+}
+
+private fun bitmapAllocationBytes(
+    width: Long,
+    height: Long,
+    bytesPerPixel: Int,
+): Long? {
+    // Bitmap.createBitmap() uses SkImageInfo's minimum row bytes for a fresh software bitmap.
+    val pixels = saturatingMultiply(width, height)
+    if (pixels == Long.MAX_VALUE) return null
+    val allocation = saturatingMultiply(pixels, bytesPerPixel.toLong())
+    return allocation.takeUnless { it == Long.MAX_VALUE }
 }

@@ -138,6 +138,8 @@ class EnhancementCacheWorker(
                                         volume = volume,
                                         page = page,
                                         sourceSize = plan.sourceSize,
+                                        inputPixelBudget = plan.maxInputPixels,
+                                        outputByteBudget = plan.maxOutputBytes,
                                         persistTransient = false,
                                         priority = EnhancementRequestPriority.BULK_CACHE,
                                         cacheInMemory = false,
@@ -230,7 +232,7 @@ class EnhancementCacheWorker(
             } catch (error: Exception) {
                 fail(task, error.message ?: "缓存失败", comic.title)
             } finally {
-                volume.close()
+                NcnnEnhancementEngine.closeVolumeAfterEnhancement(volume)
             }
         }
     }

@@ -21,7 +21,7 @@ class EnhancementEligibilityTest {
             EnhancementEligibility.Skipped(EnhancementSkipReason.RESOLUTION_BUDGET),
             result,
         )
-        // #23 strip path still applies when composed output fits (RGB_565 under 96 MiB).
+        // The page fits the absolute strip ceiling; the page planner also applies device headroom.
         assertNotNull(planStripOutputAllocation(2000, 3000, scale = 2))
     }
 

@@ -41,22 +41,6 @@ enum class EnhancementPersistenceStatus {
     WRITE_FAILED,
 }
 
-internal fun calculateMaxInputPixels(maxMemoryBytes: Long, scale: Int = 2): Long {
-    require(scale > 0)
-    val estimatedBytesPerInputPixel = 16L + 8L * scale * scale
-    val inferenceBudget = (maxMemoryBytes / INFERENCE_HEAP_DIVISOR)
-        .coerceAtMost(MAX_INFERENCE_BYTES)
-        .coerceAtLeast(estimatedBytesPerInputPixel)
-    return inferenceBudget / estimatedBytesPerInputPixel
-}
-
-internal fun calculateBitmapCacheKilobytes(maxMemoryBytes: Long): Int =
-    (maxMemoryBytes / CACHE_HEAP_DIVISOR)
-        .coerceAtMost(MAX_CACHE_BYTES)
-        .coerceAtLeast(1024L)
-        .div(1024)
-        .toInt()
-
 sealed interface EnhancementInferenceOutcome {
     /** The bitmap is a shared borrowed result and must not be recycled by callers. */
     data class Success(
@@ -138,6 +122,7 @@ object NcnnEnhancementEngine {
     private val sessionMutex = Mutex()
     private val pageJobScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val pageJobs = EnhancementPageJobCoordinator<EnhancementInferenceOutcome>(pageJobScope)
+    private val volumeLeases = EnhancementResourceLeaseRegistry<ComicVolume>()
     private val foregroundQuietWindow = EnhancementForegroundQuietWindow()
     private val sessions = mutableMapOf<String, Session>()
     private val disabledModelsLock = Any()
@@ -276,13 +261,8 @@ object NcnnEnhancementEngine {
     }
 
     /**
-     * Defers bulk source decoding until this page owns the single producer slot. The non-cancellable
-     * await keeps caller-owned book resources valid until that page boundary finishes; pause and
-     * cancel are observed before the next page is submitted.
-     */
-    /**
      * Full-resolution strip enhancement (#23): one region at a time, compose into one output.
-     * Caller must only use this when [planStripOutputAllocation] succeeded for the page size.
+     * Caller must pass the exact input/output budgets that produced its [EnhancementPagePlan].
      */
     suspend fun enhanceStrips(
         context: Context,
@@ -290,11 +270,15 @@ object NcnnEnhancementEngine {
         volume: ComicVolume,
         page: Int,
         sourceSize: PagePixelSize,
+        inputPixelBudget: Long,
+        outputByteBudget: Long,
         preferVulkan: Boolean = true,
         persistTransient: Boolean = true,
         priority: EnhancementRequestPriority = EnhancementRequestPriority.CURRENT_PAGE,
         cacheInMemory: Boolean = true,
     ): EnhancementInferenceOutcome {
+        require(inputPixelBudget > 0L) { "input pixel budget must be positive" }
+        require(outputByteBudget >= 0L) { "output byte budget must be non-negative" }
         val persistenceRequirement = if (persistTransient) {
             EnhancementPersistenceRequirement.TRANSIENT
         } else {
@@ -307,27 +291,47 @@ object NcnnEnhancementEngine {
         }
         val diskCache = EnhancedImageDiskCache.getInstance(context)
         val writeToken = diskCache.writeToken(key)
-        return pageJobs.request(
-            key = key,
-            priority = priority,
-            persistenceRequirement = persistenceRequirement,
-            finalizer = { outcome, required ->
-                finalizePersistence(diskCache, writeToken, key, outcome, required)
-            },
-        ) {
-            cached(context, key) ?: enhanceStripsUncached(
-                context = context,
-                modelId = key.modelId,
-                volume = volume,
-                page = page,
-                sourceSize = sourceSize,
-                cacheKey = key.value,
-                preferVulkan = preferVulkan,
-                cacheInMemory = cacheInMemory,
-            )
+        val volumeLease = volumeLeases.acquire(volume)
+        var leaseTransferred = false
+        try {
+            leaseTransferred = true
+            // A queued producer owns the lease until either discardProducer or producer finally.
+            return pageJobs.request(
+                key = key,
+                priority = priority,
+                persistenceRequirement = persistenceRequirement,
+                discardProducer = { volumeLease.close() },
+                finalizer = { outcome, required ->
+                    finalizePersistence(diskCache, writeToken, key, outcome, required)
+                },
+            ) {
+                try {
+                    cached(context, key) ?: enhanceStripsUncached(
+                        context = context,
+                        modelId = key.modelId,
+                        volume = volume,
+                        page = page,
+                        sourceSize = sourceSize,
+                        maxInputPixels = inputPixelBudget,
+                        maxOutputBytes = outputByteBudget,
+                        cacheKey = key.value,
+                        preferVulkan = preferVulkan,
+                        cacheInMemory = cacheInMemory,
+                    )
+                } finally {
+                    volumeLease.close()
+                }
+            }
+        } finally {
+            if (!leaseTransferred) volumeLease.close()
         }
     }
 
+    /**
+     * Defers bulk source decoding until this page owns the single producer slot. The non-cancellable
+     * await keeps caller-owned book resources valid until that page boundary finishes; pause and
+     * cancel are observed before the next page is submitted.
+     */
     suspend fun enhanceBulk(
         context: Context,
         key: EnhancementPageKey,
@@ -416,6 +420,8 @@ object NcnnEnhancementEngine {
         volume: ComicVolume,
         page: Int,
         sourceSize: PagePixelSize,
+        maxInputPixels: Long,
+        maxOutputBytes: Long,
         cacheKey: String,
         preferVulkan: Boolean,
         cacheInMemory: Boolean,
@@ -437,6 +443,7 @@ object NcnnEnhancementEngine {
                 sourceWidth = sourceSize.width,
                 sourceHeight = sourceSize.height,
                 scale = scale,
+                maxOutputBytes = maxOutputBytes,
             ) ?: return@withContext EnhancementInferenceOutcome.Failure(
                 "页面尺寸过大，无法安全创建分带输出。"
             )
@@ -444,7 +451,7 @@ object NcnnEnhancementEngine {
                 sourceWidth = sourceSize.width,
                 sourceHeight = sourceSize.height,
                 scale = scale,
-                maxInputPixels = maxInputPixels(scale),
+                maxInputPixels = maxInputPixels,
             )
             if (strips.isEmpty()) {
                 return@withContext EnhancementInferenceOutcome.Failure("无法划分增强条带。")
@@ -477,15 +484,19 @@ object NcnnEnhancementEngine {
                     ) ?: return@withContext EnhancementInferenceOutcome.Failure(
                         "无法读取页面条带，已显示原图。"
                     )
-                    val stripOutcome = enhanceUncached(
-                        context = context,
-                        modelId = modelId,
-                        source = region,
-                        cacheKey = "$cacheKey#strip-${strip.sourceTop}",
-                        preferVulkan = preferVulkan,
-                        cacheInMemory = false,
-                        releaseSource = true,
-                    )
+                    val stripOutcome = try {
+                        enhanceUncached(
+                            context = context,
+                            modelId = modelId,
+                            source = region,
+                            cacheKey = "$cacheKey#strip-${strip.sourceTop}",
+                            preferVulkan = preferVulkan,
+                            cacheInMemory = false,
+                            releaseSource = false,
+                        )
+                    } finally {
+                        recycleSafely(region)
+                    }
                     when (stripOutcome) {
                         is EnhancementInferenceOutcome.Failure -> return@withContext stripOutcome
                         is EnhancementInferenceOutcome.Success -> {
@@ -505,7 +516,7 @@ object NcnnEnhancementEngine {
                                 )
                                 canvas.drawBitmap(enhanced, src, dst, null)
                             } finally {
-                                recycleSafely(enhanced)
+                                if (!stripOutcome.memoryCached) recycleSafely(enhanced)
                             }
                         }
                     }
@@ -775,8 +786,16 @@ object NcnnEnhancementEngine {
         return scaled
     }
 
-    fun maxInputPixels(scale: Int = 2): Long =
-        calculateMaxInputPixels(Runtime.getRuntime().maxMemory(), scale)
+    fun maxInputPixels(scale: Int = 2): Long = memoryBudget(scale).maxInputPixels
+
+    internal fun memoryBudget(scale: Int = 2): EnhancementMemoryBudget =
+        calculateEnhancementMemoryBudget(Runtime.getRuntime().maxMemory(), scale)
+
+    internal fun maxStripOutputBytes(scale: Int = 2): Long = memoryBudget(scale).composedOutputBytes
+
+    internal suspend fun closeVolumeAfterEnhancement(volume: ComicVolume) {
+        volumeLeases.closeAfterIdle(volume) { it.close() }
+    }
 
     private suspend fun finalizePersistence(
         diskCache: EnhancedImageDiskCache,
@@ -817,7 +836,6 @@ object NcnnEnhancementEngine {
         if (!bitmap.isRecycled) bitmap.recycle()
     }
 
-    // Includes source/prepared overlap, native input/output, Java output, and headroom.
     private const val NATIVE_RESULT_OK = 0
     private const val NATIVE_ERROR_SESSION_CLOSED = -1
     private const val NATIVE_ERROR_MODEL_DISABLED = -2
@@ -853,13 +871,6 @@ internal class EnhancementForegroundQuietWindow(
     }
 }
 
-private const val INFERENCE_HEAP_DIVISOR = 4L
-
-// Keep the cache below the active inference budget so cached output cannot
-// crowd out the input/output bitmaps and native buffers used by ncnn.
-private const val CACHE_HEAP_DIVISOR = 10L
-private const val MAX_INFERENCE_BYTES = 64L * 1024 * 1024
-private const val MAX_CACHE_BYTES = 48L * 1024 * 1024
 private const val TRANSIENT_BUDGET_INTERVAL_MS = 30_000L
 private const val DIFFERENT_MODEL_QUIET_WINDOW_MS = 2_000L
 private const val QUIET_WINDOW_POLL_MS = 100L

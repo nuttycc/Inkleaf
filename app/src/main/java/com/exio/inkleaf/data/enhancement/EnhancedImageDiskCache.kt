@@ -4,12 +4,15 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.storage.StorageManager
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
+import java.io.BufferedInputStream
 import java.io.File
+import java.io.FileInputStream
 import java.io.IOException
+import java.io.InputStream
 import java.io.OutputStream
 import java.util.UUID
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 internal data class EnhancedImageDiskCacheWriteToken(
     val comicId: Long,
@@ -166,25 +169,156 @@ internal class EnhancedImageDiskCache private constructor(context: Context) {
     )
 
     private object BitmapPngCodec : EnhancedImageDiskCacheCodec<Bitmap> {
-        override fun decode(file: File): Bitmap? = try {
-            BitmapFactory.decodeFile(
-                file.absolutePath,
-                BitmapFactory.Options().apply {
-                    inPreferredConfig = Bitmap.Config.ARGB_8888
-                },
-            )
-        } catch (error: OutOfMemoryError) {
-            throw EnhancedImageDiskCacheDecodeUnavailableException(error)
+        override fun decode(file: File): Bitmap? {
+            return try {
+                BufferedInputStream(FileInputStream(file)).use { input ->
+                    input.mark(ENHANCED_BITMAP_CACHE_HEADER_SIZE)
+                    when (val header = readEnhancedBitmapCacheHeader(input)) {
+                        EnhancedBitmapCacheHeader.Invalid -> null
+                        EnhancedBitmapCacheHeader.Missing -> {
+                            input.reset()
+                            decodeBitmap(input, storedConfig = null)
+                        }
+
+                        is EnhancedBitmapCacheHeader.Present ->
+                            decodeBitmap(input, header.colorConfig)
+                    }
+                }
+            } catch (error: OutOfMemoryError) {
+                throw EnhancedImageDiskCacheDecodeUnavailableException(error)
+            }
         }
 
-        override fun encode(value: Bitmap, output: OutputStream): Boolean =
-            !value.isRecycled && value.compress(Bitmap.CompressFormat.PNG, PNG_QUALITY, output)
+        override fun encode(value: Bitmap, output: OutputStream): Boolean {
+            if (value.isRecycled) return false
+            val storedConfig = if (value.config == Bitmap.Config.RGB_565) {
+                EnhancedBitmapCacheColorConfig.RGB_565
+            } else {
+                EnhancedBitmapCacheColorConfig.ARGB_8888
+            }
+            writeEnhancedBitmapCacheHeader(output, storedConfig)
+            return value.compress(Bitmap.CompressFormat.PNG, PNG_QUALITY, output)
+        }
 
         override fun isValid(file: File): Boolean {
-            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeFile(file.absolutePath, bounds)
-            return bounds.outWidth > 0 && bounds.outHeight > 0
+            return try {
+                val payload = readPayloadInfo(file) ?: return false
+                val bounds = openPayload(file, payload.offset).use { input ->
+                    BitmapFactory.Options().apply { inJustDecodeBounds = true }.also { options ->
+                        BitmapFactory.decodeStream(input, null, options)
+                    }
+                }
+                if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return false
+
+                // Validate the same preferred config used by decode(), but keep the probe tiny so
+                // containsPinned()/promoteToPinned() cannot allocate a poster-sized bitmap.
+                val probe = openPayload(file, payload.offset).use { input ->
+                    BitmapFactory.decodeStream(
+                        input,
+                        null,
+                        BitmapFactory.Options().apply {
+                            inSampleSize = validationSampleSize(bounds.outWidth, bounds.outHeight)
+                            inPreferredConfig = payload.colorConfig.toBitmapConfig()
+                        },
+                    )
+                } ?: return false
+                try {
+                    payload.colorConfig != EnhancedBitmapCacheColorConfig.RGB_565 ||
+                            probe.config == Bitmap.Config.RGB_565
+                } finally {
+                    probe.recycle()
+                }
+            } catch (_: OutOfMemoryError) {
+                false
+            }
         }
+
+        private fun EnhancedBitmapCacheColorConfig?.toBitmapConfig(): Bitmap.Config = when (this) {
+            EnhancedBitmapCacheColorConfig.RGB_565 -> Bitmap.Config.RGB_565
+            EnhancedBitmapCacheColorConfig.ARGB_8888,
+            null -> Bitmap.Config.ARGB_8888
+        }
+
+        private fun decodeBitmap(
+            input: InputStream,
+            storedConfig: EnhancedBitmapCacheColorConfig?,
+        ): Bitmap? {
+            val bitmap = BitmapFactory.decodeStream(
+                input,
+                null,
+                BitmapFactory.Options().apply {
+                    inPreferredConfig = storedConfig.toBitmapConfig()
+                },
+            )
+            if (
+                storedConfig == EnhancedBitmapCacheColorConfig.RGB_565 &&
+                bitmap != null &&
+                bitmap.config != Bitmap.Config.RGB_565
+            ) {
+                bitmap.recycle()
+                return null
+            }
+            return bitmap
+        }
+
+        private fun readPayloadInfo(file: File): PngPayloadInfo? =
+            BufferedInputStream(FileInputStream(file)).use { input ->
+                when (val header = readEnhancedBitmapCacheHeader(input)) {
+                    EnhancedBitmapCacheHeader.Invalid -> null
+                    EnhancedBitmapCacheHeader.Missing -> PngPayloadInfo(
+                        colorConfig = null,
+                        offset = 0L,
+                    )
+
+                    is EnhancedBitmapCacheHeader.Present -> PngPayloadInfo(
+                        colorConfig = header.colorConfig,
+                        offset = ENHANCED_BITMAP_CACHE_HEADER_SIZE.toLong(),
+                    )
+                }
+            }
+
+        private fun openPayload(file: File, offset: Long): BufferedInputStream {
+            val input = BufferedInputStream(FileInputStream(file))
+            try {
+                var remaining = offset
+                while (remaining > 0L) {
+                    val skipped = input.skip(remaining)
+                    if (skipped > 0L) {
+                        remaining -= skipped
+                    } else if (input.read() >= 0) {
+                        remaining -= 1L
+                    } else {
+                        throw IOException("Truncated enhanced bitmap cache header")
+                    }
+                }
+                return input
+            } catch (error: Throwable) {
+                runCatching { input.close() }
+                throw error
+            }
+        }
+
+        private fun validationSampleSize(width: Int, height: Int): Int {
+            var sample = 1
+            while (scaledPixelCount(width, height, sample) > MAX_VALIDATION_PIXELS) {
+                if (sample > (Int.MAX_VALUE ushr 1)) return Int.MAX_VALUE
+                sample = sample shl 1
+            }
+            return sample
+        }
+
+        private fun scaledPixelCount(width: Int, height: Int, sample: Int): Long {
+            val scaledWidth = (width.toLong() + sample - 1L) / sample.toLong()
+            val scaledHeight = (height.toLong() + sample - 1L) / sample.toLong()
+            return scaledWidth * scaledHeight
+        }
+
+        private data class PngPayloadInfo(
+            val colorConfig: EnhancedBitmapCacheColorConfig?,
+            val offset: Long,
+        )
+
+        private const val MAX_VALIDATION_PIXELS = 64L * 64L
     }
 
     companion object {

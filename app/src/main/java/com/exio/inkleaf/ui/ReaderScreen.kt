@@ -1523,15 +1523,12 @@ private fun ComicPage(
 
     val activeEnhancementModel = EnhancementModelCatalog.find(enhancementSelectionId)
         ?.takeIf { page == currentPage && enhancementModelInstalled }
-    val pageRenderRequest = if (
-        activeEnhancementModel == null &&
-        volume.supportsTargetedPageBitmap &&
-        viewportSize != IntSize.Zero
-    ) {
-        pdfPageRenderRequest(viewportSize, useZoomedPdfRender && page == currentPage)
-    } else {
-        null
-    }
+    val pageRenderRequest = targetedPageRenderRequest(
+        supportsTargetedPageBitmap = volume.supportsTargetedPageBitmap,
+        viewportSize = viewportSize,
+        zoomed = useZoomedPdfRender && page == currentPage,
+        enhancementActive = activeEnhancementModel != null,
+    )
 
     // 单页加载结果统一封装在 [PageContent]：失败时返回 Error 而非抛出，
     // 不让异常逃逸到 produceState 协程外导致整页崩溃。spec：corrupt/encrypted
@@ -1643,6 +1640,8 @@ private fun ComicPage(
                                             volume = volume,
                                             page = page,
                                             sourceSize = plan.sourceSize,
+                                            inputPixelBudget = plan.maxInputPixels,
+                                            outputByteBudget = plan.maxOutputBytes,
                                             persistTransient = !pinForActiveTask,
                                         )
 
@@ -1930,6 +1929,8 @@ private suspend fun prefetchEnhancement(
                 volume = volume,
                 page = page,
                 sourceSize = plan.sourceSize,
+                inputPixelBudget = plan.maxInputPixels,
+                outputByteBudget = plan.maxOutputBytes,
                 persistTransient = !pinForActiveTask,
                 priority = EnhancementRequestPriority.PREFETCH,
                 cacheInMemory = true,
@@ -2013,6 +2014,31 @@ internal fun pdfPageRenderRequest(viewportSize: IntSize, zoomed: Boolean): PageR
         maxPixels = MAX_PDF_RENDER_PIXELS,
         maxDimensionPx = MAX_PDF_RENDER_DIMENSION,
     )
+}
+
+/**
+ * Builds the targeted fallback request once the viewport is known.
+ * [enhancementActive] is intentionally non-gating because enhancement may still fall back to the
+ * original PDF render after planning, inference, or persistence fails.
+ */
+@Suppress("UNUSED_PARAMETER")
+internal fun targetedPageRenderRequest(
+    supportsTargetedPageBitmap: Boolean,
+    viewportSize: IntSize,
+    zoomed: Boolean,
+    enhancementActive: Boolean = false,
+): PageRenderRequest? {
+    // Keep this argument in the helper's contract deliberately: the old implementation gated
+    // requests on `activeEnhancementModel == null`, which left PDF enhancement failures spinning
+    // forever. Request generation is independent of which consumer may need the fallback.
+    if (
+        !supportsTargetedPageBitmap ||
+        viewportSize.width <= 0 ||
+        viewportSize.height <= 0
+    ) {
+        return null
+    }
+    return pdfPageRenderRequest(viewportSize, zoomed)
 }
 
 /**

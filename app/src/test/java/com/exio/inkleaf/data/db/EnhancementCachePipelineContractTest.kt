@@ -16,7 +16,7 @@ class EnhancementCachePipelineContractTest {
     @Test
     fun legacyPipelineRevisionDoesNotMatchCurrentPipeline() {
         assertEquals("1", ENHANCEMENT_PIPELINE_REVISION_LEGACY)
-        assertEquals("3", ENHANCEMENT_PIPELINE_REVISION)
+        assertEquals("4", ENHANCEMENT_PIPELINE_REVISION)
         assertFalse(ENHANCEMENT_PIPELINE_REVISION_LEGACY == ENHANCEMENT_PIPELINE_REVISION)
     }
 

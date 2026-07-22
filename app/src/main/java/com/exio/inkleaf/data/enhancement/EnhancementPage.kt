@@ -13,7 +13,7 @@ import com.exio.inkleaf.data.calculateFloorInferenceSampleSize
  * Bumped when fast-path preprocessing or eligibility rules change so disk/memory
  * keys miss old enhanced bitmaps without touching model artifact revisions.
  */
-const val ENHANCEMENT_PIPELINE_REVISION = "3"
+const val ENHANCEMENT_PIPELINE_REVISION = "4"
 
 /** Pre-pipeline-key tasks/rows migrate to this so workers expire instead of skipping regen. */
 const val ENHANCEMENT_PIPELINE_REVISION_LEGACY = "1"
@@ -70,15 +70,19 @@ sealed interface EnhancementPagePlan {
     data class EnhanceFast(val sourceSize: PagePixelSize) : EnhancementPagePlan
 
     /** Full-resolution horizontal strips — no whole-page pre-downscale (#23). */
-    data class EnhanceStrips(val sourceSize: PagePixelSize) : EnhancementPagePlan
+    data class EnhanceStrips(
+        val sourceSize: PagePixelSize,
+        val maxInputPixels: Long,
+        val maxOutputBytes: Long,
+    ) : EnhancementPagePlan
 
     data class Skip(val reason: EnhancementSkipReason) : EnhancementPagePlan
 }
 
 /**
  * Decides whether enhancement may run. Never allocates the inference bitmap.
- * Non-raster volumes use [ComicVolume.fastRasterEnhancementSkipReason]
- * (PDF → [EnhancementSkipReason.PDF_UNSUPPORTED]).
+ * Volumes without a fast raster path may still use strips when they expose a stable raster
+ * baseline through [ComicVolume.loadPageRasterSize] and [ComicVolume.loadPageRegion].
  *
  * Order: fast budget win → full-res strips if output fits → skip.
  */
@@ -87,6 +91,7 @@ suspend fun planEnhancementPage(
     page: Int,
     scale: Int,
     maxInputPixels: Long = NcnnEnhancementEngine.maxInputPixels(scale),
+    maxOutputBytes: Long = NcnnEnhancementEngine.maxStripOutputBytes(scale),
 ): EnhancementPagePlan {
     val size = volume.loadPageRasterSize(page)
     if (size == null) {
@@ -109,12 +114,28 @@ suspend fun planEnhancementPage(
             is EnhancementEligibility.Skipped -> Unit
         }
     }
-    // Full-res / baseline strips when region load exists and composed output fits heap.
-    if (
-        volume.supportsPageRegionLoad &&
-        planStripOutputAllocation(size.width, size.height, scale) != null
-    ) {
-        return EnhancementPagePlan.EnhanceStrips(size)
+    // Full-res / baseline strips when region load exists and the combined budget fits.
+    if (volume.supportsPageRegionLoad) {
+        if (
+            enhancementStripGeometry(
+                sourceWidth = size.width,
+                sourceHeight = size.height,
+                maxInputPixels = maxInputPixels,
+            ) == null ||
+            planStripOutputAllocation(
+                sourceWidth = size.width,
+                sourceHeight = size.height,
+                scale = scale,
+                maxOutputBytes = maxOutputBytes,
+            ) == null
+        ) {
+            return EnhancementPagePlan.Skip(EnhancementSkipReason.STRIP_MEMORY_BUDGET)
+        }
+        return EnhancementPagePlan.EnhanceStrips(
+            sourceSize = size,
+            maxInputPixels = maxInputPixels,
+            maxOutputBytes = maxOutputBytes,
+        )
     }
     return EnhancementPagePlan.Skip(
         if (volume.supportsFastRasterEnhancement) {

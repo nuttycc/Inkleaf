@@ -79,7 +79,7 @@ interface ComicVolume {
 
     /**
      * Why fast enhancement is unavailable when [supportsFastRasterEnhancement] is false.
-     * PDF overrides with [EnhancementSkipReason.PDF_UNSUPPORTED].
+     * This is used only when no region-based strip path can be planned for the page.
      */
     val fastRasterEnhancementSkipReason: EnhancementSkipReason
         get() = EnhancementSkipReason.FAST_PATH_UNSUPPORTED
