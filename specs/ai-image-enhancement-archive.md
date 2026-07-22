@@ -44,6 +44,14 @@ was installed on a device with a 256 MiB heap limit. PDF pages around `2376 x 33
 output whose RGB565 allocation was about 61 MiB, while the composed-output budget was about
 34.1 MiB. Planning therefore returned `STRIP_MEMORY_BUDGET` before model inference.
 
+## Removal and Database Behavior
+
+The active app does not migrate enhancement tables or the per-comic model-selection column. Room
+database version 16 intentionally uses the app's destructive fallback, so an existing local
+database is rebuilt when the schema changes. This is acceptable for the current unreleased app;
+future releases that require data retention must add and test an explicit migration before
+shipping.
+
 ## Recommended Direction for a Future Version
 
 1. Base eligibility on effective source resolution and the current viewport or zoom target.
