@@ -40,8 +40,6 @@ yes | sdkmanager --licenses >/dev/null || true
 sdkmanager \
     "platform-tools" \
     "platforms;android-37.0" \
-    "build-tools;36.0.0" \
-    "ndk;29.0.14206865" \
-    "cmake;3.30.5"
+    "build-tools;36.0.0"
 
 printf 'sdk.dir=%s\n' "$ANDROID_SDK_ROOT" > local.properties

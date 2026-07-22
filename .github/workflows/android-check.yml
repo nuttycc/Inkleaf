@@ -55,10 +55,6 @@ jobs:
       - name: Make Gradle wrapper executable
         run: chmod +x gradlew
 
-      - name: Install native toolchain
-        if: env.CHECK_LEVEL == 'apk' || env.CHECK_LEVEL == 'full'
-        run: sdkmanager "ndk;29.0.14206865" "cmake;3.30.5"
-
       - name: Run selected check
         # Private ubuntu-latest is 2C/8G: one fat Gradle JVM (Kotlin in-process).
         run: |

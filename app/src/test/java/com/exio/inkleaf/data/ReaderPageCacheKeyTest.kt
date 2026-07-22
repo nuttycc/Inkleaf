@@ -31,7 +31,7 @@ class ReaderPageCacheKeyTest {
     }
 
     @Test
-    fun `source revision changes the enhancement cache key`() {
+    fun `source revision changes the page cache key`() {
         val oldKey = ReaderPageCacheKey.forPage(
             "comic-42",
             page = 1,

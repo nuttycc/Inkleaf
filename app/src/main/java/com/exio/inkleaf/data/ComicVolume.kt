@@ -3,7 +3,6 @@ package com.exio.inkleaf.data
 import android.graphics.Bitmap
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
-import com.exio.inkleaf.data.enhancement.EnhancementSkipReason
 
 /** Physical-pixel bounds for formats, such as PDF, that can render at a requested resolution. */
 data class PageRenderRequest(
@@ -71,43 +70,6 @@ interface ComicVolume {
         get() = false
 
     /**
-     * Whether the fast whole-page raster enhancement path may run on this volume.
-     * Default false so unknown formats skip safely; zip/album opt in explicitly.
-     */
-    val supportsFastRasterEnhancement: Boolean
-        get() = false
-
-    /**
-     * Why fast enhancement is unavailable when [supportsFastRasterEnhancement] is false.
-     * This is used only when no region-based strip path can be planned for the page.
-     */
-    val fastRasterEnhancementSkipReason: EnhancementSkipReason
-        get() = EnhancementSkipReason.FAST_PATH_UNSUPPORTED
-
-    /**
-     * Original pixel size of a compressed raster page without allocating the full bitmap.
-     * Null when the volume is not a simple raster source or bounds cannot be read.
-     */
-    suspend fun loadPageRasterSize(globalPage: Int): PagePixelSize? = null
-
-    /** Whether [loadPageRegion] can supply full-page pixel space crops for strip SR. */
-    val supportsPageRegionLoad: Boolean
-        get() = false
-
-    /**
-     * Decodes/renders one axis-aligned region of the full-resolution page for strip SR.
-     * Coordinates are in the [loadPageRasterSize] / full-page pixel space.
-     * Null when the volume cannot supply regions (caller should not use strip mode).
-     */
-    suspend fun loadPageRegion(
-        globalPage: Int,
-        left: Int,
-        top: Int,
-        width: Int,
-        height: Int,
-    ): Bitmap? = null
-
-    /**
      * 直接读取第 [globalPage] 页的位图，跳过 [loadPageBytes] 的"渲染→压缩→UI 再解码"往返。
      *
      * 默认返回 null：zip/cbz 走 [loadPageBytes] + Coil 解码即可（本来就是压缩图片字节，
@@ -119,16 +81,6 @@ interface ComicVolume {
     suspend fun loadPageBitmap(
         globalPage: Int,
         request: PageRenderRequest? = null,
-    ): ImageBitmap? = null
-
-    /**
-     * Loads a bitmap for memory-sensitive inference without exceeding [maxPixels] when the
-     * backing format can constrain allocation before rendering. Compressed-image volumes return
-     * null so the caller can perform a sampled decode from [loadPageBytes].
-     */
-    suspend fun loadPageBitmapForInference(
-        globalPage: Int,
-        maxPixels: Long,
     ): ImageBitmap? = null
 
     /** Returns the page size used by a source's region-based OCR renderer, when supported. */

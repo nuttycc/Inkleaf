@@ -32,17 +32,7 @@ import com.exio.inkleaf.data.ReadingSessionRules
 import com.exio.inkleaf.data.db.BookSourceType
 import com.exio.inkleaf.data.db.BookmarkEntity
 import com.exio.inkleaf.data.db.ComicEntity
-import com.exio.inkleaf.data.db.EnhancementCachePageResultKind
-import com.exio.inkleaf.data.db.EnhancementCacheTaskEntity
 import com.exio.inkleaf.data.db.FavoritePageEntity
-import com.exio.inkleaf.data.enhancement.EnhancementModelCatalog
-import com.exio.inkleaf.data.enhancement.EnhancementModelRepository
-import com.exio.inkleaf.data.enhancement.EnhancementPageKey
-import com.exio.inkleaf.data.enhancement.EnhancementSelectionIds
-import com.exio.inkleaf.data.enhancement.NcnnEnhancementEngine
-import com.exio.inkleaf.data.enhancement.cache.EnhancementCacheTaskReplacementResult
-import com.exio.inkleaf.data.enhancement.cache.EnhancementCacheTaskRepository
-import com.exio.inkleaf.data.enhancement.cache.EnhancementCacheTaskStartResult
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -50,8 +40,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -67,21 +55,6 @@ sealed interface ReaderUiState {
         val title: String,
     ) : ReaderUiState
 }
-
-internal data class EnhancementCacheStartRequest(
-    val modelId: String,
-    val modelRevision: String,
-    val sourceRevision: String,
-    val startPageInclusive: Int,
-    val endPageInclusive: Int,
-)
-
-internal data class PendingEnhancementCacheReplacement(
-    val activeTask: EnhancementCacheTaskEntity,
-    val request: EnhancementCacheStartRequest,
-    val activeTaskChanged: Boolean = false,
-)
-
 /**
  * 阅读页的状态与资源持有者。
  *
@@ -98,7 +71,6 @@ class ReaderViewModel(
     private val repo = ComicRepository(app)
     private val bookmarkRepo = BookmarkRepository(app)
     private val favoriteRepo = FavoriteRepository(app)
-    private val enhancementCacheRepo = EnhancementCacheTaskRepository.getInstance(app)
     private val sessionRepo = ReadingSessionRepository.getInstance(app)
 
     var state by mutableStateOf<ReaderUiState>(ReaderUiState.Loading)
@@ -124,24 +96,8 @@ class ReaderViewModel(
     var readerMessage by mutableStateOf<String?>(null)
         private set
 
-    var enhancementSelectionId by mutableStateOf(EnhancementSelectionIds.ORIGINAL)
-        private set
-
     var currentPage by mutableIntStateOf(0)
         private set
-
-    internal var pendingEnhancementCacheReplacement by
-    mutableStateOf<PendingEnhancementCacheReplacement?>(null)
-        private set
-
-    internal var enhancementCacheReplacementInProgress by mutableStateOf(false)
-        private set
-
-    val enhancementCacheTask = enhancementCacheRepo.observeLatest(comicId).stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5_000),
-        initialValue = null,
-    )
 
     /** 正在加载中的页码集合，配合 Mutex 实现去重 */
     private val thumbInFlight = mutableSetOf<Int>()
@@ -181,20 +137,7 @@ class ReaderViewModel(
             state = try {
                 val comic = repo.getComic(comicId)
                     ?: throw ComicOpenException("书架记录不存在")
-                val normalizedSelectionId = comic.enhancementSelectionId.takeIf(
-                    EnhancementSelectionIds::isValid
-                ) ?: EnhancementSelectionIds.ORIGINAL
-                this@ReaderViewModel.comic = comic.copy(
-                    enhancementSelectionId = normalizedSelectionId
-                )
-                enhancementSelectionId = normalizedSelectionId
-                if (normalizedSelectionId != comic.enhancementSelectionId) {
-                    runCatching {
-                        repo.setEnhancementSelection(comicId, normalizedSelectionId)
-                    }.onFailure { error ->
-                        if (error is CancellationException) throw error
-                    }
-                }
+                this@ReaderViewModel.comic = comic
                 // Identify the comic before open; source revision arrives on Ready.
                 dispatchSessionEvent(
                     ReadingSessionEvent.OpenComic(
@@ -402,168 +345,6 @@ class ReaderViewModel(
         readerMessage = null
     }
 
-    fun setEnhancementSelection(selectionId: String) {
-        if (selectionId == enhancementSelectionId) return
-        viewModelScope.launch {
-            try {
-                repo.setEnhancementSelection(comicId, selectionId)
-                enhancementSelectionId = selectionId
-                comic = comic?.copy(enhancementSelectionId = selectionId)
-            } catch (error: Exception) {
-                if (error is CancellationException) throw error
-                readerMessage = if (error is IllegalArgumentException) {
-                    error.message ?: "未知的图像增强选项"
-                } else {
-                    "图像增强选择保存失败，请重试。"
-                }
-            }
-        }
-    }
-
-    fun startEnhancementCache(startPageInclusive: Int, endPageInclusive: Int) {
-        val opened = volume ?: return
-        val model = EnhancementModelCatalog.find(enhancementSelectionId)
-        if (model == null) {
-            readerMessage = "请先选择已安装的 AI 增强模型"
-            return
-        }
-        val start = startPageInclusive.coerceIn(0, opened.totalPageCount - 1)
-        val end = endPageInclusive.coerceIn(start, opened.totalPageCount - 1)
-        viewModelScope.launch {
-            try {
-                if (
-                    EnhancementModelRepository.getInstance(getApplication())
-                        .installedDirectory(model.id) == null
-                ) {
-                    readerMessage = "请先安装所选 AI 增强模型"
-                    return@launch
-                }
-                handleEnhancementCacheStart(
-                    EnhancementCacheStartRequest(
-                        modelId = model.id,
-                        modelRevision = model.revision,
-                        sourceRevision = opened.sourceRevision,
-                        startPageInclusive = start,
-                        endPageInclusive = end,
-                    ),
-                )
-            } catch (error: Exception) {
-                if (error is CancellationException) throw error
-                readerMessage = "启动缓存失败"
-            }
-        }
-    }
-
-    fun confirmEnhancementCacheReplacement() {
-        if (enhancementCacheReplacementInProgress) return
-        val request = pendingEnhancementCacheReplacement ?: return
-        enhancementCacheReplacementInProgress = true
-        viewModelScope.launch {
-            try {
-                when (
-                    val result = enhancementCacheRepo.replace(
-                        expectedActiveTaskId = request.activeTask.id,
-                        comicId = comicId,
-                        modelId = request.request.modelId,
-                        modelRevision = request.request.modelRevision,
-                        sourceRevision = request.request.sourceRevision,
-                        startPageInclusive = request.request.startPageInclusive,
-                        endPageInclusive = request.request.endPageInclusive,
-                    )
-                ) {
-                    is EnhancementCacheTaskReplacementResult.Replaced -> {
-                        pendingEnhancementCacheReplacement = null
-                        readerMessage = cacheStartedMessage(request.request)
-                    }
-
-                    is EnhancementCacheTaskReplacementResult.ActiveTaskChanged -> {
-                        val activeTask = result.activeTask
-                        if (activeTask == null) {
-                            handleEnhancementCacheStart(request.request)
-                        } else {
-                            pendingEnhancementCacheReplacement = request.copy(
-                                activeTask = activeTask,
-                                activeTaskChanged = true,
-                            )
-                        }
-                    }
-                }
-            } catch (error: Exception) {
-                if (error is CancellationException) throw error
-                readerMessage = "替换缓存任务失败"
-            } finally {
-                enhancementCacheReplacementInProgress = false
-            }
-        }
-    }
-
-    fun dismissEnhancementCacheReplacement() {
-        if (enhancementCacheReplacementInProgress) return
-        pendingEnhancementCacheReplacement = null
-    }
-
-    fun pauseEnhancementCache(taskId: String) {
-        viewModelScope.launch { enhancementCacheRepo.pause(taskId) }
-    }
-
-    fun resumeEnhancementCache(taskId: String) {
-        viewModelScope.launch { enhancementCacheRepo.resume(taskId) }
-    }
-
-    fun cancelEnhancementCache(taskId: String) {
-        viewModelScope.launch { enhancementCacheRepo.cancel(taskId) }
-    }
-
-    private suspend fun handleEnhancementCacheStart(
-        request: EnhancementCacheStartRequest,
-    ) {
-        when (
-            val result = enhancementCacheRepo.start(
-                comicId = comicId,
-                modelId = request.modelId,
-                modelRevision = request.modelRevision,
-                sourceRevision = request.sourceRevision,
-                startPageInclusive = request.startPageInclusive,
-                endPageInclusive = request.endPageInclusive,
-            )
-        ) {
-            is EnhancementCacheTaskStartResult.Started -> {
-                pendingEnhancementCacheReplacement = null
-                readerMessage = cacheStartedMessage(request)
-            }
-
-            is EnhancementCacheTaskStartResult.ActiveTaskExists -> {
-                pendingEnhancementCacheReplacement = PendingEnhancementCacheReplacement(
-                    activeTask = result.activeTask,
-                    request = request,
-                )
-            }
-        }
-    }
-
-    private fun cacheStartedMessage(request: EnhancementCacheStartRequest): String =
-        "已开始缓存第 ${request.startPageInclusive + 1}～${request.endPageInclusive + 1} 页"
-
-    fun recordPinnedEnhancement(key: EnhancementPageKey, page: Int) {
-        viewModelScope.launch {
-            enhancementCacheRepo.recordCompletedPage(
-                key = key,
-                page = page,
-                resultKind = EnhancementCachePageResultKind.ENHANCED,
-            )
-        }
-    }
-
-    fun recordSkippedEnhancement(key: EnhancementPageKey, page: Int) {
-        viewModelScope.launch {
-            enhancementCacheRepo.recordCompletedPage(
-                key = key,
-                page = page,
-                resultKind = EnhancementCachePageResultKind.SKIPPED,
-            )
-        }
-    }
-
     /** 胶片格子按需请求缩略图：缓存已有或正在加载则直接返回（去重） */
     fun requestThumbnail(page: Int) {
         viewModelScope.launch { loadThumbnail(page) }
@@ -704,8 +485,7 @@ class ReaderViewModel(
     override fun onCleared() {
         stopCheckpointLoop()
         detachProcessLifecycle()
-        // Model manager / unexpected dispose: pause, do not complete.
-        // Explicit Back already called endReadingSession.
+        // Unexpected disposal pauses the reading session; explicit Back already completed it.
         if (!sessionEnded) {
             volumeCleanupScope.launch(NonCancellable) {
                 sessionRepo.dispatch(ReadingSessionEvent.LeftInteractiveForeground)
@@ -714,7 +494,7 @@ class ReaderViewModel(
         val closingVolume = volume
         volume = null
         volumeCleanupScope.launch {
-            closingVolume?.let { NcnnEnhancementEngine.closeVolumeAfterEnhancement(it) }
+            closingVolume?.close()
         }
     }
 

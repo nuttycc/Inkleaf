@@ -16,7 +16,7 @@ jobs:
       - checkout
 
       - run:
-          name: Accept SDK licenses and install native toolchain
+          name: Accept SDK licenses
           command: |
             set -euo pipefail
             mkdir -p "$ANDROID_HOME/licenses"
@@ -24,12 +24,6 @@ jobs:
             # Licenses must cover packages Gradle auto-downloads (e.g. platforms;android-37).
             echo -e "24333f8a63b6825ea9c5514f83c2829b004d1fee\n" > "$ANDROID_HOME/licenses/android-sdk-license"
             echo -e "84831b9409646a918e30573bab4c9c91346d8abd\n" > "$ANDROID_HOME/licenses/android-sdk-preview-license"
-            # Match GHA android-check: only pin NDK/CMake. Do not preinstall
-            # platforms;android-37 — cimg/android's bundled sdkmanager index may
-            # not list it yet; AGP downloads compileSdk platforms during the build.
-            sdkmanager \
-              "ndk;29.0.14206865" \
-              "cmake;3.30.5"
 
       - restore_cache:
           keys:
@@ -50,7 +44,7 @@ jobs:
               -Dorg.gradle.workers.max=4 \
               -Dorg.gradle.parallel=true \
               -Dorg.gradle.priority=normal
-          # Budget for cold SDK/NDK install + full debug check (GHA uses 30m wall).
+          # Budget for a cold SDK setup + full debug check (GHA uses 30m wall).
           no_output_timeout: 45m
 
       - save_cache:

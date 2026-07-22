@@ -18,12 +18,11 @@ class ReaderPageRenderRequestTest {
     }
 
     @Test
-    fun fallbackRequestWaitsOnlyForViewportNotEnhancementSelection() {
+    fun zoomedVolumesStillGetTargetedRenderRequest() {
         val request = targetedPageRenderRequest(
             supportsTargetedPageBitmap = true,
             viewportSize = IntSize(1080, 1920),
             zoomed = true,
-            enhancementActive = true,
         )
         assertNotNull(request)
     }

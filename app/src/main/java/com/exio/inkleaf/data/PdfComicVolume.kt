@@ -9,7 +9,6 @@ import androidx.core.graphics.createBitmap
 import com.ahmer.pdfium.PdfiumCore
 import com.exio.inkleaf.data.PdfComicVolume.Companion.pdfiumLock
 import com.exio.inkleaf.data.db.ChapterEntity
-import com.exio.inkleaf.data.enhancement.EnhancementSkipReason
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -19,8 +18,6 @@ import kotlin.coroutines.coroutineContext
 import kotlin.math.sqrt
 
 private const val OCR_PDF_RENDER_SCALE = 4.0
-private const val ENHANCEMENT_PDF_MAX_PIXELS = 8_000_000L
-private const val ENHANCEMENT_PDF_MAX_DIMENSION = 4096
 
 /**
  * 把包含多个 PDF 文件的目录作为一本书来阅读。
@@ -145,17 +142,6 @@ class PdfComicVolume(
      */
     override val supportsTargetedPageBitmap: Boolean = true
 
-    /**
-     * No compressed whole-page fast path for PDF (no file pixels).
-     * Strip SR uses a fixed render baseline via [loadPageRasterSize]/[loadPageRegion].
-     */
-    override val supportsFastRasterEnhancement: Boolean = false
-
-    override val supportsPageRegionLoad: Boolean = true
-
-    override val fastRasterEnhancementSkipReason =
-        EnhancementSkipReason.PDF_UNSUPPORTED
-
     override suspend fun loadPageBitmap(
         globalPage: Int,
         request: PageRenderRequest?,
@@ -166,76 +152,7 @@ class PdfComicVolume(
             pageIndex = page,
             qualityScale = 1.0,
             request = request,
-            maxPixels = null,
         )?.asImageBitmap()
-    }
-
-    override suspend fun loadPageBitmapForInference(
-        globalPage: Int,
-        maxPixels: Long,
-    ): ImageBitmap? = withContext(Dispatchers.IO) {
-        val (chapter, page) = globalToChapterPage(globalPage)
-        renderPageBitmap(
-            chapterIndex = chapter,
-            pageIndex = page,
-            qualityScale = 1.0,
-            request = null,
-            maxPixels = maxPixels,
-        )?.asImageBitmap()
-    }
-
-    /**
-     * Enhancement baseline: same soft caps as reader zoom PDF renders (8M px / 4096 edge),
-     * not the OCR ×4 policy.
-     */
-    override suspend fun loadPageRasterSize(globalPage: Int): PagePixelSize? =
-        withContext(Dispatchers.IO) {
-            val (chapter, page) = globalToChapterPage(globalPage)
-            pdfiumLock.withLock {
-                val opened = openDocumentLocked(chapter) ?: return@withLock null
-                opened.document.openPage(page)
-                val size = calculatePdfRenderSize(
-                    pageWidthPoints = opened.core.getPageWidthPoint(page),
-                    pageHeightPoints = opened.core.getPageHeightPoint(page),
-                    qualityScale = 1.0,
-                    request = PageRenderRequest(
-                        maxWidthPx = ENHANCEMENT_PDF_MAX_DIMENSION,
-                        maxHeightPx = ENHANCEMENT_PDF_MAX_DIMENSION,
-                        maxPixels = ENHANCEMENT_PDF_MAX_PIXELS,
-                        maxDimensionPx = ENHANCEMENT_PDF_MAX_DIMENSION,
-                    ),
-                )
-                PagePixelSize(size.width, size.height)
-            }
-        }
-
-    override suspend fun loadPageRegion(
-        globalPage: Int,
-        left: Int,
-        top: Int,
-        width: Int,
-        height: Int,
-    ): Bitmap? = withContext(Dispatchers.IO) {
-        val pageSize = loadPageRasterSize(globalPage) ?: return@withContext null
-        require(left >= 0 && top >= 0 && width > 0 && height > 0)
-        require(left + width <= pageSize.width && top + height <= pageSize.height)
-        val (chapter, page) = globalToChapterPage(globalPage)
-        pdfiumLock.withLock {
-            val opened = openDocumentLocked(chapter) ?: return@withLock null
-            opened.document.openPage(page)
-            createBitmap(width, height).also { bitmap ->
-                bitmap.eraseColor(android.graphics.Color.WHITE)
-                opened.core.renderPageBitmap(
-                    page,
-                    bitmap,
-                    -left,
-                    -top,
-                    pageSize.width,
-                    pageSize.height,
-                    true,
-                )
-            }
-        }
     }
 
     override suspend fun ocrPageSize(globalPage: Int): PagePixelSize? =
@@ -380,7 +297,6 @@ class PdfComicVolume(
                 pageIndex = pageIndex,
                 qualityScale = if (fullQuality) 1.0 else 0.5,
                 request = null,
-                maxPixels = null,
             )
                 ?: throw ComicOpenException("无法打开章节 PDF: ${chapters[chapterIndex].title}")
         }
@@ -405,10 +321,9 @@ class PdfComicVolume(
         pageIndex: Int,
         qualityScale: Double,
         request: PageRenderRequest?,
-        maxPixels: Long?,
     ): Bitmap? = pdfiumLock.withLock {
         coroutineContext.ensureActive()
-        renderPageBitmapLocked(chapterIndex, pageIndex, qualityScale, request, maxPixels)
+        renderPageBitmapLocked(chapterIndex, pageIndex, qualityScale, request)
     }
 
     private fun renderPageBitmapLocked(
@@ -416,7 +331,6 @@ class PdfComicVolume(
         pageIndex: Int,
         qualityScale: Double,
         request: PageRenderRequest?,
-        maxPixels: Long?,
     ): Bitmap? {
         if (closed) return null
         val opened = openDocumentLocked(chapterIndex) ?: return null
@@ -431,7 +345,6 @@ class PdfComicVolume(
             pageHeightPoints = height,
             qualityScale = qualityScale,
             request = request,
-            legacyMaxPixels = maxPixels,
         )
 
         val bitmap = createBitmap(size.width, size.height)
@@ -474,7 +387,6 @@ internal fun calculatePdfRenderSize(
     pageHeightPoints: Int,
     qualityScale: Double = 1.0,
     request: PageRenderRequest? = null,
-    legacyMaxPixels: Long? = null,
 ): PdfRenderSize {
     val pageWidth = pageWidthPoints.coerceAtLeast(1).toDouble()
     val pageHeight = pageHeightPoints.coerceAtLeast(1).toDouble()
@@ -482,11 +394,8 @@ internal fun calculatePdfRenderSize(
         minOf(it.maxWidthPx / pageWidth, it.maxHeightPx / pageHeight)
     } ?: qualityScale
 
-    val pixelBudget = request?.maxPixels ?: legacyMaxPixels
-    if (pixelBudget != null) {
-        scale = minOf(scale, sqrt(pixelBudget.toDouble() / (pageWidth * pageHeight)))
-    }
     request?.let {
+        scale = minOf(scale, sqrt(it.maxPixels.toDouble() / (pageWidth * pageHeight)))
         scale = minOf(scale, it.maxDimensionPx / maxOf(pageWidth, pageHeight))
     }
     scale = scale.coerceAtLeast(1.0 / maxOf(pageWidth, pageHeight))
