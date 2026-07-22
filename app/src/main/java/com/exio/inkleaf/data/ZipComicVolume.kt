@@ -1,6 +1,9 @@
 package com.exio.inkleaf.data
 
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.BitmapRegionDecoder
+import android.graphics.Rect
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -14,6 +17,7 @@ class ZipComicVolume(private val book: ComicBook, private val title: String) : C
     override val sourceRevision: String get() = book.sourceRevision
     override val chapterCount: Int get() = 1
     override val supportsFastRasterEnhancement: Boolean = true
+    override val supportsPageRegionLoad: Boolean = true
 
     override fun chapterTitle(chapterIndex: Int): String = title
     override fun chapterStartPage(chapterIndex: Int): Int = 0
@@ -44,6 +48,35 @@ class ZipComicVolume(private val book: ComicBook, private val title: String) : C
                 PagePixelSize(bounds.outWidth, bounds.outHeight)
             }
         }
+
+    override suspend fun loadPageRegion(
+        globalPage: Int,
+        left: Int,
+        top: Int,
+        width: Int,
+        height: Int,
+    ): Bitmap? = withContext(Dispatchers.IO) {
+        val bytes = loadPageBytes(globalPage)
+        val decoder = try {
+            BitmapRegionDecoder.newInstance(bytes, 0, bytes.size, false)
+        } catch (_: Exception) {
+            null
+        } ?: return@withContext null
+        try {
+            decoder.decodeRegion(
+                Rect(left, top, left + width, top + height),
+                BitmapFactory.Options().apply {
+                    inPreferredConfig = Bitmap.Config.ARGB_8888
+                },
+            )
+        } catch (_: OutOfMemoryError) {
+            null
+        } catch (_: Exception) {
+            null
+        } finally {
+            decoder.recycle()
+        }
+    }
 
     override suspend fun loadThumbnailPageBytes(globalPage: Int): ByteArray =
         book.loadThumbnailPageBytes(globalPage.coerceIn(0, book.pageCount - 1))

@@ -19,6 +19,8 @@ import kotlin.coroutines.coroutineContext
 import kotlin.math.sqrt
 
 private const val OCR_PDF_RENDER_SCALE = 4.0
+private const val ENHANCEMENT_PDF_MAX_PIXELS = 8_000_000L
+private const val ENHANCEMENT_PDF_MAX_DIMENSION = 4096
 
 /**
  * 把包含多个 PDF 文件的目录作为一本书来阅读。
@@ -143,8 +145,13 @@ class PdfComicVolume(
      */
     override val supportsTargetedPageBitmap: Boolean = true
 
-    /** Fast whole-page SR is not used for PDF; keep targeted original renders (D3′). */
+    /**
+     * No compressed whole-page fast path for PDF (no file pixels).
+     * Strip SR uses a fixed render baseline via [loadPageRasterSize]/[loadPageRegion].
+     */
     override val supportsFastRasterEnhancement: Boolean = false
+
+    override val supportsPageRegionLoad: Boolean = true
 
     override val fastRasterEnhancementSkipReason =
         EnhancementSkipReason.PDF_UNSUPPORTED
@@ -175,6 +182,60 @@ class PdfComicVolume(
             request = null,
             maxPixels = maxPixels,
         )?.asImageBitmap()
+    }
+
+    /**
+     * Enhancement baseline: same soft caps as reader zoom PDF renders (8M px / 4096 edge),
+     * not the OCR ×4 policy.
+     */
+    override suspend fun loadPageRasterSize(globalPage: Int): PagePixelSize? =
+        withContext(Dispatchers.IO) {
+            val (chapter, page) = globalToChapterPage(globalPage)
+            pdfiumLock.withLock {
+                val opened = openDocumentLocked(chapter) ?: return@withLock null
+                opened.document.openPage(page)
+                val size = calculatePdfRenderSize(
+                    pageWidthPoints = opened.core.getPageWidthPoint(page),
+                    pageHeightPoints = opened.core.getPageHeightPoint(page),
+                    qualityScale = 1.0,
+                    request = PageRenderRequest(
+                        maxWidthPx = ENHANCEMENT_PDF_MAX_DIMENSION,
+                        maxHeightPx = ENHANCEMENT_PDF_MAX_DIMENSION,
+                        maxPixels = ENHANCEMENT_PDF_MAX_PIXELS,
+                        maxDimensionPx = ENHANCEMENT_PDF_MAX_DIMENSION,
+                    ),
+                )
+                PagePixelSize(size.width, size.height)
+            }
+        }
+
+    override suspend fun loadPageRegion(
+        globalPage: Int,
+        left: Int,
+        top: Int,
+        width: Int,
+        height: Int,
+    ): Bitmap? = withContext(Dispatchers.IO) {
+        val pageSize = loadPageRasterSize(globalPage) ?: return@withContext null
+        require(left >= 0 && top >= 0 && width > 0 && height > 0)
+        require(left + width <= pageSize.width && top + height <= pageSize.height)
+        val (chapter, page) = globalToChapterPage(globalPage)
+        pdfiumLock.withLock {
+            val opened = openDocumentLocked(chapter) ?: return@withLock null
+            opened.document.openPage(page)
+            createBitmap(width, height).also { bitmap ->
+                bitmap.eraseColor(android.graphics.Color.WHITE)
+                opened.core.renderPageBitmap(
+                    page,
+                    bitmap,
+                    -left,
+                    -top,
+                    pageSize.width,
+                    pageSize.height,
+                    true,
+                )
+            }
+        }
     }
 
     override suspend fun ocrPageSize(globalPage: Int): PagePixelSize? =

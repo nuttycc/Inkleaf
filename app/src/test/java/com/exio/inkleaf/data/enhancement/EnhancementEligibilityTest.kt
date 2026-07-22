@@ -1,6 +1,7 @@
 package com.exio.inkleaf.data.enhancement
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -9,7 +10,7 @@ class EnhancementEligibilityTest {
     private val capped64MiBInput4x = calculateMaxInputPixels(2L * 1024 * 1024 * 1024, scale = 4)
 
     @Test
-    fun titleCase2000x3000At2xIsSkippedUnderCappedBudget() {
+    fun titleCase2000x3000At2xFailsFastBudgetButStripOutputFits() {
         val result = evaluateResolutionBudgetEligibility(
             sourceWidth = 2000,
             sourceHeight = 3000,
@@ -20,6 +21,8 @@ class EnhancementEligibilityTest {
             EnhancementEligibility.Skipped(EnhancementSkipReason.RESOLUTION_BUDGET),
             result,
         )
+        // #23 strip path still applies when composed output fits (RGB_565 under 96 MiB).
+        assertNotNull(planStripOutputAllocation(2000, 3000, scale = 2))
     }
 
     @Test

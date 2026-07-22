@@ -1595,7 +1595,8 @@ private fun ComicPage(
                             }
                         }
 
-                        is EnhancementPagePlan.Enhance -> {
+                        is EnhancementPagePlan.EnhanceFast,
+                        is EnhancementPagePlan.EnhanceStrips -> {
                             NcnnEnhancementEngine.recordForegroundRequest(enhancementModel.id)
                             val cached = NcnnEnhancementEngine.cached(context, pageKey)
                             if (cached != null) {
@@ -1625,10 +1626,6 @@ private fun ComicPage(
                                 val retainedOriginal = value.takeIf { current ->
                                     current is PageContent.Bitmap || current is PageContent.Bytes
                                 }
-                                // Keep any already-shown 原图 as the processing preview. Never attach the
-                                // floor-decoded inference source to composition — TRANSFERRED
-                                // ownership lets the engine recycle that overshoot after prepareInput
-                                // (F1a peak invariant vs calculateMaxInputPixels).
                                 val retainedProcessing = retainedOriginal?.withEnhancementStatus(
                                     status = PageEnhancementStatus.Processing,
                                     enhancementKey = pageKey,
@@ -1638,20 +1635,36 @@ private fun ComicPage(
                                         enhancementStatus = PageEnhancementStatus.Processing,
                                         enhancementKey = pageKey,
                                     )
-                                val sourceBitmap = loadEnhancementSourceBitmap(
-                                    volume = volume,
-                                    page = page,
-                                    scale = enhancementModel.scale,
-                                )
-                                when (
-                                    val outcome = NcnnEnhancementEngine.enhance(
-                                        context = context,
-                                        key = pageKey,
-                                        source = sourceBitmap,
-                                        persistTransient = !pinForActiveTask,
-                                        sourceOwnership = EnhancementSourceOwnership.TRANSFERRED,
-                                    )
-                                ) {
+                                val outcome = when (plan) {
+                                    is EnhancementPagePlan.EnhanceStrips ->
+                                        NcnnEnhancementEngine.enhanceStrips(
+                                            context = context,
+                                            key = pageKey,
+                                            volume = volume,
+                                            page = page,
+                                            sourceSize = plan.sourceSize,
+                                            persistTransient = !pinForActiveTask,
+                                        )
+
+                                    is EnhancementPagePlan.EnhanceFast -> {
+                                        val sourceBitmap = loadEnhancementSourceBitmap(
+                                            volume = volume,
+                                            page = page,
+                                            scale = enhancementModel.scale,
+                                        )
+                                        NcnnEnhancementEngine.enhance(
+                                            context = context,
+                                            key = pageKey,
+                                            source = sourceBitmap,
+                                            persistTransient = !pinForActiveTask,
+                                            sourceOwnership =
+                                                EnhancementSourceOwnership.TRANSFERRED,
+                                        )
+                                    }
+
+                                    is EnhancementPagePlan.Skip -> error("unreachable")
+                                }
+                                when (outcome) {
                                     is EnhancementInferenceOutcome.Success -> {
                                         if (
                                             outcome.persistenceStatus ==
@@ -1880,12 +1893,14 @@ private suspend fun prefetchEnhancement(
     onSkipped: (EnhancementPageKey, Int) -> Unit,
 ) {
     val pageKey = buildEnhancementPageKey(comicId, volume, page, model)
-    when (planEnhancementPage(volume, page, model.scale)) {
+    val plan = planEnhancementPage(volume, page, model.scale)
+    when (plan) {
         is EnhancementPagePlan.Skip -> {
             if (pinForActiveTask) onSkipped(pageKey, page)
             return
         }
-        is EnhancementPagePlan.Enhance -> Unit
+        is EnhancementPagePlan.EnhanceFast,
+        is EnhancementPagePlan.EnhanceStrips -> Unit
     }
     NcnnEnhancementEngine.recordForegroundRequest(model.id)
     val cached = NcnnEnhancementEngine.cached(context, pageKey)
@@ -1907,14 +1922,32 @@ private suspend fun prefetchEnhancement(
         return
     }
 
-    val source = loadEnhancementSourceBitmap(volume, page, model.scale)
-    val outcome = NcnnEnhancementEngine.enhance(
-        context = context,
-        key = pageKey,
-        source = source,
-        persistTransient = !pinForActiveTask,
-        priority = EnhancementRequestPriority.PREFETCH,
-    )
+    val outcome = when (plan) {
+        is EnhancementPagePlan.EnhanceStrips ->
+            NcnnEnhancementEngine.enhanceStrips(
+                context = context,
+                key = pageKey,
+                volume = volume,
+                page = page,
+                sourceSize = plan.sourceSize,
+                persistTransient = !pinForActiveTask,
+                priority = EnhancementRequestPriority.PREFETCH,
+                cacheInMemory = true,
+            )
+
+        is EnhancementPagePlan.EnhanceFast -> {
+            val source = loadEnhancementSourceBitmap(volume, page, model.scale)
+            NcnnEnhancementEngine.enhance(
+                context = context,
+                key = pageKey,
+                source = source,
+                persistTransient = !pinForActiveTask,
+                priority = EnhancementRequestPriority.PREFETCH,
+            )
+        }
+
+        is EnhancementPagePlan.Skip -> return
+    }
     if (
         outcome is EnhancementInferenceOutcome.Success &&
         outcome.persistenceStatus == EnhancementPersistenceStatus.PINNED

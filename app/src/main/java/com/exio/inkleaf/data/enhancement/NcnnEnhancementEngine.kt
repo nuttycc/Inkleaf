@@ -2,11 +2,15 @@ package com.exio.inkleaf.data.enhancement
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Rect
 import android.os.SystemClock
 import android.util.LruCache
 import androidx.annotation.Keep
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.scale
+import com.exio.inkleaf.data.ComicVolume
+import com.exio.inkleaf.data.PagePixelSize
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -276,6 +280,54 @@ object NcnnEnhancementEngine {
      * await keeps caller-owned book resources valid until that page boundary finishes; pause and
      * cancel are observed before the next page is submitted.
      */
+    /**
+     * Full-resolution strip enhancement (#23): one region at a time, compose into one output.
+     * Caller must only use this when [planStripOutputAllocation] succeeded for the page size.
+     */
+    suspend fun enhanceStrips(
+        context: Context,
+        key: EnhancementPageKey,
+        volume: ComicVolume,
+        page: Int,
+        sourceSize: PagePixelSize,
+        preferVulkan: Boolean = true,
+        persistTransient: Boolean = true,
+        priority: EnhancementRequestPriority = EnhancementRequestPriority.CURRENT_PAGE,
+        cacheInMemory: Boolean = true,
+    ): EnhancementInferenceOutcome {
+        val persistenceRequirement = if (persistTransient) {
+            EnhancementPersistenceRequirement.TRANSIENT
+        } else {
+            EnhancementPersistenceRequirement.PINNED
+        }
+        if (priority == EnhancementRequestPriority.BULK_CACHE) {
+            foregroundQuietWindow.awaitBulkTurn(key.modelId)
+        } else {
+            foregroundQuietWindow.record(key.modelId)
+        }
+        val diskCache = EnhancedImageDiskCache.getInstance(context)
+        val writeToken = diskCache.writeToken(key)
+        return pageJobs.request(
+            key = key,
+            priority = priority,
+            persistenceRequirement = persistenceRequirement,
+            finalizer = { outcome, required ->
+                finalizePersistence(diskCache, writeToken, key, outcome, required)
+            },
+        ) {
+            cached(context, key) ?: enhanceStripsUncached(
+                context = context,
+                modelId = key.modelId,
+                volume = volume,
+                page = page,
+                sourceSize = sourceSize,
+                cacheKey = key.value,
+                preferVulkan = preferVulkan,
+                cacheInMemory = cacheInMemory,
+            )
+        }
+    }
+
     suspend fun enhanceBulk(
         context: Context,
         key: EnhancementPageKey,
@@ -356,6 +408,144 @@ object NcnnEnhancementEngine {
             }
         }
         return null
+    }
+
+    private suspend fun enhanceStripsUncached(
+        context: Context,
+        modelId: String,
+        volume: ComicVolume,
+        page: Int,
+        sourceSize: PagePixelSize,
+        cacheKey: String,
+        preferVulkan: Boolean,
+        cacheInMemory: Boolean,
+    ): EnhancementInferenceOutcome {
+        val requestGeneration = activeModelGeneration(modelId)
+            ?: return EnhancementInferenceOutcome.Failure("模型当前不可用，已显示原图。")
+        return withContext(Dispatchers.Default) {
+            currentCoroutineContext().ensureActive()
+            if (!NativeEnhancementBridge.isLoaded()) {
+                return@withContext EnhancementInferenceOutcome.Failure("ncnn 推理库未能加载。")
+            }
+            cached(modelId, cacheKey)?.let { return@withContext it }
+            val session = sessionFor(context, modelId, preferVulkan)
+                ?: return@withContext EnhancementInferenceOutcome.Failure(
+                    "模型加载失败，请重新下载模型包。"
+                )
+            val scale = session.scale
+            val allocation = planStripOutputAllocation(
+                sourceWidth = sourceSize.width,
+                sourceHeight = sourceSize.height,
+                scale = scale,
+            ) ?: return@withContext EnhancementInferenceOutcome.Failure(
+                "页面尺寸过大，无法安全创建分带输出。"
+            )
+            val strips = planEnhancementStrips(
+                sourceWidth = sourceSize.width,
+                sourceHeight = sourceSize.height,
+                scale = scale,
+                maxInputPixels = maxInputPixels(scale),
+            )
+            if (strips.isEmpty()) {
+                return@withContext EnhancementInferenceOutcome.Failure("无法划分增强条带。")
+            }
+            var composed: Bitmap? = null
+            try {
+                val bitmapConfig = when (allocation.colorConfig) {
+                    StripOutputColorConfig.ARGB_8888 -> Bitmap.Config.ARGB_8888
+                    StripOutputColorConfig.RGB_565 -> Bitmap.Config.RGB_565
+                }
+                composed = Bitmap.createBitmap(
+                    sourceSize.width * scale,
+                    sourceSize.height * scale,
+                    bitmapConfig,
+                )
+                val canvas = Canvas(composed)
+                for (strip in strips) {
+                    currentCoroutineContext().ensureActive()
+                    if (!isModelGenerationCurrent(modelId, requestGeneration)) {
+                        return@withContext EnhancementInferenceOutcome.Failure(
+                            "模型已被移除，已显示原图。"
+                        )
+                    }
+                    val region = volume.loadPageRegion(
+                        globalPage = page,
+                        left = 0,
+                        top = strip.sourceTop,
+                        width = sourceSize.width,
+                        height = strip.sourceHeight,
+                    ) ?: return@withContext EnhancementInferenceOutcome.Failure(
+                        "无法读取页面条带，已显示原图。"
+                    )
+                    val stripOutcome = enhanceUncached(
+                        context = context,
+                        modelId = modelId,
+                        source = region,
+                        cacheKey = "$cacheKey#strip-${strip.sourceTop}",
+                        preferVulkan = preferVulkan,
+                        cacheInMemory = false,
+                        releaseSource = true,
+                    )
+                    when (stripOutcome) {
+                        is EnhancementInferenceOutcome.Failure -> return@withContext stripOutcome
+                        is EnhancementInferenceOutcome.Success -> {
+                            val enhanced = stripOutcome.bitmap
+                            try {
+                                val src = Rect(
+                                    0,
+                                    strip.outputCropTop,
+                                    enhanced.width,
+                                    strip.outputCropTop + strip.outputCoreHeight,
+                                )
+                                val dst = Rect(
+                                    0,
+                                    strip.outputCoreTop,
+                                    enhanced.width,
+                                    strip.outputCoreTop + strip.outputCoreHeight,
+                                )
+                                canvas.drawBitmap(enhanced, src, dst, null)
+                            } finally {
+                                recycleSafely(enhanced)
+                            }
+                        }
+                    }
+                }
+                if (!isModelGenerationCurrent(modelId, requestGeneration)) {
+                    return@withContext EnhancementInferenceOutcome.Failure(
+                        "模型已被移除，已显示原图。"
+                    )
+                }
+                val output = requireNotNull(composed)
+                composed = null
+                if (cacheInMemory) {
+                    synchronized(bitmapCache) {
+                        if (!isModelGenerationCurrent(modelId, requestGeneration)) {
+                            recycleSafely(output)
+                            return@withContext EnhancementInferenceOutcome.Failure(
+                                "模型已被移除，已显示原图。"
+                            )
+                        }
+                        bitmapCache.put(
+                            cacheKey,
+                            CachedBitmap(modelId, output, session.backend),
+                        )
+                    }
+                }
+                EnhancementInferenceOutcome.Success(
+                    bitmap = output,
+                    backend = session.backend,
+                    memoryCached = cacheInMemory,
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: OutOfMemoryError) {
+                EnhancementInferenceOutcome.Failure("设备内存不足，已显示原图。")
+            } catch (_: Exception) {
+                EnhancementInferenceOutcome.Failure("AI 分带推理失败，已显示原图。")
+            } finally {
+                composed?.let { recycleSafely(it) }
+            }
+        }
     }
 
     private suspend fun enhanceUncached(

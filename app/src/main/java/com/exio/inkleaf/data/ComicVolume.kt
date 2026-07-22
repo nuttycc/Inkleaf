@@ -90,6 +90,23 @@ interface ComicVolume {
      */
     suspend fun loadPageRasterSize(globalPage: Int): PagePixelSize? = null
 
+    /** Whether [loadPageRegion] can supply full-page pixel space crops for strip SR. */
+    val supportsPageRegionLoad: Boolean
+        get() = false
+
+    /**
+     * Decodes/renders one axis-aligned region of the full-resolution page for strip SR.
+     * Coordinates are in the [loadPageRasterSize] / full-page pixel space.
+     * Null when the volume cannot supply regions (caller should not use strip mode).
+     */
+    suspend fun loadPageRegion(
+        globalPage: Int,
+        left: Int,
+        top: Int,
+        width: Int,
+        height: Int,
+    ): Bitmap? = null
+
     /**
      * 直接读取第 [globalPage] 页的位图，跳过 [loadPageBytes] 的"渲染→压缩→UI 再解码"往返。
      *

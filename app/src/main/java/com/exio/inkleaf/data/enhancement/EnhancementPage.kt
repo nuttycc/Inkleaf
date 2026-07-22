@@ -13,7 +13,7 @@ import com.exio.inkleaf.data.calculateFloorInferenceSampleSize
  * Bumped when fast-path preprocessing or eligibility rules change so disk/memory
  * keys miss old enhanced bitmaps without touching model artifact revisions.
  */
-const val ENHANCEMENT_PIPELINE_REVISION = "2"
+const val ENHANCEMENT_PIPELINE_REVISION = "3"
 
 /** Pre-pipeline-key tasks/rows migrate to this so workers expire instead of skipping regen. */
 const val ENHANCEMENT_PIPELINE_REVISION_LEGACY = "1"
@@ -66,15 +66,21 @@ fun buildEnhancementPageKey(
 
 /** Volume-level plan before cache lookup or inference decode. */
 sealed interface EnhancementPagePlan {
-    data class Enhance(val sourceSize: PagePixelSize) : EnhancementPagePlan
+    /** Whole-page path; may floor-sample then continuous-clamp to the input budget. */
+    data class EnhanceFast(val sourceSize: PagePixelSize) : EnhancementPagePlan
+
+    /** Full-resolution horizontal strips — no whole-page pre-downscale (#23). */
+    data class EnhanceStrips(val sourceSize: PagePixelSize) : EnhancementPagePlan
 
     data class Skip(val reason: EnhancementSkipReason) : EnhancementPagePlan
 }
 
 /**
- * Decides whether the fast path may run. Never allocates the inference bitmap.
+ * Decides whether enhancement may run. Never allocates the inference bitmap.
  * Non-raster volumes use [ComicVolume.fastRasterEnhancementSkipReason]
  * (PDF → [EnhancementSkipReason.PDF_UNSUPPORTED]).
+ *
+ * Order: fast budget win → full-res strips if output fits → skip.
  */
 suspend fun planEnhancementPage(
     volume: ComicVolume,
@@ -82,22 +88,41 @@ suspend fun planEnhancementPage(
     scale: Int,
     maxInputPixels: Long = NcnnEnhancementEngine.maxInputPixels(scale),
 ): EnhancementPagePlan {
-    if (!volume.supportsFastRasterEnhancement) {
-        return EnhancementPagePlan.Skip(volume.fastRasterEnhancementSkipReason)
-    }
     val size = volume.loadPageRasterSize(page)
-        ?: throw ComicOpenException("本页图像无法解码")
-    return when (
-        val eligibility = evaluateResolutionBudgetEligibility(
-            sourceWidth = size.width,
-            sourceHeight = size.height,
-            scale = scale,
-            maxInputPixels = maxInputPixels,
-        )
-    ) {
-        EnhancementEligibility.Eligible -> EnhancementPagePlan.Enhance(size)
-        is EnhancementEligibility.Skipped -> EnhancementPagePlan.Skip(eligibility.reason)
+    if (size == null) {
+        return if (!volume.supportsFastRasterEnhancement) {
+            EnhancementPagePlan.Skip(volume.fastRasterEnhancementSkipReason)
+        } else {
+            throw ComicOpenException("本页图像无法解码")
+        }
     }
+    if (volume.supportsFastRasterEnhancement) {
+        when (
+            evaluateResolutionBudgetEligibility(
+                sourceWidth = size.width,
+                sourceHeight = size.height,
+                scale = scale,
+                maxInputPixels = maxInputPixels,
+            )
+        ) {
+            EnhancementEligibility.Eligible -> return EnhancementPagePlan.EnhanceFast(size)
+            is EnhancementEligibility.Skipped -> Unit
+        }
+    }
+    // Full-res / baseline strips when region load exists and composed output fits heap.
+    if (
+        volume.supportsPageRegionLoad &&
+        planStripOutputAllocation(size.width, size.height, scale) != null
+    ) {
+        return EnhancementPagePlan.EnhanceStrips(size)
+    }
+    return EnhancementPagePlan.Skip(
+        if (volume.supportsFastRasterEnhancement) {
+            EnhancementSkipReason.RESOLUTION_BUDGET
+        } else {
+            volume.fastRasterEnhancementSkipReason
+        },
+    )
 }
 
 suspend fun loadEnhancementSourceBitmap(

@@ -118,7 +118,8 @@ class EnhancementCacheWorker(
                     val key = buildEnhancementPageKey(task.comicId, volume, page, model)
                     val pageResultKind = when (val plan = planEnhancementPage(volume, page, model.scale)) {
                         is EnhancementPagePlan.Skip -> EnhancementCachePageResultKind.SKIPPED
-                        is EnhancementPagePlan.Enhance -> {
+                        is EnhancementPagePlan.EnhanceFast,
+                        is EnhancementPagePlan.EnhanceStrips -> {
                             val ready = diskCache.containsPinned(key) ||
                                     diskCache.promoteToPinned(key, writeToken)
                             if (!ready) {
@@ -129,6 +130,17 @@ class EnhancementCacheWorker(
                                         key = key,
                                         cached = cached,
                                         priority = EnhancementRequestPriority.BULK_CACHE,
+                                    )
+                                } else if (plan is EnhancementPagePlan.EnhanceStrips) {
+                                    NcnnEnhancementEngine.enhanceStrips(
+                                        context = applicationContext,
+                                        key = key,
+                                        volume = volume,
+                                        page = page,
+                                        sourceSize = plan.sourceSize,
+                                        persistTransient = false,
+                                        priority = EnhancementRequestPriority.BULK_CACHE,
+                                        cacheInMemory = false,
                                     )
                                 } else {
                                     NcnnEnhancementEngine.enhanceBulk(

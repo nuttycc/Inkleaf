@@ -3,6 +3,8 @@ package com.exio.inkleaf.data
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.BitmapRegionDecoder
+import android.graphics.Rect
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import com.exio.inkleaf.data.db.AlbumPageEntity
@@ -20,6 +22,7 @@ class AlbumComicVolume(
 
     override val totalPageCount: Int = pages.size
     override val supportsFastRasterEnhancement: Boolean = true
+    override val supportsPageRegionLoad: Boolean = true
     override val sourceRevision: String = ReaderPageCacheKey.sourceRevision(
         buildList {
             add("album")
@@ -65,6 +68,35 @@ class AlbumComicVolume(
                 PagePixelSize(bounds.outWidth, bounds.outHeight)
             }
         }
+
+    override suspend fun loadPageRegion(
+        globalPage: Int,
+        left: Int,
+        top: Int,
+        width: Int,
+        height: Int,
+    ): Bitmap? = withContext(Dispatchers.IO) {
+        val file = pageFile(globalPage)
+        val decoder = try {
+            BitmapRegionDecoder.newInstance(file.absolutePath, false)
+        } catch (_: Exception) {
+            null
+        } ?: return@withContext null
+        try {
+            decoder.decodeRegion(
+                Rect(left, top, left + width, top + height),
+                BitmapFactory.Options().apply {
+                    inPreferredConfig = Bitmap.Config.ARGB_8888
+                },
+            )
+        } catch (_: OutOfMemoryError) {
+            null
+        } catch (_: Exception) {
+            null
+        } finally {
+            decoder.recycle()
+        }
+    }
 
     override suspend fun loadThumbnailPageBytes(globalPage: Int): ByteArray =
         loadPageBytes(globalPage)
