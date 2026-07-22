@@ -48,9 +48,10 @@ output whose RGB565 allocation was about 61 MiB, while the composed-output budge
 
 The active app does not migrate enhancement tables or the per-comic model-selection column. Room
 database version 16 intentionally uses the app's destructive fallback, so an existing local
-database is rebuilt when the schema changes. This is acceptable for the current unreleased app;
-future releases that require data retention must add and test an explicit migration before
-shipping.
+database is rebuilt when the schema changes. On cold start, the app also removes the retired
+feature's generated model/cache directories from private files and cache storage. This is
+acceptable for the current unreleased app; future releases that require data retention must add
+and test an explicit migration and storage policy before shipping.
 
 ## Recommended Direction for a Future Version
 
