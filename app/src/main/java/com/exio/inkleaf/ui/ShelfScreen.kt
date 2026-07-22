@@ -69,10 +69,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -229,56 +230,45 @@ fun ShelfScreen(
     }
 
     Scaffold(
-        modifier = modifier,
+        modifier = modifier.fillMaxSize(),
         contentWindowInsets = WindowInsets(0),
         topBar = {
-            // The shelf filter is a compact control, not a page heading. Keep it on the
-            // same row as the actions instead of using the flexible bar's expanded title row.
-            TopAppBar(
-                title = {
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { showGroupSheet = true }
-                            .padding(horizontal = 4.dp, vertical = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(groupTitle(selectedGroup, groups))
-                        Icon(
-                            Icons.Filled.ArrowDropDown,
-                            contentDescription = "选择分组",
-                        )
-                    }
-                },
-                actions = {
-                    // 添加是"必须但低频"的功能：顶栏小图标拿最低调的常驻位，
-                    // 空书架时的主推入口是空状态里的按钮（渐进式显著度）。
-                    // 点开走底部 sheet——与排版抽屉、目录管理同一套视觉语言
-                    IconButton(onClick = { showAddSheet = true }) {
-                        Icon(Icons.Filled.Add, contentDescription = "添加内容")
-                    }
-                    // core 图标集没有 Tune，用自建的矢量资源（res/drawable/ic_tune.xml）
-                    IconButton(onClick = { showLayoutSheet = true }) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_tune),
-                            contentDescription = "书架排版",
-                        )
-                    }
-                    // 刷新已自动化：App 回到前台时由 ShelfViewModel 监听
-                    // 进程生命周期自动扫描（ProcessLifecycleOwner）
-                    // 目录管理已收进设置页（设置 → 漫画库目录）
-                    IconButton(onClick = onOpenSettings) {
-                        Icon(Icons.Filled.Settings, contentDescription = "设置")
-                    }
-                },
-                // 透明底色：顶栏不保有独立主题色，换肤瞬切才不会被 M3 内部
-                // 弹簧拖慢（策略与前提见 Theme.kt 的换肤注释）。本屏内容不会
-                // 滚到顶栏底下；若将来加 scrollBehavior 需重新评估
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.Transparent,
-                    scrolledContainerColor = Color.Transparent,
-                ),
-            )
+            // Top-level destinations use a single-row TopAppBar so title and actions stay
+            // on one baseline. Group filter is a pinned second row (same idea as Saved tabs).
+            Column {
+                TopAppBar(
+                    title = { Text("书架") },
+                    actions = {
+                        // 添加是"必须但低频"的功能：顶栏小图标拿最低调的常驻位，
+                        // 空书架时的主推入口是空状态里的按钮（渐进式显著度）。
+                        // 点开走底部 sheet——与排版抽屉、目录管理同一套视觉语言
+                        IconButton(onClick = { showAddSheet = true }) {
+                            Icon(Icons.Filled.Add, contentDescription = "添加内容")
+                        }
+                        // core 图标集没有 Tune，用自建的矢量资源（res/drawable/ic_tune.xml）
+                        IconButton(onClick = { showLayoutSheet = true }) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_tune),
+                                contentDescription = "书架排版",
+                            )
+                        }
+                        // 刷新已自动化：App 回到前台时由 ShelfViewModel 监听
+                        // 进程生命周期自动扫描（ProcessLifecycleOwner）
+                        // 目录管理已收进设置页（设置 → 漫画库目录）
+                        IconButton(onClick = onOpenSettings) {
+                            Icon(Icons.Filled.Settings, contentDescription = "设置")
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.background,
+                        scrolledContainerColor = MaterialTheme.colorScheme.background,
+                    ),
+                )
+                ShelfGroupFilterBar(
+                    label = groupTitle(selectedGroup, groups),
+                    onClick = { showGroupSheet = true },
+                )
+            }
         },
         snackbarHost = {
             SnackbarHost(
@@ -783,6 +773,40 @@ private fun groupTitle(
     ShelfGroupFilterKind.UNGROUPED -> "未分组"
     ShelfGroupFilterKind.GROUP ->
         groups?.firstOrNull { it.group.id == selected.groupId }?.group?.name ?: "全部"
+}
+
+/**
+ * Pinned under the top app bar: shows the active group and opens the existing picker sheet.
+ */
+@Composable
+private fun ShelfGroupFilterBar(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.background)
+            .clickable(onClick = onClick)
+            .semantics { contentDescription = "选择分组，$label" }
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Icon(
+            Icons.Filled.ArrowDropDown,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 }
 
 /**
