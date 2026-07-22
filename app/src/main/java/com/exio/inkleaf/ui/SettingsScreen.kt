@@ -47,18 +47,12 @@ fun SettingsScreen(
     themeSettings: ThemeSettings,
     onBack: () -> Unit,
     onOpenThemeSettings: () -> Unit,
-    onOpenModelManager: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: SettingsViewModel = viewModel(),
     foldersViewModel: FoldersViewModel = viewModel(),
-    enhancementModelsViewModel: EnhancementModelsViewModel = viewModel(),
 ) {
     val cacheLimit by viewModel.cacheLimit.collectAsStateWithLifecycle()
     val cacheUsage by viewModel.cacheUsageBytes.collectAsStateWithLifecycle()
-    val installedModelCount by enhancementModelsViewModel.installedCount.collectAsStateWithLifecycle()
-    val installedModelBytes by enhancementModelsViewModel.installedBytes.collectAsStateWithLifecycle()
-    val bundledModelCount = enhancementModelsViewModel.bundledCount
-    val modelsChecking by enhancementModelsViewModel.isChecking.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val cacheBudgetBytes = remember(cacheLimit, context) { cacheLimit.bytes(context) }
     val autoCacheBudgetBytes = remember(context) { CacheLimit.AUTO.bytes(context) }
@@ -115,18 +109,6 @@ fun SettingsScreen(
                 onClick = { showCacheLimitSheet = true },
                 trailingContent = { ForwardIcon() },
             )
-            InkleafActionListItem(
-                headline = "图像增强模型",
-                supporting = when {
-                    modelsChecking -> "正在检查模型文件…"
-                    installedModelCount == 0 -> "已内置 $bundledModelCount 个模型包 · 可继续下载更多模型"
-                    else -> "已内置 $bundledModelCount 个 · 已下载 $installedModelCount 个 · 占用 " +
-                            formatFileSize(installedModelBytes)
-                },
-                onClick = onOpenModelManager,
-                trailingContent = { ForwardIcon() },
-            )
-
             SectionLabel("漫画库")
             InkleafActionListItem(
                 headline = "漫画库目录",
@@ -234,7 +216,7 @@ private fun AboutSheetContent(
         )
         InkleafActionListItem(
             headline = "开源许可",
-            supporting = "模型版权、许可证与来源",
+            supporting = "OCR 模型、运行时与图像库许可",
             onClick = onOpenLicenses,
             trailingContent = { ForwardIcon() },
         )
@@ -249,7 +231,7 @@ private fun ThirdPartyLicensesSheetContent(
     SheetColumn(modifier = modifier, scrollable = true) {
         StandardSheetTitle("开源许可")
         Text(
-            text = "内置模型与相关库版权归各自上游项目。",
+            text = "OCR 模型与相关库版权归各自上游项目。",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
@@ -275,24 +257,6 @@ private data class ThirdPartyNotice(
 )
 
 private val THIRD_PARTY_NOTICES = listOf(
-    ThirdPartyNotice(
-        name = "Real-CUGAN",
-        summary = "面向动漫的图像超分辨率与降噪模型",
-        license = "MIT · nihui / bilibili",
-        url = "https://github.com/bilibili/ailab/tree/main/Real-CUGAN",
-    ),
-    ThirdPartyNotice(
-        name = "Waifu2x",
-        summary = "二次元图像放大与降噪工具",
-        license = "MIT · nihui / nagadomi",
-        url = "https://github.com/nagadomi/waifu2x",
-    ),
-    ThirdPartyNotice(
-        name = "Real-ESRGAN AnimeVideo-v3",
-        summary = "面向动画视频的超分辨率模型",
-        license = "BSD-3-Clause · Xintao Wang",
-        url = "https://github.com/xinntao/Real-ESRGAN",
-    ),
     ThirdPartyNotice(
         name = "PP-OCRv6 / PaddleOCR",
         summary = "轻量文字检测与识别引擎",

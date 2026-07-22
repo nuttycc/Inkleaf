@@ -1,17 +1,13 @@
 package com.exio.inkleaf.ui
 
-import android.Manifest
 import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.content.pm.PackageManager
 import android.os.Build
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateFloatAsState
@@ -109,12 +105,10 @@ import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
@@ -130,7 +124,6 @@ import com.exio.inkleaf.data.db.FavoritePageEntity
 import com.exio.inkleaf.data.enhancement.EnhancementInferenceOutcome
 import com.exio.inkleaf.data.enhancement.EnhancementModelCatalog
 import com.exio.inkleaf.data.enhancement.EnhancementModelDescriptor
-import com.exio.inkleaf.data.enhancement.EnhancementModelInstallState
 import com.exio.inkleaf.data.enhancement.EnhancementPageKey
 import com.exio.inkleaf.data.enhancement.EnhancementPagePlan
 import com.exio.inkleaf.data.enhancement.EnhancementPersistenceStatus
@@ -165,7 +158,6 @@ private const val OCR_SESSION_CACHE_PAGES = 8
 fun ReaderScreen(
     comicId: Long,
     onBack: () -> Unit,
-    onOpenModelManager: () -> Unit,
     modifier: Modifier = Modifier,
     initialPage: Int? = null,
 ) {
@@ -173,63 +165,13 @@ fun ReaderScreen(
         val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY]!!
         ReaderViewModel(app, comicId, initialPage)
     }
-    val enhancementModelsViewModel: EnhancementModelsViewModel = viewModel()
-    val modelStates by enhancementModelsViewModel.modelStates.collectAsStateWithLifecycle()
-    val enhancementCacheTask by viewModel.enhancementCacheTask.collectAsStateWithLifecycle()
-    val pendingCacheReplacement = viewModel.pendingEnhancementCacheReplacement
-
     // 工具栏显隐提升到这一层：系统栏控制要在 Loading 阶段就生效，
     // 不能等 Ready 才开始（否则进入时多一次"系统栏缩进"的视觉跳变）
     var showControls by remember { mutableStateOf(false) }
-    var showEnhancementSheet by remember { mutableStateOf(false) }
-    var showEnhancementCacheSheet by remember { mutableStateOf(false) }
-    var pendingCacheRange by remember { mutableStateOf<IntRange?>(null) }
-
-    val selectedEnhancementId = viewModel.enhancementSelectionId
-    val selectedModelState = modelStates[selectedEnhancementId]
-    val selectedModelInstalled = EnhancementModelCatalog.find(selectedEnhancementId) == null ||
-            selectedModelState is EnhancementModelInstallState.Installed
-    LaunchedEffect(selectedEnhancementId, selectedModelState) {
-        val selectedId = selectedEnhancementId
-        val selectedModel = EnhancementModelCatalog.find(selectedId)
-        if (
-            selectedId !in EnhancementSelectionIds.builtIn &&
-            (selectedModel == null ||
-                    selectedModelState is EnhancementModelInstallState.NotInstalled)
-        ) {
-            viewModel.setEnhancementSelection(EnhancementSelectionIds.ORIGINAL)
-        }
-    }
 
     val view = LocalView.current
     val context = LocalContext.current
     val window = (view.context as? Activity)?.window
-    val notificationPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        val range = pendingCacheRange
-        pendingCacheRange = null
-        if (granted && range != null) {
-            viewModel.startEnhancementCache(range.first, range.last)
-        } else if (!granted) {
-            Toast.makeText(context, "需要通知权限才能显示缓存进度", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    val startEnhancementCache: (Int, Int) -> Unit = { start, end ->
-        if (
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.POST_NOTIFICATIONS,
-            ) != PackageManager.PERMISSION_GRANTED
-        ) {
-            pendingCacheRange = start..end
-            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-        } else {
-            viewModel.startEnhancementCache(start, end)
-        }
-    }
 
     val readerMessage = viewModel.readerMessage
     LaunchedEffect(readerMessage) {
@@ -253,12 +195,7 @@ fun ReaderScreen(
     }
 
     // 系统返回手势/返回键也要走 exitReader，而不是让 Navigation 直接 pop
-    BackHandler(
-        enabled = !showEnhancementSheet &&
-                !showEnhancementCacheSheet &&
-                pendingCacheReplacement == null,
-        onBack = exitReader,
-    )
+    BackHandler(onBack = exitReader)
 
     if (window != null) {
         DisposableEffect(showControls) {
@@ -319,12 +256,11 @@ fun ReaderScreen(
                     onToggleFavorite = viewModel::toggleFavorite,
                     onSetCover = viewModel::setCurrentPageAsCover,
                     onPageChanged = viewModel::saveProgress,
-                    enhancementSelectionId = viewModel.enhancementSelectionId,
-                    enhancementModelInstalled = selectedModelInstalled,
-                    enhancementCacheTask = enhancementCacheTask,
-                    onPinnedEnhancement = viewModel::recordPinnedEnhancement,
-                    onSkippedEnhancement = viewModel::recordSkippedEnhancement,
-                    onOpenEnhancement = { showEnhancementSheet = true },
+                    enhancementSelectionId = EnhancementSelectionIds.ORIGINAL,
+                    enhancementModelInstalled = false,
+                    enhancementCacheTask = null,
+                    onPinnedEnhancement = { _, _ -> },
+                    onSkippedEnhancement = { _, _ -> },
                     onBack = exitReader,
                     showControls = showControls,
                     onToggleControls = { showControls = !showControls },
@@ -332,52 +268,6 @@ fun ReaderScreen(
                 )
             }
         }
-    }
-
-    if (showEnhancementSheet) {
-        ReaderEnhancementSheet(
-            selectedId = viewModel.enhancementSelectionId,
-            modelStates = modelStates,
-            accent = readerAccentColor(),
-            onDismiss = { showEnhancementSheet = false },
-            onOpenManager = {
-                showEnhancementSheet = false
-                if (window != null) {
-                    WindowCompat.getInsetsController(window, view)
-                        .show(WindowInsetsCompat.Type.systemBars())
-                }
-                onOpenModelManager()
-            },
-            onOpenCache = { showEnhancementCacheSheet = true },
-            onSelect = viewModel::setEnhancementSelection,
-        )
-    }
-
-    val readyState = viewModel.state as? ReaderUiState.Ready
-    if (showEnhancementCacheSheet && readyState != null) {
-        val cacheModel = EnhancementModelCatalog.find(viewModel.enhancementSelectionId)
-            ?.takeIf { selectedModelState is EnhancementModelInstallState.Installed }
-        EnhancementCacheSheet(
-            currentPage = viewModel.currentPage,
-            pageCount = readyState.volume.totalPageCount,
-            modelName = cacheModel?.displayName,
-            task = enhancementCacheTask,
-            onDismiss = { showEnhancementCacheSheet = false },
-            onStart = startEnhancementCache,
-            onPause = viewModel::pauseEnhancementCache,
-            onResume = viewModel::resumeEnhancementCache,
-            onCancel = viewModel::cancelEnhancementCache,
-        )
-    }
-
-    pendingCacheReplacement?.let { replacement ->
-        EnhancementCacheReplacementDialog(
-            replacement = replacement,
-            currentComicId = comicId,
-            replacementInProgress = viewModel.enhancementCacheReplacementInProgress,
-            onConfirm = viewModel::confirmEnhancementCacheReplacement,
-            onDismiss = viewModel::dismissEnhancementCacheReplacement,
-        )
     }
 
 }
@@ -406,7 +296,6 @@ private fun ComicPager(
     enhancementCacheTask: EnhancementCacheTaskEntity?,
     onPinnedEnhancement: (EnhancementPageKey, Int) -> Unit,
     onSkippedEnhancement: (EnhancementPageKey, Int) -> Unit,
-    onOpenEnhancement: () -> Unit,
     onBack: () -> Unit,
     showControls: Boolean,
     onToggleControls: () -> Unit,
@@ -797,10 +686,7 @@ private fun ComicPager(
             isBookmarked = bookmarkPages.containsKey(pagerState.currentPage),
             isFavorite = favoritePages.containsKey(pagerState.currentPage),
             isZoomed = zoomedPage == pagerState.currentPage,
-            enhancementSelectionId = enhancementSelectionId,
-            enhancementStatus = currentEnhancementStatus,
             onBack = onBack,
-            onOpenEnhancement = onOpenEnhancement,
             onOpenBookmarks = { showBookmarks = true },
             onToggleBookmark = { onToggleBookmark(pagerState.currentPage) },
             onToggleFavorite = { onToggleFavorite(pagerState.currentPage) },
@@ -858,10 +744,7 @@ private fun ReaderTopBar(
     isBookmarked: Boolean,
     isFavorite: Boolean,
     isZoomed: Boolean,
-    enhancementSelectionId: String,
-    enhancementStatus: PageEnhancementStatus?,
     onBack: () -> Unit,
-    onOpenEnhancement: () -> Unit,
     onOpenBookmarks: () -> Unit,
     onToggleBookmark: () -> Unit,
     onToggleFavorite: () -> Unit,
@@ -907,67 +790,6 @@ private fun ReaderTopBar(
             if (isZoomed) {
                 TextButton(onClick = onResetZoom) {
                     Text(text = "100%", color = Color.White)
-                }
-            }
-            val enhancementDescription = enhancementStatus?.let { status ->
-                "图像增强，${status.readerDescription()}"
-            } ?: when (enhancementSelectionId) {
-                EnhancementSelectionIds.ORIGINAL -> "图像增强，当前为原图"
-                else -> {
-                    val modelName = EnhancementModelCatalog.find(enhancementSelectionId)
-                        ?.displayName ?: enhancementSelectionId
-                    "图像增强，已选择 $modelName，页面加载时应用"
-                }
-            }
-            val topBarStatusLabel = enhancementStatus?.readerTopBarLabel()
-            if (topBarStatusLabel != null) {
-                TextButton(
-                    onClick = onOpenEnhancement,
-                    modifier = Modifier.semantics {
-                        contentDescription = enhancementDescription
-                    },
-                ) {
-                    if (enhancementStatus is PageEnhancementStatus.Processing) {
-                        CircularProgressIndicator(
-                            modifier = Modifier
-                                .padding(end = 6.dp)
-                                .size(14.dp),
-                            strokeWidth = 2.dp,
-                            color = accent,
-                        )
-                    }
-                    Text(
-                        text = topBarStatusLabel,
-                        color = if (enhancementStatus is PageEnhancementStatus.Failed) {
-                            readerErrorColor()
-                        } else {
-                            Color.White
-                        },
-                        style = MaterialTheme.typography.labelLarge,
-                        maxLines = 1,
-                    )
-                }
-            } else {
-                IconButton(
-                    onClick = onOpenEnhancement,
-                    modifier = Modifier.semantics {
-                        contentDescription = enhancementDescription
-                    },
-                ) {
-                    Icon(
-                        painter = painterResource(
-                            MaterialSymbolsOutlinedR.drawable
-                                .materialsymbols_ic_photo_filter_outlined,
-                        ),
-                        contentDescription = null,
-                        tint = if (
-                            enhancementSelectionId != EnhancementSelectionIds.ORIGINAL
-                        ) {
-                            accent
-                        } else {
-                            Color.White
-                        },
-                    )
                 }
             }
             IconButton(onClick = onToggleBookmark) {
