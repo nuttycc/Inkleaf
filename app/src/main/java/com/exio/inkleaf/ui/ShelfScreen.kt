@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -37,6 +38,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -74,6 +76,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -319,29 +322,14 @@ fun ShelfScreen(
                             .verticalScroll(rememberScrollState()),
                         contentAlignment = Alignment.Center,
                     ) {
-                        // 空书架时"添加"就是此刻的首要动作，给实体按钮；
-                        // 库建好后该动作降级回顶栏小图标（渐进式显著度）
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                text = "书架还是空的",
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Button(onClick = {
-                                treePicker.launch(buildFolderPickerInitialUri(lastPickedFolder))
-                            }) {
-                                Text("添加漫画目录")
-                            }
-                            TextButton(onClick = {
-                                picker.launch(LibraryScanner.COMIC_PICKER_MIME_TYPES)
-                            }) {
-                                Text("或添加漫画文件")
-                            }
-                            TextButton(onClick = onCreateAlbum) {
-                                Text("从图片创建图册")
-                            }
-                        }
+                        // Filtered list can be empty for two reasons: brand-new library, or
+                        // the active group filter matches nothing. Copy and CTAs differ.
+                        ShelfEmptyState(
+                            selection = selectedGroup,
+                            groupLabel = groupTitle(selectedGroup, groups),
+                            onAddContent = { showAddSheet = true },
+                            modifier = Modifier.padding(32.dp),
+                        )
                     }
 
                     ShelfPhase.CONTENT -> LazyVerticalGrid(
@@ -773,6 +761,72 @@ private fun groupTitle(
     ShelfGroupFilterKind.UNGROUPED -> "未分组"
     ShelfGroupFilterKind.GROUP ->
         groups?.firstOrNull { it.group.id == selected.groupId }?.group?.name ?: "全部"
+}
+
+/**
+ * Empty shelf body. Library-empty (filter = all) offers one primary CTA into the shared add
+ * sheet; group-filter empty only explains how to switch groups — imports stay on the top bar.
+ */
+@Composable
+private fun ShelfEmptyState(
+    selection: ShelfGroupSelection,
+    groupLabel: String,
+    onAddContent: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val isLibraryEmpty = selection.kind == ShelfGroupFilterKind.ALL
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        // Same glyph as the bottom-nav shelf tab so empty state matches destination identity
+        // (history / bookmark / favorite empties do the same with their tab icons).
+        Icon(
+            imageVector = Icons.Filled.Home,
+            contentDescription = null,
+            modifier = Modifier.size(48.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        if (isLibraryEmpty) {
+            Text(
+                text = "还没有漫画",
+                style = MaterialTheme.typography.titleLarge,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "添加文件夹建立漫画库，也可导入文件或创建图册。",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            // Progressive disclosure: empty state elevates add; later it lives as a top-bar icon.
+            Button(onClick = onAddContent) {
+                Text("添加内容")
+            }
+        } else {
+            val title = when (selection.kind) {
+                ShelfGroupFilterKind.UNGROUPED -> "没有未分组的漫画"
+                ShelfGroupFilterKind.GROUP -> "这个分组里还没有漫画"
+                ShelfGroupFilterKind.ALL -> error("library-empty branch handles ALL")
+            }
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleLarge,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "点上方「$groupLabel」可切换分组。",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
 }
 
 /**

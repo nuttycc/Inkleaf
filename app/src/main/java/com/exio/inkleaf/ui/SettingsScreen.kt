@@ -111,8 +111,7 @@ fun SettingsScreen(
             InkleafActionListItem(
                 headline = "漫画缓存上限",
                 supporting = "当前占用 ${formatBytes(cacheUsage)} · " +
-                        cacheLimitSummary(cacheLimit, cacheBudgetBytes) +
-                        "\n超出上限自动清理最久未读的书，不影响你的原文件",
+                        cacheLimitSummary(cacheLimit, cacheBudgetBytes),
                 onClick = { showCacheLimitSheet = true },
                 trailingContent = { ForwardIcon() },
             )
@@ -197,12 +196,7 @@ fun SettingsScreen(
             onDismissRequest = { showLicensesSheet = false },
             sheetState = rememberExpandOnlySheetState(),
         ) {
-            ThirdPartyLicensesSheetContent(
-                text = remember(context) {
-                    context.assets.open(MODEL_LICENSE_NOTICE_ASSET).bufferedReader()
-                        .use { it.readText() }
-                },
-            )
+            ThirdPartyLicensesSheetContent()
         }
     }
 }
@@ -249,18 +243,75 @@ private fun AboutSheetContent(
 
 @Composable
 private fun ThirdPartyLicensesSheetContent(
-    text: String,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
     SheetColumn(modifier = modifier, scrollable = true) {
         StandardSheetTitle("开源许可")
         Text(
-            text = text,
-            style = MaterialTheme.typography.bodySmall,
+            text = "内置模型与相关库版权归各自上游项目。",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
         )
+        THIRD_PARTY_NOTICES.forEach { notice ->
+            InkleafActionListItem(
+                headline = notice.name,
+                supporting = "${notice.summary}\n${notice.license}",
+                onClick = {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(notice.url)))
+                },
+                trailingContent = { ForwardIcon() },
+            )
+        }
     }
 }
+
+private data class ThirdPartyNotice(
+    val name: String,
+    val summary: String,
+    val license: String,
+    val url: String,
+)
+
+private val THIRD_PARTY_NOTICES = listOf(
+    ThirdPartyNotice(
+        name = "Real-CUGAN",
+        summary = "面向动漫的图像超分辨率与降噪模型",
+        license = "MIT · nihui / bilibili",
+        url = "https://github.com/bilibili/ailab/tree/main/Real-CUGAN",
+    ),
+    ThirdPartyNotice(
+        name = "Waifu2x",
+        summary = "二次元图像放大与降噪工具",
+        license = "MIT · nihui / nagadomi",
+        url = "https://github.com/nagadomi/waifu2x",
+    ),
+    ThirdPartyNotice(
+        name = "Real-ESRGAN AnimeVideo-v3",
+        summary = "面向动画视频的超分辨率模型",
+        license = "BSD-3-Clause · Xintao Wang",
+        url = "https://github.com/xinntao/Real-ESRGAN",
+    ),
+    ThirdPartyNotice(
+        name = "PP-OCRv6 / PaddleOCR",
+        summary = "轻量文字检测与识别引擎",
+        license = "Apache-2.0 · PaddlePaddle Authors",
+        url = "https://github.com/PaddlePaddle/PaddleOCR",
+    ),
+    ThirdPartyNotice(
+        name = "ONNX Runtime",
+        summary = "跨平台机器学习推理运行时",
+        license = "MIT · Microsoft Corporation",
+        url = "https://github.com/microsoft/onnxruntime",
+    ),
+    ThirdPartyNotice(
+        name = "OpenCV Android",
+        summary = "计算机视觉基础库",
+        license = "Apache-2.0 · OpenCV team",
+        url = "https://github.com/opencv/opencv",
+    ),
+)
 
 @Composable
 private fun CacheLimitSheetContent(
@@ -271,6 +322,12 @@ private fun CacheLimitSheetContent(
 ) {
     SheetColumn(modifier = modifier, selectable = true) {
         StandardSheetTitle("漫画缓存上限")
+        Text(
+            text = "超出上限自动清理最久未读的书，不影响原文件",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+        )
         CacheLimit.entries.forEach { limit ->
             InkleafChoiceListItem(
                 headline = limit.label,
@@ -320,7 +377,6 @@ private fun cacheLimitDescription(limit: CacheLimit, autoBudgetBytes: Long): Str
     }
 
 private const val GITHUB_URL = "https://github.com/nuttycc/inkleaf"
-private const val MODEL_LICENSE_NOTICE_ASSET = "THIRD_PARTY_MODEL_LICENSES.txt"
 
 private fun appVersionName(context: Context): String {
     val packageInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
