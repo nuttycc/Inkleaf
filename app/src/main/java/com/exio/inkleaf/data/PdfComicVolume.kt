@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.os.ParcelFileDescriptor
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.core.graphics.createBitmap
 import com.ahmer.pdfium.PdfiumCore
 import com.exio.inkleaf.data.PdfComicVolume.Companion.pdfiumLock
 import com.exio.inkleaf.data.db.ChapterEntity
@@ -199,7 +200,7 @@ class PdfComicVolume(
             )
             require(left >= 0 && top >= 0 && width > 0 && height > 0)
             require(left + width <= pageSize.width && top + height <= pageSize.height)
-            Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { bitmap ->
+            createBitmap(width, height).also { bitmap ->
                 bitmap.eraseColor(android.graphics.Color.WHITE)
                 opened.core.renderPageBitmap(
                     page,
@@ -365,7 +366,7 @@ class PdfComicVolume(
             legacyMaxPixels = maxPixels,
         )
 
-        val bitmap = Bitmap.createBitmap(size.width, size.height, Bitmap.Config.ARGB_8888)
+        val bitmap = createBitmap(size.width, size.height)
         bitmap.eraseColor(android.graphics.Color.WHITE)
 
         core.renderPageBitmap(

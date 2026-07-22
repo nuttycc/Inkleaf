@@ -5,6 +5,8 @@ import android.graphics.Bitmap
 import android.os.SystemClock
 import android.util.LruCache
 import androidx.annotation.Keep
+import androidx.core.graphics.createBitmap
+import androidx.core.graphics.scale
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -380,10 +382,9 @@ object NcnnEnhancementEngine {
                         "页面尺寸过大，无法安全创建推理位图。"
                     )
                 val inferenceInput = requireNotNull(prepared)
-                unownedOutput = Bitmap.createBitmap(
+                unownedOutput = createBitmap(
                     inferenceInput.width * session.scale,
                     inferenceInput.height * session.scale,
-                    Bitmap.Config.ARGB_8888,
                 ).apply { setHasAlpha(inferenceInput.hasAlpha()) }
                 val inferenceOutput = requireNotNull(unownedOutput)
 
@@ -548,7 +549,7 @@ object NcnnEnhancementEngine {
         val targetWidth = (argb.width * ratio).toInt().coerceAtLeast(1)
         val targetHeight = (argb.height * ratio).toInt().coerceAtLeast(1)
         val scaled = try {
-            Bitmap.createScaledBitmap(argb, targetWidth, targetHeight, true)
+            argb.scale(targetWidth, targetHeight)
         } catch (_: OutOfMemoryError) {
             null
         }

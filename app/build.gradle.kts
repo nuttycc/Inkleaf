@@ -36,7 +36,7 @@ android {
     defaultConfig {
         applicationId = "com.exio.inkleaf"
         minSdk = 29
-        targetSdk = 36
+        targetSdk = 37
         versionCode = injectedVersionCode ?: 1
         versionName = injectedVersionName ?: "1.0"
 

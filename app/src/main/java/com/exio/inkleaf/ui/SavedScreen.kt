@@ -44,6 +44,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -112,7 +113,7 @@ fun SavedScreen(
     val bookmarks by savedViewModel.bookmarks.collectAsStateWithLifecycle()
     val favorites by favoritesViewModel.favorites.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
-    var selectedTab by rememberSaveable { mutableStateOf(BOOKMARKS_TAB_INDEX) }
+    var selectedTab by rememberSaveable { mutableIntStateOf(BOOKMARKS_TAB_INDEX) }
     var sourceChanged by remember { mutableStateOf<BookmarkResolution.SourceChanged?>(null) }
 
     SnackbarMessageEffect(

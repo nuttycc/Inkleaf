@@ -170,16 +170,13 @@ internal class EnhancedImageDiskCacheStore<T>(
     internal fun pinnedFile(entry: EnhancedImageDiskCacheEntry): File =
         fileFor(pinnedRoot, entry)
 
-    internal fun transientUsableSpace(): Long =
-        if (transientRoot.exists()) transientRoot.usableSpace else transientRoot.parentFile?.usableSpace
-            ?: 0L
+    /** Root used for pinned cache volume queries (total space). */
+    internal fun pinnedStorageRoot(): File =
+        if (pinnedRoot.exists()) pinnedRoot else pinnedRoot.parentFile ?: pinnedRoot
 
-    internal fun pinnedUsableSpace(): Long =
-        if (pinnedRoot.exists()) pinnedRoot.usableSpace else pinnedRoot.parentFile?.usableSpace
-            ?: 0L
-
-    internal fun pinnedTotalSpace(): Long =
-        if (pinnedRoot.exists()) pinnedRoot.totalSpace else pinnedRoot.parentFile?.totalSpace ?: 0L
+    /** Root used for transient cache volume queries. */
+    internal fun transientStorageRoot(): File =
+        if (transientRoot.exists()) transientRoot else transientRoot.parentFile ?: transientRoot
 
     private suspend fun write(
         root: File,

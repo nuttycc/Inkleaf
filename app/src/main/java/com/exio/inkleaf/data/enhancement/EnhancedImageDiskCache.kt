@@ -3,10 +3,13 @@ package com.exio.inkleaf.data.enhancement
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.os.storage.StorageManager
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.File
+import java.io.IOException
 import java.io.OutputStream
+import java.util.UUID
 
 internal data class EnhancedImageDiskCacheWriteToken(
     val comicId: Long,
@@ -24,11 +27,13 @@ internal enum class EnhancedImagePinnedWriteResult {
 
 /** Stores enhanced pages in transient or user-pinned private app storage. */
 internal class EnhancedImageDiskCache private constructor(context: Context) {
+    private val appContext = context.applicationContext
     private val store = EnhancedImageDiskCacheStore(
-        cacheDir = context.cacheDir,
-        filesDir = context.filesDir,
+        cacheDir = appContext.cacheDir,
+        filesDir = appContext.filesDir,
         codec = BitmapPngCodec,
     )
+    private val storageManager = appContext.getSystemService(StorageManager::class.java)
     private val mutationMutex = Mutex()
     private val generationLock = Any()
     private val comicGenerations = mutableMapOf<Long, Long>()
@@ -91,7 +96,7 @@ internal class EnhancedImageDiskCache private constructor(context: Context) {
         mutationMutex.withLock { store.enforceTransientBudget(maxBytes) }
 
     fun transientBudgetBytes(): Long {
-        val usableBytes = store.transientUsableSpace()
+        val usableBytes = allocatableBytes(store.transientStorageRoot())
         return if (usableBytes > 0L) {
             (usableBytes / TRANSIENT_STORAGE_DIVISOR)
                 .coerceAtMost(MAX_TRANSIENT_CACHE_BYTES)
@@ -128,12 +133,29 @@ internal class EnhancedImageDiskCache private constructor(context: Context) {
 
     private fun hasPinnedHeadroom(bitmap: Bitmap): Boolean {
         if (bitmap.isRecycled) return false
-        val usableBytes = store.pinnedUsableSpace()
+        val pinnedRoot = store.pinnedStorageRoot()
+        val usableBytes = allocatableBytes(pinnedRoot)
         if (usableBytes <= 0L) return false
-        val totalBytes = store.pinnedTotalSpace()
+        val totalBytes = pinnedRoot.totalSpace
         val reserveBytes = (totalBytes / PINNED_STORAGE_RESERVE_DIVISOR)
             .coerceIn(MIN_PINNED_STORAGE_RESERVE_BYTES, MAX_PINNED_STORAGE_RESERVE_BYTES)
         return usableBytes - bitmap.allocationByteCount.toLong() >= reserveBytes
+    }
+
+    /**
+     * Prefer [StorageManager.getAllocatableBytes], which includes clearable cached data.
+     * Fall back to [File.usableSpace] when the volume UUID is unavailable.
+     */
+    private fun allocatableBytes(root: File): Long {
+        val manager = storageManager ?: return root.usableSpace
+        return try {
+            val uuid: UUID = manager.getUuidForPath(root)
+            manager.getAllocatableBytes(uuid)
+        } catch (_: IOException) {
+            root.usableSpace
+        } catch (_: IllegalArgumentException) {
+            root.usableSpace
+        }
     }
 
     private fun EnhancementPageKey.toDiskEntry() = EnhancedImageDiskCacheEntry(

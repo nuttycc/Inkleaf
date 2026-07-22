@@ -1,7 +1,6 @@
 package com.exio.inkleaf.ui
 
 import android.content.Intent
-import android.net.Uri
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
@@ -36,6 +35,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.exio.inkleaf.R
@@ -281,7 +281,7 @@ private fun ModelDetailsSheet(model: EnhancementModelDescriptor) {
             TextButton(
                 onClick = {
                     runCatching {
-                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(model.sourceUrl)))
+                        context.startActivity(Intent(Intent.ACTION_VIEW, model.sourceUrl.toUri()))
                     }
                 },
             ) {

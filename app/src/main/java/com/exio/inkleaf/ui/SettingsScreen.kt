@@ -3,7 +3,6 @@ package com.exio.inkleaf.ui
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -35,6 +34,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.exio.inkleaf.data.CacheLimit
@@ -181,7 +181,7 @@ fun SettingsScreen(
             AboutSheetContent(
                 versionName = remember(context) { appVersionName(context) },
                 onOpenGitHub = {
-                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(GITHUB_URL)))
+                    context.startActivity(Intent(Intent.ACTION_VIEW, GITHUB_URL.toUri()))
                 },
                 onOpenLicenses = {
                     showAboutSheet = false
@@ -259,7 +259,7 @@ private fun ThirdPartyLicensesSheetContent(
                 headline = notice.name,
                 supporting = "${notice.summary}\n${notice.license}",
                 onClick = {
-                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(notice.url)))
+                    context.startActivity(Intent(Intent.ACTION_VIEW, notice.url.toUri()))
                 },
                 trailingContent = { ForwardIcon() },
             )

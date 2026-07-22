@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import androidx.core.net.toUri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
@@ -346,7 +347,7 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycle
                     seriesConfirmations = remaining,
                 )
             }
-        } ?: addSeriesFolder(Uri.parse(request.treeUri), approvedLargeScan = true)
+        } ?: addSeriesFolder(request.treeUri.toUri(), approvedLargeScan = true)
     }
 
     fun dismissSeriesScanConfirmation() {

@@ -72,6 +72,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -157,10 +158,10 @@ private const val OCR_SESSION_CACHE_PAGES = 8
 @Composable
 fun ReaderScreen(
     comicId: Long,
-    initialPage: Int? = null,
     onBack: () -> Unit,
     onOpenModelManager: () -> Unit,
     modifier: Modifier = Modifier,
+    initialPage: Int? = null,
 ) {
     val viewModel: ReaderViewModel = viewModel {
         val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY]!!
@@ -410,10 +411,10 @@ private fun ComicPager(
     )
     val scope = rememberCoroutineScope()
     var zoomedPage by remember { mutableStateOf<Int?>(null) }
-    var zoomToggleRequest by remember { mutableStateOf(0) }
-    var zoomResetRequest by remember { mutableStateOf(0) }
-    var zoomTogglePage by remember { mutableStateOf(-1) }
-    var zoomResetPage by remember { mutableStateOf(-1) }
+    var zoomToggleRequest by remember { mutableIntStateOf(0) }
+    var zoomResetRequest by remember { mutableIntStateOf(0) }
+    var zoomTogglePage by remember { mutableIntStateOf(-1) }
+    var zoomResetPage by remember { mutableIntStateOf(-1) }
     var zoomToggleAnchor by remember { mutableStateOf(Offset.Unspecified) }
     var enhancementReport by remember { mutableStateOf<PageEnhancementReport?>(null) }
     var enhancementCompletion by remember { mutableStateOf<PageEnhancementCompletion?>(null) }

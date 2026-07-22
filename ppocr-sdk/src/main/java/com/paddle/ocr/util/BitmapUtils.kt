@@ -15,6 +15,7 @@
 package com.paddle.ocr.util
 
 import android.graphics.Bitmap
+import androidx.core.graphics.createBitmap
 import org.opencv.android.Utils
 import org.opencv.core.CvType
 import org.opencv.core.Mat
@@ -45,7 +46,7 @@ object BitmapUtils {
         val rgba = Mat()
         return try {
             Imgproc.cvtColor(mat, rgba, Imgproc.COLOR_BGR2RGBA)
-            Bitmap.createBitmap(rgba.cols(), rgba.rows(), Bitmap.Config.ARGB_8888).also { bitmap ->
+            createBitmap(rgba.cols(), rgba.rows()).also { bitmap ->
                 Utils.matToBitmap(rgba, bitmap)
             }
         } finally {

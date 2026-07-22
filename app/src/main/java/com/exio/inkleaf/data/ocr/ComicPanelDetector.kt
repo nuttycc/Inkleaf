@@ -7,6 +7,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.RectF
+import androidx.core.graphics.createBitmap
 import org.opencv.android.Utils
 import org.opencv.core.Mat
 import org.opencv.core.MatOfPoint
@@ -30,10 +31,9 @@ internal class ComicPanelPreview(
     private val pageHeight: Int,
 ) : AutoCloseable {
     private val scale = min(1f, PANEL_PREVIEW_LONG_EDGE.toFloat() / max(pageWidth, pageHeight))
-    private val bitmap = Bitmap.createBitmap(
+    private val bitmap = createBitmap(
         (pageWidth * scale).roundToInt().coerceAtLeast(1),
         (pageHeight * scale).roundToInt().coerceAtLeast(1),
-        Bitmap.Config.ARGB_8888,
     ).apply { eraseColor(Color.WHITE) }
     private val canvas = Canvas(bitmap)
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)

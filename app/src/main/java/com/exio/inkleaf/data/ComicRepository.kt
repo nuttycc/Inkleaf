@@ -3,6 +3,7 @@ package com.exio.inkleaf.data
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import androidx.core.net.toUri
 import androidx.documentfile.provider.DocumentFile
 import androidx.room.withTransaction
 import com.exio.inkleaf.data.db.AppDatabase
@@ -152,12 +153,12 @@ class ComicRepository(context: Context) {
                 chapters = chapters,
                 pfdResolver = { uriString ->
                     runCatching {
-                        appContext.contentResolver.openFileDescriptor(Uri.parse(uriString), "r")
+                        appContext.contentResolver.openFileDescriptor(uriString.toUri(), "r")
                     }.getOrNull()
                 },
             )
         } else {
-            val book = ComicBook.open(appContext, Uri.parse(comic.uri), comic.id)
+            val book = ComicBook.open(appContext, comic.uri.toUri(), comic.id)
             ZipComicVolume(book, comic.title)
         }
     }
@@ -361,7 +362,7 @@ class ComicRepository(context: Context) {
         if (comic.sourceType != BookSourceType.CREATED_ALBUM) {
             runCatching {
                 appContext.contentResolver.releasePersistableUriPermission(
-                    Uri.parse(comic.uri), Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    comic.uri.toUri(), Intent.FLAG_GRANT_READ_URI_PERMISSION
                 )
             }
         }
@@ -404,7 +405,7 @@ class ComicRepository(context: Context) {
         folderDao.deleteById(folder.id)
         runCatching {
             appContext.contentResolver.releasePersistableUriPermission(
-                Uri.parse(folder.treeUri), Intent.FLAG_GRANT_READ_URI_PERMISSION
+                folder.treeUri.toUri(), Intent.FLAG_GRANT_READ_URI_PERMISSION
             )
         }
     }
@@ -599,7 +600,7 @@ class ComicRepository(context: Context) {
      */
     private suspend fun syncLibraryFolder(folder: LibraryFolderEntity): ScanResult {
         val scanned = try {
-            scanner.scanFolder(Uri.parse(folder.treeUri)).distinctBy { it.fileKey }
+            scanner.scanFolder(folder.treeUri.toUri()).distinctBy { it.fileKey }
         } catch (e: LibraryScanner.FolderAccessException) {
             // 目录打不开：返回空结果，外层把它加入 failed
             return ScanResult(0, 0, 0, 0, emptyList())
@@ -666,7 +667,7 @@ class ComicRepository(context: Context) {
         folder: LibraryFolderEntity,
         approvedExpansion: Boolean,
     ): SeriesFolderSyncOutcome {
-        val treeUri = Uri.parse(folder.treeUri)
+        val treeUri = folder.treeUri.toUri()
         val scan = try {
             scanner.scanPdfsRecursively(
                 treeUri = treeUri,
@@ -954,7 +955,7 @@ class ComicRepository(context: Context) {
             }
             // PDF 章节目录的封面在首次导入或首次打开时通过 PdfComicVolume 生成
             if (db.chapterDao().countByComicId(comic.id) > 0) continue
-            val bytes = runCatching { readFirstImageBytes(Uri.parse(comic.uri)) }
+            val bytes = runCatching { readFirstImageBytes(comic.uri.toUri()) }
                 .getOrNull() ?: continue
             val cover = Covers.createCoverFile(appContext, comic.id, bytes) ?: continue
             applyGeneratedCover(comic, cover)

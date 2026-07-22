@@ -79,6 +79,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
@@ -103,7 +104,7 @@ internal fun buildFolderPickerInitialUri(lastPickedFolder: String?): Uri? {
     if (lastPickedFolder == null) return null
 
     return try {
-        val treeUri = Uri.parse(lastPickedFolder)
+        val treeUri = lastPickedFolder.toUri()
         if (
             treeUri.scheme != ContentResolver.SCHEME_CONTENT ||
             treeUri.authority.isNullOrBlank() ||
