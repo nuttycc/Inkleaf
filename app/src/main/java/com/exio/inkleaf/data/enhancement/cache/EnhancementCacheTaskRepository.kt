@@ -11,9 +11,11 @@ import androidx.work.workDataOf
 import com.exio.inkleaf.data.ComicRepository
 import com.exio.inkleaf.data.db.AppDatabase
 import com.exio.inkleaf.data.db.EnhancementCachePageCompletion
+import com.exio.inkleaf.data.db.EnhancementCachePageResultKind
 import com.exio.inkleaf.data.db.EnhancementCacheTaskEntity
 import com.exio.inkleaf.data.db.EnhancementCacheTaskReplacementDecision
 import com.exio.inkleaf.data.db.EnhancementCacheTaskStatus
+import com.exio.inkleaf.data.enhancement.ENHANCEMENT_PIPELINE_REVISION
 import com.exio.inkleaf.data.enhancement.EnhancementPageKey
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -152,12 +154,14 @@ class EnhancementCacheTaskRepository private constructor(context: Context) {
     }
 
     /**
-     * Records progress only after the corresponding pinned file has been persisted successfully.
-     * Matching includes the comic, model revision, source revision, and requested page range.
+     * Records progress after a page was handled for the active bulk task.
+     * Callers pass [resultKind] so skipped pages count as done without a pin file.
+     * Matching includes comic, model revision, source revision, pipeline revision, and range.
      */
     suspend fun recordCompletedPage(
         key: EnhancementPageKey,
         page: Int,
+        resultKind: String = EnhancementCachePageResultKind.ENHANCED,
     ): EnhancementCachePageRecordResult = withContext(NonCancellable) {
         when (
             val result = dao.markPageCompleted(
@@ -166,8 +170,10 @@ class EnhancementCacheTaskRepository private constructor(context: Context) {
                 modelId = key.modelId,
                 modelRevision = key.modelRevision,
                 sourceRevision = key.sourceRevision,
+                pipelineRevision = key.pipelineRevision,
                 page = page,
                 completedAt = System.currentTimeMillis(),
+                resultKind = resultKind,
             )
         ) {
             EnhancementCachePageCompletion.NotApplicable ->
@@ -185,6 +191,13 @@ class EnhancementCacheTaskRepository private constructor(context: Context) {
             }
         }
     }
+
+    /** Completed-page rows including [EnhancementCachePageResultKind] for diagnostics/UI. */
+    suspend fun getCompletedPageResults(taskId: String) =
+        dao.getCompletedPageResults(taskId)
+
+    suspend fun getCompletedPageResultKind(taskId: String, page: Int): String? =
+        dao.getCompletedPageResultKind(taskId, page)
 
     suspend fun pause(taskId: String) = taskOperationMutex.withLock {
         val task = dao.getById(taskId) ?: return@withLock
@@ -255,6 +268,7 @@ class EnhancementCacheTaskRepository private constructor(context: Context) {
             modelId = modelId,
             modelRevision = modelRevision,
             sourceRevision = sourceRevision,
+            pipelineRevision = ENHANCEMENT_PIPELINE_REVISION,
             startPageInclusive = startPageInclusive,
             endPageInclusive = endPageInclusive,
             nextPage = startPageInclusive,

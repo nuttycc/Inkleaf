@@ -610,6 +610,7 @@ class EnhancementPageJobCoordinatorTest {
             modelId = "model",
             modelRevision = "model-revision",
             sourceRevision = "source-revision",
+            pipelineRevision = ENHANCEMENT_PIPELINE_REVISION,
             value = page,
         )
     }

@@ -218,6 +218,8 @@ object NcnnEnhancementEngine {
             val diskCache = EnhancedImageDiskCache.getInstance(context)
             val writeToken = diskCache.writeToken(key)
             sourceTransferred = true
+            // discardProducer runs only if this job is dropped before the producer starts.
+            // Once the producer runs, enhanceUncached / cache-hit path owns releaseSource.
             return pageJobs.request(
                 key = key,
                 priority = priority,
@@ -227,17 +229,20 @@ object NcnnEnhancementEngine {
                     finalizePersistence(diskCache, writeToken, key, outcome, required)
                 },
             ) {
-                try {
-                    cached(context, key) ?: enhanceUncached(
+                val memoryHit = cached(context, key)
+                if (memoryHit != null) {
+                    if (recycleSource) recycleSafely(source)
+                    memoryHit
+                } else {
+                    enhanceUncached(
                         context = context,
                         modelId = key.modelId,
                         source = source,
                         cacheKey = key.value,
                         preferVulkan = preferVulkan,
                         cacheInMemory = cacheInMemory,
+                        releaseSource = recycleSource,
                     )
-                } finally {
-                    if (recycleSource) recycleSafely(source)
                 }
             }
         } finally {
@@ -290,8 +295,11 @@ object NcnnEnhancementEngine {
                     finalizePersistence(diskCache, writeToken, key, outcome, required)
                 },
             ) {
-                cached(context, key) ?: sourceLoader().let { source ->
-                    try {
+                val memoryHit = cached(context, key)
+                if (memoryHit != null) {
+                    memoryHit
+                } else {
+                    sourceLoader().let { source ->
                         enhanceUncached(
                             context = context,
                             modelId = key.modelId,
@@ -299,9 +307,8 @@ object NcnnEnhancementEngine {
                             cacheKey = key.value,
                             preferVulkan = preferVulkan,
                             cacheInMemory = false,
+                            releaseSource = true,
                         )
-                    } finally {
-                        recycleSafely(source)
                     }
                 }
             }
@@ -358,21 +365,32 @@ object NcnnEnhancementEngine {
         cacheKey: String,
         preferVulkan: Boolean,
         cacheInMemory: Boolean,
+        releaseSource: Boolean,
     ): EnhancementInferenceOutcome {
         val requestGeneration = activeModelGeneration(modelId)
-            ?: return EnhancementInferenceOutcome.Failure("模型当前不可用，已显示原图。")
+            ?: run {
+                if (releaseSource) recycleSafely(source)
+                return EnhancementInferenceOutcome.Failure("模型当前不可用，已显示原图。")
+            }
         return withContext(Dispatchers.Default) {
             currentCoroutineContext().ensureActive()
             if (!NativeEnhancementBridge.isLoaded()) {
+                if (releaseSource) recycleSafely(source)
                 return@withContext EnhancementInferenceOutcome.Failure(
                     "ncnn 推理库未能加载。"
                 )
             }
             var prepared: Bitmap? = null
             var unownedOutput: Bitmap? = null
+            // When true, [source] still needs recycle in finally (prepared === source path).
+            var sourceHeldForInference = releaseSource
             try {
                 currentCoroutineContext().ensureActive()
-                cached(modelId, cacheKey)?.let { return@withContext it }
+                cached(modelId, cacheKey)?.let {
+                    if (releaseSource) recycleSafely(source)
+                    sourceHeldForInference = false
+                    return@withContext it
+                }
                 val session = sessionFor(context, modelId, preferVulkan)
                     ?: return@withContext EnhancementInferenceOutcome.Failure(
                         "模型加载失败，请重新下载模型包。"
@@ -381,6 +399,12 @@ object NcnnEnhancementEngine {
                     ?: return@withContext EnhancementInferenceOutcome.Failure(
                         "页面尺寸过大，无法安全创建推理位图。"
                     )
+                // Floor decode may exceed M; drop it once continuous clamp exists so peak
+                // matches calculateMaxInputPixels (prepared + output + native mats only).
+                if (releaseSource && prepared !== source) {
+                    recycleSafely(source)
+                    sourceHeldForInference = false
+                }
                 val inferenceInput = requireNotNull(prepared)
                 unownedOutput = createBitmap(
                     inferenceInput.width * session.scale,
@@ -439,7 +463,11 @@ object NcnnEnhancementEngine {
                 EnhancementInferenceOutcome.Failure("AI 推理失败，已显示原图。")
             } finally {
                 unownedOutput?.recycle()
-                prepared?.takeIf { it !== source }?.recycle()
+                val preparedBitmap = prepared
+                if (preparedBitmap != null && preparedBitmap !== source) {
+                    recycleSafely(preparedBitmap)
+                }
+                if (sourceHeldForInference) recycleSafely(source)
             }
         }
     }

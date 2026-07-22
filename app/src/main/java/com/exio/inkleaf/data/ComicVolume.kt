@@ -3,6 +3,7 @@ package com.exio.inkleaf.data
 import android.graphics.Bitmap
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import com.exio.inkleaf.data.enhancement.EnhancementSkipReason
 
 /** Physical-pixel bounds for formats, such as PDF, that can render at a requested resolution. */
 data class PageRenderRequest(
@@ -68,6 +69,26 @@ interface ComicVolume {
     /** Whether this volume can rasterize a page for the reader's current physical viewport. */
     val supportsTargetedPageBitmap: Boolean
         get() = false
+
+    /**
+     * Whether the fast whole-page raster enhancement path may run on this volume.
+     * Default false so unknown formats skip safely; zip/album opt in explicitly.
+     */
+    val supportsFastRasterEnhancement: Boolean
+        get() = false
+
+    /**
+     * Why fast enhancement is unavailable when [supportsFastRasterEnhancement] is false.
+     * PDF overrides with [EnhancementSkipReason.PDF_UNSUPPORTED].
+     */
+    val fastRasterEnhancementSkipReason: EnhancementSkipReason
+        get() = EnhancementSkipReason.FAST_PATH_UNSUPPORTED
+
+    /**
+     * Original pixel size of a compressed raster page without allocating the full bitmap.
+     * Null when the volume is not a simple raster source or bounds cannot be read.
+     */
+    suspend fun loadPageRasterSize(globalPage: Int): PagePixelSize? = null
 
     /**
      * 直接读取第 [globalPage] 页的位图，跳过 [loadPageBytes] 的"渲染→压缩→UI 再解码"往返。

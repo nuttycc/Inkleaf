@@ -32,6 +32,7 @@ import com.exio.inkleaf.data.ReadingSessionRules
 import com.exio.inkleaf.data.db.BookSourceType
 import com.exio.inkleaf.data.db.BookmarkEntity
 import com.exio.inkleaf.data.db.ComicEntity
+import com.exio.inkleaf.data.db.EnhancementCachePageResultKind
 import com.exio.inkleaf.data.db.EnhancementCacheTaskEntity
 import com.exio.inkleaf.data.db.FavoritePageEntity
 import com.exio.inkleaf.data.enhancement.EnhancementModelCatalog
@@ -544,7 +545,21 @@ class ReaderViewModel(
 
     fun recordPinnedEnhancement(key: EnhancementPageKey, page: Int) {
         viewModelScope.launch {
-            enhancementCacheRepo.recordCompletedPage(key, page)
+            enhancementCacheRepo.recordCompletedPage(
+                key = key,
+                page = page,
+                resultKind = EnhancementCachePageResultKind.ENHANCED,
+            )
+        }
+    }
+
+    fun recordSkippedEnhancement(key: EnhancementPageKey, page: Int) {
+        viewModelScope.launch {
+            enhancementCacheRepo.recordCompletedPage(
+                key = key,
+                page = page,
+                resultKind = EnhancementCachePageResultKind.SKIPPED,
+            )
         }
     }
 

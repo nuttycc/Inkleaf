@@ -132,13 +132,19 @@ import com.exio.inkleaf.data.enhancement.EnhancementModelCatalog
 import com.exio.inkleaf.data.enhancement.EnhancementModelDescriptor
 import com.exio.inkleaf.data.enhancement.EnhancementModelInstallState
 import com.exio.inkleaf.data.enhancement.EnhancementPageKey
+import com.exio.inkleaf.data.enhancement.EnhancementPagePlan
 import com.exio.inkleaf.data.enhancement.EnhancementPersistenceStatus
 import com.exio.inkleaf.data.enhancement.EnhancementRequestPriority
 import com.exio.inkleaf.data.enhancement.EnhancementSelectionIds
+import com.exio.inkleaf.data.enhancement.EnhancementSkipReason
 import com.exio.inkleaf.data.enhancement.EnhancementSourceOwnership
 import com.exio.inkleaf.data.enhancement.NcnnEnhancementEngine
+import com.exio.inkleaf.data.enhancement.ENHANCEMENT_PIPELINE_REVISION
 import com.exio.inkleaf.data.enhancement.buildEnhancementPageKey
 import com.exio.inkleaf.data.enhancement.loadEnhancementSourceBitmap
+import com.exio.inkleaf.data.enhancement.planEnhancementPage
+import com.exio.inkleaf.data.enhancement.readerDescription
+import com.exio.inkleaf.data.enhancement.readerShortLabel
 import com.exio.inkleaf.data.ocr.OcrPageResult
 import com.exio.inkleaf.data.ocr.OcrSelectionSession
 import com.exio.inkleaf.data.ocr.PaddleOcrEngine
@@ -317,6 +323,7 @@ fun ReaderScreen(
                     enhancementModelInstalled = selectedModelInstalled,
                     enhancementCacheTask = enhancementCacheTask,
                     onPinnedEnhancement = viewModel::recordPinnedEnhancement,
+                    onSkippedEnhancement = viewModel::recordSkippedEnhancement,
                     onOpenEnhancement = { showEnhancementSheet = true },
                     onBack = exitReader,
                     showControls = showControls,
@@ -398,6 +405,7 @@ private fun ComicPager(
     enhancementModelInstalled: Boolean,
     enhancementCacheTask: EnhancementCacheTaskEntity?,
     onPinnedEnhancement: (EnhancementPageKey, Int) -> Unit,
+    onSkippedEnhancement: (EnhancementPageKey, Int) -> Unit,
     onOpenEnhancement: () -> Unit,
     onBack: () -> Unit,
     showControls: Boolean,
@@ -544,7 +552,7 @@ private fun ComicPager(
             ?.takeIf { enhancementModelInstalled }
         if (
             model == null ||
-            !completion.success ||
+            !completion.readyForPrefetch ||
             completion.page != pagerState.settledPage ||
             completion.selectionId != enhancementSelectionId
         ) {
@@ -566,9 +574,11 @@ private fun ComicPager(
                 comicId = comicId,
                 model = model,
                 sourceRevision = volume.sourceRevision,
+                pipelineRevision = ENHANCEMENT_PIPELINE_REVISION,
                 page = targetPage,
             ),
             onPinned = onPinnedEnhancement,
+            onSkipped = onSkippedEnhancement,
         )
     }
 
@@ -639,13 +649,15 @@ private fun ComicPager(
                             comicId = comicId,
                             model = model,
                             sourceRevision = volume.sourceRevision,
+                            pipelineRevision = ENHANCEMENT_PIPELINE_REVISION,
                             page = page,
                         )
                     } == true,
                 onPinnedEnhancement = onPinnedEnhancement,
+                onSkippedEnhancement = onSkippedEnhancement,
                 ocrResult = ocrResults[page],
                 ocrMode = ocrSelection.activePage == page,
-                onEnhancementCompleted = { page, selectionId, success ->
+                onEnhancementCompleted = { page, selectionId, readyForPrefetch ->
                     if (
                         page == pagerState.currentPage &&
                         selectionId == enhancementSelectionId
@@ -653,7 +665,7 @@ private fun ComicPager(
                         enhancementCompletion = PageEnhancementCompletion(
                             page = page,
                             selectionId = selectionId,
-                            success = success,
+                            readyForPrefetch = readyForPrefetch,
                         )
                     }
                 },
@@ -907,16 +919,30 @@ private fun ReaderTopBar(
                     "图像增强，已选择 $modelName，页面加载时应用"
                 }
             }
-            if (enhancementStatus is PageEnhancementStatus.Failed) {
+            val topBarStatusLabel = enhancementStatus?.readerTopBarLabel()
+            if (topBarStatusLabel != null) {
                 TextButton(
                     onClick = onOpenEnhancement,
                     modifier = Modifier.semantics {
                         contentDescription = enhancementDescription
                     },
                 ) {
+                    if (enhancementStatus is PageEnhancementStatus.Processing) {
+                        CircularProgressIndicator(
+                            modifier = Modifier
+                                .padding(end = 6.dp)
+                                .size(14.dp),
+                            strokeWidth = 2.dp,
+                            color = accent,
+                        )
+                    }
                     Text(
-                        text = "优化失败",
-                        color = readerErrorColor(),
+                        text = topBarStatusLabel,
+                        color = if (enhancementStatus is PageEnhancementStatus.Failed) {
+                            readerErrorColor()
+                        } else {
+                            Color.White
+                        },
                         style = MaterialTheme.typography.labelLarge,
                         maxLines = 1,
                     )
@@ -928,29 +954,20 @@ private fun ReaderTopBar(
                         contentDescription = enhancementDescription
                     },
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        if (enhancementStatus is PageEnhancementStatus.Processing) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(32.dp),
-                                strokeWidth = 2.dp,
-                                color = accent,
-                            )
-                        }
-                        Icon(
-                            painter = painterResource(
-                                MaterialSymbolsOutlinedR.drawable
-                                    .materialsymbols_ic_photo_filter_outlined,
-                            ),
-                            contentDescription = null,
-                            tint = if (
-                                enhancementSelectionId != EnhancementSelectionIds.ORIGINAL
-                            ) {
-                                accent
-                            } else {
-                                Color.White
-                            },
-                        )
-                    }
+                    Icon(
+                        painter = painterResource(
+                            MaterialSymbolsOutlinedR.drawable
+                                .materialsymbols_ic_photo_filter_outlined,
+                        ),
+                        contentDescription = null,
+                        tint = if (
+                            enhancementSelectionId != EnhancementSelectionIds.ORIGINAL
+                        ) {
+                            accent
+                        } else {
+                            Color.White
+                        },
+                    )
                 }
             }
             IconButton(onClick = onToggleBookmark) {
@@ -1419,6 +1436,7 @@ private fun ComicPage(
     enhancementModelInstalled: Boolean,
     pinForActiveTask: Boolean,
     onPinnedEnhancement: (EnhancementPageKey, Int) -> Unit,
+    onSkippedEnhancement: (EnhancementPageKey, Int) -> Unit,
     ocrResult: OcrPageResult?,
     ocrMode: Boolean,
     onEnhancementCompleted: (Int, String, Boolean) -> Unit,
@@ -1548,76 +1566,120 @@ private fun ComicPage(
                         page = page,
                         model = enhancementModel,
                     )
-                    NcnnEnhancementEngine.recordForegroundRequest(enhancementModel.id)
-                    val cached = NcnnEnhancementEngine.cached(context, pageKey)
-                    if (cached != null) {
-                        val cachedContent = PageContent.Bitmap(
-                            bitmap = cached.bitmap.asImageBitmap(),
-                            enhancementKey = pageKey,
-                        )
-                        value = cachedContent
-                        if (pinForActiveTask) {
-                            val pinned = NcnnEnhancementEngine.pinCached(
-                                context = context,
-                                key = pageKey,
-                                cached = cached,
-                                priority = EnhancementRequestPriority.CURRENT_PAGE,
-                            )
-                            if (
-                                pinned is EnhancementInferenceOutcome.Success &&
-                                pinned.persistenceStatus == EnhancementPersistenceStatus.PINNED
-                            ) {
-                                onPinnedEnhancement(pageKey, page)
-                            }
-                        }
-                        cachedContent
-                    } else {
-                        val retainedOriginal = value.takeIf { current ->
-                            current is PageContent.Bitmap || current is PageContent.Bytes
-                        }
-                        val retainedProcessing = retainedOriginal?.withEnhancementStatus(
-                            status = PageEnhancementStatus.Processing,
-                            enhancementKey = pageKey,
-                        )
-                        if (retainedProcessing != null) value = retainedProcessing
-                        val sourceBitmap = loadEnhancementSourceBitmap(
+                    when (
+                        val plan = planEnhancementPage(
                             volume = volume,
                             page = page,
                             scale = enhancementModel.scale,
                         )
-                        val readableOriginal = retainedProcessing ?: PageContent.Bitmap(
-                            bitmap = sourceBitmap.asImageBitmap(),
-                            enhancementStatus = PageEnhancementStatus.Processing,
-                            enhancementKey = pageKey,
-                        )
-                        value = readableOriginal
-                        when (
-                            val outcome = NcnnEnhancementEngine.enhance(
-                                context = context,
-                                key = pageKey,
-                                source = sourceBitmap,
-                                persistTransient = !pinForActiveTask,
-                                sourceOwnership = EnhancementSourceOwnership.BORROWED,
-                            )
-                        ) {
-                            is EnhancementInferenceOutcome.Success -> {
-                                if (
-                                    outcome.persistenceStatus ==
-                                    EnhancementPersistenceStatus.PINNED
-                                ) {
-                                    onPinnedEnhancement(pageKey, page)
+                    ) {
+                        is EnhancementPagePlan.Skip -> {
+                            // Mirror original-path PDF guard: no viewport request yet → Loading.
+                            if (volume.supportsTargetedPageBitmap && pageRenderRequest == null) {
+                                PageContent.Loading
+                            } else {
+                                val original = loadOriginalPageContent(
+                                    volume = volume,
+                                    page = page,
+                                    pageRenderRequest = pageRenderRequest,
+                                )
+                                original.withEnhancementStatus(
+                                    status = PageEnhancementStatus.Skipped(plan.reason),
+                                    enhancementKey = pageKey,
+                                ).also { skipped ->
+                                    if (pinForActiveTask) {
+                                        onSkippedEnhancement(pageKey, page)
+                                    }
+                                    value = skipped
                                 }
-                                PageContent.Bitmap(
-                                    bitmap = outcome.bitmap.asImageBitmap(),
-                                    enhancementKey = pageKey,
-                                )
                             }
+                        }
 
-                            is EnhancementInferenceOutcome.Failure ->
-                                readableOriginal.withEnhancementStatus(
-                                    status = PageEnhancementStatus.Failed(outcome.message),
+                        is EnhancementPagePlan.Enhance -> {
+                            NcnnEnhancementEngine.recordForegroundRequest(enhancementModel.id)
+                            val cached = NcnnEnhancementEngine.cached(context, pageKey)
+                            if (cached != null) {
+                                val cachedContent = PageContent.Bitmap(
+                                    bitmap = cached.bitmap.asImageBitmap(),
+                                    enhancementStatus = PageEnhancementStatus.Applied,
                                     enhancementKey = pageKey,
                                 )
+                                value = cachedContent
+                                if (pinForActiveTask) {
+                                    val pinned = NcnnEnhancementEngine.pinCached(
+                                        context = context,
+                                        key = pageKey,
+                                        cached = cached,
+                                        priority = EnhancementRequestPriority.CURRENT_PAGE,
+                                    )
+                                    if (
+                                        pinned is EnhancementInferenceOutcome.Success &&
+                                        pinned.persistenceStatus ==
+                                        EnhancementPersistenceStatus.PINNED
+                                    ) {
+                                        onPinnedEnhancement(pageKey, page)
+                                    }
+                                }
+                                cachedContent
+                            } else {
+                                val retainedOriginal = value.takeIf { current ->
+                                    current is PageContent.Bitmap || current is PageContent.Bytes
+                                }
+                                // Keep any already-shown 原图 as the processing preview. Never attach the
+                                // floor-decoded inference source to composition — TRANSFERRED
+                                // ownership lets the engine recycle that overshoot after prepareInput
+                                // (F1a peak invariant vs calculateMaxInputPixels).
+                                val retainedProcessing = retainedOriginal?.withEnhancementStatus(
+                                    status = PageEnhancementStatus.Processing,
+                                    enhancementKey = pageKey,
+                                )
+                                value = retainedProcessing
+                                    ?: PageContent.Enhancing(
+                                        enhancementStatus = PageEnhancementStatus.Processing,
+                                        enhancementKey = pageKey,
+                                    )
+                                val sourceBitmap = loadEnhancementSourceBitmap(
+                                    volume = volume,
+                                    page = page,
+                                    scale = enhancementModel.scale,
+                                )
+                                when (
+                                    val outcome = NcnnEnhancementEngine.enhance(
+                                        context = context,
+                                        key = pageKey,
+                                        source = sourceBitmap,
+                                        persistTransient = !pinForActiveTask,
+                                        sourceOwnership = EnhancementSourceOwnership.TRANSFERRED,
+                                    )
+                                ) {
+                                    is EnhancementInferenceOutcome.Success -> {
+                                        if (
+                                            outcome.persistenceStatus ==
+                                            EnhancementPersistenceStatus.PINNED
+                                        ) {
+                                            onPinnedEnhancement(pageKey, page)
+                                        }
+                                        PageContent.Bitmap(
+                                            bitmap = outcome.bitmap.asImageBitmap(),
+                                            enhancementStatus = PageEnhancementStatus.Applied,
+                                            enhancementKey = pageKey,
+                                        )
+                                    }
+
+                                    is EnhancementInferenceOutcome.Failure -> {
+                                        val fallback = retainedProcessing
+                                            ?: loadOriginalPageContent(
+                                                volume = volume,
+                                                page = page,
+                                                pageRenderRequest = pageRenderRequest,
+                                            )
+                                        fallback.withEnhancementStatus(
+                                            status = PageEnhancementStatus.Failed(outcome.message),
+                                            enhancementKey = pageKey,
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -1642,14 +1704,15 @@ private fun ComicPage(
             page == currentPage &&
             enhancementModelInstalled &&
             expectedEnhancementKey != null &&
-            content is PageContent.Bitmap &&
             content.enhancementKey == expectedEnhancementKey
         ) {
-            onEnhancementCompleted(
-                page,
-                enhancementSelectionId,
-                (content as PageContent.Bitmap).enhancementStatus == null,
-            )
+            // Prefetch after the page is settled on applied enhance or planned skip.
+            val readyForPrefetch = when (content.enhancementStatus) {
+                PageEnhancementStatus.Applied,
+                is PageEnhancementStatus.Skipped -> true
+                else -> false
+            }
+            onEnhancementCompleted(page, enhancementSelectionId, readyForPrefetch)
         }
     }
 
@@ -1768,7 +1831,8 @@ private fun ComicPage(
                         )
                     }
 
-                    PageContent.Loading -> {
+                    PageContent.Loading,
+                    is PageContent.Enhancing -> {
                         // 没有模糊垫底（预热未到/系统不支持）才显示转圈
                         if (!showBlurPlaceholder) {
                             DelayedSpinner(showDelay = 200.milliseconds)
@@ -1813,8 +1877,16 @@ private suspend fun prefetchEnhancement(
     model: EnhancementModelDescriptor,
     pinForActiveTask: Boolean,
     onPinned: (EnhancementPageKey, Int) -> Unit,
+    onSkipped: (EnhancementPageKey, Int) -> Unit,
 ) {
     val pageKey = buildEnhancementPageKey(comicId, volume, page, model)
+    when (planEnhancementPage(volume, page, model.scale)) {
+        is EnhancementPagePlan.Skip -> {
+            if (pinForActiveTask) onSkipped(pageKey, page)
+            return
+        }
+        is EnhancementPagePlan.Enhance -> Unit
+    }
     NcnnEnhancementEngine.recordForegroundRequest(model.id)
     val cached = NcnnEnhancementEngine.cached(context, pageKey)
     if (cached != null) {
@@ -1917,6 +1989,11 @@ internal fun pdfPageRenderRequest(viewportSize: IntSize, zoomed: Boolean): PageR
  */
 private sealed interface PageContent {
     data object Loading : PageContent
+    /** Enhancement in flight without retaining the inference source bitmap. */
+    data class Enhancing(
+        val enhancementStatus: PageEnhancementStatus,
+        val enhancementKey: EnhancementPageKey,
+    ) : PageContent
     data class Bitmap(
         val bitmap: ImageBitmap,
         val enhancementStatus: PageEnhancementStatus? = null,
@@ -1934,6 +2011,7 @@ private val PageContent.enhancementStatus: PageEnhancementStatus?
     get() = when (this) {
         is PageContent.Bitmap -> enhancementStatus
         is PageContent.Bytes -> enhancementStatus
+        is PageContent.Enhancing -> enhancementStatus
         is PageContent.Error,
         PageContent.Loading -> null
     }
@@ -1942,6 +2020,7 @@ private val PageContent.enhancementKey: EnhancementPageKey?
     get() = when (this) {
         is PageContent.Bitmap -> enhancementKey
         is PageContent.Bytes -> enhancementKey
+        is PageContent.Enhancing -> enhancementKey
         is PageContent.Error,
         PageContent.Loading -> null
     }
@@ -1953,6 +2032,7 @@ private fun PageContent.withEnhancementStatus(
     when (this) {
         is PageContent.Bitmap -> copy(enhancementStatus = status, enhancementKey = enhancementKey)
         is PageContent.Bytes -> copy(enhancementStatus = status, enhancementKey = enhancementKey)
+        is PageContent.Enhancing -> copy(enhancementStatus = status, enhancementKey = enhancementKey)
         is PageContent.Error,
         PageContent.Loading -> this
     }
@@ -1975,6 +2055,7 @@ private fun EnhancementCacheTaskEntity?.requestsPage(
     comicId: Long,
     model: EnhancementModelDescriptor,
     sourceRevision: String,
+    pipelineRevision: String,
     page: Int,
 ): Boolean {
     val task = this ?: return false
@@ -1983,21 +2064,36 @@ private fun EnhancementCacheTaskEntity?.requestsPage(
             task.modelId == model.id &&
             task.modelRevision == model.revision &&
             task.sourceRevision == sourceRevision &&
+            task.pipelineRevision == pipelineRevision &&
             page in task.startPageInclusive..task.endPageInclusive
 }
 
 private sealed interface PageEnhancementStatus {
     data object Processing : PageEnhancementStatus
+    data object Applied : PageEnhancementStatus
+    data class Skipped(val reason: EnhancementSkipReason) : PageEnhancementStatus
     data class Failed(val message: String) : PageEnhancementStatus
 }
 
 private fun PageEnhancementStatus.readerShortLabel(): String = when (this) {
     PageEnhancementStatus.Processing -> "优化中"
+    PageEnhancementStatus.Applied -> "已增强"
+    is PageEnhancementStatus.Skipped -> reason.readerShortLabel()
     is PageEnhancementStatus.Failed -> "优化失败，已显示原图"
+}
+
+/** Compact top-bar label when chrome is expanded (U1). */
+private fun PageEnhancementStatus.readerTopBarLabel(): String = when (this) {
+    PageEnhancementStatus.Processing -> "优化中"
+    PageEnhancementStatus.Applied -> "已增强"
+    is PageEnhancementStatus.Skipped -> reason.readerShortLabel()
+    is PageEnhancementStatus.Failed -> "优化失败"
 }
 
 private fun PageEnhancementStatus.readerDescription(): String = when (this) {
     PageEnhancementStatus.Processing -> "正在优化本页"
+    PageEnhancementStatus.Applied -> "本页已应用图像增强"
+    is PageEnhancementStatus.Skipped -> reason.readerDescription()
     is PageEnhancementStatus.Failed -> message
 }
 
@@ -2011,7 +2107,8 @@ private data class PageEnhancementReport(
 private data class PageEnhancementCompletion(
     val page: Int,
     val selectionId: String,
-    val success: Boolean,
+    /** Settled Applied or Skipped — may start next-page prefetch. */
+    val readyForPrefetch: Boolean,
 )
 
 private const val PREFETCH_DELAY_MS = 200L

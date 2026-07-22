@@ -7,17 +7,21 @@ import androidx.work.workDataOf
 import com.exio.inkleaf.data.ComicRepository
 import com.exio.inkleaf.data.db.AppDatabase
 import com.exio.inkleaf.data.db.EnhancementCachePageCompletion
+import com.exio.inkleaf.data.db.EnhancementCachePageResultKind
 import com.exio.inkleaf.data.db.EnhancementCacheTaskEntity
 import com.exio.inkleaf.data.db.EnhancementCacheTaskStatus
 import com.exio.inkleaf.data.enhancement.EnhancedImageDiskCache
 import com.exio.inkleaf.data.enhancement.EnhancementInferenceOutcome
 import com.exio.inkleaf.data.enhancement.EnhancementModelCatalog
 import com.exio.inkleaf.data.enhancement.EnhancementModelRepository
+import com.exio.inkleaf.data.enhancement.ENHANCEMENT_PIPELINE_REVISION
+import com.exio.inkleaf.data.enhancement.EnhancementPagePlan
 import com.exio.inkleaf.data.enhancement.EnhancementPersistenceStatus
 import com.exio.inkleaf.data.enhancement.EnhancementRequestPriority
 import com.exio.inkleaf.data.enhancement.NcnnEnhancementEngine
 import com.exio.inkleaf.data.enhancement.buildEnhancementPageKey
 import com.exio.inkleaf.data.enhancement.loadEnhancementSourceBitmap
+import com.exio.inkleaf.data.enhancement.planEnhancementPage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -66,6 +70,13 @@ class EnhancementCacheWorker(
             if (currentModelRevision != task.modelRevision) {
                 return@withLock expire(task, "AI 模型已更新，请重新创建缓存任务", comic.title)
             }
+            if (task.pipelineRevision != ENHANCEMENT_PIPELINE_REVISION) {
+                return@withLock expire(
+                    task,
+                    "增强预处理流程已更新，请重新创建缓存任务",
+                    comic.title,
+                )
+            }
             if (EnhancementModelRepository.getInstance(applicationContext)
                     .installedDirectory(model.id) == null
             ) {
@@ -105,44 +116,50 @@ class EnhancementCacheWorker(
                     page = page.coerceAtLeast(task.nextPage)
                     if (page > task.endPageInclusive) break
                     val key = buildEnhancementPageKey(task.comicId, volume, page, model)
-                    val ready = diskCache.containsPinned(key) ||
-                            diskCache.promoteToPinned(key, writeToken)
-                    if (!ready) {
-                        val cached = NcnnEnhancementEngine.cached(applicationContext, key)
-                        val outcome = if (cached != null) {
-                            NcnnEnhancementEngine.pinCached(
-                                context = applicationContext,
-                                key = key,
-                                cached = cached,
-                                priority = EnhancementRequestPriority.BULK_CACHE,
-                            )
-                        } else {
-                            NcnnEnhancementEngine.enhanceBulk(
-                                context = applicationContext,
-                                key = key,
-                            ) {
-                                loadEnhancementSourceBitmap(volume, page, model.scale)
-                            }
-                        }
-                        when (outcome) {
-                            is EnhancementInferenceOutcome.Success -> when (
-                                outcome.persistenceStatus
-                            ) {
-                                EnhancementPersistenceStatus.PINNED -> Unit
-                                EnhancementPersistenceStatus.LOW_STORAGE ->
-                                    throw EnhancementCacheLowStorageException()
+                    val pageResultKind = when (val plan = planEnhancementPage(volume, page, model.scale)) {
+                        is EnhancementPagePlan.Skip -> EnhancementCachePageResultKind.SKIPPED
+                        is EnhancementPagePlan.Enhance -> {
+                            val ready = diskCache.containsPinned(key) ||
+                                    diskCache.promoteToPinned(key, writeToken)
+                            if (!ready) {
+                                val cached = NcnnEnhancementEngine.cached(applicationContext, key)
+                                val outcome = if (cached != null) {
+                                    NcnnEnhancementEngine.pinCached(
+                                        context = applicationContext,
+                                        key = key,
+                                        cached = cached,
+                                        priority = EnhancementRequestPriority.BULK_CACHE,
+                                    )
+                                } else {
+                                    NcnnEnhancementEngine.enhanceBulk(
+                                        context = applicationContext,
+                                        key = key,
+                                    ) {
+                                        loadEnhancementSourceBitmap(volume, page, model.scale)
+                                    }
+                                }
+                                when (outcome) {
+                                    is EnhancementInferenceOutcome.Success -> when (
+                                        outcome.persistenceStatus
+                                    ) {
+                                        EnhancementPersistenceStatus.PINNED -> Unit
+                                        EnhancementPersistenceStatus.LOW_STORAGE ->
+                                            throw EnhancementCacheLowStorageException()
 
-                                EnhancementPersistenceStatus.INVALIDATED ->
-                                    throw IOException("增强缓存目标已失效")
+                                        EnhancementPersistenceStatus.INVALIDATED ->
+                                            throw IOException("增强缓存目标已失效")
 
-                                EnhancementPersistenceStatus.WRITE_FAILED,
-                                EnhancementPersistenceStatus.NONE ->
-                                    throw IOException("增强结果写入失败")
-                            }
+                                        EnhancementPersistenceStatus.WRITE_FAILED,
+                                        EnhancementPersistenceStatus.NONE ->
+                                            throw IOException("增强结果写入失败")
+                                    }
 
-                            is EnhancementInferenceOutcome.Failure -> {
-                                throw IOException(outcome.message)
+                                    is EnhancementInferenceOutcome.Failure -> {
+                                        throw IOException(outcome.message)
+                                    }
+                                }
                             }
+                            EnhancementCachePageResultKind.ENHANCED
                         }
                     }
 
@@ -154,8 +171,10 @@ class EnhancementCacheWorker(
                             modelId = task.modelId,
                             modelRevision = task.modelRevision,
                             sourceRevision = task.sourceRevision,
+                            pipelineRevision = task.pipelineRevision,
                             page = page,
                             completedAt = updatedAt,
+                            resultKind = pageResultKind,
                         )
                     ) {
                         EnhancementCachePageCompletion.NotApplicable -> {

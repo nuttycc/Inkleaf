@@ -1,8 +1,10 @@
 package com.exio.inkleaf.data.db
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import com.exio.inkleaf.data.enhancement.ENHANCEMENT_PIPELINE_REVISION_LEGACY
 
 @Entity(
     tableName = "enhancement_cache_tasks",
@@ -17,6 +19,8 @@ data class EnhancementCacheTaskEntity(
     val modelId: String,
     val modelRevision: String,
     val sourceRevision: String,
+    @ColumnInfo(defaultValue = "'1'")
+    val pipelineRevision: String = ENHANCEMENT_PIPELINE_REVISION_LEGACY,
     val startPageInclusive: Int,
     val endPageInclusive: Int,
     val nextPage: Int,

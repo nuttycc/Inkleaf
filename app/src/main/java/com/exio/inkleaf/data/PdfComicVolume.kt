@@ -9,6 +9,7 @@ import androidx.core.graphics.createBitmap
 import com.ahmer.pdfium.PdfiumCore
 import com.exio.inkleaf.data.PdfComicVolume.Companion.pdfiumLock
 import com.exio.inkleaf.data.db.ChapterEntity
+import com.exio.inkleaf.data.enhancement.EnhancementSkipReason
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -141,6 +142,12 @@ class PdfComicVolume(
      * ComicOpenException 给出清晰提示。
      */
     override val supportsTargetedPageBitmap: Boolean = true
+
+    /** Fast whole-page SR is not used for PDF; keep targeted original renders (D3′). */
+    override val supportsFastRasterEnhancement: Boolean = false
+
+    override val fastRasterEnhancementSkipReason =
+        EnhancementSkipReason.PDF_UNSUPPORTED
 
     override suspend fun loadPageBitmap(
         globalPage: Int,

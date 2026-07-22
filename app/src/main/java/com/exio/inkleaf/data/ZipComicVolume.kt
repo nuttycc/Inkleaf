@@ -1,5 +1,9 @@
 package com.exio.inkleaf.data
 
+import android.graphics.BitmapFactory
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
 /**
  * 把现有的 zip/cbz 单文件漫画包装成 [ComicVolume]。
  *
@@ -9,6 +13,7 @@ class ZipComicVolume(private val book: ComicBook, private val title: String) : C
     override val totalPageCount: Int get() = book.pageCount
     override val sourceRevision: String get() = book.sourceRevision
     override val chapterCount: Int get() = 1
+    override val supportsFastRasterEnhancement: Boolean = true
 
     override fun chapterTitle(chapterIndex: Int): String = title
     override fun chapterStartPage(chapterIndex: Int): Int = 0
@@ -27,6 +32,18 @@ class ZipComicVolume(private val book: ComicBook, private val title: String) : C
 
     override suspend fun loadPageBytes(globalPage: Int): ByteArray =
         book.loadPageBytes(globalPage.coerceIn(0, book.pageCount - 1))
+
+    override suspend fun loadPageRasterSize(globalPage: Int): PagePixelSize? =
+        withContext(Dispatchers.IO) {
+            val bytes = loadPageBytes(globalPage)
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+                null
+            } else {
+                PagePixelSize(bounds.outWidth, bounds.outHeight)
+            }
+        }
 
     override suspend fun loadThumbnailPageBytes(globalPage: Int): ByteArray =
         book.loadThumbnailPageBytes(globalPage.coerceIn(0, book.pageCount - 1))

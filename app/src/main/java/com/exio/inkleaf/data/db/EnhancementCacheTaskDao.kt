@@ -96,6 +96,7 @@ abstract class EnhancementCacheTaskDao {
                 "AND (:taskId IS NULL OR id = :taskId) " +
                 "AND comicId = :comicId AND modelId = :modelId " +
                 "AND modelRevision = :modelRevision AND sourceRevision = :sourceRevision " +
+                "AND pipelineRevision = :pipelineRevision " +
                 "AND :page BETWEEN startPageInclusive AND endPageInclusive LIMIT 1"
     )
     protected abstract suspend fun getActiveMatchingPage(
@@ -104,6 +105,7 @@ abstract class EnhancementCacheTaskDao {
         modelId: String,
         modelRevision: String,
         sourceRevision: String,
+        pipelineRevision: String,
         page: Int,
     ): EnhancementCacheTaskEntity?
 
@@ -129,8 +131,10 @@ abstract class EnhancementCacheTaskDao {
         modelId: String,
         modelRevision: String,
         sourceRevision: String,
+        pipelineRevision: String,
         page: Int,
         completedAt: Long,
+        resultKind: String = EnhancementCachePageResultKind.ENHANCED,
     ): EnhancementCachePageCompletion {
         val task = getActiveMatchingPage(
             taskId = taskId,
@@ -138,6 +142,7 @@ abstract class EnhancementCacheTaskDao {
             modelId = modelId,
             modelRevision = modelRevision,
             sourceRevision = sourceRevision,
+            pipelineRevision = pipelineRevision,
             page = page,
         ) ?: return EnhancementCachePageCompletion.NotApplicable
         val newlyCompleted = insertCompletedPage(
@@ -145,6 +150,7 @@ abstract class EnhancementCacheTaskDao {
                 taskId = task.id,
                 page = page,
                 completedAt = completedAt,
+                resultKind = resultKind,
             )
         ) != -1L
         if (newlyCompleted) {
@@ -180,6 +186,20 @@ abstract class EnhancementCacheTaskDao {
                 "ORDER BY page ASC"
     )
     abstract suspend fun getCompletedPages(taskId: String): List<Int>
+
+    @Query(
+        "SELECT * FROM enhancement_cache_completed_pages WHERE taskId = :taskId " +
+                "ORDER BY page ASC"
+    )
+    abstract suspend fun getCompletedPageResults(
+        taskId: String,
+    ): List<EnhancementCacheCompletedPageEntity>
+
+    @Query(
+        "SELECT resultKind FROM enhancement_cache_completed_pages " +
+                "WHERE taskId = :taskId AND page = :page LIMIT 1"
+    )
+    abstract suspend fun getCompletedPageResultKind(taskId: String, page: Int): String?
 
     @Query(
         "SELECT COUNT(*) FROM enhancement_cache_completed_pages WHERE taskId = :taskId"

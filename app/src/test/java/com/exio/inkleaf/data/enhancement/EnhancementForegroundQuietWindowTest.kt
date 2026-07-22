@@ -89,6 +89,7 @@ class EnhancementForegroundQuietWindowTest {
         modelId = "model",
         modelRevision = "revision",
         sourceRevision = "source",
+        pipelineRevision = ENHANCEMENT_PIPELINE_REVISION,
         value = value,
     )
 }

@@ -22,8 +22,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ReadingSessionEntity::class,
     ],
     // v13+: reading activity history schema. No data migration — destructive rebuild is intentional (#15).
+    // v15: enhancement completed pages store enhanced vs skipped result kind.
     // Bump when the history table shape changes so identity-hash mismatches wipe cleanly.
-    version = 14,
+    version = 15,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -50,7 +51,12 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "comic_reader.db",
                 )
-                    .addMigrations(MIGRATION_8_9, MIGRATION_9_10, MIGRATION_11_12)
+                    .addMigrations(
+                        MIGRATION_8_9,
+                        MIGRATION_9_10,
+                        MIGRATION_11_12,
+                        MIGRATION_14_15,
+                    )
                     .fallbackToDestructiveMigration(dropAllTables = true)
                     .build()
                     .also { instance = it }
@@ -142,6 +148,21 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL(
                     "CREATE INDEX IF NOT EXISTS index_bookmarks_addedAt " +
                             "ON bookmarks(addedAt)"
+                )
+            }
+        }
+
+        internal val MIGRATION_14_15 = object : Migration(14, 15) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Legacy tasks keep pipelineRevision=1 so the worker expires them after the
+                // preprocess/eligibility pipeline bump instead of treating old checkpoints as done.
+                db.execSQL(
+                    "ALTER TABLE enhancement_cache_tasks " +
+                            "ADD COLUMN pipelineRevision TEXT NOT NULL DEFAULT '1'"
+                )
+                db.execSQL(
+                    "ALTER TABLE enhancement_cache_completed_pages " +
+                            "ADD COLUMN resultKind TEXT NOT NULL DEFAULT 'enhanced'"
                 )
             }
         }

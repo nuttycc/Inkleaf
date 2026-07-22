@@ -19,6 +19,7 @@ class AlbumComicVolume(
     private val filesDir = context.applicationContext.filesDir
 
     override val totalPageCount: Int = pages.size
+    override val supportsFastRasterEnhancement: Boolean = true
     override val sourceRevision: String = ReaderPageCacheKey.sourceRevision(
         buildList {
             add("album")
@@ -53,6 +54,17 @@ class AlbumComicVolume(
     override suspend fun loadPageBytes(globalPage: Int): ByteArray = withContext(Dispatchers.IO) {
         pageFile(globalPage).readBytes()
     }
+
+    override suspend fun loadPageRasterSize(globalPage: Int): PagePixelSize? =
+        withContext(Dispatchers.IO) {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(pageFile(globalPage).absolutePath, bounds)
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+                null
+            } else {
+                PagePixelSize(bounds.outWidth, bounds.outHeight)
+            }
+        }
 
     override suspend fun loadThumbnailPageBytes(globalPage: Int): ByteArray =
         loadPageBytes(globalPage)
