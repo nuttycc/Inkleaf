@@ -86,7 +86,7 @@ jobs:
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: 17
+          java-version: 25
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4.0.1
@@ -143,7 +143,7 @@ jobs:
           RELEASE_TAG: ${{ steps.meta.outputs.tag }}
 
       - name: Create or update GitHub Release
-        uses: softprops/action-gh-release@v3.0.1
+        uses: softprops/action-gh-release@v3.0.2
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
           files: |

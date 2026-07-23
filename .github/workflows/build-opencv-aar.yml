@@ -35,7 +35,7 @@ jobs:
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: 17
+          java-version: 25
 
       - name: Set up Android SDK (NDK + cmake)
         uses: android-actions/setup-android@v4.0.1
@@ -98,7 +98,7 @@ jobs:
           echo "AAR_PATH=$AAR" >> "$GITHUB_ENV"
 
       - name: Upload AAR
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: opencv-android-slim-${{ inputs.opencv_tag }}
           path: ${{ env.AAR_PATH }}

@@ -41,7 +41,7 @@ jobs:
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: 17
+          java-version: 25
 
       - name: Set up Android SDK
         if: env.CHECK_LEVEL == 'apk' || env.CHECK_LEVEL == 'full'
@@ -83,7 +83,7 @@ jobs:
 
       - name: Upload debug APK
         if: env.CHECK_LEVEL == 'apk' || env.CHECK_LEVEL == 'full'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: inkleaf-debug-${{ github.sha }}
           path: app/build/outputs/apk/debug/*.apk
@@ -92,7 +92,7 @@ jobs:
 
       - name: Upload lint report
         if: failure() && (env.CHECK_LEVEL == 'check' || env.CHECK_LEVEL == 'full')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: lint-report-${{ github.sha }}
           path: app/build/reports/lint-results-debug.html
