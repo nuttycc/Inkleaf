@@ -24,7 +24,8 @@ android {
 
 dependencies {
     implementation(libs.onnxruntime.android)
-    implementation(libs.opencv.android)
+    // Slim self-built OpenCV AAR (core/imgproc/imgcodecs/java/geometry, arm64-v8a only).
+    implementation(files("${rootDir}/libs/opencv-slim.aar"))
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.core.ktx)
 }
