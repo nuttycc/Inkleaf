@@ -290,8 +290,9 @@ class PdfComicVolume(
         pageIndex: Int,
         fullQuality: Boolean,
     ): ByteArray {
+        val callerContext = currentCoroutineContext()
         val bitmap = pdfiumLock.withLock {
-            currentCoroutineContext().ensureActive()
+            callerContext.ensureActive()
             renderPageBitmapLocked(
                 chapterIndex = chapterIndex,
                 pageIndex = pageIndex,
@@ -321,9 +322,12 @@ class PdfComicVolume(
         pageIndex: Int,
         qualityScale: Double,
         request: PageRenderRequest?,
-    ): Bitmap? = pdfiumLock.withLock {
-        currentCoroutineContext().ensureActive()
-        renderPageBitmapLocked(chapterIndex, pageIndex, qualityScale, request)
+    ): Bitmap? {
+        val callerContext = currentCoroutineContext()
+        return pdfiumLock.withLock {
+            callerContext.ensureActive()
+            renderPageBitmapLocked(chapterIndex, pageIndex, qualityScale, request)
+        }
     }
 
     private fun renderPageBitmapLocked(
