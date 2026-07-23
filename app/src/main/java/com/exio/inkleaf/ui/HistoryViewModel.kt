@@ -86,6 +86,7 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
     private val clock = SystemReadingClock()
     private val eventChannel = Channel<HistoryEvent>(Channel.BUFFERED)
     private val todayRefresh = MutableStateFlow(0)
+    private var lastRefreshDate: LocalDate? = null
 
     /** Session id currently resolving for continue-reading; null when idle. */
     var resolvingSessionId by mutableStateOf<String?>(null)
@@ -136,6 +137,11 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
         .cachedIn(viewModelScope)
 
     fun refreshDateLabels() {
+        val today = Instant.ofEpochMilli(clock.nowMillis())
+            .atZone(ZoneId.systemDefault())
+            .toLocalDate()
+        if (today == lastRefreshDate) return
+        lastRefreshDate = today
         todayRefresh.value += 1
     }
 
