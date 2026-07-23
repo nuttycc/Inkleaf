@@ -8,10 +8,11 @@
 #   python3 build_sdk.py --config inkleaf-config.py --modules_list "..." ...
 #
 # This file is copied next to build_sdk.py (opencv/platforms/android/) before
-# execution, so `from build_sdk_helper import ABI` resolves at runtime.
+# execution. build_sdk.py loads it via exec(), sharing its globals, so the ABI
+# class (defined in build_sdk.py itself in OpenCV 5.x; build_sdk_helper.py was
+# removed) is directly available — no import needed.
 
 import os
-from build_sdk_helper import ABI
 
 # NDK min API level. App minSdk=29, but NDK API level may be lower (it is the
 # floor of libc symbols the .so may link). 24 keeps broad device coverage and
