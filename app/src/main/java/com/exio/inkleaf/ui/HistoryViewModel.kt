@@ -20,7 +20,9 @@ import com.exio.inkleaf.data.db.BookSourceType
 import com.exio.inkleaf.data.db.HistoryRowProjection
 import com.exio.inkleaf.data.db.ReadingSessionEntity
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -90,6 +92,7 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
         private set
 
     private var resolveGeneration = 0L
+    private var resolveJob: Job? = null
 
     val events = eventChannel.receiveAsFlow()
 
@@ -101,7 +104,7 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
             sessionRepo.historyPaging()
                 .map { paging ->
                     paging
-                        .map { row -> HistoryListItem.Session(row.toUi()) }
+                        .map { row -> row.toHistoryListItem() }
                         .insertSeparators { before, after ->
                             val afterSession = after as? HistoryListItem.Session
                                 ?: return@insertSeparators null
@@ -139,9 +142,10 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
     fun continueReading(session: HistorySessionUi) {
         if (!session.contentAvailable || session.comicId == null) return
         if (resolvingSessionId == session.id) return
+        resolveJob?.cancel()
         val generation = ++resolveGeneration
         resolvingSessionId = session.id
-        viewModelScope.launch {
+        val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
             try {
                 val comic = comicRepo.getComic(session.comicId)
                     ?.takeUnless { it.isMissing || it.isDraft }
@@ -203,9 +207,12 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
             } finally {
                 if (generation == resolveGeneration) {
                     resolvingSessionId = null
+                    resolveJob = null
                 }
             }
         }
+        resolveJob = job
+        job.start()
     }
 
     fun deleteSession(sessionId: String) {
@@ -250,9 +257,14 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
 
     fun cancelPendingResolve() {
         resolveGeneration += 1
+        resolveJob?.cancel()
+        resolveJob = null
         resolvingSessionId = null
     }
 }
+
+private fun HistoryRowProjection.toHistoryListItem(): HistoryListItem =
+    HistoryListItem.Session(toUi())
 
 private fun HistoryRowProjection.toUi(): HistorySessionUi {
     val available = comicId != null && isMissing != true && isDraft != true

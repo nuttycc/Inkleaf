@@ -55,6 +55,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
@@ -80,6 +81,11 @@ fun HistoryScreen(
     }
     var pendingDelete by remember {
         mutableStateOf<HistoryEvent.SessionDeleted?>(null)
+    }
+
+    LifecycleResumeEffect(viewModel) {
+        viewModel.refreshDateLabels()
+        onPauseOrDispose { viewModel.cancelPendingResolve() }
     }
 
     LaunchedEffect(viewModel) {

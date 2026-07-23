@@ -15,6 +15,7 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.viewModelScope
+import com.exio.inkleaf.InkleafApplication
 import com.exio.inkleaf.data.BookmarkRepository
 import com.exio.inkleaf.data.BookmarkToggleResult
 import com.exio.inkleaf.data.ChapterProgress
@@ -34,16 +35,16 @@ import com.exio.inkleaf.data.db.BookmarkEntity
 import com.exio.inkleaf.data.db.ComicEntity
 import com.exio.inkleaf.data.db.FavoritePageEntity
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlin.time.Duration.Companion.milliseconds
 
 /** 阅读页状态机：打开中 / 失败 / 就绪（带恢复的起始页码） */
 sealed interface ReaderUiState {
@@ -72,6 +73,7 @@ class ReaderViewModel(
     private val bookmarkRepo = BookmarkRepository(app)
     private val favoriteRepo = FavoriteRepository(app)
     private val sessionRepo = ReadingSessionRepository.getInstance(app)
+    private val applicationScope = getApplication<InkleafApplication>().applicationScope
 
     var state by mutableStateOf<ReaderUiState>(ReaderUiState.Loading)
         private set
@@ -247,9 +249,7 @@ class ReaderViewModel(
         sessionEnded = true
         stopCheckpointLoop()
         detachProcessLifecycle()
-        viewModelScope.launch(NonCancellable) {
-            sessionRepo.dispatch(ReadingSessionEvent.LeaveReader(reason))
-        }
+        dispatchTerminalSessionEvent(ReadingSessionEvent.LeaveReader(reason))
     }
 
     fun toggleFavorite(page: Int) {
@@ -487,13 +487,11 @@ class ReaderViewModel(
         detachProcessLifecycle()
         // Unexpected disposal pauses the reading session; explicit Back already completed it.
         if (!sessionEnded) {
-            volumeCleanupScope.launch(NonCancellable) {
-                sessionRepo.dispatch(ReadingSessionEvent.LeftInteractiveForeground)
-            }
+            dispatchTerminalSessionEvent(ReadingSessionEvent.LeftInteractiveForeground)
         }
         val closingVolume = volume
         volume = null
-        volumeCleanupScope.launch {
+        applicationScope.launch {
             closingVolume?.close()
         }
     }
@@ -548,6 +546,19 @@ class ReaderViewModel(
         }
     }
 
+    private fun dispatchTerminalSessionEvent(event: ReadingSessionEvent) {
+        // Start immediately so the terminal event is queued before navigation creates another Reader.
+        applicationScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            try {
+                sessionRepo.dispatch(event)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                // Session tracking must not break navigation or process-owned cleanup.
+            }
+        }
+    }
+
     private fun positionSnapshot(
         opened: ComicVolume,
         globalPage: Int,
@@ -565,8 +576,6 @@ class ReaderViewModel(
     }
 
     companion object {
-        private val volumeCleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
         /** 缩略图解码目标宽度（px）：56dp 格子在 3x 屏上约 168px */
         private const val THUMB_TARGET_WIDTH = 168
 

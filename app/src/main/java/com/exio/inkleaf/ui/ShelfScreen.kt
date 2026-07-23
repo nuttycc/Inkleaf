@@ -95,6 +95,7 @@ import com.exio.inkleaf.data.db.BookSourceType
 import com.exio.inkleaf.data.db.ComicEntity
 import com.exio.inkleaf.data.db.GroupWithCount
 import kotlinx.coroutines.delay
+import kotlin.time.Duration.Companion.milliseconds
 import java.io.File
 
 /** 书架内容区的三态：作为 Crossfade 的 key，列表内容增删不触发整区动画 */

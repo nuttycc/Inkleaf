@@ -17,7 +17,7 @@ import kotlinx.coroutines.launch
 import java.io.File
 
 class InkleafApplication : Application() {
-    private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    internal val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private lateinit var shelfWarmup: Deferred<Unit>
 
     override fun onCreate() {

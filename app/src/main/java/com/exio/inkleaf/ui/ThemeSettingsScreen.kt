@@ -86,6 +86,7 @@ import com.exio.inkleaf.ui.theme.rememberInkleafColorScheme
 import com.materialkolor.hct.Hct
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.time.Duration.Companion.milliseconds
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

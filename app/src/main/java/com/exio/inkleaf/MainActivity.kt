@@ -73,6 +73,7 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
+import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.serialization.Serializable
 
 /**
