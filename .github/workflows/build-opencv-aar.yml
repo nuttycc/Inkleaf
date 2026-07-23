@@ -1,0 +1,106 @@
+name: Build OpenCV AAR
+
+run-name: Build slim OpenCV AAR (${{ inputs.opencv_tag }})
+
+# Builds a minimal OpenCV Android AAR (arm64-v8a only) containing just the
+# modules Inkleaf uses: core, imgproc, imgcodecs, java, geometry.
+#
+# The resulting AAR replaces the full org.opencv:opencv Maven dependency
+# (~40 MB native lib -> expected ~6-10 MB). Run manually when bumping the
+# OpenCV version or when the module set changes. See
+# scripts/opencv-android-config.py for build flags.
+
+on:
+  workflow_dispatch:
+    inputs:
+      opencv_tag:
+        description: 'OpenCV git tag (matching the org.opencv:opencv Maven family, e.g. 5.0.0)'
+        required: true
+        default: '5.0.0'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build OpenCV AAR (arm64-v8a, slim modules)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Android SDK (NDK + cmake)
+        uses: android-actions/setup-android@v4.0.1
+        with:
+          # NDK r27 LTS (27.2.12479018) supports 16 KB page sizes and is
+          # compatible with OpenCV 5.x build_sdk.py. cmake 3.22.1 is the
+          # version AGP ships; ninja comes from apt below.
+          packages: 'platforms;android-36 ndk;27.2.12479018 cmake;3.22.1'
+
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Resolve NDK path
+        run: |
+          NDK_PATH=$(ls -d "$ANDROID_HOME"/ndk/* 2>/dev/null | head -1)
+          if [ -z "$NDK_PATH" ]; then
+            echo "NDK not found under $ANDROID_HOME/ndk" >&2
+            exit 1
+          fi
+          echo "ANDROID_NDK_ROOT=$NDK_PATH" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "Resolved NDK: $NDK_PATH"
+
+      - name: Checkout OpenCV source
+        run: |
+          git clone --depth 1 -b "${{ inputs.opencv_tag }}" \
+            https://github.com/opencv/opencv.git /opt/opencv
+
+      - name: Copy build config
+        run: cp scripts/opencv-android-config.py /opt/opencv/platforms/android/inkleaf-config.py
+
+      - name: Build OpenCV Android SDK
+        # Run from platforms/android so config.py can `from build_sdk_helper import ABI`.
+        working-directory: /opt/opencv/platforms/android
+        run: |
+          python3 build_sdk.py \
+            --sdk_path "$ANDROID_SDK_ROOT" \
+            --ndk_path "$ANDROID_NDK_ROOT" \
+            --config inkleaf-config.py \
+            --modules_list "core,imgproc,imgcodecs,java,geometry" \
+            --no_samples_build \
+            /opt/opencv_build /opt/opencv
+
+      - name: Build AAR
+        working-directory: /opt/opencv/platforms/android
+        run: |
+          python3 build_java_shared_aar.py /opt/opencv_build/OpenCV-android-sdk
+
+      - name: Locate AAR and report size
+        run: |
+          set -e
+          AAR=$(find /opt/opencv_build /opt/opencv/platforms/android \
+            -name '*.aar' -type f 2>/dev/null | head -1)
+          if [ -z "$AAR" ]; then
+            echo "No .aar produced by build_java_shared_aar.py" >&2
+            exit 1
+          fi
+          echo "AAR path: $AAR"
+          ls -lh "$AAR"
+          echo "AAR_PATH=$AAR" >> "$GITHUB_ENV"
+
+      - name: Upload AAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: opencv-android-slim-${{ inputs.opencv_tag }}
+          path: ${{ env.AAR_PATH }}
+          if-no-files-found: error
+          retention-days: 30
