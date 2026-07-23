@@ -13,6 +13,9 @@ local.properties
 !app/debug.keystore
 /app/release/
 
+
+.agents/
+.trae/
 .gemini/
 .claude/
 .junie/

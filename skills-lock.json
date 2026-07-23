@@ -35,7 +35,7 @@
       "source": "exa-labs/agent-skills",
       "sourceType": "github",
       "skillPath": "skills/exa-contents/SKILL.md",
-      "computedHash": "195eb40893f1f66dc75df4778da420f72c01a5ac1472659bf4a53ec40a08a27f"
+      "computedHash": "175bf0b235af79c49c185b1e2ffd84f7f9bf124ec4ec2f1ada3ddb0515c8924b"
     },
     "exa-search": {
       "source": "exa-labs/agent-skills",
