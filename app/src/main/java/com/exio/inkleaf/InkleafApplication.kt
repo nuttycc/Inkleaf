@@ -14,7 +14,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import java.io.File
 
 class InkleafApplication : Application() {
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -26,7 +25,6 @@ class InkleafApplication : Application() {
         // Process-owned startup work must survive the short-lived Activity used to synchronize
         // a stored night mode on cold start.
         applicationScope.launch {
-            cleanupRetiredEnhancementStorage()
             ReaderCache.cleanupOnColdStart(this@InkleafApplication)
             AlbumRepository(this@InkleafApplication).cleanupOnColdStart()
             AlbumExporter.cleanupOnColdStart(this@InkleafApplication)
@@ -47,26 +45,6 @@ class InkleafApplication : Application() {
 
     suspend fun awaitShelfWarmup() {
         shelfWarmup.await()
-    }
-
-    /** Remove generated storage owned exclusively by the retired enhancement feature. */
-    private fun cleanupRetiredEnhancementStorage() {
-        listOf(
-            File(filesDir, "image_enhancement_models"),
-            File(filesDir, "ai_enhanced_images"),
-            File(cacheDir, "ai_enhanced_images"),
-        ).forEach { directory ->
-            if (!directory.exists()) return@forEach
-            runCatching { directory.deleteRecursively() }
-                .onSuccess { deleted ->
-                    if (!deleted) {
-                        Log.w(TAG, "Unable to remove retired storage: ${directory.name}")
-                    }
-                }
-                .onFailure { error ->
-                    Log.w(TAG, "Retired storage cleanup failed: ${directory.name}", error)
-                }
-        }
     }
 
     private companion object {

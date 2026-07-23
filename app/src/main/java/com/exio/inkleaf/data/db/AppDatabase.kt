@@ -17,8 +17,7 @@ import androidx.room.RoomDatabase
         BookmarkEntity::class,
         ReadingSessionEntity::class,
     ],
-    // v13+: reading activity history schema. No data migration — destructive rebuild is intentional (#15).
-    // v16 removes the retired enhancement schema; local data may be rebuilt on upgrade.
+    // No migration history is retained for this unreleased app.
     version = 16,
     exportSchema = false,
 )
