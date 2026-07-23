@@ -139,7 +139,7 @@ fun ThemeSettingsScreen(
         viewModel.consumeSaveError()
     }
     LaunchedEffect(draft) {
-        delay(THEME_AUTOSAVE_DEBOUNCE_MS)
+        delay(THEME_AUTOSAVE_DEBOUNCE_MS.milliseconds)
         viewModel.persistTheme(draft)
     }
 

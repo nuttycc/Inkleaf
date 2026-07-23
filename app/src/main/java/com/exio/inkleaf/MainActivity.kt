@@ -317,7 +317,7 @@ class MainActivity : AppCompatActivity() {
         var initialTheme by mutableStateOf<ThemeSettings?>(null)
         lifecycleScope.launch {
             val loadedTheme = try {
-                withTimeout(THEME_LOAD_TIMEOUT_MS) { themeRepo.settings.first() }
+                withTimeout(THEME_LOAD_TIMEOUT_MS.milliseconds) { themeRepo.settings.first() }
             } catch (error: TimeoutCancellationException) {
                 Log.e(LOG_TAG, "Timed out while loading theme settings", error)
                 ThemeSettings()
@@ -341,7 +341,7 @@ class MainActivity : AppCompatActivity() {
         var shelfWarm by mutableStateOf(false)
         lifecycleScope.launch {
             try {
-                withTimeout(SHELF_WARMUP_TIMEOUT_MS) {
+                withTimeout(SHELF_WARMUP_TIMEOUT_MS.milliseconds) {
                     (application as InkleafApplication).awaitShelfWarmup()
                 }
             } catch (error: TimeoutCancellationException) {

@@ -158,7 +158,7 @@ fun ShelfScreen(
     LaunchedEffect(scanState.isScanning, scanState.isManual) {
         showScanProgress = false
         if (scanState.isScanning && scanState.isManual) {
-            delay(2_000)
+            delay(2_000.milliseconds)
             showScanProgress = true
         }
     }

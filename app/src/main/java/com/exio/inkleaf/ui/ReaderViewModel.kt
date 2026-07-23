@@ -208,7 +208,7 @@ class ReaderViewModel(
         progressWriteJob = viewModelScope.launch {
             try {
                 while (true) {
-                    delay(PROGRESS_WRITE_INTERVAL_MS)
+                    delay(PROGRESS_WRITE_INTERVAL_MS.milliseconds)
                     val latest = pendingProgress ?: break
                     pendingProgress = null
                     withContext(NonCancellable) {
@@ -523,7 +523,7 @@ class ReaderViewModel(
         if (checkpointJob?.isActive == true || sessionEnded) return
         checkpointJob = viewModelScope.launch {
             while (true) {
-                delay(ReadingSessionRules.CHECKPOINT_INTERVAL_MS)
+                delay(ReadingSessionRules.CHECKPOINT_INTERVAL_MS.milliseconds)
                 if (sessionEnded) break
                 sessionRepo.dispatch(ReadingSessionEvent.CheckpointTick)
             }

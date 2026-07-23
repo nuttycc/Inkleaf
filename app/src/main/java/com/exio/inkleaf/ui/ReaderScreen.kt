@@ -1193,7 +1193,7 @@ private fun ComicPage(
         if (page != currentPage || scale <= ZOOMED_THRESHOLD) {
             useZoomedPdfRender = false
         } else {
-            delay(PDF_ZOOM_RENDER_DEBOUNCE_MS)
+            delay(PDF_ZOOM_RENDER_DEBOUNCE_MS.milliseconds)
             useZoomedPdfRender = true
         }
     }

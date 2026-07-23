@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -12,7 +13,6 @@ import java.io.FileNotFoundException
 import java.util.zip.ZipEntry
 import java.util.zip.ZipException
 import java.util.zip.ZipFile
-import kotlin.coroutines.coroutineContext
 
 /** 打开漫画失败时抛出，message 直接用于界面展示 */
 class ComicOpenException(message: String, cause: Throwable? = null) : Exception(message, cause)
@@ -177,7 +177,7 @@ class ComicBook private constructor(
                         val buffer = ByteArray(64 * 1024)
                         while (true) {
                             // 用户在复制大文件期间退出阅读界面时，从这里响应协程取消
-                            coroutineContext.ensureActive()
+                            currentCoroutineContext().ensureActive()
                             val read = input.read(buffer)
                             if (read == -1) break
                             output.write(buffer, 0, read)

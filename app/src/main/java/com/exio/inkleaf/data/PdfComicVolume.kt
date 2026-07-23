@@ -10,11 +10,11 @@ import com.ahmer.pdfium.PdfiumCore
 import com.exio.inkleaf.data.PdfComicVolume.Companion.pdfiumLock
 import com.exio.inkleaf.data.db.ChapterEntity
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
-import kotlin.coroutines.coroutineContext
 import kotlin.math.sqrt
 
 private const val OCR_PDF_RENDER_SCALE = 4.0
@@ -291,7 +291,7 @@ class PdfComicVolume(
         fullQuality: Boolean,
     ): ByteArray {
         val bitmap = pdfiumLock.withLock {
-            coroutineContext.ensureActive()
+            currentCoroutineContext().ensureActive()
             renderPageBitmapLocked(
                 chapterIndex = chapterIndex,
                 pageIndex = pageIndex,
@@ -322,7 +322,7 @@ class PdfComicVolume(
         qualityScale: Double,
         request: PageRenderRequest?,
     ): Bitmap? = pdfiumLock.withLock {
-        coroutineContext.ensureActive()
+        currentCoroutineContext().ensureActive()
         renderPageBitmapLocked(chapterIndex, pageIndex, qualityScale, request)
     }
 

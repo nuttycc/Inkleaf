@@ -6,10 +6,10 @@ import android.net.Uri
 import android.os.CancellationSignal
 import android.provider.DocumentsContract
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.job
 import kotlinx.coroutines.withContext
-import kotlin.coroutines.coroutineContext
 
 /**
  * Enumerates user-granted SAF trees without touching the database.
@@ -279,7 +279,7 @@ class LibraryScanner(context: Context) {
     ): Boolean {
         val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentDocId)
         val signal = CancellationSignal()
-        val job = coroutineContext.job
+        val job = currentCoroutineContext().job
         val cancellationHandle = job.invokeOnCompletion {
             if (job.isCancelled) signal.cancel()
         }
@@ -294,7 +294,7 @@ class LibraryScanner(context: Context) {
             ) ?: throw IllegalStateException("provider 返回了 null cursor")
             cursor.use {
                 while (it.moveToNext()) {
-                    coroutineContext.ensureActive()
+                    currentCoroutineContext().ensureActive()
                     val child = it.readChild() ?: continue
                     if (!visitor(child)) break
                 }
