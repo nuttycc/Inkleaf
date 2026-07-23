@@ -57,9 +57,9 @@ interface ComicVolume {
     fun pageIdentity(globalPage: Int): String? = null
 
     /** Finds the current global position of a stable page identity after source edits. */
-    fun findPageByIdentity(identity: String): Int? {
-        if (identity.isBlank()) return null
-        return (0 until totalPageCount).firstOrNull { pageIdentity(it) == identity }
+    fun findPageByIdentity(pageIdentity: String): Int? {
+        if (pageIdentity.isBlank()) return null
+        return (0 until totalPageCount).firstOrNull { this.pageIdentity(it) == pageIdentity }
     }
 
     /** 读取第 [globalPage] 页的原始图片字节（zip/cbz 是压缩图片数据，PDF 是渲染后的 PNG） */
