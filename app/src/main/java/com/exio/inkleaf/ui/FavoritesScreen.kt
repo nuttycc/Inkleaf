@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,97 +17,23 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.MediumFlexibleTopAppBar
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.exio.inkleaf.R
 import com.exio.inkleaf.data.db.FavoritePageEntity
 import java.io.File
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun FavoritesScreen(
-    onOpenFavorite: (Long) -> Unit,
-    modifier: Modifier = Modifier,
-    viewerMessage: String? = null,
-    onViewerMessageConsumed: () -> Unit = {},
-    viewModel: FavoritesViewModel = viewModel(),
-) {
-    val favorites by viewModel.favorites.collectAsStateWithLifecycle()
-    val snackbarHostState = remember { SnackbarHostState() }
-
-    SnackbarMessageEffect(
-        message = viewModel.message,
-        hostState = snackbarHostState,
-        onConsumed = viewModel::consumeMessage,
-    )
-    LaunchedEffect(viewerMessage) {
-        viewerMessage?.let {
-            onViewerMessageConsumed()
-            snackbarHostState.showSnackbar(it)
-        }
-    }
-
-    val topAppBarScrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
-
-    Box(modifier = modifier.fillMaxSize()) {
-        Scaffold(
-            modifier = Modifier
-                .fillMaxSize()
-                .nestedScroll(topAppBarScrollBehavior.nestedScrollConnection),
-            contentWindowInsets = WindowInsets(0),
-            topBar = {
-                MediumFlexibleTopAppBar(
-                    title = { Text("图片收藏") },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = Color.Transparent,
-                        scrolledContainerColor = Color.Transparent,
-                    ),
-                    scrollBehavior = topAppBarScrollBehavior,
-                )
-            },
-            snackbarHost = {},
-        ) { innerPadding ->
-            FavoritesContent(
-                favorites = favorites,
-                onOpenFavorite = onOpenFavorite,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding),
-            )
-        }
-
-        SnackbarHost(
-            hostState = snackbarHostState,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(16.dp),
-        )
-    }
-}
 
 @Composable
 internal fun FavoritesContent(

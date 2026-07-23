@@ -226,15 +226,6 @@ class LibraryScanner(context: Context) {
         )
     }
 
-    /** Compatibility path for old callers. New synchronization code must inspect structured state. */
-    suspend fun scanPdfs(treeUri: Uri): List<ScannedFile> {
-        val result = scanPdfsRecursively(treeUri, confirmationThresholds = null)
-        if (result.stopReason != null) {
-            throw FolderAccessException("目录内容超过安全扫描上限")
-        }
-        return result.files
-    }
-
     private data class PendingDirectory(
         val docId: String,
         val relativePath: String,

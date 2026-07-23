@@ -41,7 +41,6 @@ class InkleafApplication : Application() {
             } catch (error: Exception) {
                 Log.w(TAG, "Shelf warmup failed", error)
             }
-            Unit
         }
     }
 

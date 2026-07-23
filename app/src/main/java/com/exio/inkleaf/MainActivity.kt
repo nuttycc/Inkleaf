@@ -304,7 +304,7 @@ class MainActivity : AppCompatActivity() {
             ?.let(Uri::parse)
         if (restoredExternalUri != null) {
             externalOpenRequest = ExternalOpenRequest(
-                id = savedInstanceState?.getLong(STATE_EXTERNAL_OPEN_ID) ?: 0L,
+                id = savedInstanceState.getLong(STATE_EXTERNAL_OPEN_ID),
                 uri = restoredExternalUri,
             )
         } else if (savedInstanceState == null) {

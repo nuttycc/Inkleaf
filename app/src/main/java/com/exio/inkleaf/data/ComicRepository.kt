@@ -343,12 +343,10 @@ class ComicRepository(context: Context) {
                 }
             }
         }
-        if (comic.sourceType != BookSourceType.CREATED_ALBUM) {
-            runCatching {
-                appContext.contentResolver.releasePersistableUriPermission(
-                    comic.uri.toUri(), Intent.FLAG_GRANT_READ_URI_PERMISSION
-                )
-            }
+        runCatching {
+            appContext.contentResolver.releasePersistableUriPermission(
+                comic.uri.toUri(), Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
         }
     }
 
@@ -585,7 +583,7 @@ class ComicRepository(context: Context) {
     private suspend fun syncLibraryFolder(folder: LibraryFolderEntity): ScanResult {
         val scanned = try {
             scanner.scanFolder(folder.treeUri.toUri()).distinctBy { it.fileKey }
-        } catch (e: LibraryScanner.FolderAccessException) {
+        } catch (_: LibraryScanner.FolderAccessException) {
             // 目录打不开：返回空结果，外层把它加入 failed
             return ScanResult(0, 0, 0, 0, emptyList())
         }
@@ -770,7 +768,7 @@ class ComicRepository(context: Context) {
     /**
      * 按扫描到的 PDF 列表同步章节表：新增、恢复、标记失效、清理已移除章节。
      * diff 计算在 [ChapterSync.computeDiff]（纯函数，单测覆盖），落库在
-     * [ChapterDao.applyDiff]（一个事务，原子提交）。返回实际新增的章节数。
+     * `ChapterDao.applyDiff`（一个事务，原子提交）。返回实际新增的章节数。
      */
     private suspend fun syncSeriesChapters(
         comic: ComicEntity,
@@ -902,14 +900,6 @@ class ComicRepository(context: Context) {
         }
     }
 
-    private fun releaseTreePermission(treeUri: Uri) {
-        runCatching {
-            appContext.contentResolver.releasePersistableUriPermission(
-                treeUri, Intent.FLAG_GRANT_READ_URI_PERMISSION
-            )
-        }
-    }
-
     /**
      * 给没有封面的书补封面。用 ZipInputStream 顺序流读到第一个图片条目就停，
      * 不需要像阅读那样把整个文件复制到缓存（封面不需要随机访问）。
@@ -993,7 +983,7 @@ class ComicRepository(context: Context) {
     }
 
     /** 删除一本书的全部派生磁盘产物：封面文件 + 阅读缓存（zip 副本、缩略图） */
-    private suspend fun deleteComicArtifacts(comic: ComicEntity) {
+    private fun deleteComicArtifacts(comic: ComicEntity) {
         comic.coverPath?.let { File(it).delete() }
         if (comic.sourceType == BookSourceType.CREATED_ALBUM) {
             File(appContext.filesDir, "albums/${comic.id}").deleteRecursively()

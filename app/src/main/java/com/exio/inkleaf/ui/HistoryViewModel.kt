@@ -312,6 +312,6 @@ private fun formatDuration(activeMillis: Long): String {
     return if (totalMinutes < 1L) {
         "阅读不足 1 分钟"
     } else {
-        "阅读 ${totalMinutes} 分钟"
+        "阅读 $totalMinutes 分钟"
     }
 }

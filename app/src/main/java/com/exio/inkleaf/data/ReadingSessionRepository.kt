@@ -50,10 +50,6 @@ class ReadingSessionRepository private constructor(
         pagingSourceFactory = { dao.observeHistoryPaging() },
     ).flow
 
-    suspend fun getSessionEntity(id: String): ReadingSessionEntity? = mutex.withLock {
-        dao.getById(id)
-    }
-
     suspend fun deletePermanent(id: String): ReadingSessionEntity? = mutex.withLock {
         db.withTransaction {
             val existing = dao.getById(id) ?: return@withTransaction null
@@ -81,19 +77,6 @@ class ReadingSessionRepository private constructor(
             machine.onEvent(ReadingSessionEvent.ProcessRestored(null))
             hydrated = true
         }
-    }
-
-    suspend fun countPermanent(): Long = mutex.withLock {
-        dao.countPermanent()
-    }
-
-    /**
-     * Load the resumable row into the machine after process start.
-     * Safe to call multiple times; only the first load hits the DB.
-     */
-    suspend fun ensureHydrated() {
-        if (hydrated) return
-        mutex.withLock { hydrateLocked() }
     }
 
     /** Dispatch a domain event and persist resulting effects atomically. */
@@ -174,10 +157,5 @@ class ReadingSessionRepository private constructor(
                     idGenerator = idGenerator,
                 ).also { instance = it }
             }
-
-        /** Test-only: drop the process singleton between cases. */
-        internal fun clearInstanceForTests() {
-            instance = null
-        }
     }
 }
