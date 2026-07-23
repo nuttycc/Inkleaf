@@ -8,11 +8,13 @@ set -euo pipefail
 #   ./scripts/setup-android-env.sh
 #
 # What it does:
-#   1. Installs Android CLI tool
-#   2. Installs required Android SDK packages (platform-tools,
+#   1. Detects system info (OS, architecture, CPU, memory, disk space)
+#   2. Installs Android CLI tool
+#   3. Installs required Android SDK packages (platform-tools,
 #      build-tools, platform) based on the project's build.gradle.kts
-#   3. Configures shell environment variables (ANDROID_HOME, PATH)
-#   4. Verifies the installation
+#   4. Configures China-friendly Maven and Gradle distribution mirrors
+#   5. Configures shell environment variables (ANDROID_HOME, PATH)
+#   6. Verifies the installation
 # ============================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -24,6 +26,12 @@ BUILD_TOOLS_VERSION="${BUILD_TOOLS_VERSION:-37.0.0}"
 PLATFORM_PACKAGE="${PLATFORM_PACKAGE:-platforms/android-37.0}"
 ANDROID_HOME="${ANDROID_HOME:-$HOME/Android/Sdk}"
 ANDROID_BIN_DIR="$HOME/.local/bin"
+GRADLE_HOME_DIR="${GRADLE_USER_HOME:-$HOME/.gradle}"
+CONFIGURE_CHINA_MIRRORS="${INKLEAF_CONFIGURE_CHINA_MIRRORS:-true}"
+ALIYUN_MAVEN_MIRROR_URL="${INKLEAF_ALIYUN_MAVEN_MIRROR_URL:-https://maven.aliyun.com/repository/public}"
+ALIYUN_GOOGLE_MIRROR_URL="${INKLEAF_ALIYUN_GOOGLE_MIRROR_URL:-https://maven.aliyun.com/repository/google}"
+ALIYUN_GRADLE_PLUGIN_MIRROR_URL="${INKLEAF_ALIYUN_GRADLE_PLUGIN_MIRROR_URL:-https://maven.aliyun.com/repository/gradle-plugin}"
+TENCENT_GRADLE_MIRROR_URL="${INKLEAF_TENCENT_GRADLE_MIRROR_URL:-https://mirrors.cloud.tencent.com/gradle/}"
 
 # ---- Colors ----
 if [ -t 1 ]; then
@@ -70,6 +78,145 @@ detect_os() {
   esac
 
   info "Detected: OS=$OS, ARCH=$ARCH"
+}
+
+# ---- Helper for formatting sizes ----
+format_size_mb() {
+  local mb="${1:-0}"
+  if [ "$mb" -ge 1024 ]; then
+    awk -v mb="$mb" 'BEGIN {printf "%.1f GB", mb/1024}'
+  else
+    echo "${mb} MB"
+  fi
+}
+
+# ---- Check system resources (CPU, Memory, Disk Space) ----
+get_cpu_info() {
+  local cores=""
+  local model=""
+
+  if command -v nproc >/dev/null 2>&1; then
+    cores="$(nproc 2>/dev/null || true)"
+  elif command -v sysctl >/dev/null 2>&1; then
+    cores="$(sysctl -n hw.ncpu 2>/dev/null || true)"
+  fi
+
+  if [ -f /proc/cpuinfo ]; then
+    model="$( (grep -m1 'model name' /proc/cpuinfo 2>/dev/null || true) | awk -F: '{print $2}' | sed 's/^[ \t]*//' )"
+  elif command -v sysctl >/dev/null 2>&1; then
+    model="$(sysctl -n machdep.cpu.brand_string 2>/dev/null || true)"
+  fi
+
+  CPU_CORES=0
+  if [[ "${cores:-}" =~ ^[0-9]+$ ]]; then
+    CPU_CORES="$cores"
+  fi
+
+  if [ -n "$cores" ] && [ -n "$model" ]; then
+    CPU_INFO="$cores cores ($model)"
+  elif [ -n "$cores" ]; then
+    CPU_INFO="$cores cores"
+  elif [ -n "$model" ]; then
+    CPU_INFO="$model"
+  else
+    CPU_INFO="Unknown"
+  fi
+}
+
+get_mem_info() {
+  TOTAL_MEM_MB=0
+  AVAIL_MEM_MB=0
+
+  if [ "$OS" = "linux" ] && [ -f /proc/meminfo ]; then
+    local total_kb avail_kb
+    total_kb="$(awk '/MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)"
+    avail_kb="$(awk '/MemAvailable:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)"
+    if [[ "${total_kb:-0}" =~ ^[0-9]+$ ]]; then
+      TOTAL_MEM_MB=$((total_kb / 1024))
+    fi
+    if [[ "${avail_kb:-0}" =~ ^[0-9]+$ ]]; then
+      AVAIL_MEM_MB=$((avail_kb / 1024))
+    fi
+  elif [ "$OS" = "darwin" ] && command -v sysctl >/dev/null 2>&1; then
+    local mem_bytes
+    mem_bytes="$(sysctl -n hw.memsize 2>/dev/null || echo 0)"
+    if [[ "${mem_bytes:-0}" =~ ^[0-9]+$ ]]; then
+      TOTAL_MEM_MB=$((mem_bytes / 1024 / 1024))
+    fi
+
+    if command -v vm_stat >/dev/null 2>&1; then
+      local page_size free_pages inactive_pages
+      page_size="$(vm_stat | awk '/page size of/ {print $8}' | tr -d '.' 2>/dev/null || echo 4096)"
+      free_pages="$(vm_stat | awk '/Pages free:/ {print $3}' | tr -d '.' 2>/dev/null || echo 0)"
+      inactive_pages="$(vm_stat | awk '/Pages inactive:/ {print $3}' | tr -d '.' 2>/dev/null || echo 0)"
+      if [[ "${page_size:-0}" =~ ^[0-9]+$ ]] && [[ "${free_pages:-0}" =~ ^[0-9]+$ ]] && [[ "${inactive_pages:-0}" =~ ^[0-9]+$ ]]; then
+        AVAIL_MEM_MB=$(((free_pages + inactive_pages) * page_size / 1024 / 1024))
+      fi
+    fi
+  fi
+}
+
+get_disk_info() {
+  local path="$1"
+  local avail_kb
+  avail_kb="$( (df -P -k "$path" 2>/dev/null || true) | awk 'NR==2 {print $4}' )"
+  avail_kb="${avail_kb:-0}"
+  if [[ "$avail_kb" =~ ^[0-9]+$ ]]; then
+    echo $((avail_kb / 1024))
+  else
+    echo 0
+  fi
+}
+
+check_system_resources() {
+  info "Checking system hardware resources..."
+
+  # CPU
+  get_cpu_info
+  info "  CPU: $CPU_INFO"
+  if [ "$CPU_CORES" -gt 0 ] && [ "$CPU_CORES" -lt 2 ]; then
+    warn "  Low CPU core count ($CPU_CORES core). Gradle builds may be slow."
+  fi
+
+  # Memory
+  get_mem_info
+  if [ "$TOTAL_MEM_MB" -gt 0 ]; then
+    local total_formatted avail_formatted
+    total_formatted="$(format_size_mb "$TOTAL_MEM_MB")"
+    if [ "$AVAIL_MEM_MB" -gt 0 ]; then
+      avail_formatted="$(format_size_mb "$AVAIL_MEM_MB")"
+      info "  Memory: $total_formatted total ($avail_formatted available)"
+    else
+      info "  Memory: $total_formatted total"
+    fi
+
+    if [ "$TOTAL_MEM_MB" -lt 7000 ]; then
+      warn "  Low RAM detected ($total_formatted). At least 8 GB RAM is recommended for Android development."
+    fi
+  else
+    warn "  Unable to determine total system memory."
+  fi
+
+  # Disk Space
+  local check_path="$HOME"
+  if [ -d "$ANDROID_HOME" ]; then
+    check_path="$ANDROID_HOME"
+  elif [ -d "$(dirname "$ANDROID_HOME")" ]; then
+    check_path="$(dirname "$ANDROID_HOME")"
+  fi
+
+  local disk_avail_mb
+  disk_avail_mb="$(get_disk_info "$check_path")"
+  if [ "$disk_avail_mb" -gt 0 ]; then
+    local disk_formatted
+    disk_formatted="$(format_size_mb "$disk_avail_mb")"
+    info "  Disk Space: $disk_formatted available ($check_path)"
+    if [ "$disk_avail_mb" -lt 10240 ]; then
+      warn "  Low disk space ($disk_formatted). At least 10 GB free space is recommended for Android SDK & Gradle."
+    fi
+  else
+    warn "  Unable to determine free disk space on $check_path."
+  fi
 }
 
 # ---- Check prerequisites ----
@@ -183,6 +330,172 @@ install_sdk_packages() {
   android sdk install "${packages[@]}"
 
   success "SDK packages installed"
+}
+
+# ---- Configure China-friendly Gradle mirrors ----
+china_mirrors_enabled() {
+  case "$CONFIGURE_CHINA_MIRRORS" in
+    1|true|TRUE|yes|YES|on|ON) return 0 ;;
+    0|false|FALSE|no|NO|off|OFF) return 1 ;;
+    *)
+      error "Invalid INKLEAF_CONFIGURE_CHINA_MIRRORS value: $CONFIGURE_CHINA_MIRRORS"
+      error "Use true/false, yes/no, on/off, or 1/0."
+      exit 1
+      ;;
+  esac
+}
+
+validate_mirror_url() {
+  local label="$1"
+  local url="$2"
+
+  case "$url" in
+    https://*) ;;
+    *)
+      error "$label must use HTTPS: $url"
+      exit 1
+      ;;
+  esac
+
+  # Keep generated Gradle and properties files safe from shell/code injection.
+  case "$url" in
+    *[!A-Za-z0-9._~:/?#@%+=,-]*)
+      error "$label contains unsupported characters: $url"
+      exit 1
+      ;;
+  esac
+}
+
+configure_maven_mirror() {
+  local init_dir="$GRADLE_HOME_DIR/init.d"
+  local init_script="$init_dir/inkleaf-cn-mirrors.gradle"
+  local temp_file
+
+  mkdir -p "$init_dir"
+  temp_file="$(mktemp "$init_dir/.inkleaf-cn-mirrors.gradle.XXXXXX")"
+
+  cat > "$temp_file" <<EOF
+// Managed by Inkleaf's setup-android-env.sh.
+// Mirrors are inserted first; repositories declared by the build remain fallbacks.
+def aliyunGoogleMirrorUrl = '$ALIYUN_GOOGLE_MIRROR_URL'
+def aliyunPublicMirrorUrl = '$ALIYUN_MAVEN_MIRROR_URL'
+def aliyunGradlePluginMirrorUrl = '$ALIYUN_GRADLE_PLUGIN_MIRROR_URL'
+
+beforeSettings { settings ->
+    settings.pluginManagement.repositories {
+        maven {
+            name = 'AliyunGoogleMirror'
+            url = settings.uri(aliyunGoogleMirrorUrl)
+        }
+        maven {
+            name = 'AliyunGradlePluginMirror'
+            url = settings.uri(aliyunGradlePluginMirrorUrl)
+        }
+        maven {
+            name = 'AliyunPublicMirror'
+            url = settings.uri(aliyunPublicMirrorUrl)
+        }
+    }
+
+    settings.dependencyResolutionManagement.repositories {
+        maven {
+            name = 'AliyunGoogleMirror'
+            url = settings.uri(aliyunGoogleMirrorUrl)
+        }
+        maven {
+            name = 'AliyunPublicMirror'
+            url = settings.uri(aliyunPublicMirrorUrl)
+        }
+        maven {
+            name = 'AliyunGradlePluginMirror'
+            url = settings.uri(aliyunGradlePluginMirrorUrl)
+        }
+    }
+}
+EOF
+
+  mv "$temp_file" "$init_script"
+  success "Maven mirrors configured (Google, Public, Gradle-Plugin)"
+  info "  Aliyun Google: $ALIYUN_GOOGLE_MIRROR_URL"
+  info "  Aliyun Public: $ALIYUN_MAVEN_MIRROR_URL"
+  info "  Aliyun Gradle Plugin: $ALIYUN_GRADLE_PLUGIN_MIRROR_URL"
+  info "  Gradle init script: $init_script"
+}
+
+configure_gradle_distribution_mirror() {
+  local wrapper_properties="$PROJECT_ROOT/gradle/wrapper/gradle-wrapper.properties"
+  local distribution_value
+  local distribution_url
+  local distribution_file
+  local mirror_url
+  local temp_file
+
+  if [ ! -f "$wrapper_properties" ]; then
+    warn "Gradle wrapper properties not found: $wrapper_properties"
+    return 0
+  fi
+
+  distribution_value="$(sed -n 's/^distributionUrl=//p' "$wrapper_properties" | head -1)"
+  if [ -z "$distribution_value" ]; then
+    warn "distributionUrl not found in $wrapper_properties"
+    return 0
+  fi
+
+  # Java properties commonly escape the URL colon; normalize it before parsing.
+  distribution_url="$(printf '%s\n' "$distribution_value" | sed 's/\\:/:/g')"
+  distribution_file="${distribution_url##*/}"
+  distribution_file="${distribution_file%%\?*}"
+
+  case "$distribution_file" in
+    gradle-*-bin.zip|gradle-*-all.zip) ;;
+    *)
+      warn "Unsupported Gradle distribution URL: $distribution_url"
+      warn "Keeping the existing distributionUrl."
+      return 0
+      ;;
+  esac
+
+  mirror_url="${TENCENT_GRADLE_MIRROR_URL%/}/$distribution_file"
+  if [ "$distribution_url" = "$mirror_url" ]; then
+    success "Gradle distribution mirror already configured: $mirror_url"
+    return 0
+  fi
+
+  temp_file="$(mktemp "$wrapper_properties.XXXXXX")"
+  if ! awk -v replacement="distributionUrl=$mirror_url" '
+    BEGIN { updated = 0 }
+    /^distributionUrl=/ {
+      print replacement
+      updated = 1
+      next
+    }
+    { print }
+    END { if (!updated) exit 1 }
+  ' "$wrapper_properties" > "$temp_file"; then
+    rm -f "$temp_file"
+    error "Failed to update Gradle wrapper distribution URL."
+    exit 1
+  fi
+
+  mv "$temp_file" "$wrapper_properties"
+  success "Gradle distribution mirror configured: $mirror_url"
+  info "  Updated local wrapper file: $wrapper_properties"
+}
+
+configure_gradle_mirrors() {
+  if ! china_mirrors_enabled; then
+    info "China mirror configuration skipped (INKLEAF_CONFIGURE_CHINA_MIRRORS=$CONFIGURE_CHINA_MIRRORS)"
+    return 0
+  fi
+
+  validate_mirror_url "Aliyun Maven mirror URL" "$ALIYUN_MAVEN_MIRROR_URL"
+  validate_mirror_url "Aliyun Google mirror URL" "$ALIYUN_GOOGLE_MIRROR_URL"
+  validate_mirror_url "Aliyun Gradle Plugin mirror URL" "$ALIYUN_GRADLE_PLUGIN_MIRROR_URL"
+  validate_mirror_url "Tencent Gradle mirror URL" "$TENCENT_GRADLE_MIRROR_URL"
+
+  info "Configuring China-friendly Gradle mirrors..."
+  configure_maven_mirror
+  configure_gradle_distribution_mirror
 }
 
 # ---- Configure shell environment ----
@@ -331,8 +644,10 @@ main() {
   echo ""
 
   detect_os
+  check_system_resources
   check_prerequisites
   read_project_config
+  configure_gradle_mirrors
   install_android_cli
   install_sdk_packages
   configure_shell_env
