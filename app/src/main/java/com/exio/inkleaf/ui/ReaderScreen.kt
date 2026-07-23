@@ -1227,7 +1227,7 @@ private fun ComicPage(
                 throw cancelled
             } catch (e: ComicOpenException) {
                 PageContent.Error(e.message ?: "本页无法打开")
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 PageContent.Error("本页无法打开")
             }
         }
@@ -1443,7 +1443,7 @@ internal fun targetedPageRenderRequest(
 private sealed interface PageContent {
     data object Loading : PageContent
     data class Bitmap(val bitmap: ImageBitmap) : PageContent
-    data class Bytes(val bytes: ByteArray) : PageContent
+    class Bytes(val bytes: ByteArray) : PageContent
     data class Error(val message: String) : PageContent
 }
 

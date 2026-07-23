@@ -81,7 +81,7 @@ internal object PolygonUnclip {
         distance: Double,
         clockwiseInImageCoords: Boolean,
     ) {
-        var startAngle = atan2(fromNormal.y, fromNormal.x)
+        val startAngle = atan2(fromNormal.y, fromNormal.x)
         var endAngle = atan2(toNormal.y, toNormal.x)
         if (clockwiseInImageCoords) {
             while (endAngle < startAngle) endAngle += 2.0 * PI

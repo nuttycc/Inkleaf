@@ -23,17 +23,17 @@ import org.opencv.core.Mat
 import org.opencv.core.Scalar
 import org.opencv.imgproc.Imgproc
 
-data class DetPreprocessResult(
+internal class DetPreprocessResult(
     val tensorData: FloatArray,
     val shape: LongArray,
     val originalH: Int,
     val originalW: Int,
 )
 
-object DetPreprocessor {
+internal object DetPreprocessor {
     private val mean = doubleArrayOf(0.485, 0.456, 0.406)
     private val std = doubleArrayOf(0.229, 0.224, 0.225)
-    private const val scale = 1.0 / 255.0
+    private const val SCALE = 1.0 / 255.0
 
     fun preprocess(
         bitmap: Bitmap,
@@ -76,7 +76,7 @@ object DetPreprocessor {
         val channels = mutableListOf<Mat>()
         Core.split(floatMat, channels)
         for (c in 0..2) {
-            Core.multiply(channels[c], Scalar(scale), channels[c])
+            Core.multiply(channels[c], Scalar(SCALE), channels[c])
             Core.subtract(channels[c], Scalar(mean[c]), channels[c])
             Core.divide(channels[c], Scalar(std[c]), channels[c])
         }
