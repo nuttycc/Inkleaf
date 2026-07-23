@@ -67,7 +67,7 @@ object ReadingSessionRules {
      * or settle it and start fresh.
      *
      * Explicit leave already COMPLETED the prior session, so this only sees
-     * ACTIVE/PAUSED rows (process recovery, background return, model manager).
+     * ACTIVE/PAUSED rows (process recovery or background return).
      *
      * Source identity is the checkpoint revision — the last content version
      * this session was actually reading.

@@ -60,7 +60,6 @@ import com.exio.inkleaf.data.ComicRepository
 import com.exio.inkleaf.data.ThemeSettings
 import com.exio.inkleaf.data.ThemeSettingsRepository
 import com.exio.inkleaf.ui.AlbumEditorScreen
-import com.exio.inkleaf.ui.EnhancementModelManagerScreen
 import com.exio.inkleaf.ui.FavoriteViewerScreen
 import com.exio.inkleaf.ui.HistoryScreen
 import com.exio.inkleaf.ui.ReaderScreen
@@ -106,9 +105,6 @@ data object SettingsRoute
 
 @Serializable
 data object ThemeSettingsRoute
-
-@Serializable
-data object EnhancementModelsRoute
 
 /** 外层壳↔二级：全宽滑动的运动量大，350~450ms 区间体感比较合适 */
 private const val NAV_TRANSITION_MS = 400
@@ -522,9 +518,6 @@ class MainActivity : AppCompatActivity() {
                                 comicId = route.comicId,
                                 initialPage = route.initialPage,
                                 onBack = { outerNavController.popBackStack() },
-                                onOpenModelManager = {
-                                    outerNavController.navigate(EnhancementModelsRoute)
-                                },
                             )
                         }
                         composable<FavoriteViewerRoute> { entry ->
@@ -550,9 +543,6 @@ class MainActivity : AppCompatActivity() {
                                 onOpenThemeSettings = {
                                     outerNavController.navigate(ThemeSettingsRoute)
                                 },
-                                onOpenModelManager = {
-                                    outerNavController.navigate(EnhancementModelsRoute)
-                                },
                             )
                         }
                         composable<ThemeSettingsRoute> {
@@ -567,11 +557,6 @@ class MainActivity : AppCompatActivity() {
                                         committed = committed,
                                     )
                                 },
-                            )
-                        }
-                        composable<EnhancementModelsRoute> {
-                            EnhancementModelManagerScreen(
-                                onBack = { outerNavController.popBackStack() },
                             )
                         }
                     }

@@ -18,9 +18,6 @@ internal data class ReaderPageContentKeys(
     internal data class ProducerRestart(
         val isCurrentPage: Boolean,
         val pageRenderRequest: PageRenderRequest?,
-        val enhancementSelectionId: String,
-        val enhancementModelInstalled: Boolean,
-        val pinForActiveTask: Boolean,
     )
 }
 
@@ -30,9 +27,6 @@ internal fun readerPageContentKeys(
     cacheKeyPrefix: String,
     isCurrentPage: Boolean,
     pageRenderRequest: PageRenderRequest?,
-    enhancementSelectionId: String,
-    enhancementModelInstalled: Boolean,
-    pinForActiveTask: Boolean,
 ): ReaderPageContentKeys = ReaderPageContentKeys(
     stateReset = ReaderPageContentKeys.StateReset(
         volumeToken = volumeToken,
@@ -42,8 +36,5 @@ internal fun readerPageContentKeys(
     producerRestart = ReaderPageContentKeys.ProducerRestart(
         isCurrentPage = isCurrentPage,
         pageRenderRequest = pageRenderRequest,
-        enhancementSelectionId = enhancementSelectionId,
-        enhancementModelInstalled = enhancementModelInstalled,
-        pinForActiveTask = pinForActiveTask,
     ),
 )

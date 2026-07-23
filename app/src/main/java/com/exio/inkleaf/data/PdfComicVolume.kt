@@ -152,21 +152,6 @@ class PdfComicVolume(
             pageIndex = page,
             qualityScale = 1.0,
             request = request,
-            maxPixels = null,
-        )?.asImageBitmap()
-    }
-
-    override suspend fun loadPageBitmapForInference(
-        globalPage: Int,
-        maxPixels: Long,
-    ): ImageBitmap? = withContext(Dispatchers.IO) {
-        val (chapter, page) = globalToChapterPage(globalPage)
-        renderPageBitmap(
-            chapterIndex = chapter,
-            pageIndex = page,
-            qualityScale = 1.0,
-            request = null,
-            maxPixels = maxPixels,
         )?.asImageBitmap()
     }
 
@@ -312,7 +297,6 @@ class PdfComicVolume(
                 pageIndex = pageIndex,
                 qualityScale = if (fullQuality) 1.0 else 0.5,
                 request = null,
-                maxPixels = null,
             )
                 ?: throw ComicOpenException("无法打开章节 PDF: ${chapters[chapterIndex].title}")
         }
@@ -337,10 +321,9 @@ class PdfComicVolume(
         pageIndex: Int,
         qualityScale: Double,
         request: PageRenderRequest?,
-        maxPixels: Long?,
     ): Bitmap? = pdfiumLock.withLock {
         coroutineContext.ensureActive()
-        renderPageBitmapLocked(chapterIndex, pageIndex, qualityScale, request, maxPixels)
+        renderPageBitmapLocked(chapterIndex, pageIndex, qualityScale, request)
     }
 
     private fun renderPageBitmapLocked(
@@ -348,7 +331,6 @@ class PdfComicVolume(
         pageIndex: Int,
         qualityScale: Double,
         request: PageRenderRequest?,
-        maxPixels: Long?,
     ): Bitmap? {
         if (closed) return null
         val opened = openDocumentLocked(chapterIndex) ?: return null
@@ -363,7 +345,6 @@ class PdfComicVolume(
             pageHeightPoints = height,
             qualityScale = qualityScale,
             request = request,
-            legacyMaxPixels = maxPixels,
         )
 
         val bitmap = createBitmap(size.width, size.height)
@@ -406,7 +387,6 @@ internal fun calculatePdfRenderSize(
     pageHeightPoints: Int,
     qualityScale: Double = 1.0,
     request: PageRenderRequest? = null,
-    legacyMaxPixels: Long? = null,
 ): PdfRenderSize {
     val pageWidth = pageWidthPoints.coerceAtLeast(1).toDouble()
     val pageHeight = pageHeightPoints.coerceAtLeast(1).toDouble()
@@ -414,11 +394,8 @@ internal fun calculatePdfRenderSize(
         minOf(it.maxWidthPx / pageWidth, it.maxHeightPx / pageHeight)
     } ?: qualityScale
 
-    val pixelBudget = request?.maxPixels ?: legacyMaxPixels
-    if (pixelBudget != null) {
-        scale = minOf(scale, sqrt(pixelBudget.toDouble() / (pageWidth * pageHeight)))
-    }
     request?.let {
+        scale = minOf(scale, sqrt(it.maxPixels.toDouble() / (pageWidth * pageHeight)))
         scale = minOf(scale, it.maxDimensionPx / maxOf(pageWidth, pageHeight))
     }
     scale = scale.coerceAtLeast(1.0 / maxOf(pageWidth, pageHeight))

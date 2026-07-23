@@ -27,33 +27,6 @@ class ReaderPageContentKeysTest {
     }
 
     @Test
-    fun `model selection changes restart without resetting state`() {
-        val before = keys(enhancementSelectionId = "model-a")
-        val after = keys(enhancementSelectionId = "model-b")
-
-        assertEquals(before.stateReset, after.stateReset)
-        assertNotEquals(before.producerRestart, after.producerRestart)
-    }
-
-    @Test
-    fun `model installation changes restart without resetting state`() {
-        val before = keys(enhancementModelInstalled = true)
-        val after = keys(enhancementModelInstalled = false)
-
-        assertEquals(before.stateReset, after.stateReset)
-        assertNotEquals(before.producerRestart, after.producerRestart)
-    }
-
-    @Test
-    fun `active task pinning changes restart without resetting state`() {
-        val before = keys(pinForActiveTask = false)
-        val after = keys(pinForActiveTask = true)
-
-        assertEquals(before.stateReset, after.stateReset)
-        assertNotEquals(before.producerRestart, after.producerRestart)
-    }
-
-    @Test
     fun `PDF render request changes restart without resetting displayed state`() {
         val before = keys(pageRenderRequest = renderRequest(1080, 1920))
         val after = keys(pageRenderRequest = renderRequest(3240, 5760))
@@ -77,18 +50,12 @@ class ReaderPageContentKeysTest {
         cacheKeyPrefix: String = "comic-1",
         isCurrentPage: Boolean = true,
         pageRenderRequest: PageRenderRequest? = null,
-        enhancementSelectionId: String = "model-a",
-        enhancementModelInstalled: Boolean = true,
-        pinForActiveTask: Boolean = false,
     ): ReaderPageContentKeys = readerPageContentKeys(
         volumeToken = volumeToken,
         page = page,
         cacheKeyPrefix = cacheKeyPrefix,
         isCurrentPage = isCurrentPage,
         pageRenderRequest = pageRenderRequest,
-        enhancementSelectionId = enhancementSelectionId,
-        enhancementModelInstalled = enhancementModelInstalled,
-        pinForActiveTask = pinForActiveTask,
     )
 
     private fun renderRequest(width: Int, height: Int) = PageRenderRequest(

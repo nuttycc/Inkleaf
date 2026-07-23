@@ -83,16 +83,6 @@ interface ComicVolume {
         request: PageRenderRequest? = null,
     ): ImageBitmap? = null
 
-    /**
-     * Loads a bitmap for memory-sensitive inference without exceeding [maxPixels] when the
-     * backing format can constrain allocation before rendering. Compressed-image volumes return
-     * null so the caller can perform a sampled decode from [loadPageBytes].
-     */
-    suspend fun loadPageBitmapForInference(
-        globalPage: Int,
-        maxPixels: Long,
-    ): ImageBitmap? = null
-
     /** Returns the page size used by a source's region-based OCR renderer, when supported. */
     suspend fun ocrPageSize(globalPage: Int): PagePixelSize? = null
 

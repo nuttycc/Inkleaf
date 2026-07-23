@@ -31,7 +31,6 @@ val injectedVersionCode =
 android {
     namespace = "com.exio.inkleaf"
     compileSdk = 37
-    ndkVersion = "29.0.14206865"
 
     defaultConfig {
         applicationId = "com.exio.inkleaf"
@@ -44,13 +43,6 @@ android {
 
         ndk {
             abiFilters += "arm64-v8a"
-        }
-
-        externalNativeBuild {
-            cmake {
-                arguments += "-DANDROID_STL=c++_static"
-                targets += "inkleaf_enhancement"
-            }
         }
     }
 
@@ -98,12 +90,6 @@ android {
             // Pdfium and OpenCV both bundle a 16 KB-aligned C++ runtime. Keep one shared copy;
             // verify the selected library in the next manually built release artifact.
             pickFirsts += "lib/**/libc++_shared.so"
-        }
-    }
-    externalNativeBuild {
-        cmake {
-            path = file("src/main/cpp/CMakeLists.txt")
-            version = "3.30.5"
         }
     }
 }
@@ -154,7 +140,6 @@ dependencies {
     implementation(libs.androidx.documentfile)
     implementation(libs.ahmer.pdfium)
     implementation(libs.reorderable)
-    implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.opencv.android)
 
     testImplementation(libs.junit)

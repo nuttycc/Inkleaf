@@ -9,7 +9,7 @@
         <exclude
             domain="file"
             path="albums/" />
-        <!-- Downloadable model packages are reproducible and should not consume backup quota. -->
+        <!-- Retired enhancement artifacts are removed on cold start and must not be restored. -->
         <exclude
             domain="file"
             path="image_enhancement_models/" />
