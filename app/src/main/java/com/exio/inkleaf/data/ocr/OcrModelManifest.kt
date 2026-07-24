@@ -14,6 +14,10 @@ internal data class OcrModelFileSpec(
     val relativePath: String,
     val sizeBytes: Long,
     val sha256: String,
+    /** 远端仓库标识，由 [OcrModelSource.resolveUrl] 与 [fileName] 一起解析为 URL。 */
+    val repo: String,
+    /** 远端文件名（可能与 [relativePath] 的 basename 不同）。 */
+    val fileName: String,
 )
 
 internal val OCR_MODEL_FILES = listOf(
@@ -21,16 +25,22 @@ internal val OCR_MODEL_FILES = listOf(
         relativePath = "rec/inference.yml",
         sizeBytes = 150_579L,
         sha256 = "ab078671bb49f06228eadccd34f1bb501e157f7a047095ffb943ba81512c77d1",
+        repo = "PP-OCRv6_small_rec_onnx",
+        fileName = "inference.yml",
     ),
     OcrModelFileSpec(
         relativePath = "det/inference.onnx",
         sizeBytes = 9_880_512L,
         sha256 = "d73e0058b7a8086bbd57f3d10b8bcd4ff95363f67e06e2762b5e814fe9c9410e",
+        repo = "PP-OCRv6_small_det_onnx",
+        fileName = "inference.onnx",
     ),
     OcrModelFileSpec(
         relativePath = "rec/inference.onnx",
         sizeBytes = 21_159_378L,
         sha256 = "5435fd747c9e0efe15a96d0b378d5bd157e9492ed8fd80edf08f30d02fa24634",
+        repo = "PP-OCRv6_small_rec_onnx",
+        fileName = "inference.onnx",
     ),
 )
 
@@ -63,19 +73,6 @@ internal val OCR_MODEL_SOURCES = listOf(
         },
     ),
 )
-
-/** 每个模型文件对应的远端 repo 和文件名。 */
-internal data class OcrModelRemoteRef(
-    val repo: String,
-    val fileName: String,
-)
-
-internal fun OcrModelFileSpec.remoteRef(): OcrModelRemoteRef = when (relativePath) {
-    "det/inference.onnx" -> OcrModelRemoteRef("PP-OCRv6_small_det_onnx", "inference.onnx")
-    "rec/inference.onnx" -> OcrModelRemoteRef("PP-OCRv6_small_rec_onnx", "inference.onnx")
-    "rec/inference.yml" -> OcrModelRemoteRef("PP-OCRv6_small_rec_onnx", "inference.yml")
-    else -> error("Unknown model file: $relativePath")
-}
 
 /** 模型文件在本地的根目录。 */
 internal fun ocrModelDir(filesDir: File): File = File(filesDir, "ocr/ppocrv6_small")
