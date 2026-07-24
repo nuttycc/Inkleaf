@@ -121,6 +121,7 @@ import com.exio.inkleaf.data.db.FavoritePageEntity
 import com.exio.inkleaf.data.ocr.OcrPageResult
 import com.exio.inkleaf.data.ocr.OcrSelectionSession
 import com.exio.inkleaf.data.ocr.PaddleOcrEngine
+import com.exio.inkleaf.data.ocr.isOcrModelReady
 import com.exio.inkleaf.data.ocr.openOcrPageSource
 import com.exio.inkleaf.data.ocr.selectedOcrText
 import kotlinx.coroutines.CancellationException
@@ -140,6 +141,7 @@ fun ReaderScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     initialPage: Int? = null,
+    onNavigateToModelDownload: () -> Unit = {},
 ) {
     val viewModel: ReaderViewModel = viewModel {
         val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY]!!
@@ -238,6 +240,7 @@ fun ReaderScreen(
                     onBack = exitReader,
                     showControls = showControls,
                     onToggleControls = { showControls = !showControls },
+                    onNavigateToModelDownload = onNavigateToModelDownload,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -267,6 +270,7 @@ private fun ComicPager(
     onBack: () -> Unit,
     showControls: Boolean,
     onToggleControls: () -> Unit,
+    onNavigateToModelDownload: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -289,17 +293,34 @@ private fun ComicPager(
     var ocrSelection by remember { mutableStateOf(OcrSelectionSession()) }
     var showOcrLongPressMenu by remember { mutableStateOf(false) }
     var ocrLongPressAnchor by remember { mutableStateOf(Offset.Zero) }
+    var pendingOcrPage by remember { mutableStateOf<Int?>(null) }
     LaunchedEffect(pagerState.currentPage) {
         zoomedPage = null
         ocrSelection = ocrSelection.onPageChanged(pagerState.currentPage)
         showOcrLongPressMenu = false
+    }
+    // 从模型下载界面返回后，自动重试之前挂起的 OCR 操作
+    androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+        val page = pendingOcrPage ?: return@LifecycleEventEffect
+        if (isOcrModelReady(context.filesDir)) {
+            pendingOcrPage = null
+            recognizePage(page)
+        }
     }
 
     fun recognizePage(page: Int) {
         val cached = ocrResults[page]?.takeIf { it.regions.isNotEmpty() }
         if (cached != null) {
             ocrSelection = ocrSelection.enter(page)
-        } else if (ocrProcessingPage == null) {
+            return
+        }
+        // 模型未下载时跳转下载界面
+        if (!isOcrModelReady(context.filesDir)) {
+            pendingOcrPage = page
+            onNavigateToModelDownload()
+            return
+        }
+        if (ocrProcessingPage == null) {
             ocrProcessingPage = page
             scope.launch {
                 val source = runCatching { openOcrPageSource(volume, page) }
