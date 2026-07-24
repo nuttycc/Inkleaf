@@ -573,7 +573,6 @@ class MainActivity : AppCompatActivity() {
                         composable<OcrModelDownloadRoute> {
                             OcrModelDownloadScreen(
                                 onBack = { outerNavController.popBackStack() },
-                                onDownloadComplete = { outerNavController.popBackStack() },
                             )
                         }
                     }

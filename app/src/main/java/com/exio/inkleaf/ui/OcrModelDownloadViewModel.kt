@@ -33,7 +33,6 @@ sealed interface OcrDownloadUiState {
         val totalBytes: Long,
         val currentFileName: String,
     ) : OcrDownloadUiState
-    data object Completed : OcrDownloadUiState
     data class Error(val message: String, val sourceName: String?) : OcrDownloadUiState
     data object NoSourceAvailable : OcrDownloadUiState
 }
@@ -54,27 +53,35 @@ class OcrModelDownloadViewModel(app: Application) : AndroidViewModel(app) {
     private val downloader = OcrModelDownloader(client)
     private val settings = OcrModelSettingsRepository(app)
     private val filesDir = app.filesDir
+
     private val _selectedVariant = MutableStateFlow(OcrModelVariant.SMALL)
     val selectedVariant = _selectedVariant.asStateFlow()
+
     private val _state = MutableStateFlow<OcrDownloadUiState?>(null)
     val state = _state.asStateFlow()
-    val options = combine(settings.activeVariant, _selectedVariant) { active, selected ->
+
+    private val _refreshTrigger = MutableStateFlow(0)
+
+    val options = combine(settings.activeVariant, _selectedVariant, _refreshTrigger) { active, selected, _ ->
         OcrModelVariant.entries.map { variant ->
-            OcrModelOption(variant, isOcrModelReady(filesDir, variant), variant == active)
+            val installed = isOcrModelReady(filesDir, variant)
+            OcrModelOption(variant, installed, installed && variant == active)
         }.also { if (selected !in OcrModelVariant.entries) _selectedVariant.value = active }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     private var selectedSource: OcrModelSource? = null
     private var downloadJob: Job? = null
-
-    init {
-        viewModelScope.launch { settings.activeVariant.collect { _selectedVariant.value = it } }
-    }
 
     fun selectVariant(variant: OcrModelVariant) {
         if (downloadJob?.isActive != true) _selectedVariant.value = variant
     }
 
-    fun selectSource() {
+    fun downloadVariant(variant: OcrModelVariant) {
+        _selectedVariant.value = variant
+        selectSource(autoStart = true)
+    }
+
+    fun selectSource(autoStart: Boolean = false) {
         val variant = _selectedVariant.value
         _state.value = OcrDownloadUiState.SelectingSource
         viewModelScope.launch {
@@ -83,7 +90,11 @@ class OcrModelDownloadViewModel(app: Application) : AndroidViewModel(app) {
                 _state.value = OcrDownloadUiState.NoSourceAvailable
             } else {
                 selectedSource = source
-                _state.value = OcrDownloadUiState.ReadyToDownload(source.name, variant.totalBytes)
+                if (autoStart) {
+                    startDownload()
+                } else {
+                    _state.value = OcrDownloadUiState.ReadyToDownload(source.name, variant.totalBytes)
+                }
             }
         }
     }
@@ -98,7 +109,8 @@ class OcrModelDownloadViewModel(app: Application) : AndroidViewModel(app) {
                 _state.update { OcrDownloadUiState.Downloading(source.name, progress.downloadedBytes, progress.totalBytes, progress.currentFileName) }
             }
             settings.setActiveVariant(variant)
-            _state.value = OcrDownloadUiState.Completed
+            _refreshTrigger.value += 1
+            _state.value = null
         }
         downloadJob?.invokeOnCompletion { error ->
             if (error != null && error !is CancellationException) {
@@ -107,9 +119,20 @@ class OcrModelDownloadViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun activateVariant(variant: OcrModelVariant) {
+        if (isOcrModelReady(filesDir, variant)) {
+            _selectedVariant.value = variant
+            viewModelScope.launch {
+                settings.setActiveVariant(variant)
+                _refreshTrigger.value += 1
+                _state.value = null
+            }
+        }
+    }
+
     fun activateSelected() {
         val variant = _selectedVariant.value
-        if (isOcrModelReady(filesDir, variant)) viewModelScope.launch { settings.setActiveVariant(variant); _state.value = OcrDownloadUiState.Completed }
+        activateVariant(variant)
     }
 
     fun retryDownload() = startDownload()
@@ -117,17 +140,18 @@ class OcrModelDownloadViewModel(app: Application) : AndroidViewModel(app) {
     fun cancelDownload() {
         downloadJob?.cancel()
         downloadJob = null
-        // Keep partial files so a later retry can resume with HTTP Range.
+        _state.value = null
     }
 
     fun deleteVariant(variant: OcrModelVariant) {
-        if (variant == selectedVariant.value) return
         ocrModelDir(filesDir, variant).deleteRecursively()
+        _refreshTrigger.value += 1
     }
 
     override fun onCleared() {
+        // onCleared 在主线程执行，evictAll() 会关闭活跃连接触发主线程网络 IO（NetworkOnMainThreadException）。
+        // 连接由 OkHttp 闲置超时和进程退出自动回收。
         client.dispatcher.executorService.shutdown()
-        client.connectionPool.evictAll()
         super.onCleared()
     }
 }
