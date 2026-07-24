@@ -39,6 +39,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.exio.inkleaf.data.CacheLimit
 import com.exio.inkleaf.data.ThemeSettings
+import com.exio.inkleaf.data.ocr.OcrModelSettingsRepository
+import com.exio.inkleaf.data.ocr.isOcrModelReady
 
 /** General settings. Theme editing lives on its own route with an explicit apply boundary. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -55,6 +57,8 @@ fun SettingsScreen(
     val cacheLimit by viewModel.cacheLimit.collectAsStateWithLifecycle()
     val cacheUsage by viewModel.cacheUsageBytes.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val activeOcrVariant by remember(context) { OcrModelSettingsRepository(context).activeVariant }
+        .collectAsStateWithLifecycle(initialValue = com.exio.inkleaf.data.ocr.OcrModelVariant.SMALL)
     val cacheBudgetBytes = remember(cacheLimit, context) { cacheLimit.bytes(context) }
     val autoCacheBudgetBytes = remember(context) { CacheLimit.AUTO.bytes(context) }
     var showCacheLimitSheet by remember { mutableStateOf(false) }
@@ -121,10 +125,10 @@ fun SettingsScreen(
             SectionLabel("文字识别")
             InkleafActionListItem(
                 headline = "OCR 模型",
-                supporting = if (com.exio.inkleaf.data.ocr.isOcrModelReady(context.filesDir)) {
-                    "PP-OCRv6 Small · 已就绪"
+                supporting = if (isOcrModelReady(context.filesDir, activeOcrVariant)) {
+                    "${activeOcrVariant.displayName} · 已就绪"
                 } else {
-                    "PP-OCRv6 Small · 未下载"
+                    "${activeOcrVariant.displayName} · 未下载"
                 },
                 onClick = onOpenOcrModelDownload,
                 trailingContent = { ForwardIcon() },

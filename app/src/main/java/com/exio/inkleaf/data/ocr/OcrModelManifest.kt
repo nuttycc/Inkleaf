@@ -1,88 +1,74 @@
-// OCR 模型清单：版本、文件列表、校验值、下载源地址。
 package com.exio.inkleaf.data.ocr
 
 import java.io.File
 
-/** 模型版本标识，版本变化时触发重新下载。 */
-internal const val OCR_MODEL_VERSION = "ppocrv6_small_1"
+enum class OcrModelVariant(
+    val id: String,
+    val displayName: String,
+    val description: String,
+    val languageSummary: String,
+    val version: String,
+    val files: List<OcrModelFileSpec>,
+) {
+    SMALL(
+        id = "ppocrv6_small",
+        displayName = "PP-OCRv6 Small",
+        description = "识别能力更完整，支持日文，适合大多数设备。",
+        languageSummary = "支持 50 种语言，包括中文、英文和日文",
+        version = "ppocrv6_small_1",
+        files = listOf(
+            OcrModelFileSpec("rec/inference.yml", 150_579L, "ab078671bb49f06228eadccd34f1bb501e157f7a047095ffb943ba81512c77d1", "PP-OCRv6_small_rec_onnx", "inference.yml"),
+            OcrModelFileSpec("det/inference.onnx", 9_880_512L, "d73e0058b7a8086bbd57f3d10b8bcd4ff95363f67e06e2762b5e814fe9c9410e", "PP-OCRv6_small_det_onnx", "inference.onnx"),
+            OcrModelFileSpec("rec/inference.onnx", 21_159_378L, "5435fd747c9e0efe15a96d0b378d5bd157e9492ed8fd80edf08f30d02fa24634", "PP-OCRv6_small_rec_onnx", "inference.onnx"),
+        ),
+    ),
+    TINY(
+        id = "ppocrv6_tiny",
+        displayName = "PP-OCRv6 Tiny",
+        description = "体积更小、速度更快，但不支持日文。",
+        languageSummary = "支持 49 种语言，不包含日文",
+        version = "ppocrv6_tiny_1",
+        files = listOf(
+            OcrModelFileSpec("rec/inference.yml", 55_571L, "66170210bad538e83fff3c4a3867e547d6bf20b50d64b20347c4b913f3034ea1", "PP-OCRv6_tiny_rec_onnx", "inference.yml"),
+            OcrModelFileSpec("det/inference.onnx", 1_780_590L, "193bab7a04fca699a6c82e6abb5b81bdb28177f0abd4062552b04908dafb19f8", "PP-OCRv6_tiny_det_onnx", "inference.onnx"),
+            OcrModelFileSpec("rec/inference.onnx", 4_462_639L, "9ef676d6ed3c88256a2d92c640c44f25b0c40947e111b14b8be8f594091563e6", "PP-OCRv6_tiny_rec_onnx", "inference.onnx"),
+        ),
+    ),
+}
 
-/** 模型文件总大小（字节），用于进度展示。 */
-internal const val OCR_MODEL_TOTAL_BYTES = 9_880_512L + 21_159_378L + 150_579L
+val OcrModelVariant.totalBytes: Long get() = files.sumOf { it.sizeBytes }
 
-internal data class OcrModelFileSpec(
-    /** 相对于模型根目录的路径，如 "det/inference.onnx"。 */
+data class OcrModelFileSpec(
     val relativePath: String,
     val sizeBytes: Long,
     val sha256: String,
-    /** 远端仓库标识，由 [OcrModelSource.resolveUrl] 与 [fileName] 一起解析为 URL。 */
     val repo: String,
-    /** 远端文件名（可能与 [relativePath] 的 basename 不同）。 */
     val fileName: String,
 )
 
-internal val OCR_MODEL_FILES = listOf(
-    OcrModelFileSpec(
-        relativePath = "rec/inference.yml",
-        sizeBytes = 150_579L,
-        sha256 = "ab078671bb49f06228eadccd34f1bb501e157f7a047095ffb943ba81512c77d1",
-        repo = "PP-OCRv6_small_rec_onnx",
-        fileName = "inference.yml",
-    ),
-    OcrModelFileSpec(
-        relativePath = "det/inference.onnx",
-        sizeBytes = 9_880_512L,
-        sha256 = "d73e0058b7a8086bbd57f3d10b8bcd4ff95363f67e06e2762b5e814fe9c9410e",
-        repo = "PP-OCRv6_small_det_onnx",
-        fileName = "inference.onnx",
-    ),
-    OcrModelFileSpec(
-        relativePath = "rec/inference.onnx",
-        sizeBytes = 21_159_378L,
-        sha256 = "5435fd747c9e0efe15a96d0b378d5bd157e9492ed8fd80edf08f30d02fa24634",
-        repo = "PP-OCRv6_small_rec_onnx",
-        fileName = "inference.onnx",
-    ),
-)
+// Backward-compatible aliases for the original Small-only API.
+internal const val OCR_MODEL_VERSION = "ppocrv6_small_1"
+internal val OCR_MODEL_FILES: List<OcrModelFileSpec> get() = OcrModelVariant.SMALL.files
+internal val OCR_MODEL_TOTAL_BYTES: Long get() = OcrModelVariant.SMALL.totalBytes
 
-/**
- * 下载源定义。每个源提供 URL 模板，[resolveUrl] 将 repo 和文件名拼接为完整下载地址。
- */
 internal data class OcrModelSource(
     val name: String,
-    /** 用于测速和下载的 URL 构造器：(repoPath, fileName) -> URL */
     val resolveUrl: (repo: String, fileName: String) -> String,
 )
 
 internal val OCR_MODEL_SOURCES = listOf(
-    OcrModelSource(
-        name = "HuggingFace",
-        resolveUrl = { repo, file ->
-            "https://huggingface.co/PaddlePaddle/$repo/resolve/main/$file"
-        },
-    ),
-    OcrModelSource(
-        name = "ModelScope",
-        resolveUrl = { repo, file ->
-            "https://modelscope.cn/models/PaddlePaddle/$repo/resolve/master/$file"
-        },
-    ),
-    OcrModelSource(
-        name = "hf-mirror",
-        resolveUrl = { repo, file ->
-            "https://hf-mirror.com/PaddlePaddle/$repo/resolve/main/$file"
-        },
-    ),
+    OcrModelSource("HuggingFace") { repo, file -> "https://huggingface.co/PaddlePaddle/$repo/resolve/main/$file" },
+    OcrModelSource("ModelScope") { repo, file -> "https://modelscope.cn/models/PaddlePaddle/$repo/resolve/master/$file" },
+    OcrModelSource("hf-mirror") { repo, file -> "https://hf-mirror.com/PaddlePaddle/$repo/resolve/main/$file" },
 )
 
-/** 模型文件在本地的根目录。 */
-internal fun ocrModelDir(filesDir: File): File = File(filesDir, "ocr/ppocrv6_small")
+internal fun ocrModelDir(filesDir: File, variant: OcrModelVariant = OcrModelVariant.SMALL): File =
+    File(filesDir, "ocr/${variant.id}")
 
-/** 检查本地模型是否完整且版本匹配。 */
-internal fun isOcrModelReady(filesDir: File): Boolean {
-    val dir = ocrModelDir(filesDir)
-    val versionFile = File(dir, ".version")
-    if (!versionFile.exists() || versionFile.readText().trim() != OCR_MODEL_VERSION) return false
-    return OCR_MODEL_FILES.all { spec ->
+internal fun isOcrModelReady(filesDir: File, variant: OcrModelVariant = OcrModelVariant.SMALL): Boolean {
+    val dir = ocrModelDir(filesDir, variant)
+    if (!File(dir, ".version").let { it.exists() && it.readText().trim() == variant.version }) return false
+    return variant.files.all { spec ->
         val file = File(dir, spec.relativePath)
         file.exists() && file.length() == spec.sizeBytes
     }
