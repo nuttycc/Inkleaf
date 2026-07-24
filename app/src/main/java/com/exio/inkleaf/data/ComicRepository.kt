@@ -874,7 +874,7 @@ class ComicRepository(context: Context) {
 
     /**
      * 给 PDF 章节目录补封面。首次导入时 comics 表刚插入，封面为空；
-     * 用 [PdfComicVolume] 读第一个可读章节的第一页生成封面。
+     * 通过 [ComicVolume] 读第一个可读章节的第一页生成封面。
      *
      * 缺失章节可能排在可读章节之前，因此不能假定索引 0 一定能打开。所有
      * PDF 打开都走 Dispatchers.IO，避免在主线程做 native 解析。
@@ -887,11 +887,7 @@ class ComicRepository(context: Context) {
         withContext(Dispatchers.IO) {
             val volume = runCatching { openBook(updatedComic) }.getOrNull() ?: return@withContext
             try {
-                val coverChapter = if (volume is PdfComicVolume) {
-                    volume.firstReadableChapterOrNull()
-                } else {
-                    (0 until volume.chapterCount).firstOrNull(volume::isChapterReadable)
-                }
+                val coverChapter = volume.firstReadableChapterIndex()
                 val coverPage = coverChapter?.let { volume.chapterStartPage(it) }
                 if (coverPage != null) {
                     val bytes = runCatching { volume.loadPageBytes(coverPage) }.getOrNull()

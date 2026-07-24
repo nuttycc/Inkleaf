@@ -20,6 +20,11 @@ data class PageRenderRequest(
 
 data class PagePixelSize(val width: Int, val height: Int)
 
+data class ChapterMetadata(
+    val pageCount: Int,
+    val isReadable: Boolean,
+)
+
 /**
  * 一本已打开的漫画，对 UI 层隐藏底层是 zip/cbz 还是 PDF 目录。
  *
@@ -46,6 +51,20 @@ interface ComicVolume {
 
     /** Whether the chapter can currently be opened for reading. */
     fun isChapterReadable(chapterIndex: Int): Boolean = chapterPageCount(chapterIndex) > 0
+
+    /** Reads chapter metadata as one immutable snapshot for chapter-list UIs. */
+    fun probeChapterMetadata(): List<ChapterMetadata> = List(chapterCount) { chapterIndex ->
+        ChapterMetadata(
+            pageCount = chapterPageCount(chapterIndex).coerceAtLeast(0),
+            isReadable = isChapterReadable(chapterIndex),
+        )
+    }
+
+    /** Finds the first chapter that can currently be opened. */
+    fun firstReadableChapterIndex(): Int? =
+        (0 until chapterCount).firstOrNull { chapterIndex ->
+            isChapterReadable(chapterIndex)
+        }
 
     /** 将全局页码转换为 (章节索引, 章节内页码) */
     fun globalToChapterPage(globalPage: Int): ChapterProgress

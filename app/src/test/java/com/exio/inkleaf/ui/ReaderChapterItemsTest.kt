@@ -1,6 +1,7 @@
 package com.exio.inkleaf.ui
 
 import com.exio.inkleaf.data.ChapterProgress
+import com.exio.inkleaf.data.ChapterMetadata
 import com.exio.inkleaf.data.ComicVolume
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -38,14 +39,13 @@ class ReaderChapterItemsTest {
 
     @Test
     fun `loader snapshots source chapters including missing entries`() = runBlocking {
-        val items = loadReaderChapterItems(
-            FakeChapterVolume(
-                titles = listOf("", "第二章", "损坏章节", "第四章"),
-                pageCounts = listOf(0, 12, 0, 5),
-                startPages = listOf(0, 0, 12, 12),
-                readable = listOf(false, true, false, true),
-            ),
+        val volume = FakeChapterVolume(
+            titles = listOf("", "第二章", "损坏章节", "第四章"),
+            pageCounts = listOf(0, 12, 0, 5),
+            startPages = listOf(0, 0, 12, 12),
+            readable = listOf(false, true, false, true),
         )
+        val items = loadReaderChapterItems(volume)
 
         assertEquals(listOf(0, 1, 2, 3), items.map { it.index })
         assertEquals("第 1 章", items[0].title)
@@ -53,6 +53,21 @@ class ReaderChapterItemsTest {
         assertEquals(listOf(0, 12, 0, 5), items.map { it.pageCount })
         assertEquals(listOf(0, 0, 12, 12), items.map { it.startPage })
         assertEquals(listOf(false, true, false, true), items.map { it.isReadable })
+        assertEquals(1, volume.metadataProbeCount)
+        assertEquals(0, volume.individualReadabilityProbeCount)
+    }
+
+    @Test
+    fun `first readable chapter probe stops in source order`() {
+        val volume = FakeChapterVolume(
+            titles = listOf("损坏章节", "第二章", "第三章"),
+            pageCounts = listOf(0, 4, 8),
+            startPages = listOf(0, 0, 4),
+            readable = listOf(false, true, true),
+        )
+
+        assertEquals(1, volume.firstReadableChapterIndex())
+        assertEquals(2, volume.individualReadabilityProbeCount)
     }
 
     private class FakeChapterVolume(
@@ -61,6 +76,9 @@ class ReaderChapterItemsTest {
         private val startPages: List<Int>,
         private val readable: List<Boolean>,
     ) : ComicVolume {
+        var metadataProbeCount = 0
+        var individualReadabilityProbeCount = 0
+
         override val totalPageCount: Int = pageCounts.sumOf { it.coerceAtLeast(0) }
         override val sourceRevision: String = "fake"
         override val chapterCount: Int = titles.size
@@ -71,7 +89,17 @@ class ReaderChapterItemsTest {
 
         override fun chapterPageCount(chapterIndex: Int): Int = pageCounts[chapterIndex]
 
-        override fun isChapterReadable(chapterIndex: Int): Boolean = readable[chapterIndex]
+        override fun isChapterReadable(chapterIndex: Int): Boolean {
+            individualReadabilityProbeCount++
+            return readable[chapterIndex]
+        }
+
+        override fun probeChapterMetadata(): List<ChapterMetadata> {
+            metadataProbeCount++
+            return pageCounts.indices.map { index ->
+                ChapterMetadata(pageCounts[index], readable[index])
+            }
+        }
 
         override fun globalToChapterPage(globalPage: Int): ChapterProgress =
             ChapterProgress(0, globalPage)
