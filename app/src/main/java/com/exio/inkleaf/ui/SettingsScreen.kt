@@ -47,6 +47,7 @@ fun SettingsScreen(
     themeSettings: ThemeSettings,
     onBack: () -> Unit,
     onOpenThemeSettings: () -> Unit,
+    onOpenOcrModelDownload: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: SettingsViewModel = viewModel(),
     foldersViewModel: FoldersViewModel = viewModel(),
@@ -114,6 +115,18 @@ fun SettingsScreen(
                 headline = "漫画库目录",
                 supporting = "管理扫描漫画的文件夹",
                 onClick = { showFoldersSheet = true },
+                trailingContent = { ForwardIcon() },
+            )
+
+            SectionLabel("文字识别")
+            InkleafActionListItem(
+                headline = "OCR 模型",
+                supporting = if (com.exio.inkleaf.data.ocr.isOcrModelReady(context.filesDir)) {
+                    "PP-OCRv6 Small · 已就绪"
+                } else {
+                    "PP-OCRv6 Small · 未下载"
+                },
+                onClick = onOpenOcrModelDownload,
                 trailingContent = { ForwardIcon() },
             )
 

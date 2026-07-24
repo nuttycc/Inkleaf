@@ -35,6 +35,23 @@ class ORTSessionManager(
         private set
 
     fun loadModels(detAssetPath: String, recAssetPath: String) {
+        loadModelsInternal(
+            detReader = { readModelAsset(detAssetPath) },
+            recReader = { readModelAsset(recAssetPath) },
+        )
+    }
+
+    fun loadModels(detFile: java.io.File, recFile: java.io.File) {
+        loadModelsInternal(
+            detReader = { readModelFile(detFile) },
+            recReader = { readModelFile(recFile) },
+        )
+    }
+
+    private fun loadModelsInternal(
+        detReader: () -> ByteArray,
+        recReader: () -> ByteArray,
+    ) {
         val loadStart = System.currentTimeMillis()
         env = OrtEnvironment.getEnvironment()
         val opts = OrtSession.SessionOptions().apply {
@@ -45,14 +62,14 @@ class ORTSessionManager(
             val ortEnv = env
                 ?: throw OCRError.ModelLoadFailed("OCR", Exception("Environment not initialized"))
             try {
-                // Load one asset at a time so the 30 MB model pair is never retained as two Java
+                // Load one model at a time so the 30 MB model pair is never retained as two Java
                 // byte arrays while ORT is also allocating its native sessions.
-                detSession = ortEnv.createSession(readModelAsset(detAssetPath), opts)
+                detSession = ortEnv.createSession(detReader(), opts)
             } catch (t: Throwable) {
                 throw OCRError.ModelLoadFailed("detection", t)
             }
             try {
-                recSession = ortEnv.createSession(readModelAsset(recAssetPath), opts)
+                recSession = ortEnv.createSession(recReader(), opts)
             } catch (t: Throwable) {
                 detSession?.close()
                 detSession = null
@@ -110,6 +127,14 @@ class ORTSessionManager(
             context.assets.open(assetPath).use { it.readBytes() }
         } catch (t: Throwable) {
             throw OCRError.ModelNotFound(assetPath, t)
+        }
+    }
+
+    private fun readModelFile(file: java.io.File): ByteArray {
+        return try {
+            file.readBytes()
+        } catch (t: Throwable) {
+            throw OCRError.ModelNotFound(file.absolutePath, t)
         }
     }
 

@@ -62,6 +62,7 @@ import com.exio.inkleaf.data.ThemeSettingsRepository
 import com.exio.inkleaf.ui.AlbumEditorScreen
 import com.exio.inkleaf.ui.FavoriteViewerScreen
 import com.exio.inkleaf.ui.HistoryScreen
+import com.exio.inkleaf.ui.OcrModelDownloadScreen
 import com.exio.inkleaf.ui.ReaderScreen
 import com.exio.inkleaf.ui.SavedScreen
 import com.exio.inkleaf.ui.SettingsScreen
@@ -106,6 +107,9 @@ data object SettingsRoute
 
 @Serializable
 data object ThemeSettingsRoute
+
+@Serializable
+data object OcrModelDownloadRoute
 
 /** 外层壳↔二级：全宽滑动的运动量大，350~450ms 区间体感比较合适 */
 private const val NAV_TRANSITION_MS = 400
@@ -519,6 +523,9 @@ class MainActivity : AppCompatActivity() {
                                 comicId = route.comicId,
                                 initialPage = route.initialPage,
                                 onBack = { outerNavController.popBackStack() },
+                                onNavigateToModelDownload = {
+                                    outerNavController.navigate(OcrModelDownloadRoute)
+                                },
                             )
                         }
                         composable<FavoriteViewerRoute> { entry ->
@@ -544,6 +551,9 @@ class MainActivity : AppCompatActivity() {
                                 onOpenThemeSettings = {
                                     outerNavController.navigate(ThemeSettingsRoute)
                                 },
+                                onOpenOcrModelDownload = {
+                                    outerNavController.navigate(OcrModelDownloadRoute)
+                                },
                             )
                         }
                         composable<ThemeSettingsRoute> {
@@ -558,6 +568,12 @@ class MainActivity : AppCompatActivity() {
                                         committed = committed,
                                     )
                                 },
+                            )
+                        }
+                        composable<OcrModelDownloadRoute> {
+                            OcrModelDownloadScreen(
+                                onBack = { outerNavController.popBackStack() },
+                                onDownloadComplete = { outerNavController.popBackStack() },
                             )
                         }
                     }

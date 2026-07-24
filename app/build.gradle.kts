@@ -133,6 +133,7 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.material.kolor)
+    implementation(libs.okhttp)
 
     implementation(libs.coil.compose)
     implementation(libs.androidx.room.runtime)
