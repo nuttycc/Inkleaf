@@ -11,7 +11,6 @@ import com.exio.inkleaf.data.ocr.OcrModelDownloader
 import com.exio.inkleaf.data.ocr.OcrModelSource
 import com.exio.inkleaf.data.ocr.OcrSourceSelector
 import com.exio.inkleaf.data.ocr.ocrModelDir
-import com.exio.inkleaf.data.ocr.remoteRef
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -83,8 +82,7 @@ internal class OcrModelDownloadViewModel(app: Application) : AndroidViewModel(ap
             } else {
                 selectedSource = source
                 val sampleRef = OCR_MODEL_FILES.last().let { spec ->
-                    val ref = spec.remoteRef()
-                    source.resolveUrl(ref.repo, ref.fileName)
+                    source.resolveUrl(spec.repo, spec.fileName)
                 }
                 _state.value = OcrDownloadUiState.ReadyToDownload(
                     source = source,
@@ -97,6 +95,8 @@ internal class OcrModelDownloadViewModel(app: Application) : AndroidViewModel(ap
 
     fun startDownload() {
         val source = selectedSource ?: return
+        // 防御重入：先取消上一个未完成的下载任务
+        downloadJob?.cancel()
         val modelDir = ocrModelDir(getApplication<Application>().filesDir)
         _state.value = OcrDownloadUiState.Downloading(
             source = source,

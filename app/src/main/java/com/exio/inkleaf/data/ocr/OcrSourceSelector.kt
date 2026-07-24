@@ -37,7 +37,7 @@ internal class OcrSourceSelector(
                     }
                 }.awaitAll()
                     .filterNotNull()
-                    .minByOrNull { (_, bytesPerSec) -> -bytesPerSec }
+                    .maxByOrNull { (_, bytesPerSec) -> bytesPerSec }
                     ?.first
             }
         }
@@ -63,12 +63,13 @@ internal class OcrSourceSelector(
             probeClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful && response.code != 206) return null
                 val body = response.body ?: return null
+                val sink = okio.Buffer()
                 val read = body.source().use { source ->
                     var total = 0L
-                    val buffer = okio.Buffer()
                     while (total < bytes) {
-                        val n = source.read(buffer, 8192)
+                        val n = source.read(sink, 8192)
                         if (n == -1L) break
+                        sink.clear()
                         total += n
                     }
                     total

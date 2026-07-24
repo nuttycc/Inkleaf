@@ -29,6 +29,7 @@ internal class OcrModelDownloader(
     /**
      * 下载所有模型文件到 [modelDir]，通过 Flow 上报进度。
      * 每个文件失败自动重试 1 次（Range 续传），仍失败则抛 [OcrDownloadException]。
+     * 单个文件下载过程中按 256KB 粒度上报进度，避免大文件期间进度条长时间不动。
      */
     fun download(
         source: OcrModelSource,
@@ -40,11 +41,15 @@ internal class OcrModelDownloader(
             val targetFile = File(modelDir, spec.relativePath)
             targetFile.parentFile?.mkdirs()
 
-            // 已存在且大小正确则跳过
+            // 已存在且大小匹配，再做 SHA-256 校验，通过则跳过；校验失败视作损坏重下。
             if (targetFile.exists() && targetFile.length() == spec.sizeBytes) {
-                downloadedTotal += spec.sizeBytes
-                emit(OcrDownloadProgress(downloadedTotal, OCR_MODEL_TOTAL_BYTES, spec.relativePath))
-                continue
+                if (verifySha256(targetFile, spec.sha256)) {
+                    downloadedTotal += spec.sizeBytes
+                    emit(OcrDownloadProgress(downloadedTotal, OCR_MODEL_TOTAL_BYTES, spec.relativePath))
+                    continue
+                }
+                // 大小对但内容损坏，删掉重下
+                targetFile.delete()
             }
 
             val partialFile = File(modelDir, "${spec.relativePath}.partial")
@@ -56,11 +61,27 @@ internal class OcrModelDownloader(
             // 最多尝试 2 次（首次 + 重试 1 次）
             for (attempt in 0..1) {
                 try {
-                    downloadFile(source, spec, partialFile)
-                    verifySha256(partialFile, spec.sha256)
-                    // 校验通过，重命名为最终文件
+                    downloadFile(source, spec, partialFile) { bytesSoFar ->
+                        emit(
+                            OcrDownloadProgress(
+                                downloadedBytes = downloadedTotal + bytesSoFar,
+                                totalBytes = OCR_MODEL_TOTAL_BYTES,
+                                currentFileName = spec.relativePath,
+                            )
+                        )
+                    }
+                    if (!verifySha256(partialFile, spec.sha256)) {
+                        partialFile.delete()
+                        throw OcrDownloadException(
+                            "校验失败: ${spec.relativePath} (期望 ${spec.sha256.take(12)}…)",
+                        )
+                    }
                     if (targetFile.exists()) targetFile.delete()
-                    partialFile.renameTo(targetFile)
+                    if (!partialFile.renameTo(targetFile)) {
+                        throw OcrDownloadException(
+                            "无法重命名 ${partialFile.name} -> ${targetFile.name}",
+                        )
+                    }
                     success = true
                     break
                 } catch (e: Exception) {
@@ -84,13 +105,17 @@ internal class OcrModelDownloader(
         File(modelDir, ".version").writeText(OCR_MODEL_VERSION)
     }.flowOn(Dispatchers.IO)
 
-    private fun downloadFile(
+    /**
+     * 下载单个文件到 [partialFile]（支持 Range 续传）。
+     * [onProgress] 在写入过程中以约 256KB 粒度回调，参数为本轮已写入字节数（含续传起始偏移）。
+     */
+    private suspend fun downloadFile(
         source: OcrModelSource,
         spec: OcrModelFileSpec,
         partialFile: File,
+        onProgress: suspend (bytesSoFar: Long) -> Unit,
     ) {
-        val remoteRef = spec.remoteRef()
-        val url = source.resolveUrl(remoteRef.repo, remoteRef.fileName)
+        val url = source.resolveUrl(spec.repo, spec.fileName)
         val existingBytes = if (partialFile.exists()) partialFile.length() else 0L
 
         val requestBuilder = Request.Builder().url(url)
@@ -99,13 +124,16 @@ internal class OcrModelDownloader(
         }
 
         client.newCall(requestBuilder.build()).execute().use { response ->
+            val append: Boolean
             when {
                 response.code == 206 -> {
                     // 续传成功，追加写入
+                    append = true
                 }
                 response.isSuccessful -> {
                     // 服务端不支持 Range 或返回完整文件，从头写
                     if (existingBytes > 0) partialFile.delete()
+                    append = false
                 }
                 else -> throw OcrDownloadException(
                     "HTTP ${response.code}: ${spec.relativePath}",
@@ -115,16 +143,32 @@ internal class OcrModelDownloader(
             val body = response.body
                 ?: throw OcrDownloadException("空响应体: ${spec.relativePath}")
 
-            val append = response.code == 206
+            var bytesSoFar = if (append) existingBytes else 0L
+            val progressInterval = 256 * 1024L
+            var bytesSinceLastEmit = 0L
+
             FileOutputStream(partialFile, append).use { fos ->
                 body.byteStream().use { input ->
-                    input.copyTo(fos)
+                    val buffer = ByteArray(8192)
+                    var read: Int
+                    while (input.read(buffer).also { read = it } != -1) {
+                        fos.write(buffer, 0, read)
+                        bytesSoFar += read
+                        bytesSinceLastEmit += read
+                        if (bytesSinceLastEmit >= progressInterval) {
+                            onProgress(bytesSoFar)
+                            bytesSinceLastEmit = 0
+                        }
+                    }
                 }
             }
+            // 写完后补一次最终进度，保证调用方能拿到收尾状态
+            onProgress(bytesSoFar)
         }
     }
 
-    private fun verifySha256(file: File, expected: String) {
+    /** 校验文件 SHA-256 是否匹配；返回 false 表示不匹配（不抛异常）。 */
+    private fun verifySha256(file: File, expected: String): Boolean {
         val digest = MessageDigest.getInstance("SHA-256")
         file.inputStream().use { input ->
             val buffer = ByteArray(8192)
@@ -134,11 +178,6 @@ internal class OcrModelDownloader(
             }
         }
         val actual = digest.digest().joinToString("") { "%02x".format(it) }
-        if (!actual.equals(expected, ignoreCase = true)) {
-            file.delete()
-            throw OcrDownloadException(
-                "校验失败: ${file.name} (期望 ${expected.take(12)}…, 实际 ${actual.take(12)}…)",
-            )
-        }
+        return actual.equals(expected, ignoreCase = true)
     }
 }
