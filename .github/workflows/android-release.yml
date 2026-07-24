@@ -114,10 +114,19 @@ jobs:
         env:
           INKLEAF_KEYSTORE_BASE64: ${{ secrets.INKLEAF_KEYSTORE_BASE64 }}
 
-      - name: Test and build release APK
+      - name: Run unit tests
         # Private ubuntu-latest is 2C/8G: one fat Gradle JVM (Kotlin in-process).
         run: |
-          ./gradlew testDebugUnitTest assembleRelease \
+          ./gradlew testDebugUnitTest \
+            -Dorg.gradle.jvmargs="-Xmx5g -XX:MaxMetaspaceSize=768m -XX:+UseParallelGC -Dfile.encoding=UTF-8" \
+            -Dkotlin.compiler.execution.strategy=in-process \
+            -Dorg.gradle.workers.max=2 \
+            -Dorg.gradle.parallel=true \
+            -Dorg.gradle.priority=normal
+
+      - name: Build release APK
+        run: |
+          ./gradlew assembleRelease \
             -Dorg.gradle.jvmargs="-Xmx5g -XX:MaxMetaspaceSize=768m -XX:+UseParallelGC -Dfile.encoding=UTF-8" \
             -Dkotlin.compiler.execution.strategy=in-process \
             -Dorg.gradle.workers.max=2 \

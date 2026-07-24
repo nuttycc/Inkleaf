@@ -62,7 +62,7 @@ class OcrModelManifestTest {
         val dir = newTempDir()
         try {
             writeValidFiles(dir)
-            Files.writeString(dir.toPath().resolve(".version"), "stale_version")
+            Files.writeString(modelDir(dir).resolve(".version"), "stale_version")
             assertFalse(isOcrModelReady(dir))
         } finally {
             cleanup(dir)
@@ -74,8 +74,8 @@ class OcrModelManifestTest {
         val dir = newTempDir()
         try {
             writeValidFiles(dir)
-            Files.delete(dir.toPath().resolve(OCR_MODEL_FILES.first().relativePath))
-            Files.writeString(dir.toPath().resolve(".version"), OCR_MODEL_VERSION)
+            Files.delete(modelDir(dir).resolve(OCR_MODEL_FILES.first().relativePath))
+            Files.writeString(modelDir(dir).resolve(".version"), OCR_MODEL_VERSION)
             assertFalse(isOcrModelReady(dir))
         } finally {
             cleanup(dir)
@@ -88,10 +88,10 @@ class OcrModelManifestTest {
         try {
             writeValidFiles(dir)
             // 覆盖其中一个文件为短内容，大小不匹配
-            val victim = dir.toPath().resolve(OCR_MODEL_FILES.first().relativePath)
+            val victim = modelDir(dir).resolve(OCR_MODEL_FILES.first().relativePath)
             Files.delete(victim)
             Files.write(victim, "wrong".toByteArray())
-            Files.writeString(dir.toPath().resolve(".version"), OCR_MODEL_VERSION)
+            Files.writeString(modelDir(dir).resolve(".version"), OCR_MODEL_VERSION)
             assertFalse(isOcrModelReady(dir))
         } finally {
             cleanup(dir)
@@ -103,7 +103,7 @@ class OcrModelManifestTest {
         val dir = newTempDir()
         try {
             writeValidFiles(dir)
-            Files.writeString(dir.toPath().resolve(".version"), OCR_MODEL_VERSION)
+            Files.writeString(modelDir(dir).resolve(".version"), OCR_MODEL_VERSION)
             assertTrue(isOcrModelReady(dir))
         } finally {
             cleanup(dir)
@@ -131,10 +131,12 @@ class OcrModelManifestTest {
         dir.toPath().deleteIfExists()
     }
 
+    private fun modelDir(filesDir: File) = ocrModelDir(filesDir).toPath()
+
     /** 写出所有 spec 对应的占位文件，大小匹配 spec.sizeBytes（内容不参与 isOcrModelReady 校验）。 */
     private fun writeValidFiles(dir: File) {
         OCR_MODEL_FILES.forEach { spec ->
-            val target = dir.toPath().resolve(spec.relativePath)
+            val target = modelDir(dir).resolve(spec.relativePath)
             Files.createDirectories(target.parent)
             // 用稀疏文件填到指定大小，避免为 21MB 占位文件分配真实内存
             java.io.RandomAccessFile(target.toFile(), "rw").use { raf ->
