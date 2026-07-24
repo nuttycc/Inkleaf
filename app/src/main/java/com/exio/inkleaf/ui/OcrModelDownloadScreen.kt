@@ -155,7 +155,7 @@ fun OcrModelDownloadScreen(
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "来源: ${s.source.name}",
+                        "来源: ${s.sourceName}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -177,10 +177,10 @@ fun OcrModelDownloadScreen(
                         style = MaterialTheme.typography.bodyMedium,
                         textAlign = TextAlign.Center,
                     )
-                    if (s.source != null) {
+                    if (s.sourceName != null) {
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            "来源: ${s.source.name}",
+                            "来源: ${s.sourceName}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

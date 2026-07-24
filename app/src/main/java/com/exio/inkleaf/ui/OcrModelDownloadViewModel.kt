@@ -26,14 +26,14 @@ sealed interface OcrDownloadUiState {
 
     /** 测速完成，等待用户确认开始下载。 */
     data class ReadyToDownload(
-        val source: OcrModelSource,
+        val sourceName: String,
         val sampleUrl: String,
         val totalBytes: Long,
     ) : OcrDownloadUiState
 
     /** 下载中。 */
     data class Downloading(
-        val source: OcrModelSource,
+        val sourceName: String,
         val downloadedBytes: Long,
         val totalBytes: Long,
         val currentFileName: String,
@@ -45,7 +45,7 @@ sealed interface OcrDownloadUiState {
     /** 出错。 */
     data class Error(
         val message: String,
-        val source: OcrModelSource?,
+        val sourceName: String?,
     ) : OcrDownloadUiState
 
     /** 无可用源（全部超时）。 */
@@ -85,7 +85,7 @@ class OcrModelDownloadViewModel(app: Application) : AndroidViewModel(app) {
                     source.resolveUrl(spec.repo, spec.fileName)
                 }
                 _state.value = OcrDownloadUiState.ReadyToDownload(
-                    source = source,
+                    sourceName = source.name,
                     sampleUrl = sampleRef,
                     totalBytes = OCR_MODEL_TOTAL_BYTES,
                 )
@@ -99,7 +99,7 @@ class OcrModelDownloadViewModel(app: Application) : AndroidViewModel(app) {
         downloadJob?.cancel()
         val modelDir = ocrModelDir(getApplication<Application>().filesDir)
         _state.value = OcrDownloadUiState.Downloading(
-            source = source,
+            sourceName = source.name,
             downloadedBytes = 0L,
             totalBytes = OCR_MODEL_TOTAL_BYTES,
             currentFileName = "",
@@ -109,7 +109,7 @@ class OcrModelDownloadViewModel(app: Application) : AndroidViewModel(app) {
                 .collect { progress: OcrDownloadProgress ->
                     _state.update {
                         OcrDownloadUiState.Downloading(
-                            source = source,
+                            sourceName = source.name,
                             downloadedBytes = progress.downloadedBytes,
                             totalBytes = progress.totalBytes,
                             currentFileName = progress.currentFileName,
@@ -122,7 +122,7 @@ class OcrModelDownloadViewModel(app: Application) : AndroidViewModel(app) {
             if (error != null && error !is CancellationException) {
                 _state.value = OcrDownloadUiState.Error(
                     message = error.message ?: "下载失败",
-                    source = source,
+                    sourceName = source.name,
                 )
             }
         }
