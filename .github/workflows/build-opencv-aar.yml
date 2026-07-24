@@ -42,11 +42,8 @@ jobs:
         with:
           # NDK r27 LTS (27.2.12479018) supports 16 KB page sizes and is
           # compatible with OpenCV 5.x build_sdk.py. cmake 3.22.1 is the
-          # version AGP ships; ninja comes from apt below.
+          # version AGP ships. Ninja is preinstalled on ubuntu-latest.
           packages: 'platforms;android-36 ndk;27.2.12479018 cmake;3.22.1'
-
-      - name: Install build tools
-        run: sudo apt-get update && sudo apt-get install -y ninja-build
 
       - name: Resolve NDK path
         run: |
@@ -60,9 +57,13 @@ jobs:
           echo "Resolved NDK: $NDK_PATH"
 
       - name: Checkout OpenCV source
+        # Tarball avoids git protocol handshake + object unpacking; faster on
+        # ephemeral CI runners. --strip-components=1 drops the opencv-<tag>/
+        # top-level dir so downstream paths stay /opt/opencv/...
         run: |
-          git clone --depth 1 -b "${{ inputs.opencv_tag }}" \
-            https://github.com/opencv/opencv.git /opt/opencv
+          mkdir -p /opt/opencv
+          curl -sSL "https://github.com/opencv/opencv/archive/refs/tags/${{ inputs.opencv_tag }}.tar.gz" \
+            | tar -xz -C /opt/opencv --strip-components=1
 
       - name: Copy build config
         run: cp scripts/opencv-android-config.py /opt/opencv/platforms/android/inkleaf-config.py
