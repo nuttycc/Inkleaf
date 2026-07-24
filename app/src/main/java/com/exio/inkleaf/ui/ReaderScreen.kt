@@ -46,6 +46,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -291,6 +292,8 @@ private fun ComicPager(
     var zoomResetPage by remember { mutableIntStateOf(-1) }
     var zoomToggleAnchor by remember { mutableStateOf(Offset.Unspecified) }
     var showBookmarks by remember { mutableStateOf(false) }
+    var showChapters by remember { mutableStateOf(false) }
+    var chapterLayoutVersion by remember(volume) { mutableIntStateOf(0) }
     val ocrResults = remember { mutableStateMapOf<Int, OcrPageResult>() }
     val ocrResultOrder = remember { ArrayDeque<Int>() }
     val snackbarHostState = remember { SnackbarHostState() }
@@ -392,10 +395,10 @@ private fun ComicPager(
 
     // 当前页对应的章节信息，用于多章书籍的界面提示
     val currentPage = pagerState.currentPage
-    val chapterProgress = remember(currentPage, volume) {
+    val chapterProgress = remember(currentPage, volume, chapterLayoutVersion) {
         volume.globalToChapterPage(currentPage)
     }
-    val chapterTitle = remember(chapterProgress, volume) {
+    val chapterTitle = remember(chapterProgress, volume, chapterLayoutVersion) {
         volume.chapterTitle(chapterProgress.chapterIndex)
     }
 
@@ -587,6 +590,8 @@ private fun ComicPager(
             isZoomed = zoomedPage == pagerState.currentPage,
             onBack = onBack,
             onOpenBookmarks = { showBookmarks = true },
+            showChapterMenu = shouldShowChapterMenu(volume.chapterCount),
+            onOpenChapters = { showChapters = true },
             onToggleBookmark = { onToggleBookmark(pagerState.currentPage) },
             onToggleFavorite = { onToggleFavorite(pagerState.currentPage) },
             onSetCover = { onSetCover(pagerState.currentPage) },
@@ -627,6 +632,20 @@ private fun ComicPager(
         )
     }
 
+    if (showChapters) {
+        ReaderChaptersSheet(
+            volume = volume,
+            currentChapterIndex = chapterProgress.chapterIndex,
+            accent = readerAccentColor(),
+            onChaptersLoaded = { chapterLayoutVersion++ },
+            onSelect = { page ->
+                showChapters = false
+                scope.launch { pagerState.scrollToPage(page) }
+            },
+            onDismiss = { showChapters = false },
+        )
+    }
+
     ocrSelection.detailText?.let { text ->
         ReaderOcrTextSheet(
             text = text,
@@ -645,6 +664,8 @@ private fun ReaderTopBar(
     isZoomed: Boolean,
     onBack: () -> Unit,
     onOpenBookmarks: () -> Unit,
+    showChapterMenu: Boolean,
+    onOpenChapters: () -> Unit,
     onToggleBookmark: () -> Unit,
     onToggleFavorite: () -> Unit,
     onSetCover: () -> Unit,
@@ -729,6 +750,21 @@ private fun ReaderTopBar(
                             onOpenBookmarks()
                         },
                     )
+                    if (showChapterMenu) {
+                        DropdownMenuItem(
+                            text = { Text("章节") },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.List,
+                                    contentDescription = null,
+                                )
+                            },
+                            onClick = {
+                                showMoreMenu = false
+                                onOpenChapters()
+                            },
+                        )
+                    }
                     DropdownMenuItem(
                         text = {
                             Text(if (isFavorite) "取消收藏本页" else "收藏当前页图片")
