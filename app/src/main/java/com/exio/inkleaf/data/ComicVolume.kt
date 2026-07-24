@@ -44,6 +44,9 @@ interface ComicVolume {
     /** 获取第 [chapterIndex] 章的页数 */
     fun chapterPageCount(chapterIndex: Int): Int
 
+    /** Whether the chapter can currently be opened for reading. */
+    fun isChapterReadable(chapterIndex: Int): Boolean = chapterPageCount(chapterIndex) > 0
+
     /** 将全局页码转换为 (章节索引, 章节内页码) */
     fun globalToChapterPage(globalPage: Int): ChapterProgress
 

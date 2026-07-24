@@ -28,7 +28,6 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -64,18 +63,6 @@ internal fun ReaderBookmarksSheet(
     onRestore: suspend (BookmarkEntity) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val typography = MaterialTheme.typography
-    val shapes = MaterialTheme.shapes
-    val readerScheme = remember(accent) {
-        darkColorScheme(
-            primary = accent,
-            onPrimary = Color.Black,
-            surface = Color(0xFF121212),
-            onSurface = Color.White,
-            surfaceVariant = Color(0xFF242424),
-            onSurfaceVariant = Color(0xFFD0D0D0),
-        )
-    }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val removalsInFlight = remember { mutableStateMapOf<Long, Boolean>() }
@@ -84,7 +71,7 @@ internal fun ReaderBookmarksSheet(
     }
     val orderedBookmarks = bookmarks.sortedBy { it.globalPage }
 
-    MaterialTheme(colorScheme = readerScheme, typography = typography, shapes = shapes) {
+    ReaderSheetTheme(accent = accent) {
         ModalBottomSheet(
             onDismissRequest = {
                 snackbarHostState.currentSnackbarData?.dismiss()

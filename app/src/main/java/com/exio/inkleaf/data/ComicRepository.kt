@@ -130,7 +130,9 @@ class ComicRepository(context: Context) {
                 title = comic.title,
             )
         }
-        val chapters = db.chapterDao().getReadableByComicId(comic.id)
+        // Keep missing chapters in the volume so the reader can preserve their position
+        // and show them as disabled in the chapter list.
+        val chapters = db.chapterDao().getByComicId(comic.id)
         return if (comic.sourceType == BookSourceType.PDF_SERIES || chapters.isNotEmpty()) {
             PdfComicVolume(
                 context = appContext,

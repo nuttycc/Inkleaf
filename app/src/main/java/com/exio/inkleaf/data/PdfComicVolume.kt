@@ -40,7 +40,11 @@ class PdfComicVolume(
 
     /** 每个章节的页数；index 与 chapters 一致 */
     private val pageCounts = IntArray(chapters.size) { index ->
-        chapters[index].pageCount.takeIf { it > 0 } ?: -1
+        if (chapters[index].isMissing) {
+            0
+        } else {
+            chapters[index].pageCount.takeIf { it > 0 } ?: -1
+        }
     }
 
     /** 章节起始全局页号缓存 */
@@ -60,6 +64,7 @@ class PdfComicVolume(
                 add(chapter.uri)
                 add((chapter.size ?: -1L).toString())
                 add((chapter.lastModified ?: -1L).toString())
+                add(chapter.isMissing.toString())
             }
         }
     )
@@ -85,6 +90,33 @@ class PdfComicVolume(
         return pageCounts.getOrElse(chapterIndex) { 0 }.coerceAtLeast(0)
     }
 
+    override fun isChapterReadable(chapterIndex: Int): Boolean {
+        if (chapterIndex !in chapters.indices || chapters[chapterIndex].isMissing) return false
+        return pdfiumLock.withLock {
+            if (closed || pageCounts[chapterIndex] == 0) return@withLock false
+            val opened = openDocumentLocked(chapterIndex) ?: run {
+                pageCounts[chapterIndex] = 0
+                startPages = null
+                return@withLock false
+            }
+            // A stored positive page count may belong to an older file revision; probe the
+            // current document before exposing the chapter as selectable.
+            val actualPageCount = runCatching { opened.document.totalPages }
+                .getOrNull()
+                ?.coerceAtLeast(0)
+            if (actualPageCount == null) {
+                pageCounts[chapterIndex] = 0
+                startPages = null
+                return@withLock false
+            }
+            if (pageCounts[chapterIndex] != actualPageCount) {
+                pageCounts[chapterIndex] = actualPageCount
+                startPages = null
+            }
+            actualPageCount > 0
+        }
+    }
+
     override fun globalToChapterPage(globalPage: Int): ChapterProgress {
         // 封面回填等早期路径只会读第 0 页：在 startPages 还没算出来时，只要
         // 第 0 章本身能打开，就直接落在 (0, globalPage)，避免触发 computeStartPages
@@ -99,7 +131,7 @@ class PdfComicVolume(
         if (starts.isEmpty()) return ChapterProgress(0, 0)
         val chapter = (0 until chapterCount).lastOrNull { starts[it] <= globalPage } ?: 0
         val pages = pageCounts.getOrElse(chapter) { 0 }.coerceAtLeast(0)
-        // 章节打不开时 pageCounts[chapter] 为 -1（被 coerce 成 0）。
+        // 章节打不开时 pageCounts[chapter] 为 0。
         // pages <= 0 时直接落在第 0 页，渲染层会再给出"无法打开章节"的清晰提示。
         val pageInChapter = if (pages <= 0) 0
             else (globalPage - starts[chapter]).coerceIn(0, pages - 1)
@@ -231,13 +263,21 @@ class PdfComicVolume(
 
     private fun ensurePageCount(chapterIndex: Int) {
         pdfiumLock.withLock {
+            if (chapters[chapterIndex].isMissing) {
+                pageCounts[chapterIndex] = 0
+                return
+            }
             if (pageCounts[chapterIndex] >= 0 || closed) return
             val cached = openChapters[chapterIndex]
             if (cached != null) {
                 pageCounts[chapterIndex] = cached.document.totalPages
                 return
             }
-            val temporary = createOpenChapter(chapterIndex) ?: return
+            val temporary = createOpenChapter(chapterIndex) ?: run {
+                // Cache a failed probe for this opened volume; reopening the reader retries it.
+                pageCounts[chapterIndex] = 0
+                return
+            }
             try {
                 pageCounts[chapterIndex] = temporary.document.totalPages
             } finally {
@@ -264,9 +304,7 @@ class PdfComicVolume(
             val doc = core.newDocument(pfd)
             OpenChapter(core = core, document = doc, pfd = pfd)
         } catch (e: Exception) {
-            // 打开失败（损坏/加密/权限）：关掉 pfd，pageCounts 留 -1。
-            // 后续 chapterPageCount 会返回 0，globalToChapterPage 落在第 0 页，
-            // 渲染层抛 ComicOpenException 给出清晰提示——不崩。
+            // 打开失败（损坏/加密/权限）：关掉 pfd，让调用方将章节标记为不可读。
             runCatching { pfd.close() }
             null
         }

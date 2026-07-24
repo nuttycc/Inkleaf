@@ -15,7 +15,7 @@ on:
           - check
           # debug APK only
           - apk
-          # assembleDebug + unit tests + lint (former auto PR check)
+          # assembleDebug + unit tests + androidTest compile + lint
           - full
 
 permissions:
@@ -73,7 +73,7 @@ jobs:
               ./gradlew assembleDebug "${GRADLE_ARGS[@]}"
               ;;
             full)
-              ./gradlew assembleDebug testDebugUnitTest lintDebug "${GRADLE_ARGS[@]}"
+              ./gradlew assembleDebug :app:compileDebugAndroidTestKotlin testDebugUnitTest lintDebug "${GRADLE_ARGS[@]}"
               ;;
             *)
               echo "Unsupported check level: $CHECK_LEVEL" >&2
