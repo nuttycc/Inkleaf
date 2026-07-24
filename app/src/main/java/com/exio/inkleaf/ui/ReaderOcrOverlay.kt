@@ -35,10 +35,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.PathOperation
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
@@ -145,45 +149,152 @@ internal fun ReaderOcrPageOverlay(
     val currentOnRegionTapped by rememberUpdatedState(onRegionTapped)
     val currentOnRegionAdded by rememberUpdatedState(onRegionAdded)
     var magnifierCenter by remember(result) { mutableStateOf(Offset.Unspecified) }
-    val drawingModifier = remember(result, selectedIds, accent, density) {
-        Modifier.drawWithCache {
-            val layout = calculateOcrImageLayout(
-                viewport = IntSize(size.width.toInt(), size.height.toInt()),
-                imageWidth = result.imageWidth,
-                imageHeight = result.imageHeight,
+    
+    val drawingModifier = Modifier.drawWithCache {
+        val layout = calculateOcrImageLayout(
+            viewport = IntSize(size.width.toInt(), size.height.toInt()),
+            imageWidth = result.imageWidth,
+            imageHeight = result.imageHeight,
+        )
+        val visualOutsetPx = with(density) { 1.dp.toPx() }
+        val normalStroke = Stroke(
+            width = with(density) { 1.dp.toPx() },
+            cap = StrokeCap.Round,
+            join = StrokeJoin.Round,
+        )
+        val selectedGlowStroke = Stroke(
+            width = with(density) { 3.5.dp.toPx() },
+            cap = StrokeCap.Round,
+            join = StrokeJoin.Round,
+        )
+        val selectedMainStroke = Stroke(
+            width = with(density) { 1.8.dp.toPx() },
+            cap = StrokeCap.Round,
+            join = StrokeJoin.Round,
+        )
+        val selectedInnerLightStroke = Stroke(
+            width = with(density) { 1.2.dp.toPx() },
+            cap = StrokeCap.Round,
+            join = StrokeJoin.Round,
+        )
+
+        val neonBlueFill = Color(0xFF00E5FF).copy(alpha = 0.38f)
+        val neonBlueGlowFill = Color(0xFF00B0FF).copy(alpha = 0.26f)
+        val innerLightColor = Color.White.copy(alpha = 0.88f)
+        val blueAccent = Color(0xFF00E5FF)
+
+        val regionPaths = result.regions.map { region ->
+            region to region.points.toViewportPath(layout, visualOutsetPx)
+        }
+        val selectedRegionPairs = regionPaths.filter { (region, _) -> region.id in selectedIds }
+        val selectedPaths = selectedRegionPairs.map { (_, path) -> path }
+
+        val mergedSelectedPath = selectedPaths.firstOrNull()?.let { firstPath ->
+            selectedPaths.drop(1).fold(firstPath) { mergedPath, path ->
+                Path.combine(PathOperation.Union, mergedPath, path)
+            }
+        }
+
+        // 按阅读顺序找到首尾选中区域，计算排版方向与手柄位置
+        val sortedSelectedRegions = result.regions
+            .filter { it.id in selectedIds }
+            .sortedBy { it.readingOrder }
+        val startRegion = sortedSelectedRegions.firstOrNull()
+        val endRegion = sortedSelectedRegions.lastOrNull()
+
+        val handleRadiusPx = with(density) { 7.dp.toPx() }
+        val handleBorderStroke = Stroke(
+            width = handleRadiusPx * 0.22f,
+            cap = StrokeCap.Round,
+            join = StrokeJoin.Round,
+        )
+        val handleShadowColor = Color.Black.copy(alpha = 0.25f)
+        val innerDotColor = Color.White
+
+        val startHandleData = startRegion?.let { reg ->
+            val points = reg.points.map(layout::pageToViewport)
+            val minX = points.minOf { it.x }
+            val maxX = points.maxOf { it.x }
+            val minY = points.minOf { it.y }
+            val maxY = points.maxOf { it.y }
+            val isVertical = (maxX - minX) < (maxY - minY)
+            val tipPos = if (isVertical) Offset(maxX, minY) else Offset(minX, minY)
+            buildClosedExpressiveHandle(
+                tipPosition = tipPos,
+                isStart = true,
+                isVertical = isVertical,
+                handleRadiusPx = handleRadiusPx,
             )
-            val visualOutsetPx = with(density) { 1.dp.toPx() }
-            val normalStroke = Stroke(width = with(density) { 1.dp.toPx() })
-            val selectedStroke = Stroke(width = with(density) { 2.dp.toPx() })
-            val regionPaths = result.regions.map { region ->
-                region to region.points.toViewportPath(layout, visualOutsetPx)
-            }
-            val selectedPaths = regionPaths
-                .filter { (region, _) -> region.id in selectedIds }
-                .map { (_, path) -> path }
-            val mergedSelectedPath = selectedPaths.firstOrNull()?.let { firstPath ->
-                selectedPaths.drop(1).fold(firstPath) { mergedPath, path ->
-                    Path.combine(PathOperation.Union, mergedPath, path)
-                }
-            }
-            onDrawBehind {
-                regionPaths.forEach { (region, path) ->
-                    if (region.id !in selectedIds) {
-                        drawPath(
-                            path = path,
-                            color = Color.White.copy(alpha = 0.52f),
-                            style = normalStroke,
-                        )
-                    }
-                }
-                mergedSelectedPath?.let { path ->
-                    drawPath(path, color = accent.copy(alpha = 0.18f), style = Fill)
+        }
+
+        val endHandleData = endRegion?.let { reg ->
+            val points = reg.points.map(layout::pageToViewport)
+            val minX = points.minOf { it.x }
+            val maxX = points.maxOf { it.x }
+            val minY = points.minOf { it.y }
+            val maxY = points.maxOf { it.y }
+            val isVertical = (maxX - minX) < (maxY - minY)
+            val tipPos = if (isVertical) Offset(minX, maxY) else Offset(maxX, maxY)
+            buildClosedExpressiveHandle(
+                tipPosition = tipPos,
+                isStart = false,
+                isVertical = isVertical,
+                handleRadiusPx = handleRadiusPx,
+            )
+        }
+
+        onDrawBehind {
+            // 1. 绘制未选中的 OCR 文字气泡边框
+            regionPaths.forEach { (region, path) ->
+                if (region.id !in selectedIds) {
                     drawPath(
                         path = path,
-                        color = accent,
-                        style = selectedStroke,
+                        color = Color.White.copy(alpha = 0.45f),
+                        style = normalStroke,
                     )
                 }
+            }
+
+            // 2. 绘制蓝色荧光笔通透高亮 (Neon Cyan Blue)
+            mergedSelectedPath?.let { path ->
+                // 底层：柔和电蓝色发光
+                drawPath(path, color = neonBlueGlowFill, style = Fill)
+                // 核心荧光青蓝填充
+                drawPath(path, color = neonBlueFill, style = Fill)
+                // 3.5dp 外发光边框
+                drawPath(
+                    path = path,
+                    color = blueAccent.copy(alpha = 0.48f),
+                    style = selectedGlowStroke,
+                )
+                // 1.2dp 纯白亮线内衬
+                drawPath(
+                    path = path,
+                    color = innerLightColor,
+                    style = selectedInnerLightStroke,
+                )
+                // 荧光蓝主外框
+                drawPath(
+                    path = path,
+                    color = blueAccent,
+                    style = selectedMainStroke,
+                )
+            }
+
+            // 3. 绘制荧光蓝水滴手柄
+            startHandleData?.let { (path, center) ->
+                drawPath(path, color = handleShadowColor, style = Fill)
+                drawPath(path, color = blueAccent, style = Fill)
+                drawPath(path, color = Color.White, style = handleBorderStroke)
+                drawCircle(color = innerDotColor, radius = handleRadiusPx * 0.35f, center = center)
+            }
+
+            if (endHandleData != null && endHandleData.first != startHandleData?.first) {
+                val (path, center) = endHandleData
+                drawPath(path, color = handleShadowColor, style = Fill)
+                drawPath(path, color = blueAccent, style = Fill)
+                drawPath(path, color = Color.White, style = handleBorderStroke)
+                drawCircle(color = innerDotColor, radius = handleRadiusPx * 0.35f, center = center)
             }
         }
     }
@@ -484,4 +595,39 @@ internal fun ReaderOcrTextSheet(
             }
         }
     }
+}
+
+private fun buildClosedExpressiveHandle(
+    tipPosition: Offset,
+    isStart: Boolean,
+    isVertical: Boolean,
+    handleRadiusPx: Float,
+): Pair<Path, Offset> {
+    val r = handleRadiusPx
+    val pinHeightPx = r * 1.3f
+
+    val bulbCenter = if (isStart) {
+        if (isVertical) Offset(tipPosition.x + r * 0.5f, tipPosition.y - pinHeightPx)
+        else Offset(tipPosition.x - r * 0.5f, tipPosition.y - pinHeightPx)
+    } else {
+        if (isVertical) Offset(tipPosition.x - r * 0.5f, tipPosition.y + pinHeightPx)
+        else Offset(tipPosition.x + r * 0.5f, tipPosition.y + pinHeightPx)
+    }
+
+    val path = Path().apply {
+        addOval(
+            androidx.compose.ui.geometry.Rect(
+                bulbCenter.x - r,
+                bulbCenter.y - r,
+                bulbCenter.x + r,
+                bulbCenter.y + r,
+            )
+        )
+        moveTo(bulbCenter.x - r * 0.6f, bulbCenter.y)
+        lineTo(tipPosition.x, tipPosition.y)
+        lineTo(bulbCenter.x + r * 0.6f, bulbCenter.y)
+        close()
+    }
+
+    return path to bulbCenter
 }
