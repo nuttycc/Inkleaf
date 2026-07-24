@@ -9,12 +9,13 @@ set -euo pipefail
 #
 # What it does:
 #   1. Detects system info (OS, architecture, CPU, memory, disk space)
-#   2. Installs Android CLI tool
-#   3. Installs required Android SDK packages (platform-tools,
+#   2. Installs a JDK (Temurin) into the user home if missing/too old
+#   3. Installs Android CLI tool
+#   4. Installs required Android SDK packages (platform-tools,
 #      build-tools, platform) based on the project's build.gradle.kts
-#   4. Configures China-friendly Maven and Gradle distribution mirrors
-#   5. Configures shell environment variables (ANDROID_HOME, PATH)
-#   6. Verifies the installation
+#   5. Configures China-friendly Maven and Gradle distribution mirrors
+#   6. Configures shell environment variables (JAVA_HOME, ANDROID_HOME, PATH)
+#   7. Verifies the installation
 # ============================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -24,6 +25,11 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 COMPILE_SDK="${COMPILE_SDK:-37}"
 BUILD_TOOLS_VERSION="${BUILD_TOOLS_VERSION:-37.0.0}"
 PLATFORM_PACKAGE="${PLATFORM_PACKAGE:-platforms/android-37.0}"
+# Prefer Temurin 25 (matches gradle/gradle-daemon-jvm.properties toolchainVersion).
+REQUIRED_JDK_MAJOR="${INKLEAF_REQUIRED_JDK_MAJOR:-25}"
+JDK_MAJOR="${INKLEAF_JDK_MAJOR:-25}"
+JAVA_HOME="${JAVA_HOME:-}"
+JDK_INSTALL_ROOT="${INKLEAF_JDK_INSTALL_ROOT:-$HOME/.local/jdk}"
 ANDROID_HOME="${ANDROID_HOME:-$HOME/Android/Sdk}"
 ANDROID_BIN_DIR="$HOME/.local/bin"
 GRADLE_HOME_DIR="${GRADLE_USER_HOME:-$HOME/.gradle}"
@@ -32,6 +38,16 @@ ALIYUN_MAVEN_MIRROR_URL="${INKLEAF_ALIYUN_MAVEN_MIRROR_URL:-https://maven.aliyun
 ALIYUN_GOOGLE_MIRROR_URL="${INKLEAF_ALIYUN_GOOGLE_MIRROR_URL:-https://maven.aliyun.com/repository/google}"
 ALIYUN_GRADLE_PLUGIN_MIRROR_URL="${INKLEAF_ALIYUN_GRADLE_PLUGIN_MIRROR_URL:-https://maven.aliyun.com/repository/gradle-plugin}"
 TENCENT_GRADLE_MIRROR_URL="${INKLEAF_TENCENT_GRADLE_MIRROR_URL:-https://mirrors.cloud.tencent.com/gradle/}"
+# Optional override for the Adoptium binary API (must still return a JDK archive).
+ADOPTIUM_JDK_API_BASE="${INKLEAF_ADOPTIUM_JDK_API_BASE:-https://api.adoptium.net/v3/binary/latest}"
+
+# Hard minimums — below these the machine cannot usefully install/run the toolchain.
+# Soft recommendations still warn but do not abort.
+MIN_CPU_CORES="${INKLEAF_MIN_CPU_CORES:-2}"
+MIN_TOTAL_MEM_MB="${INKLEAF_MIN_TOTAL_MEM_MB:-4096}"
+MIN_DISK_MB="${INKLEAF_MIN_DISK_MB:-8192}"
+RECOMMENDED_TOTAL_MEM_MB="${INKLEAF_RECOMMENDED_TOTAL_MEM_MB:-8192}"
+RECOMMENDED_DISK_MB="${INKLEAF_RECOMMENDED_DISK_MB:-10240}"
 
 # ---- Colors ----
 if [ -t 1 ]; then
@@ -168,14 +184,22 @@ get_disk_info() {
   fi
 }
 
+fail_resource() {
+  error "$*"
+  RESOURCE_CHECK_FAILED=1
+}
+
 check_system_resources() {
   info "Checking system hardware resources..."
+  RESOURCE_CHECK_FAILED=0
 
   # CPU
   get_cpu_info
   info "  CPU: $CPU_INFO"
-  if [ "$CPU_CORES" -gt 0 ] && [ "$CPU_CORES" -lt 2 ]; then
-    warn "  Low CPU core count ($CPU_CORES core). Gradle builds may be slow."
+  if [ "$CPU_CORES" -le 0 ]; then
+    fail_resource "Unable to determine CPU core count. Refusing to continue."
+  elif [ "$CPU_CORES" -lt "$MIN_CPU_CORES" ]; then
+    fail_resource "CPU core count too low ($CPU_CORES). Need at least $MIN_CPU_CORES cores."
   fi
 
   # Memory
@@ -190,11 +214,13 @@ check_system_resources() {
       info "  Memory: $total_formatted total"
     fi
 
-    if [ "$TOTAL_MEM_MB" -lt 7000 ]; then
-      warn "  Low RAM detected ($total_formatted). At least 8 GB RAM is recommended for Android development."
+    if [ "$TOTAL_MEM_MB" -lt "$MIN_TOTAL_MEM_MB" ]; then
+      fail_resource "RAM too low ($total_formatted). Need at least $(format_size_mb "$MIN_TOTAL_MEM_MB") total."
+    elif [ "$TOTAL_MEM_MB" -lt "$RECOMMENDED_TOTAL_MEM_MB" ]; then
+      warn "  Low RAM ($total_formatted). $(format_size_mb "$RECOMMENDED_TOTAL_MEM_MB") is recommended; builds may be slow or OOM."
     fi
   else
-    warn "  Unable to determine total system memory."
+    fail_resource "Unable to determine total system memory. Refusing to continue."
   fi
 
   # Disk Space
@@ -211,12 +237,25 @@ check_system_resources() {
     local disk_formatted
     disk_formatted="$(format_size_mb "$disk_avail_mb")"
     info "  Disk Space: $disk_formatted available ($check_path)"
-    if [ "$disk_avail_mb" -lt 10240 ]; then
-      warn "  Low disk space ($disk_formatted). At least 10 GB free space is recommended for Android SDK & Gradle."
+    if [ "$disk_avail_mb" -lt "$MIN_DISK_MB" ]; then
+      fail_resource "Disk space too low ($disk_formatted on $check_path). Need at least $(format_size_mb "$MIN_DISK_MB") free."
+    elif [ "$disk_avail_mb" -lt "$RECOMMENDED_DISK_MB" ]; then
+      warn "  Tight disk space ($disk_formatted). $(format_size_mb "$RECOMMENDED_DISK_MB") free is recommended for SDK & Gradle caches."
     fi
   else
-    warn "  Unable to determine free disk space on $check_path."
+    fail_resource "Unable to determine free disk space on $check_path. Refusing to continue."
   fi
+
+  if [ "$RESOURCE_CHECK_FAILED" -ne 0 ]; then
+    error "System resources are below the minimum required to install/use this environment."
+    error "Override thresholds only if you know what you are doing:"
+    error "  INKLEAF_MIN_CPU_CORES (default $MIN_CPU_CORES)"
+    error "  INKLEAF_MIN_TOTAL_MEM_MB (default $MIN_TOTAL_MEM_MB)"
+    error "  INKLEAF_MIN_DISK_MB (default $MIN_DISK_MB)"
+    exit 1
+  fi
+
+  success "System resources meet minimum requirements"
 }
 
 # ---- Check prerequisites ----
@@ -229,19 +268,181 @@ check_prerequisites() {
   fi
   success "curl is available"
 
-  if ! command -v java >/dev/null 2>&1; then
-    warn "Java not found in PATH. Android CLI and Gradle require Java."
-    warn "Please install JDK 11+ before proceeding."
-    read -rp "Continue anyway? [y/N] " answer
-    case "$answer" in
-      [Yy]|[Yy][Ee][Ss]) ;;
-      *) exit 1 ;;
-    esac
-  else
-    local java_version
-    java_version="$(java -version 2>&1 | head -1)"
-    success "Java available: $java_version"
+  if ! command -v tar >/dev/null 2>&1; then
+    error "tar is required but not installed."
+    exit 1
   fi
+  success "tar is available"
+
+  ensure_java
+}
+
+# ---- Java / JDK helpers ----
+java_major_version() {
+  local java_bin="${1:-java}"
+  local version_line major
+
+  version_line="$("$java_bin" -version 2>&1 | head -1 || true)"
+  # Examples: openjdk version "17.0.13"  /  openjdk version "1.8.0_422"
+  major="$(printf '%s\n' "$version_line" | sed -n 's/.*version "\([0-9][0-9]*\)\..*/\1/p')"
+  if [ "$major" = "1" ]; then
+    major="$(printf '%s\n' "$version_line" | sed -n 's/.*version "1\.\([0-9][0-9]*\)\..*/\1/p')"
+  fi
+  if [[ "${major:-}" =~ ^[0-9]+$ ]]; then
+    echo "$major"
+  else
+    echo 0
+  fi
+}
+
+resolve_existing_java_home() {
+  local java_bin candidate major
+
+  if [ -n "${JAVA_HOME:-}" ] && [ -x "$JAVA_HOME/bin/java" ]; then
+    major="$(java_major_version "$JAVA_HOME/bin/java")"
+    if [ "$major" -ge "$REQUIRED_JDK_MAJOR" ]; then
+      echo "$JAVA_HOME"
+      return 0
+    fi
+  fi
+
+  if command -v java >/dev/null 2>&1; then
+    java_bin="$(command -v java)"
+    major="$(java_major_version "$java_bin")"
+    if [ "$major" -ge "$REQUIRED_JDK_MAJOR" ]; then
+      if command -v readlink >/dev/null 2>&1; then
+        candidate="$(readlink -f "$java_bin" 2>/dev/null || true)"
+      else
+        candidate=""
+      fi
+      if [ -z "$candidate" ]; then
+        candidate="$java_bin"
+      fi
+      # .../bin/java -> JAVA_HOME
+      echo "$(cd "$(dirname "$candidate")/.." && pwd)"
+      return 0
+    fi
+  fi
+
+  # Reuse a previous user-local install if present.
+  if [ -x "$JDK_INSTALL_ROOT/current/bin/java" ]; then
+    major="$(java_major_version "$JDK_INSTALL_ROOT/current/bin/java")"
+    if [ "$major" -ge "$REQUIRED_JDK_MAJOR" ]; then
+      echo "$JDK_INSTALL_ROOT/current"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+adoptium_os_name() {
+  case "$OS" in
+    linux) echo "linux" ;;
+    darwin) echo "mac" ;;
+    *)
+      error "Unsupported OS for JDK install: $OS"
+      exit 1
+      ;;
+  esac
+}
+
+adoptium_arch_name() {
+  case "$ARCH" in
+    x86_64) echo "x64" ;;
+    arm64) echo "aarch64" ;;
+    *)
+      error "Unsupported architecture for JDK install: $ARCH"
+      exit 1
+      ;;
+  esac
+}
+
+install_temurin_jdk() {
+  local os_name arch_name download_url archive_path extract_dir
+  local marker_dir extracted_home
+
+  os_name="$(adoptium_os_name)"
+  arch_name="$(adoptium_arch_name)"
+  download_url="${ADOPTIUM_JDK_API_BASE%/}/${JDK_MAJOR}/ga/${os_name}/${arch_name}/jdk/hotspot/normal/eclipse?project=jdk"
+  marker_dir="$JDK_INSTALL_ROOT/temurin-${JDK_MAJOR}"
+  archive_path="$(mktemp "${TMPDIR:-/tmp}/temurin-${JDK_MAJOR}.XXXXXX.tar.gz")"
+  extract_dir="$(mktemp -d "${TMPDIR:-/tmp}/temurin-${JDK_MAJOR}-extract.XXXXXX")"
+
+  info "Installing Temurin JDK ${JDK_MAJOR} into $marker_dir (user-local, no root)..."
+  info "  Download: $download_url"
+
+  # shellcheck disable=SC2064
+  trap "rm -rf '$archive_path' '$extract_dir'" RETURN
+
+  if ! curl -fL --retry 3 --retry-delay 2 -o "$archive_path" "$download_url"; then
+    error "Failed to download Temurin JDK ${JDK_MAJOR}."
+    error "Override API base with INKLEAF_ADOPTIUM_JDK_API_BASE if needed."
+    exit 1
+  fi
+
+  if ! tar -xzf "$archive_path" -C "$extract_dir"; then
+    error "Failed to extract JDK archive."
+    exit 1
+  fi
+
+  extracted_home="$(find "$extract_dir" -mindepth 1 -maxdepth 3 -type f -path '*/bin/java' 2>/dev/null | head -1 || true)"
+  if [ -z "$extracted_home" ]; then
+    error "Downloaded archive does not contain bin/java."
+    exit 1
+  fi
+  extracted_home="$(cd "$(dirname "$extracted_home")/.." && pwd)"
+
+  if [ ! -x "$extracted_home/bin/java" ]; then
+    error "Extracted JDK is not executable: $extracted_home/bin/java"
+    exit 1
+  fi
+
+  mkdir -p "$JDK_INSTALL_ROOT"
+  rm -rf "$marker_dir"
+  mkdir -p "$marker_dir"
+  # Copy resolved JAVA_HOME tree into a stable path (macOS archives already
+  # resolve to Contents/Home via the bin/java lookup above).
+  cp -a "$extracted_home"/. "$marker_dir"/
+
+  ln -sfn "$marker_dir" "$JDK_INSTALL_ROOT/current"
+
+  JAVA_HOME="$marker_dir"
+  export JAVA_HOME
+  export PATH="$JAVA_HOME/bin:$PATH"
+
+  local major
+  major="$(java_major_version "$JAVA_HOME/bin/java")"
+  if [ "$major" -lt "$REQUIRED_JDK_MAJOR" ]; then
+    error "Installed JDK major version $major is below required $REQUIRED_JDK_MAJOR."
+    exit 1
+  fi
+
+  success "Installed Temurin JDK ${major}: $JAVA_HOME"
+  success "  $($JAVA_HOME/bin/java -version 2>&1 | head -1)"
+}
+
+ensure_java() {
+  local existing_home major
+
+  if existing_home="$(resolve_existing_java_home)"; then
+    JAVA_HOME="$existing_home"
+    export JAVA_HOME
+    export PATH="$JAVA_HOME/bin:$PATH"
+    major="$(java_major_version "$JAVA_HOME/bin/java")"
+    success "Java available: $($JAVA_HOME/bin/java -version 2>&1 | head -1)"
+    info "  JAVA_HOME=$JAVA_HOME (major=$major)"
+    return 0
+  fi
+
+  if command -v java >/dev/null 2>&1; then
+    major="$(java_major_version "$(command -v java)")"
+    warn "Found Java major=$major, but JDK ${REQUIRED_JDK_MAJOR}+ is required. Installing latest Temurin ${JDK_MAJOR}..."
+  else
+    info "Java not found. Installing latest Temurin JDK ${JDK_MAJOR}..."
+  fi
+
+  install_temurin_jdk
 }
 
 # ---- Install Android CLI ----
@@ -499,47 +700,75 @@ configure_gradle_mirrors() {
 }
 
 # ---- Configure shell environment ----
+append_env_block_if_needed() {
+  local rc_file="$1"
+  local env_block="$2"
+  local label="$3"
+
+  if [ ! -f "$rc_file" ]; then
+    return 0
+  fi
+
+  if grep -q "setup-android-env.sh" "$rc_file" 2>/dev/null; then
+    # Refresh managed block so JAVA_HOME / build-tools path stay current.
+    local temp_file
+    temp_file="$(mktemp "$rc_file.XXXXXX")"
+    awk '
+      BEGIN { skip = 0 }
+      /^# Android SDK \(added by setup-android-env\.sh\)$/ { skip = 1; next }
+      skip == 1 && /^export PATH=/ { skip = 0; next }
+      skip == 1 { next }
+      { print }
+    ' "$rc_file" > "$temp_file"
+    printf '%s\n' "$env_block" >> "$temp_file"
+    mv "$temp_file" "$rc_file"
+    success "Updated $label"
+    return 1
+  fi
+
+  printf '%s\n' "$env_block" >> "$rc_file"
+  success "Updated $label"
+  return 1
+}
+
 configure_shell_env() {
   info "Configuring shell environment..."
+
+  if [ -z "${JAVA_HOME:-}" ] || [ ! -x "$JAVA_HOME/bin/java" ]; then
+    error "JAVA_HOME is not set to a usable JDK before shell configuration."
+    exit 1
+  fi
 
   local env_block
   env_block=$(cat <<EOF
 
 # Android SDK (added by setup-android-env.sh)
+export JAVA_HOME="$JAVA_HOME"
 export ANDROID_HOME="\$HOME/Android/Sdk"
 export ANDROID_SDK_ROOT="\$HOME/Android/Sdk"
-export PATH="\$HOME/.local/bin:\$ANDROID_HOME/platform-tools:\$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION:\$PATH"
+export PATH="\$JAVA_HOME/bin:\$HOME/.local/bin:\$ANDROID_HOME/platform-tools:\$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION:\$PATH"
 EOF
 )
 
   local updated=0
 
-  # Update .bashrc
-  if [ -f "$HOME/.bashrc" ]; then
-    if grep -q "setup-android-env.sh" "$HOME/.bashrc" 2>/dev/null; then
-      info ".bashrc already configured"
-    else
-      echo "$env_block" >> "$HOME/.bashrc"
-      success "Updated ~/.bashrc"
-      updated=1
-    fi
+  if append_env_block_if_needed "$HOME/.bashrc" "$env_block" "~/.bashrc"; then
+    :
+  else
+    updated=1
   fi
 
-  # Update .zshrc
-  if [ -f "$HOME/.zshrc" ]; then
-    if grep -q "setup-android-env.sh" "$HOME/.zshrc" 2>/dev/null; then
-      info ".zshrc already configured"
-    else
-      echo "$env_block" >> "$HOME/.zshrc"
-      success "Updated ~/.zshrc"
-      updated=1
-    fi
+  if append_env_block_if_needed "$HOME/.zshrc" "$env_block" "~/.zshrc"; then
+    :
+  else
+    updated=1
   fi
 
   # Apply to current session
+  export JAVA_HOME
   export ANDROID_HOME
   export ANDROID_SDK_ROOT="$ANDROID_HOME"
-  export PATH="$ANDROID_BIN_DIR:$ANDROID_HOME/platform-tools:$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION:$PATH"
+  export PATH="$JAVA_HOME/bin:$ANDROID_BIN_DIR:$ANDROID_HOME/platform-tools:$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION:$PATH"
 
   if [ "$updated" -eq 1 ]; then
     warn "Remember to restart your shell or run:"
@@ -553,6 +782,22 @@ verify_installation() {
   info "Verifying installation..."
 
   local all_ok=1
+
+  # Java
+  if [ -n "${JAVA_HOME:-}" ] && [ -x "$JAVA_HOME/bin/java" ]; then
+    local major
+    major="$(java_major_version "$JAVA_HOME/bin/java")"
+    if [ "$major" -ge "$REQUIRED_JDK_MAJOR" ]; then
+      success "java: $($JAVA_HOME/bin/java -version 2>&1 | head -1)"
+      success "JAVA_HOME=$JAVA_HOME"
+    else
+      error "java major $major is below required $REQUIRED_JDK_MAJOR"
+      all_ok=0
+    fi
+  else
+    error "java: not found"
+    all_ok=0
+  fi
 
   # Android CLI
   if command -v android >/dev/null 2>&1; then
