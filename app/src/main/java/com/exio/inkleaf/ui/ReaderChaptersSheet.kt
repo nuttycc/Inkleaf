@@ -1,8 +1,7 @@
 package com.exio.inkleaf.ui
 
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -129,7 +128,8 @@ internal fun ReaderChaptersSheet(
 
     LaunchedEffect(loadedChapters, currentChapterIndex) {
         val loaded = loadedChapters ?: return@LaunchedEffect
-        listState.scrollToItem((currentChapterIndex + 1).coerceIn(0, loaded.size))
+        // 标题已固定在 LazyColumn 之外，章节 index 即列表位置，无需 +1 偏移
+        listState.scrollToItem(currentChapterIndex.coerceIn(0, (loaded.size - 1).coerceAtLeast(0)))
     }
 
     ReaderSheetTheme(accent = accent) {
@@ -138,22 +138,22 @@ internal fun ReaderChaptersSheet(
             sheetState = rememberExpandOnlySheetState(),
             containerColor = MaterialTheme.colorScheme.surface,
         ) {
-            Box(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(min = 240.dp, max = 560.dp)
                     .navigationBarsPadding(),
             ) {
+                StandardSheetTitle(
+                    "章节${loadedChapters?.let { " · ${it.size}" } ?: ""}",
+                )
                 LazyColumn(
                     state = listState,
                     contentPadding = PaddingValues(bottom = 24.dp),
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
                 ) {
-                    item {
-                        StandardSheetTitle(
-                            "章节${loadedChapters?.let { " · ${it.size}" } ?: ""}",
-                        )
-                    }
                     if (loadedChapters == null) {
                         item {
                             Text(
