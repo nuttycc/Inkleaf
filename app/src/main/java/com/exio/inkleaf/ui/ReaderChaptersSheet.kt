@@ -1,19 +1,30 @@
 package com.exio.inkleaf.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
@@ -21,6 +32,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.semantics
@@ -128,8 +140,12 @@ internal fun ReaderChaptersSheet(
 
     LaunchedEffect(loadedChapters, currentChapterIndex) {
         val loaded = loadedChapters ?: return@LaunchedEffect
-        // 标题已固定在 LazyColumn 之外，章节 index 即列表位置，无需 +1 偏移
-        listState.scrollToItem(currentChapterIndex.coerceIn(0, (loaded.size - 1).coerceAtLeast(0)))
+        if (loaded.isEmpty()) return@LaunchedEffect
+        // 让前一章露出来一点，保留"从哪来"的上下文；首章则直接置顶
+        val targetIndex = (currentChapterIndex - 1)
+            .coerceAtLeast(0)
+            .coerceAtMost(loaded.lastIndex)
+        listState.scrollToItem(targetIndex)
     }
 
     ReaderSheetTheme(accent = accent) {
@@ -141,27 +157,40 @@ internal fun ReaderChaptersSheet(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 240.dp, max = 560.dp)
+                    .fillMaxHeight(0.75f)
                     .navigationBarsPadding(),
             ) {
-                StandardSheetTitle(
-                    "章节${loadedChapters?.let { " · ${it.size}" } ?: ""}",
-                )
+                // 固定标题栏：不透明背景 + 底部分割线，与滚动列表视觉切分；
+                // 右侧提供显式关闭按钮，不依赖下滑手势
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surface),
+                ) {
+                    StandardSheetTitle(
+                        "章节${loadedChapters?.let { " · ${it.size}" } ?: ""}",
+                        modifier = Modifier.weight(1f),
+                    )
+                    IconButton(onClick = onDismiss) {
+                        Icon(
+                            imageVector = Icons.Filled.Close,
+                            contentDescription = "关闭",
+                        )
+                    }
+                }
+                HorizontalDivider()
                 LazyColumn(
                     state = listState,
-                    contentPadding = PaddingValues(bottom = 24.dp),
+                    contentPadding = PaddingValues(bottom = 12.dp),
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f),
                 ) {
                     if (loadedChapters == null) {
-                        item {
-                            Text(
-                                text = "正在读取章节…",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(16.dp),
-                            )
-                        }
+                        item { ChapterSheetLoading() }
+                    } else if (loadedChapters.isEmpty()) {
+                        item { ReaderChaptersEmptyState() }
                     } else {
                         items(
                             items = loadedChapters,
@@ -177,6 +206,45 @@ internal fun ReaderChaptersSheet(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ChapterSheetLoading() {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(32.dp),
+    ) {
+        CircularProgressIndicator()
+    }
+}
+
+@Composable
+private fun ReaderChaptersEmptyState() {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 32.dp, vertical = 32.dp),
+    ) {
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.List,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(40.dp),
+        )
+        Text(
+            text = "没有章节",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Text(
+            text = "这本漫画似乎没有任何可显示的章节。",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodyMedium,
+        )
     }
 }
 
@@ -203,6 +271,14 @@ internal fun ReaderChapterRow(
             .semantics {
                 status?.let { stateDescription = it }
             },
+        // ListItem 的 selected 参数不绘制容器背景，需显式高亮当前章节
+        colors = ListItemDefaults.colors(
+            containerColor = if (isCurrent) {
+                MaterialTheme.colorScheme.surfaceContainerHigh
+            } else {
+                Color.Transparent
+            },
+        ),
         trailingContent = if (isCurrent) {
             {
                 Icon(
