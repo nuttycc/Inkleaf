@@ -299,14 +299,6 @@ private fun ComicPager(
         ocrSelection = ocrSelection.onPageChanged(pagerState.currentPage)
         showOcrLongPressMenu = false
     }
-    // 从模型下载界面返回后，自动重试之前挂起的 OCR 操作
-    androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
-        val page = pendingOcrPage ?: return@LifecycleEventEffect
-        if (isOcrModelReady(context.filesDir)) {
-            pendingOcrPage = null
-            recognizePage(page)
-        }
-    }
 
     fun recognizePage(page: Int) {
         val cached = ocrResults[page]?.takeIf { it.regions.isNotEmpty() }
@@ -368,6 +360,15 @@ private fun ComicPager(
                     }
                 }
             }
+        }
+    }
+
+    // 从模型下载界面返回后，自动重试之前挂起的 OCR 操作
+    androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+        val page = pendingOcrPage ?: return@LifecycleEventEffect
+        if (isOcrModelReady(context.filesDir)) {
+            pendingOcrPage = null
+            recognizePage(page)
         }
     }
 

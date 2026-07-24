@@ -20,7 +20,7 @@ import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
-internal sealed interface OcrDownloadUiState {
+sealed interface OcrDownloadUiState {
     /** 正在测速选源。 */
     data object SelectingSource : OcrDownloadUiState
 
@@ -52,7 +52,7 @@ internal sealed interface OcrDownloadUiState {
     data object NoSourceAvailable : OcrDownloadUiState
 }
 
-internal class OcrModelDownloadViewModel(app: Application) : AndroidViewModel(app) {
+class OcrModelDownloadViewModel(app: Application) : AndroidViewModel(app) {
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
