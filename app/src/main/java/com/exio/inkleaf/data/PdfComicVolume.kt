@@ -365,7 +365,6 @@ class PdfComicVolume(
             }
             if (changed) publishChapterLayoutLocked(merged) else current
         }
-    }
 
     /** Must be called while holding [pdfiumLock]. */
     private fun discoverPageCountLocked(chapterIndex: Int): Int {
