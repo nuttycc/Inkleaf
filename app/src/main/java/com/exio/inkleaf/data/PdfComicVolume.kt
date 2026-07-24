@@ -140,13 +140,20 @@ class PdfComicVolume(
     }
 
     override fun probeChapterMetadata(): List<ChapterMetadata> {
+        // 复用已落 chapterLayout 的 pageCount（DB 或之前 probe 的结果），
+        // 只对未知的章节做真 IO。避免每次打开章节抽屉都重新打开全部 PDF。
+        val snapshot = chapterLayout.pageCounts
         val discoveredCounts = IntArray(chapters.size) { UNPROBED_PAGE_COUNT }
         for (index in chapters.indices) {
+            val cached = snapshot[index]
+            if (cached >= 0) continue
             discoveredCounts[index] = probeChapterPageCount(index, keepOpen = false)
         }
         publishDiscoveredPageCounts(discoveredCounts)
-        return discoveredCounts.map { pageCount ->
-            ChapterMetadata(pageCount = pageCount, isReadable = pageCount > 0)
+        // 读 publish 后的最新快照，保证已缓存的章节也回传最新值
+        val resolved = chapterLayout.pageCounts
+        return resolved.map { pageCount ->
+            ChapterMetadata(pageCount = pageCount.coerceAtLeast(0), isReadable = pageCount > 0)
         }
     }
 
