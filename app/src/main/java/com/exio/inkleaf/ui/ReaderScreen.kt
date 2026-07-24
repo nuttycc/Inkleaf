@@ -108,6 +108,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
@@ -119,6 +120,8 @@ import com.exio.inkleaf.data.ReaderPageCacheKey
 import com.exio.inkleaf.data.db.BookmarkEntity
 import com.exio.inkleaf.data.db.FavoritePageEntity
 import com.exio.inkleaf.data.ocr.OcrPageResult
+import com.exio.inkleaf.data.ocr.OcrModelSettingsRepository
+import com.exio.inkleaf.data.ocr.OcrModelVariant
 import com.exio.inkleaf.data.ocr.OcrSelectionSession
 import com.exio.inkleaf.data.ocr.PaddleOcrEngine
 import com.exio.inkleaf.data.ocr.isOcrModelReady
@@ -274,6 +277,8 @@ private fun ComicPager(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    val activeOcrVariant by remember(context) { OcrModelSettingsRepository(context).activeVariant }
+        .collectAsStateWithLifecycle(initialValue = OcrModelVariant.SMALL)
     val pagerState = rememberPagerState(
         initialPage = startPage,
         pageCount = { volume.totalPageCount },
@@ -306,15 +311,18 @@ private fun ComicPager(
             ocrSelection = ocrSelection.enter(page)
             return
         }
-        // 模型未下载时跳转下载界面
-        if (!isOcrModelReady(context.filesDir)) {
-            pendingOcrPage = page
-            onNavigateToModelDownload()
-            return
-        }
         if (ocrProcessingPage == null) {
             ocrProcessingPage = page
             scope.launch {
+                val variant = activeOcrVariant
+                // Model readiness is variant-specific; route to the downloader before opening the page source.
+                if (!isOcrModelReady(context.filesDir, variant)) {
+                    pendingOcrPage = page
+                    onNavigateToModelDownload()
+                    ocrProcessingPage = null
+                    return@launch
+                }
+                PaddleOcrEngine.setActiveVariant(variant)
                 val source = runCatching { openOcrPageSource(volume, page) }
                 val outcome = source.mapCatching { pageSource ->
                     try {
@@ -366,7 +374,7 @@ private fun ComicPager(
     // 从模型下载界面返回后，自动重试之前挂起的 OCR 操作
     androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
         val page = pendingOcrPage ?: return@LifecycleEventEffect
-        if (isOcrModelReady(context.filesDir)) {
+        if (isOcrModelReady(context.filesDir, activeOcrVariant)) {
             pendingOcrPage = null
             recognizePage(page)
         }

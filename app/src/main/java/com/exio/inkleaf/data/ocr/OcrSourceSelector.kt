@@ -20,18 +20,17 @@ internal class OcrSourceSelector(
      * 并行对所有候选源发 Range GET（前 64KB），测实际吞吐，选最快的。
      * 全部超时则返回 null。结果缓存在进程生命周期内。
      */
-    suspend fun selectBestSource(): OcrModelSource? {
+    suspend fun selectBestSource(variant: OcrModelVariant = OcrModelVariant.SMALL): OcrModelSource? {
         cached?.let { return it }
         val best = withContext(Dispatchers.IO) {
             coroutineScope {
                 // 用 det 模型做测速目标（中等大小，有代表性）
-                val probeRepo = "PP-OCRv6_small_det_onnx"
-                val probeFile = "inference.onnx"
+                val probe = variant.files.first { it.relativePath.startsWith("det/") }
                 val probeBytes = 64 * 1024L
 
                 OCR_MODEL_SOURCES.map { source ->
                     async {
-                        val url = source.resolveUrl(probeRepo, probeFile)
+                        val url = source.resolveUrl(probe.repo, probe.fileName)
                         val result = measureSource(url, probeBytes)
                         if (result != null) source to result else null
                     }
