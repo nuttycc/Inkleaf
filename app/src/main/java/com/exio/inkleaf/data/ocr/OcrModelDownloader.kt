@@ -34,10 +34,11 @@ internal class OcrModelDownloader(
     fun download(
         source: OcrModelSource,
         modelDir: File,
+        variant: OcrModelVariant = OcrModelVariant.SMALL,
     ): Flow<OcrDownloadProgress> = flow {
         var downloadedTotal = 0L
 
-        for (spec in OCR_MODEL_FILES) {
+        for (spec in variant.files) {
             val targetFile = File(modelDir, spec.relativePath)
             targetFile.parentFile?.mkdirs()
 
@@ -45,7 +46,7 @@ internal class OcrModelDownloader(
             if (targetFile.exists() && targetFile.length() == spec.sizeBytes) {
                 if (verifySha256(targetFile, spec.sha256)) {
                     downloadedTotal += spec.sizeBytes
-                    emit(OcrDownloadProgress(downloadedTotal, OCR_MODEL_TOTAL_BYTES, spec.relativePath))
+                    emit(OcrDownloadProgress(downloadedTotal, variant.totalBytes, spec.relativePath))
                     continue
                 }
                 // 大小对但内容损坏，删掉重下
@@ -65,7 +66,7 @@ internal class OcrModelDownloader(
                         emit(
                             OcrDownloadProgress(
                                 downloadedBytes = downloadedTotal + bytesSoFar,
-                                totalBytes = OCR_MODEL_TOTAL_BYTES,
+                                totalBytes = variant.totalBytes,
                                 currentFileName = spec.relativePath,
                             )
                         )
@@ -98,11 +99,11 @@ internal class OcrModelDownloader(
             }
 
             downloadedTotal += spec.sizeBytes
-            emit(OcrDownloadProgress(downloadedTotal, OCR_MODEL_TOTAL_BYTES, spec.relativePath))
+            emit(OcrDownloadProgress(downloadedTotal, variant.totalBytes, spec.relativePath))
         }
 
         // 全部完成，写入版本标记
-        File(modelDir, ".version").writeText(OCR_MODEL_VERSION)
+        File(modelDir, ".version").writeText(variant.version)
     }.flowOn(Dispatchers.IO)
 
     /**

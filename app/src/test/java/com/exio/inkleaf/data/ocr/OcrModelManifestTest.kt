@@ -11,6 +11,17 @@ import kotlin.io.path.deleteIfExists
 class OcrModelManifestTest {
 
     @Test
+    fun `both model variants have independent directories and manifests`() {
+        assertTrue(ocrModelDir(File("/data"), OcrModelVariant.SMALL).path.replace(File.separator, "/").endsWith("/ocr/ppocrv6_small"))
+        assertTrue(ocrModelDir(File("/data"), OcrModelVariant.TINY).path.replace(File.separator, "/").endsWith("/ocr/ppocrv6_tiny"))
+        assertTrue(OcrModelVariant.TINY.totalBytes < OcrModelVariant.SMALL.totalBytes)
+        OcrModelVariant.values().forEach { variant ->
+            assertEquals(variant.totalBytes, variant.files.sumOf { it.sizeBytes })
+            assertTrue(variant.files.all { it.sha256.length == 64 })
+        }
+    }
+
+    @Test
     fun `total bytes constant equals sum of spec sizes`() {
         val expected = OCR_MODEL_FILES.sumOf { it.sizeBytes }
         assertEquals(expected, OCR_MODEL_TOTAL_BYTES)

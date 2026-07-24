@@ -19,11 +19,22 @@ object PaddleOcrEngine {
     private val mutex = Mutex()
     private val releaseScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var engine: PaddleOCR? = null
+    private var engineVariant: OcrModelVariant = OcrModelVariant.SMALL
+
+    /** Switches the model used by subsequent recognition calls. */
+    suspend fun setActiveVariant(variant: OcrModelVariant) {
+        mutex.withLock {
+            if (engineVariant == variant) return
+            engine?.release()
+            engine = null
+            engineVariant = variant
+        }
+    }
 
     internal suspend fun recognize(context: Context, source: OcrPageSource): OcrPageResult =
         withContext(Dispatchers.Default) {
             mutex.withLock {
-                val ocr = engine ?: create(context).also { engine = it }
+                val ocr = engine ?: create(context, engineVariant).also { engine = it }
                 val width = source.width.toFloat()
                 val height = source.height.toFloat()
                 val pixelRegions = mutableListOf<PixelOcrRegion>()
@@ -127,9 +138,9 @@ object PaddleOcrEngine {
         }
     }
 
-    private suspend fun create(context: Context): PaddleOCR {
+    private suspend fun create(context: Context, variant: OcrModelVariant): PaddleOCR {
         check(OpenCVUtils.init()) { "OpenCV initialization failed" }
-        val modelDir = ocrModelDir(context.applicationContext.filesDir)
+        val modelDir = ocrModelDir(context.applicationContext.filesDir, variant)
         return PaddleOCR.create(
             context = context.applicationContext,
             config = PaddleOCRConfig(
