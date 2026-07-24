@@ -42,6 +42,23 @@ internal data class ReaderChapterItem(
 
 internal fun shouldShowChapterMenu(chapterCount: Int): Boolean = chapterCount >= 2
 
+private fun readerChapterItem(
+    index: Int,
+    title: String,
+    pageCount: Int,
+    startPage: Int,
+    isReadable: Boolean,
+): ReaderChapterItem {
+    val normalizedPageCount = pageCount.coerceAtLeast(0)
+    return ReaderChapterItem(
+        index = index,
+        title = title.ifBlank { "第 ${index + 1} 章" },
+        pageCount = normalizedPageCount,
+        startPage = startPage,
+        isReadable = normalizedPageCount > 0 && isReadable,
+    )
+}
+
 internal fun buildReaderChapterItems(
     chapterCount: Int,
     titleOf: (Int) -> String,
@@ -50,29 +67,39 @@ internal fun buildReaderChapterItems(
     readableOf: ((index: Int, pageCount: Int) -> Boolean)? = null,
 ): List<ReaderChapterItem> = List(chapterCount) { index ->
     val pageCount = pageCountOf(index).coerceAtLeast(0)
-    ReaderChapterItem(
+    readerChapterItem(
         index = index,
-        title = titleOf(index).ifBlank { "第 ${index + 1} 章" },
+        title = titleOf(index),
         pageCount = pageCount,
         startPage = startPageOf(index),
-        isReadable = pageCount > 0 && (readableOf?.invoke(index, pageCount) ?: true),
+        isReadable = readableOf?.invoke(index, pageCount) ?: true,
     )
 }
 
 internal suspend fun loadReaderChapterItems(
     volume: ComicVolume,
 ): List<ReaderChapterItem> = withContext(Dispatchers.IO) {
-    List(volume.chapterCount) { index ->
-        val isReadable = volume.isChapterReadable(index)
-        val pageCount = volume.chapterPageCount(index).coerceAtLeast(0)
-        ReaderChapterItem(
-            index = index,
-            title = volume.chapterTitle(index).ifBlank { "第 ${index + 1} 章" },
-            pageCount = pageCount,
-            startPage = volume.chapterStartPage(index),
-            isReadable = isReadable && pageCount > 0,
-        )
+    val chapterCount = volume.chapterCount
+    // Read mutable volume metadata on IO, then pass an immutable snapshot to the pure mapper.
+    val titles = Array(chapterCount) { "" }
+    val pageCounts = IntArray(chapterCount)
+    val startPages = IntArray(chapterCount)
+    val readable = BooleanArray(chapterCount)
+    for (index in 0 until chapterCount) {
+        titles[index] = volume.chapterTitle(index)
+        readable[index] = volume.isChapterReadable(index)
+        pageCounts[index] = volume.chapterPageCount(index)
     }
+    for (index in 0 until chapterCount) {
+        startPages[index] = volume.chapterStartPage(index)
+    }
+    buildReaderChapterItems(
+        chapterCount = chapterCount,
+        titleOf = { index -> titles[index] },
+        pageCountOf = { index -> pageCounts[index] },
+        startPageOf = { index -> startPages[index] },
+        readableOf = { index, _ -> readable[index] },
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -81,6 +108,7 @@ internal fun ReaderChaptersSheet(
     volume: ComicVolume,
     currentChapterIndex: Int,
     accent: Color,
+    onChaptersLoaded: () -> Unit,
     onSelect: (Int) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -92,6 +120,10 @@ internal fun ReaderChaptersSheet(
     }
     val loadedChapters = chapters
     val listState = rememberLazyListState()
+
+    LaunchedEffect(loadedChapters) {
+        if (loadedChapters != null) onChaptersLoaded()
+    }
 
     LaunchedEffect(loadedChapters, currentChapterIndex) {
         val loaded = loadedChapters ?: return@LaunchedEffect

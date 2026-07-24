@@ -874,12 +874,10 @@ class ComicRepository(context: Context) {
 
     /**
      * 给 PDF 章节目录补封面。首次导入时 comics 表刚插入，封面为空；
-     * 用 [PdfComicVolume] 读第一章第一页生成封面。
+     * 用 [PdfComicVolume] 读第一个可读章节的第一页生成封面。
      *
-     * 只打开第一章而不是全书：totalPageCount 会触发 computeStartPages，
-     * 它会逐章打开 PDF 拿页数——多章目录在导入时会被卡住。封面只需知道
-     * 第一章有没有页，用 chapterPageCount(0) 即可。所有 PDF 打开都走
-     * Dispatchers.IO，避免在主线程做 native 解析。
+     * 缺失章节可能排在可读章节之前，因此不能假定索引 0 一定能打开。所有
+     * PDF 打开都走 Dispatchers.IO，避免在主线程做 native 解析。
      */
     private suspend fun backfillSeriesCover(outcome: AddSeriesFolderOutcome) {
         val comic = (outcome as? AddSeriesFolderOutcome.Added)?.comic ?: return
@@ -889,8 +887,11 @@ class ComicRepository(context: Context) {
         withContext(Dispatchers.IO) {
             val volume = runCatching { openBook(updatedComic) }.getOrNull() ?: return@withContext
             try {
-                if (volume.chapterPageCount(0) > 0) {
-                    val bytes = runCatching { volume.loadPageBytes(0) }.getOrNull()
+                val coverChapter = (0 until volume.chapterCount)
+                    .firstOrNull(volume::isChapterReadable)
+                val coverPage = coverChapter?.let { volume.chapterStartPage(it) }
+                if (coverPage != null) {
+                    val bytes = runCatching { volume.loadPageBytes(coverPage) }.getOrNull()
                     bytes?.let {
                         val cover = Covers.createCoverFile(appContext, updatedComic.id, it)
                         cover?.let { file -> applyGeneratedCover(updatedComic, file) }

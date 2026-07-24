@@ -38,17 +38,20 @@ class PdfComicVolume(
     /** Access-order cache bounds native documents independently of the chapter count. */
     private val openChapters = LinkedHashMap<Int, OpenChapter>(OPEN_CHAPTER_LIMIT, 0.75f, true)
 
-    /** 每个章节的页数；index 与 chapters 一致 */
-    private val pageCounts = IntArray(chapters.size) { index ->
-        if (chapters[index].isMissing) {
-            0
-        } else {
-            chapters[index].pageCount.takeIf { it > 0 } ?: -1
-        }
-    }
-
-    /** 章节起始全局页号缓存 */
-    private var startPages: IntArray? = null
+    /**
+     * Atomically published chapter metadata. Native PDF work stays behind [pdfiumLock], while
+     * Compose can read an immutable layout without waiting for an unrelated page render.
+     */
+    @Volatile
+    private var chapterLayout = PdfChapterLayout(
+        IntArray(chapters.size) { index ->
+            if (chapters[index].isMissing) {
+                0
+            } else {
+                chapters[index].pageCount.takeIf { it > 0 } ?: UNKNOWN_PAGE_COUNT
+            }
+        },
+    )
 
     init {
         require(chapters.isNotEmpty()) { "PdfComicVolume 至少需要一章" }
@@ -70,33 +73,38 @@ class PdfComicVolume(
     )
 
     override val totalPageCount: Int
-        get() {
-            val starts = startPages ?: computeStartPages()
-            if (starts.isEmpty()) return 0
-            val last = starts.lastIndex
-            return starts[last] + pageCounts[last].coerceAtLeast(0)
-        }
+        get() = resolvedChapterLayout().totalPageCount
 
     override fun chapterTitle(chapterIndex: Int): String =
         chapters.getOrNull(chapterIndex)?.title ?: ""
 
     override fun chapterStartPage(chapterIndex: Int): Int {
-        val starts = startPages ?: computeStartPages()
-        return starts.getOrElse(chapterIndex) { starts.lastOrNull() ?: 0 }
+        val layout = resolvedChapterLayout()
+        return layout.startPages.getOrElse(chapterIndex) { layout.startPages.lastOrNull() ?: 0 }
     }
 
     override fun chapterPageCount(chapterIndex: Int): Int {
-        ensurePageCount(chapterIndex)
-        return pageCounts.getOrElse(chapterIndex) { 0 }.coerceAtLeast(0)
+        if (chapterIndex !in chapters.indices) return 0
+        val cached = chapterLayout.pageCounts[chapterIndex]
+        if (cached >= 0) return cached
+        return pdfiumLock.withLock {
+            val current = chapterLayout.pageCounts[chapterIndex]
+            if (current >= 0) {
+                current
+            } else {
+                val discovered = discoverPageCountLocked(chapterIndex)
+                publishPageCountLocked(chapterIndex, discovered)
+                discovered
+            }
+        }
     }
 
     override fun isChapterReadable(chapterIndex: Int): Boolean {
         if (chapterIndex !in chapters.indices || chapters[chapterIndex].isMissing) return false
         return pdfiumLock.withLock {
-            if (closed || pageCounts[chapterIndex] == 0) return@withLock false
+            if (closed) return@withLock false
             val opened = openDocumentLocked(chapterIndex) ?: run {
-                pageCounts[chapterIndex] = 0
-                startPages = null
+                publishPageCountLocked(chapterIndex, 0)
                 return@withLock false
             }
             // A stored positive page count may belong to an older file revision; probe the
@@ -105,43 +113,44 @@ class PdfComicVolume(
                 .getOrNull()
                 ?.coerceAtLeast(0)
             if (actualPageCount == null) {
-                pageCounts[chapterIndex] = 0
-                startPages = null
+                discardOpenChapterLocked(chapterIndex)
+                publishPageCountLocked(chapterIndex, 0)
                 return@withLock false
             }
-            if (pageCounts[chapterIndex] != actualPageCount) {
-                pageCounts[chapterIndex] = actualPageCount
-                startPages = null
-            }
+            publishPageCountLocked(chapterIndex, actualPageCount)
             actualPageCount > 0
         }
     }
 
     override fun globalToChapterPage(globalPage: Int): ChapterProgress {
-        // 封面回填等早期路径只会读第 0 页：在 startPages 还没算出来时，只要
-        // 第 0 章本身能打开，就直接落在 (0, globalPage)，避免触发 computeStartPages
-        // 把整本书所有章节都打开一遍。
-        if (startPages == null && chapterCount > 0 && globalPage >= 0) {
+        // Cover generation may ask for page zero before the complete layout is known. Avoid
+        // opening every chapter when the first chapter count already answers that mapping.
+        if (!chapterLayout.isResolved && chapterCount > 0 && globalPage >= 0) {
             val firstPages = chapterPageCount(0)
             if (firstPages > 0 && globalPage < firstPages) {
                 return ChapterProgress(0, globalPage)
             }
         }
-        val starts = startPages ?: computeStartPages()
-        if (starts.isEmpty()) return ChapterProgress(0, 0)
-        val chapter = (0 until chapterCount).lastOrNull { starts[it] <= globalPage } ?: 0
-        val pages = pageCounts.getOrElse(chapter) { 0 }.coerceAtLeast(0)
-        // 章节打不开时 pageCounts[chapter] 为 0。
-        // pages <= 0 时直接落在第 0 页，渲染层会再给出"无法打开章节"的清晰提示。
+        val layout = resolvedChapterLayout()
+        if (layout.startPages.isEmpty()) return ChapterProgress(0, 0)
+        val chapter = (0 until chapterCount)
+            .lastOrNull { layout.startPages[it] <= globalPage }
+            ?: 0
+        val pages = layout.pageCounts.getOrElse(chapter) { 0 }.coerceAtLeast(0)
+        // An unreadable chapter has zero pages. Keep its local index at zero so the render path
+        // can surface the existing chapter-open error without producing a negative page index.
         val pageInChapter = if (pages <= 0) 0
-            else (globalPage - starts[chapter]).coerceIn(0, pages - 1)
+            else (globalPage - layout.startPages[chapter]).coerceIn(0, pages - 1)
         return ChapterProgress(chapter, pageInChapter)
     }
 
     override fun chapterPageToGlobal(chapterIndex: Int, pageIndex: Int): Int {
-        val starts = startPages ?: computeStartPages()
-        val start = starts.getOrElse(chapterIndex) { starts.lastOrNull() ?: 0 }
-        return start + pageIndex.coerceIn(0, (pageCounts.getOrElse(chapterIndex) { 0 } - 1).coerceAtLeast(0))
+        val layout = resolvedChapterLayout()
+        val start = layout.startPages.getOrElse(chapterIndex) {
+            layout.startPages.lastOrNull() ?: 0
+        }
+        val pageCount = layout.pageCounts.getOrElse(chapterIndex) { 0 }
+        return start + pageIndex.coerceIn(0, (pageCount - 1).coerceAtLeast(0))
     }
 
     override fun pageIdentity(globalPage: Int): String? {
@@ -249,43 +258,56 @@ class PdfComicVolume(
         }
     }
 
-    private fun computeStartPages(): IntArray {
-        val starts = IntArray(chapterCount)
-        var acc = 0
-        for (i in chapters.indices) {
-            ensurePageCount(i)
-            starts[i] = acc
-            acc += pageCounts[i].coerceAtLeast(0)
+    private fun resolvedChapterLayout(): PdfChapterLayout {
+        chapterLayout.takeIf { it.isResolved }?.let { return it }
+        return pdfiumLock.withLock {
+            val current = chapterLayout
+            if (current.isResolved) return@withLock current
+
+            val discoveredCounts = current.pageCounts.copyOf()
+            for (index in chapters.indices) {
+                if (discoveredCounts[index] < 0) {
+                    discoveredCounts[index] = discoverPageCountLocked(index)
+                }
+            }
+            publishChapterLayoutLocked(discoveredCounts)
         }
-        startPages = starts
-        return starts
     }
 
-    private fun ensurePageCount(chapterIndex: Int) {
-        pdfiumLock.withLock {
-            if (chapters[chapterIndex].isMissing) {
-                pageCounts[chapterIndex] = 0
-                return
-            }
-            if (pageCounts[chapterIndex] >= 0 || closed) return
-            val cached = openChapters[chapterIndex]
-            if (cached != null) {
-                pageCounts[chapterIndex] = cached.document.totalPages
-                return
-            }
-            val temporary = createOpenChapter(chapterIndex) ?: run {
-                // Cache a failed probe for this opened volume; reopening the reader retries it.
-                pageCounts[chapterIndex] = 0
-                return
-            }
-            try {
-                pageCounts[chapterIndex] = temporary.document.totalPages
-            } finally {
-                // Page-count discovery must not turn chapter count into open file-descriptor count.
-                closeOpenChapter(temporary)
-            }
+    /** Must be called while holding [pdfiumLock]. */
+    private fun discoverPageCountLocked(chapterIndex: Int): Int {
+        if (chapters[chapterIndex].isMissing || closed) return 0
+        val cached = openChapters[chapterIndex]
+        if (cached != null) {
+            return runCatching { cached.document.totalPages }
+                .getOrElse {
+                    discardOpenChapterLocked(chapterIndex)
+                    0
+                }
+                .coerceAtLeast(0)
+        }
+        val temporary = createOpenChapter(chapterIndex) ?: return 0
+        return try {
+            runCatching { temporary.document.totalPages }.getOrDefault(0).coerceAtLeast(0)
+        } finally {
+            // Metadata discovery must not turn chapter count into open file-descriptor count.
+            closeOpenChapter(temporary)
         }
     }
+
+    /** Must be called while holding [pdfiumLock]. */
+    private fun publishPageCountLocked(chapterIndex: Int, pageCount: Int): PdfChapterLayout {
+        val current = chapterLayout
+        val normalized = pageCount.coerceAtLeast(0)
+        if (current.pageCounts[chapterIndex] == normalized) return current
+        val updatedCounts = current.pageCounts.copyOf()
+        updatedCounts[chapterIndex] = normalized
+        return publishChapterLayoutLocked(updatedCounts)
+    }
+
+    /** Must be called while holding [pdfiumLock]. */
+    private fun publishChapterLayoutLocked(pageCounts: IntArray): PdfChapterLayout =
+        PdfChapterLayout(pageCounts).also { chapterLayout = it }
 
     private fun openDocumentLocked(chapterIndex: Int): OpenChapter? {
         if (closed) return null
@@ -294,6 +316,10 @@ class PdfComicVolume(
         openChapters[chapterIndex] = opened
         trimOpenChaptersLocked()
         return opened
+    }
+
+    private fun discardOpenChapterLocked(chapterIndex: Int) {
+        openChapters.remove(chapterIndex)?.let(::closeOpenChapter)
     }
 
     private fun createOpenChapter(chapterIndex: Int): OpenChapter? {
@@ -407,6 +433,7 @@ class PdfComicVolume(
     private companion object {
         val pdfiumLock = ReentrantLock()
         const val OPEN_CHAPTER_LIMIT = 3
+        const val UNKNOWN_PAGE_COUNT = -1
     }
 
     private data class OpenChapter(
@@ -414,6 +441,25 @@ class PdfComicVolume(
         val document: com.ahmer.pdfium.PdfDocument,
         val pfd: ParcelFileDescriptor,
     )
+}
+
+private class PdfChapterLayout(pageCounts: IntArray) {
+    val pageCounts: IntArray = pageCounts.copyOf()
+    val startPages: IntArray = calculateChapterStartPages(this.pageCounts)
+    val totalPageCount: Int = startPages.lastOrNull()?.let { lastStart ->
+        lastStart + this.pageCounts.last().coerceAtLeast(0)
+    } ?: 0
+    val isResolved: Boolean = this.pageCounts.all { it >= 0 }
+}
+
+internal fun calculateChapterStartPages(pageCounts: IntArray): IntArray {
+    val starts = IntArray(pageCounts.size)
+    var accumulatedPages = 0
+    for (index in pageCounts.indices) {
+        starts[index] = accumulatedPages
+        accumulatedPages += pageCounts[index].coerceAtLeast(0)
+    }
+    return starts
 }
 
 internal fun calculateOcrPdfPageSize(pageWidthPoints: Int, pageHeightPoints: Int): PagePixelSize =

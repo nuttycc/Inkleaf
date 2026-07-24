@@ -46,7 +46,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -293,6 +293,7 @@ private fun ComicPager(
     var zoomToggleAnchor by remember { mutableStateOf(Offset.Unspecified) }
     var showBookmarks by remember { mutableStateOf(false) }
     var showChapters by remember { mutableStateOf(false) }
+    var chapterLayoutVersion by remember(volume) { mutableIntStateOf(0) }
     val ocrResults = remember { mutableStateMapOf<Int, OcrPageResult>() }
     val ocrResultOrder = remember { ArrayDeque<Int>() }
     val snackbarHostState = remember { SnackbarHostState() }
@@ -394,10 +395,10 @@ private fun ComicPager(
 
     // 当前页对应的章节信息，用于多章书籍的界面提示
     val currentPage = pagerState.currentPage
-    val chapterProgress = remember(currentPage, volume) {
+    val chapterProgress = remember(currentPage, volume, chapterLayoutVersion) {
         volume.globalToChapterPage(currentPage)
     }
-    val chapterTitle = remember(chapterProgress, volume) {
+    val chapterTitle = remember(chapterProgress, volume, chapterLayoutVersion) {
         volume.chapterTitle(chapterProgress.chapterIndex)
     }
 
@@ -636,6 +637,7 @@ private fun ComicPager(
             volume = volume,
             currentChapterIndex = chapterProgress.chapterIndex,
             accent = readerAccentColor(),
+            onChaptersLoaded = { chapterLayoutVersion++ },
             onSelect = { page ->
                 showChapters = false
                 scope.launch { pagerState.scrollToPage(page) }
@@ -753,7 +755,7 @@ private fun ReaderTopBar(
                             text = { Text("章节") },
                             leadingIcon = {
                                 Icon(
-                                    imageVector = Icons.Filled.List,
+                                    imageVector = Icons.AutoMirrored.Filled.List,
                                     contentDescription = null,
                                 )
                             },
