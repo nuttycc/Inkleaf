@@ -114,21 +114,15 @@ jobs:
         env:
           INKLEAF_KEYSTORE_BASE64: ${{ secrets.INKLEAF_KEYSTORE_BASE64 }}
 
-      - name: Run unit tests
-        # Public ubuntu-latest is 4C/16G: one fat Gradle JVM (Kotlin in-process).
+      - name: Run unit tests and build release APK
+        # Single ./gradlew invocation reuses configuration cache + daemon across
+        # both tasks. Signing env is only read by assembleRelease; harmless to
+        # expose to testDebugUnitTest. Heap lowered to 6g to leave room for
+        # AAPT2/Kotlin workers on 4C/16G runner; Kotlin daemon (default strategy)
+        # avoids classloading contention with parallel workers.
         run: |
-          ./gradlew testDebugUnitTest \
-            -Dorg.gradle.jvmargs="-Xmx10g -XX:MaxMetaspaceSize=1g -XX:+UseParallelGC -Dfile.encoding=UTF-8" \
-            -Dkotlin.compiler.execution.strategy=in-process \
-            -Dorg.gradle.workers.max=4 \
-            -Dorg.gradle.parallel=true \
-            -Dorg.gradle.priority=normal
-
-      - name: Build release APK
-        run: |
-          ./gradlew assembleRelease \
-            -Dorg.gradle.jvmargs="-Xmx10g -XX:MaxMetaspaceSize=1g -XX:+UseParallelGC -Dfile.encoding=UTF-8" \
-            -Dkotlin.compiler.execution.strategy=in-process \
+          ./gradlew testDebugUnitTest assembleRelease \
+            -Dorg.gradle.jvmargs="-Xmx6g -XX:MaxMetaspaceSize=1g -XX:+UseParallelGC -Dfile.encoding=UTF-8" \
             -Dorg.gradle.workers.max=4 \
             -Dorg.gradle.parallel=true \
             -Dorg.gradle.priority=normal
