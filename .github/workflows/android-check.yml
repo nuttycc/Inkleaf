@@ -56,12 +56,12 @@ jobs:
         run: chmod +x gradlew
 
       - name: Run selected check
-        # Private ubuntu-latest is 2C/8G: one fat Gradle JVM (Kotlin in-process).
+        # Public ubuntu-latest is 4C/16G: one fat Gradle JVM (Kotlin in-process).
         run: |
           GRADLE_ARGS=(
-            -Dorg.gradle.jvmargs="-Xmx5g -XX:MaxMetaspaceSize=768m -XX:+UseParallelGC -Dfile.encoding=UTF-8"
+            -Dorg.gradle.jvmargs="-Xmx10g -XX:MaxMetaspaceSize=1g -XX:+UseParallelGC -Dfile.encoding=UTF-8"
             -Dkotlin.compiler.execution.strategy=in-process
-            -Dorg.gradle.workers.max=2
+            -Dorg.gradle.workers.max=4
             -Dorg.gradle.parallel=true
             -Dorg.gradle.priority=normal
           )
