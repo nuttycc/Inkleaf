@@ -26,24 +26,69 @@ import com.paddle.ocr.postprocess.BoxSorter
 import com.paddle.ocr.postprocess.QuadTextCrop
 import com.paddle.ocr.util.BitmapUtils
 
-class OCREngine(
+class OCREngine private constructor(
     context: Context,
     private val config: PaddleOCRConfig,
     engineConfig: EngineConfig,
-    detModelAsset: String = "models/det/inference.onnx",
-    recModelAsset: String = "models/rec/inference.onnx",
-    recConfigAsset: String = "models/rec/inference.yml",
+    detModelAsset: String?,
+    recModelAsset: String?,
+    recConfigAsset: String?,
+    detModelFile: java.io.File?,
+    recModelFile: java.io.File?,
+    recConfigFile: java.io.File?,
 ) {
     private val ortManager = ORTSessionManager(context, engineConfig)
     private val detectionEngine: DetectionEngine
     private val recognitionEngine: RecognitionEngine
     val coldLoadTimeMs: Long get() = ortManager.coldLoadTimeMs
 
+    constructor(
+        context: Context,
+        config: PaddleOCRConfig,
+        engineConfig: EngineConfig,
+        detModelAsset: String = "models/det/inference.onnx",
+        recModelAsset: String = "models/rec/inference.onnx",
+        recConfigAsset: String = "models/rec/inference.yml",
+    ) : this(
+        context = context,
+        config = config,
+        engineConfig = engineConfig,
+        detModelAsset = detModelAsset,
+        recModelAsset = recModelAsset,
+        recConfigAsset = recConfigAsset,
+        detModelFile = null,
+        recModelFile = null,
+        recConfigFile = null,
+    )
+
+    constructor(
+        context: Context,
+        config: PaddleOCRConfig,
+        engineConfig: EngineConfig,
+        detModelFile: java.io.File,
+        recModelFile: java.io.File,
+        recConfigFile: java.io.File,
+    ) : this(
+        context = context,
+        config = config,
+        engineConfig = engineConfig,
+        detModelAsset = null,
+        recModelAsset = null,
+        recConfigAsset = null,
+        detModelFile = detModelFile,
+        recModelFile = recModelFile,
+        recConfigFile = recConfigFile,
+    )
+
     init {
         val configured = try {
-            ortManager.loadModels(detModelAsset, recModelAsset)
-            val recModelConfig = ModelConfig.parse(context, recConfigAsset)
-            recModelConfig
+            if (detModelFile != null && recModelFile != null) {
+                ortManager.loadModels(detModelFile, recModelFile)
+                ModelConfig.parse(recConfigFile!!)
+            } else {
+                ortManager.loadModels(detModelAsset!!, recModelAsset!!)
+                ModelConfig.parse(context, recConfigAsset!!)
+            }
         } catch (t: Throwable) {
             ortManager.release()
             throw t

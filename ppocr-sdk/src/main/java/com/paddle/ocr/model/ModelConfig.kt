@@ -28,12 +28,25 @@ data class ModelConfig(
             } catch (t: Throwable) {
                 throw OCRError.ConfigParseFailed(assetPath, t)
             }
+            return parseContent(content, assetPath)
+        }
+
+        fun parse(file: java.io.File): ModelConfig {
+            val content = try {
+                file.bufferedReader().use { it.readText() }
+            } catch (t: Throwable) {
+                throw OCRError.ConfigParseFailed(file.absolutePath, t)
+            }
+            return parseContent(content, file.absolutePath)
+        }
+
+        private fun parseContent(content: String, pathForError: String): ModelConfig {
             val characterDict = try {
-                extractCharacterDict(content, assetPath)
+                extractCharacterDict(content, pathForError)
             } catch (e: OCRError.ConfigParseFailed) {
                 throw e
             } catch (t: Throwable) {
-                throw OCRError.ConfigParseFailed(assetPath, t)
+                throw OCRError.ConfigParseFailed(pathForError, t)
             }
             val charListWithSpace = characterDict.toMutableList().apply {
                 if (lastOrNull() != " ") add(" ")

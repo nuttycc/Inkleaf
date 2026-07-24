@@ -16,18 +16,6 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 object PaddleOcrEngine {
-    private data class BundledModel(
-        val detAssetPath: String,
-        val recAssetPath: String,
-        val recConfigAssetPath: String,
-    )
-
-    private val model = BundledModel(
-        detAssetPath = "ocr/ppocrv6_small/det/inference.onnx",
-        recAssetPath = "ocr/ppocrv6_small/rec/inference.onnx",
-        recConfigAssetPath = "ocr/ppocrv6_small/rec/inference.yml",
-    )
-
     private val mutex = Mutex()
     private val releaseScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var engine: PaddleOCR? = null
@@ -141,6 +129,7 @@ object PaddleOcrEngine {
 
     private suspend fun create(context: Context): PaddleOCR {
         check(OpenCVUtils.init()) { "OpenCV initialization failed" }
+        val modelDir = ocrModelDir(context.applicationContext.filesDir)
         return PaddleOCR.create(
             context = context.applicationContext,
             config = PaddleOCRConfig(
@@ -148,9 +137,9 @@ object PaddleOcrEngine {
                 recBatchSize = 1,
             ),
             engineConfig = EngineConfig(numThreads = 4),
-            detModelAssetPath = model.detAssetPath,
-            recModelAssetPath = model.recAssetPath,
-            recConfigAssetPath = model.recConfigAssetPath,
+            detModelFile = java.io.File(modelDir, "det/inference.onnx"),
+            recModelFile = java.io.File(modelDir, "rec/inference.onnx"),
+            recConfigFile = java.io.File(modelDir, "rec/inference.yml"),
         )
     }
 

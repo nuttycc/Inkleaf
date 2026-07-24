@@ -70,6 +70,26 @@ class PaddleOCR private constructor(
                 PaddleOCR(engine)
             }
         }
+
+        suspend fun create(
+            context: Context,
+            config: PaddleOCRConfig,
+            engineConfig: EngineConfig,
+            detModelFile: java.io.File,
+            recModelFile: java.io.File,
+            recConfigFile: java.io.File,
+        ): PaddleOCR {
+            val appContext = context.applicationContext
+            return withContext(Dispatchers.IO) {
+                val engine = OCREngine(
+                    appContext, config, engineConfig,
+                    detModelFile = detModelFile,
+                    recModelFile = recModelFile,
+                    recConfigFile = recConfigFile,
+                )
+                PaddleOCR(engine)
+            }
+        }
     }
 
     suspend fun recognize(bitmap: Bitmap): OCRRunResult {
