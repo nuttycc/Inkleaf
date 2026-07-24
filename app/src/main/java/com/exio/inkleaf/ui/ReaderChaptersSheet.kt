@@ -29,6 +29,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.exio.inkleaf.data.ComicVolume
+import com.exio.inkleaf.data.PdfComicVolume
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -85,11 +86,23 @@ internal suspend fun loadReaderChapterItems(
     val pageCounts = IntArray(chapterCount)
     val startPages = IntArray(chapterCount)
     val readable = BooleanArray(chapterCount)
-    for (index in 0 until chapterCount) {
-        titles[index] = volume.chapterTitle(index)
-        readable[index] = volume.isChapterReadable(index)
-        pageCounts[index] = volume.chapterPageCount(index)
+
+    // Use bulk API for PdfComicVolume to avoid expensive per-chapter lock/open cycles
+    if (volume is PdfComicVolume) {
+        val readabilityBulk = volume.chapterReadabilityBulk()
+        for (index in 0 until chapterCount) {
+            titles[index] = volume.chapterTitle(index)
+            readable[index] = readabilityBulk[index]
+            pageCounts[index] = volume.chapterPageCount(index)
+        }
+    } else {
+        for (index in 0 until chapterCount) {
+            titles[index] = volume.chapterTitle(index)
+            readable[index] = volume.isChapterReadable(index)
+            pageCounts[index] = volume.chapterPageCount(index)
+        }
     }
+
     for (index in 0 until chapterCount) {
         startPages[index] = volume.chapterStartPage(index)
     }

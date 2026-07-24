@@ -887,8 +887,11 @@ class ComicRepository(context: Context) {
         withContext(Dispatchers.IO) {
             val volume = runCatching { openBook(updatedComic) }.getOrNull() ?: return@withContext
             try {
-                val coverChapter = (0 until volume.chapterCount)
-                    .firstOrNull(volume::isChapterReadable)
+                val coverChapter = if (volume is PdfComicVolume) {
+                    volume.firstReadableChapterOrNull()
+                } else {
+                    (0 until volume.chapterCount).firstOrNull(volume::isChapterReadable)
+                }
                 val coverPage = coverChapter?.let { volume.chapterStartPage(it) }
                 if (coverPage != null) {
                     val bytes = runCatching { volume.loadPageBytes(coverPage) }.getOrNull()

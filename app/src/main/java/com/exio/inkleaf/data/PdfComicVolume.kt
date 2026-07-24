@@ -79,7 +79,9 @@ class PdfComicVolume(
         chapters.getOrNull(chapterIndex)?.title ?: ""
 
     override fun chapterStartPage(chapterIndex: Int): Int {
-        val layout = resolvedChapterLayout()
+        // Only need chapters 0 until chapterIndex-1 resolved (not chapterIndex itself)
+        if (chapterIndex <= 0) return 0
+        val layout = resolvedChapterLayout(requiredChapterIndex = chapterIndex - 1)
         return layout.startPages.getOrElse(chapterIndex) { layout.startPages.lastOrNull() ?: 0 }
     }
 
@@ -122,6 +124,44 @@ class PdfComicVolume(
         }
     }
 
+    /**
+     * Finds the first readable chapter index, or null if no chapter can be opened.
+     * Efficiently discovers page counts under a single lock acquisition.
+     */
+    fun firstReadableChapterOrNull(): Int? {
+        return pdfiumLock.withLock {
+            if (closed) return@withLock null
+            for (index in chapters.indices) {
+                if (chapters[index].isMissing) continue
+                val pageCount = discoverPageCountLocked(index)
+                publishPageCountLocked(index, pageCount)
+                if (pageCount > 0) return@withLock index
+            }
+            null
+        }
+    }
+
+    /**
+     * Returns a BooleanArray indicating which chapters are readable.
+     * Efficiently discovers page counts under a single lock acquisition.
+     */
+    fun chapterReadabilityBulk(): BooleanArray {
+        val result = BooleanArray(chapters.size)
+        pdfiumLock.withLock {
+            if (closed) return@withLock result
+            for (index in chapters.indices) {
+                if (chapters[index].isMissing) {
+                    result[index] = false
+                    continue
+                }
+                val pageCount = discoverPageCountLocked(index)
+                publishPageCountLocked(index, pageCount)
+                result[index] = pageCount > 0
+            }
+        }
+        return result
+    }
+
     override fun globalToChapterPage(globalPage: Int): ChapterProgress {
         // Cover generation may ask for page zero before the complete layout is known. Avoid
         // opening every chapter when the first chapter count already answers that mapping.
@@ -131,7 +171,29 @@ class PdfComicVolume(
                 return ChapterProgress(0, globalPage)
             }
         }
-        val layout = resolvedChapterLayout()
+
+        // Incremental resolution: discover chapters one by one until we find the target
+        var currentLayout = chapterLayout
+        if (!currentLayout.isResolved) {
+            for (index in 0 until chapterCount) {
+                // Ensure we have a layout resolved through at least this chapter
+                if (currentLayout.pageCounts[index] < 0) {
+                    currentLayout = resolvedChapterLayout(requiredChapterIndex = index)
+                }
+
+                val start = currentLayout.startPages.getOrElse(index) { 0 }
+                val count = currentLayout.pageCounts[index].coerceAtLeast(0)
+                if (globalPage < start + count) {
+                    // Found the target chapter
+                    val pageInChapter = if (count <= 0) 0
+                        else (globalPage - start).coerceIn(0, count - 1)
+                    return ChapterProgress(index, pageInChapter)
+                }
+            }
+        }
+
+        // Fallback: fully resolved or past last chapter
+        val layout = if (currentLayout.isResolved) currentLayout else resolvedChapterLayout()
         if (layout.startPages.isEmpty()) return ChapterProgress(0, 0)
         val chapter = (0 until chapterCount)
             .lastOrNull { layout.startPages[it] <= globalPage }
@@ -145,7 +207,8 @@ class PdfComicVolume(
     }
 
     override fun chapterPageToGlobal(chapterIndex: Int, pageIndex: Int): Int {
-        val layout = resolvedChapterLayout()
+        // Need chapters 0..chapterIndex resolved (including chapterIndex for page count)
+        val layout = resolvedChapterLayout(requiredChapterIndex = chapterIndex)
         val start = layout.startPages.getOrElse(chapterIndex) {
             layout.startPages.lastOrNull() ?: 0
         }
@@ -258,14 +321,30 @@ class PdfComicVolume(
         }
     }
 
-    private fun resolvedChapterLayout(): PdfChapterLayout {
-        chapterLayout.takeIf { it.isResolved }?.let { return it }
-        return pdfiumLock.withLock {
-            val current = chapterLayout
-            if (current.isResolved) return@withLock current
+    private fun resolvedChapterLayout(requiredChapterIndex: Int? = null): PdfChapterLayout {
+        val current = chapterLayout
+        val requiredIndex = requiredChapterIndex?.coerceIn(0, chapters.lastIndex)
 
-            val discoveredCounts = current.pageCounts.copyOf()
-            for (index in chapters.indices) {
+        // Fast-path: already fully resolved or resolved through required index
+        if (requiredIndex == null) {
+            current.takeIf { it.isResolved }?.let { return it }
+        } else {
+            current.takeIf { it.isResolvedThrough(requiredIndex) }?.let { return it }
+        }
+
+        return pdfiumLock.withLock {
+            val fresh = chapterLayout
+
+            // Double-check under lock
+            if (requiredIndex == null) {
+                if (fresh.isResolved) return@withLock fresh
+            } else {
+                if (fresh.isResolvedThrough(requiredIndex)) return@withLock fresh
+            }
+
+            val discoveredCounts = fresh.pageCounts.copyOf()
+            val endIndex = requiredIndex ?: chapters.lastIndex
+            for (index in 0..endIndex) {
                 if (discoveredCounts[index] < 0) {
                     discoveredCounts[index] = discoverPageCountLocked(index)
                 }
@@ -450,6 +529,11 @@ private class PdfChapterLayout(pageCounts: IntArray) {
         lastStart + this.pageCounts.last().coerceAtLeast(0)
     } ?: 0
     val isResolved: Boolean = this.pageCounts.all { it >= 0 }
+
+    fun isResolvedThrough(chapterIndex: Int): Boolean {
+        if (chapterIndex < 0 || chapterIndex >= pageCounts.size) return isResolved
+        return (0..chapterIndex).all { pageCounts[it] >= 0 }
+    }
 }
 
 internal fun calculateChapterStartPages(pageCounts: IntArray): IntArray {
