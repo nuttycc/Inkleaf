@@ -37,6 +37,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Print runner system info
+        # Helps verify runner specs (4C/16G), JVM default, and available tools
+        # when diagnosing CI memory/parallelism tuning.
+        run: |
+          echo "=== OS ==="
+          cat /etc/os-release | head -5
+          echo "=== CPU ==="
+          nproc
+          grep -c ^processor /proc/cpuinfo
+          echo "=== Memory ==="
+          free -h
+          echo "=== Disk ==="
+          df -h /
+          echo "=== Java (default) ==="
+          which java && java -version 2>&1 || echo "no java on PATH yet"
+          echo "=== Ninja ==="
+          which ninja && ninja --version || echo "no ninja"
+          echo "=== Gradle (if preinstalled) ==="
+          which gradle && gradle --version 2>&1 | head -10 || echo "no gradle on PATH"
+
       - name: Set up JDK
         uses: actions/setup-java@v5
         with:
