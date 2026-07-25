@@ -191,23 +191,6 @@ private fun ReaderBookmarkRow(
                         modifier = Modifier.size(20.dp),
                     )
                 }
-
-                // Page badge pill on thumbnail
-                Surface(
-                    shape = RoundedCornerShape(4.dp),
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
-                    modifier = Modifier
-                        .align(Alignment.BottomStart)
-                        .padding(2.dp),
-                ) {
-                    Text(
-                        text = "${globalPage + 1}",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
-                    )
-                }
             }
 
             Column(
