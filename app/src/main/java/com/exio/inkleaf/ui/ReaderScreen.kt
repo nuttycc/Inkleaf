@@ -613,6 +613,21 @@ private fun ComicPager(
             onNeedThumbnail = onNeedThumbnail,
             modifier = Modifier.align(Alignment.BottomCenter),
         )
+
+        // 章节侧栏叠在阅读区之上（非 Popup），须落在此 Box 内才能盖住 pager/工具栏
+        if (showChapters) {
+            ReaderChaptersSheet(
+                volume = volume,
+                currentChapterIndex = chapterProgress.chapterIndex,
+                accent = readerAccentColor(),
+                onChaptersLoaded = { chapterLayoutVersion++ },
+                onSelect = { page ->
+                    showChapters = false
+                    scope.launch { pagerState.scrollToPage(page) }
+                },
+                onDismiss = { showChapters = false },
+            )
+        }
     }
 
     if (showBookmarks) {
@@ -629,20 +644,6 @@ private fun ComicPager(
             onRemove = onRemoveBookmark,
             onRestore = onRestoreBookmark,
             onDismiss = { showBookmarks = false },
-        )
-    }
-
-    if (showChapters) {
-        ReaderChaptersSheet(
-            volume = volume,
-            currentChapterIndex = chapterProgress.chapterIndex,
-            accent = readerAccentColor(),
-            onChaptersLoaded = { chapterLayoutVersion++ },
-            onSelect = { page ->
-                showChapters = false
-                scope.launch { pagerState.scrollToPage(page) }
-            },
-            onDismiss = { showChapters = false },
         )
     }
 
