@@ -312,7 +312,10 @@ private fun ComicPager(
     var ocrLongPressAnchor by remember { mutableStateOf(Offset.Zero) }
     var pendingOcrPage by remember { mutableStateOf<Int?>(null) }
     LaunchedEffect(showControls) {
-        if (!showControls) filmstripExpanded = false
+        if (!showControls) {
+            activePanel = null
+            filmstripExpanded = false
+        }
     }
     LaunchedEffect(pagerState.currentPage) {
         zoomedPage = null
