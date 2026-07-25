@@ -16,7 +16,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -63,10 +62,7 @@ internal fun ColumnScope.ReaderBookmarksPanelContent(
             "${ReaderPanel.Bookmarks.title()} · ${orderedBookmarks.size}"
         },
     )
-    HorizontalDivider(
-        modifier = Modifier.padding(horizontal = 16.dp),
-        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
-    )
+    ReaderAttachedPanelDivider()
     Box(
         modifier = Modifier
             .fillMaxWidth()

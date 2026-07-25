@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -59,5 +60,13 @@ internal fun ReaderAttachedPanelHeader(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 20.dp, vertical = 12.dp),
+    )
+}
+
+@Composable
+internal fun ReaderAttachedPanelDivider(modifier: Modifier = Modifier) {
+    HorizontalDivider(
+        modifier = modifier.padding(horizontal = 16.dp),
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
     )
 }
