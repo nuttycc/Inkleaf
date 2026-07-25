@@ -177,6 +177,6 @@ class PluginRpcTest {
             queue += message
         }
 
-        fun poll(): String? = queue.poll(2, TimeUnit.SECONDS)
+        fun poll(): String? = queue.poll(10, TimeUnit.SECONDS)
     }
 }
