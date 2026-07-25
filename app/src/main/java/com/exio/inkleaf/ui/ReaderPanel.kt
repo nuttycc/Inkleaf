@@ -1,11 +1,5 @@
 package com.exio.inkleaf.ui
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -40,20 +34,13 @@ internal fun ReaderAttachedPanel(
     modifier: Modifier = Modifier,
 ) {
     ReaderSheetTheme(accent = accent) {
-        AnimatedVisibility(
-            visible = panel != null,
-            enter = slideInVertically(tween(200)) { it } + fadeIn(tween(200)),
-            exit = slideOutVertically(tween(180)) { it } + fadeOut(tween(180)),
-            modifier = modifier.fillMaxWidth(),
-        ) {
-            panel?.let { shownPanel ->
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .semantics { paneTitle = shownPanel.title() },
-                ) {
-                    content(shownPanel)
-                }
+        panel?.let { shownPanel ->
+            Column(
+                modifier = modifier
+                    .fillMaxWidth()
+                    .semantics { paneTitle = shownPanel.title() },
+            ) {
+                content(shownPanel)
             }
         }
     }

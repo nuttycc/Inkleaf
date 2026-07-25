@@ -10,7 +10,6 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -293,6 +292,17 @@ private fun ComicPager(
     var activePanel by remember { mutableStateOf<ReaderPanel?>(null) }
     var filmstripExpanded by remember { mutableStateOf(false) }
     var chapterLayoutVersion by remember(volume) { mutableIntStateOf(0) }
+    val readerChapters by produceState<List<ReaderChapterItem>?>(
+        initialValue = null,
+        key1 = volume,
+    ) {
+        if (shouldShowChapterMenu(volume.chapterCount)) {
+            value = loadReaderChapterItems(volume)
+        }
+    }
+    LaunchedEffect(readerChapters) {
+        if (readerChapters != null) chapterLayoutVersion++
+    }
     val ocrResults = remember { mutableStateMapOf<Int, OcrPageResult>() }
     val ocrResultOrder = remember { ArrayDeque<Int>() }
     val snackbarHostState = remember { SnackbarHostState() }
@@ -649,9 +659,8 @@ private fun ComicPager(
             attachedContent = { panel ->
                 when (panel) {
                     ReaderPanel.Chapters -> ReaderChaptersPanelContent(
-                        volume = volume,
+                        chapters = readerChapters,
                         currentChapterIndex = chapterProgress.chapterIndex,
-                        onChaptersLoaded = { chapterLayoutVersion++ },
                         onSelect = { page ->
                             activePanel = null
                             scope.launch { pagerState.scrollToPage(page) }
@@ -810,15 +819,11 @@ private fun ReaderBottomControls(
                 modifier = if (activePanel == ReaderPanel.Tools) {
                     Modifier
                 } else {
-                    Modifier.fillMaxHeight(0.65f)
+                    Modifier.fillMaxHeight(0.5f)
                 },
             )
 
-            AnimatedVisibility(
-                visible = activePanel == null,
-                enter = fadeIn(tween(150)),
-                exit = fadeOut(tween(150)),
-            ) {
+            if (activePanel == null) {
                 Column {
                     // 拖动中的临时值；null = 未在拖动，滑杆跟随真实页码。
                     // 松手才真正跳页：拖动中实时翻页会狂触发图片加载

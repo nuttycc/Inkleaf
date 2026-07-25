@@ -27,9 +27,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.produceState
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -116,32 +114,15 @@ internal suspend fun loadReaderChapterItems(
 
 @Composable
 internal fun ColumnScope.ReaderChaptersPanelContent(
-    volume: ComicVolume,
+    chapters: List<ReaderChapterItem>?,
     currentChapterIndex: Int,
-    onChaptersLoaded: () -> Unit,
     onSelect: (Int) -> Unit,
 ) {
-    val chapters by produceState<List<ReaderChapterItem>?>(
-        initialValue = null,
-        key1 = volume,
-    ) {
-        value = loadReaderChapterItems(volume)
-    }
     val loadedChapters = chapters
-    val listState = rememberLazyListState()
-
-    LaunchedEffect(loadedChapters) {
-        if (loadedChapters != null) onChaptersLoaded()
-    }
-
-    LaunchedEffect(loadedChapters, currentChapterIndex) {
-        val loaded = loadedChapters ?: return@LaunchedEffect
-        if (loaded.isEmpty()) return@LaunchedEffect
-        val targetIndex = (currentChapterIndex - 1)
-            .coerceAtLeast(0)
-            .coerceAtMost(loaded.lastIndex)
-        listState.scrollToItem(targetIndex)
-    }
+    val initialListIndex = readerChapterInitialListIndex(
+        chapterCount = loadedChapters?.size ?: 0,
+        currentChapterIndex = currentChapterIndex,
+    )
 
     ReaderAttachedPanelHeader(
         title = "章节列表${loadedChapters?.let { " · ${it.size}" } ?: ""}",
@@ -150,31 +131,43 @@ internal fun ColumnScope.ReaderChaptersPanelContent(
         modifier = Modifier.padding(horizontal = 16.dp),
         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
     )
-    LazyColumn(
-        state = listState,
-        contentPadding = PaddingValues(top = 8.dp, bottom = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .weight(1f),
-    ) {
-        if (loadedChapters == null) {
-            item { ChapterPanelLoading() }
-        } else if (loadedChapters.isEmpty()) {
-            item { ReaderChaptersEmptyState() }
-        } else {
-            items(
-                items = loadedChapters,
-                key = { it.index },
-            ) { chapter ->
-                ReaderChapterRow(
-                    chapter = chapter,
-                    isCurrent = chapter.index == currentChapterIndex,
-                    onSelect = onSelect,
-                )
+    key(loadedChapters, currentChapterIndex) {
+        val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialListIndex)
+        LazyColumn(
+            state = listState,
+            contentPadding = PaddingValues(top = 8.dp, bottom = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+        ) {
+            if (loadedChapters == null) {
+                item { ChapterPanelLoading() }
+            } else if (loadedChapters.isEmpty()) {
+                item { ReaderChaptersEmptyState() }
+            } else {
+                items(
+                    items = loadedChapters,
+                    key = { it.index },
+                ) { chapter ->
+                    ReaderChapterRow(
+                        chapter = chapter,
+                        isCurrent = chapter.index == currentChapterIndex,
+                        onSelect = onSelect,
+                    )
+                }
             }
         }
     }
+}
+
+internal fun readerChapterInitialListIndex(
+    chapterCount: Int,
+    currentChapterIndex: Int,
+): Int = if (chapterCount <= 0) {
+    0
+} else {
+    (currentChapterIndex - 1).coerceIn(0, chapterCount - 1)
 }
 
 @Composable
