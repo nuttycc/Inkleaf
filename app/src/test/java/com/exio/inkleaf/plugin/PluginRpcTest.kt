@@ -98,7 +98,7 @@ class PluginRpcTest {
         val transport = QueueTransport()
         val client = PluginRpcClient(
             transport = transport,
-            scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
         )
         try {
             val call = launch { client.call("pages", timeoutMs = 1_000L) }
@@ -123,7 +123,7 @@ class PluginRpcTest {
                 started.complete(Unit)
                 awaitCancellation()
             },
-            scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
         )
         try {
             client.onMessage(codec.encode(PluginRpcMessage.HostRequest("p-cancel", "clock.sleep")))
