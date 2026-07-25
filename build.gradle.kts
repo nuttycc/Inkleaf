@@ -12,6 +12,7 @@ spotless {
     kotlin {
         target("**/*.kt")
         targetExclude("**/build/**", "**/generated/**")
+        ratchetFrom("origin/main")
         ktfmt().kotlinlangStyle()
     }
 }
