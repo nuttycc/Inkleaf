@@ -25,3 +25,4 @@ local.properties
 /ppocr-sdk/build/
 skills-lock.json
 adb-connect.ps1
+.scripts/install-debug.ps1

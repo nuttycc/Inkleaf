@@ -18,6 +18,14 @@ class ReaderChapterItemsTest {
     }
 
     @Test
+    fun `chapter list starts one row before the current chapter`() {
+        assertEquals(0, readerChapterInitialListIndex(chapterCount = 0, currentChapterIndex = 8))
+        assertEquals(0, readerChapterInitialListIndex(chapterCount = 12, currentChapterIndex = 0))
+        assertEquals(4, readerChapterInitialListIndex(chapterCount = 12, currentChapterIndex = 5))
+        assertEquals(11, readerChapterInitialListIndex(chapterCount = 12, currentChapterIndex = 99))
+    }
+
+    @Test
     fun `chapter items preserve source order and expose navigation state`() {
         val items = buildReaderChapterItems(
             chapterCount = 3,
