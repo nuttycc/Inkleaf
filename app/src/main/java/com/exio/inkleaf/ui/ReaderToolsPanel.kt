@@ -16,7 +16,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -84,7 +83,7 @@ internal fun ReaderToolsPanelContent(
                 onClick = onSetCover,
                 modifier = Modifier.weight(1f),
             )
-            // Empty balance card or future extensible tool card
+            // Balance the 2-column grid so the cover card stays at half width
             Spacer(modifier = Modifier.weight(1f))
         }
     }
@@ -101,21 +100,20 @@ private fun ReaderToolCard(
     isActive: Boolean = false,
 ) {
     val containerColor = when {
+        !enabled -> MaterialTheme.colorScheme.surfaceContainerLowest.copy(alpha = 0.5f)
         isActive -> MaterialTheme.colorScheme.primaryContainer
-        enabled -> MaterialTheme.colorScheme.surfaceContainerLow
-        else -> MaterialTheme.colorScheme.surfaceContainerLowest.copy(alpha = 0.5f)
+        else -> MaterialTheme.colorScheme.surfaceContainerLow
     }
 
     val contentColor = when {
+        !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
         isActive -> MaterialTheme.colorScheme.onPrimaryContainer
-        enabled -> MaterialTheme.colorScheme.onSurface
-        else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+        else -> MaterialTheme.colorScheme.onSurface
     }
 
     val iconTint = when {
-        isActive -> MaterialTheme.colorScheme.primary
-        enabled -> MaterialTheme.colorScheme.primary
-        else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+        !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+        else -> MaterialTheme.colorScheme.primary
     }
 
     Surface(
@@ -132,18 +130,12 @@ private fun ReaderToolCard(
                 .fillMaxWidth()
                 .padding(horizontal = 14.dp, vertical = 12.dp),
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Icon(
-                    painter = painterResource(icon),
-                    contentDescription = null,
-                    tint = iconTint,
-                    modifier = Modifier.size(24.dp),
-                )
-            }
+            Icon(
+                painter = painterResource(icon),
+                contentDescription = null,
+                tint = iconTint,
+                modifier = Modifier.size(24.dp),
+            )
             Spacer(modifier = Modifier.height(10.dp))
             Text(
                 text = label,
@@ -163,4 +155,3 @@ private fun ReaderToolCard(
         }
     }
 }
-

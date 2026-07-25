@@ -98,4 +98,3 @@ internal fun ReaderAttachedPanelDivider(modifier: Modifier = Modifier) {
         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
     )
 }
-

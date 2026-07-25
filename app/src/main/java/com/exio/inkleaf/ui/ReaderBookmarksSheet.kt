@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -167,7 +166,7 @@ private fun ReaderBookmarkRow(
                 .fillMaxWidth()
                 .padding(horizontal = 10.dp, vertical = 8.dp),
         ) {
-            // 3:4 portrait thumbnail container
+            // portrait thumbnail container (~3:4)
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
@@ -272,5 +271,3 @@ private fun ReaderBookmarksEmptyState() {
         )
     }
 }
-
-

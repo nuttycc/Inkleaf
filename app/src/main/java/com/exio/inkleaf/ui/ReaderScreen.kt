@@ -1015,7 +1015,7 @@ private fun ReaderDockRow(
 ) {
     Surface(
         shape = RoundedCornerShape(28.dp),
-        color = Color(0xFF1C1B1F).copy(alpha = 0.95f),
+        color = Color.Black.copy(alpha = 0.95f),
         tonalElevation = 8.dp,
         shadowElevation = 12.dp,
         modifier = Modifier
@@ -1102,7 +1102,6 @@ internal fun ReaderDockItem(
         )
     }
 }
-
 
 /**
  * 胶片式缩略图导航条：横向一行迷你缩略图，当前页高亮并保持居中。
