@@ -1,28 +1,15 @@
 package com.exio.inkleaf.ui
 
-import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -33,26 +20,20 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
@@ -61,8 +42,6 @@ import androidx.compose.ui.unit.dp
 import com.exio.inkleaf.data.ComicVolume
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-
-private const val ChapterPanelHeightFraction = 0.72f
 
 internal data class ReaderChapterItem(
     val index: Int,
@@ -136,10 +115,9 @@ internal suspend fun loadReaderChapterItems(
 }
 
 @Composable
-internal fun ReaderChaptersSheet(
+internal fun ColumnScope.ReaderChaptersPanelContent(
     volume: ComicVolume,
     currentChapterIndex: Int,
-    accent: Color,
     onChaptersLoaded: () -> Unit,
     onSelect: (Int) -> Unit,
     onDismiss: () -> Unit,
@@ -152,8 +130,6 @@ internal fun ReaderChaptersSheet(
     }
     val loadedChapters = chapters
     val listState = rememberLazyListState()
-    var panelVisible by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { panelVisible = true }
 
     LaunchedEffect(loadedChapters) {
         if (loadedChapters != null) onChaptersLoaded()
@@ -168,149 +144,39 @@ internal fun ReaderChaptersSheet(
         listState.scrollToItem(targetIndex)
     }
 
-    BackHandler(onBack = onDismiss)
-
-    ReaderSheetTheme(accent = accent) {
-        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-            val paneLabel = "章节${loadedChapters?.let { " · ${it.size}" } ?: ""}"
-
-            AnimatedVisibility(
-                visible = panelVisible,
-                enter = fadeIn(animationSpec = tween(200)),
-                exit = fadeOut(animationSpec = tween(200)),
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.45f))
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            onClick = onDismiss,
-                        ),
+    ReaderPanelHeader(
+        title = "章节列表${loadedChapters?.let { " · ${it.size}" } ?: ""}",
+        onDismiss = onDismiss,
+    )
+    HorizontalDivider(
+        modifier = Modifier.padding(horizontal = 16.dp),
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+    )
+    LazyColumn(
+        state = listState,
+        contentPadding = PaddingValues(top = 8.dp, bottom = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .weight(1f),
+    ) {
+        if (loadedChapters == null) {
+            item { ChapterPanelLoading() }
+        } else if (loadedChapters.isEmpty()) {
+            item { ReaderChaptersEmptyState() }
+        } else {
+            items(
+                items = loadedChapters,
+                key = { it.index },
+            ) { chapter ->
+                ReaderChapterRow(
+                    chapter = chapter,
+                    isCurrent = chapter.index == currentChapterIndex,
+                    onSelect = onSelect,
                 )
             }
-
-            AnimatedVisibility(
-                visible = panelVisible,
-                enter = slideInVertically(
-                    animationSpec = spring(
-                        stiffness = Spring.StiffnessMediumLow,
-                        dampingRatio = Spring.DampingRatioNoBouncy,
-                    ),
-                ) { it } + fadeIn(animationSpec = spring()),
-                exit = slideOutVertically(
-                    animationSpec = tween(200),
-                ) { it } + fadeOut(animationSpec = tween(200)),
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .fillMaxHeight(ChapterPanelHeightFraction)
-                    .navigationBarsPadding(),
-            ) {
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-                    tonalElevation = 6.dp,
-                    shadowElevation = 12.dp,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .semantics { paneTitle = paneLabel },
-                ) {
-                    Column(
-                        modifier = Modifier.fillMaxSize(),
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 10.dp, bottom = 4.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .width(36.dp)
-                                    .height(4.dp)
-                                    .clip(CircleShape)
-                                    .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)),
-                            )
-                        }
-
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(start = 20.dp, top = 4.dp, end = 12.dp, bottom = 10.dp),
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                Text(
-                                    text = "目录",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                )
-                                loadedChapters?.let { chapters ->
-                                    Surface(
-                                        shape = CircleShape,
-                                        color = MaterialTheme.colorScheme.primaryContainer,
-                                    ) {
-                                        Text(
-                                            text = "${chapters.size}",
-                                            style = MaterialTheme.typography.labelMedium,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                                        )
-                                    }
-                                }
-                            }
-                            IconButton(onClick = onDismiss) {
-                                Icon(
-                                    imageVector = Icons.Filled.Close,
-                                    contentDescription = "关闭",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
-
-                        HorizontalDivider(
-                            modifier = Modifier.padding(horizontal = 16.dp),
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
-                        )
-
-                        LazyColumn(
-                            state = listState,
-                            contentPadding = PaddingValues(top = 8.dp, bottom = 12.dp),
-                            verticalArrangement = Arrangement.spacedBy(2.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f),
-                        ) {
-                            if (loadedChapters == null) {
-                                item { ChapterPanelLoading() }
-                            } else if (loadedChapters.isEmpty()) {
-                                item { ReaderChaptersEmptyState() }
-                            } else {
-                                items(
-                                    items = loadedChapters,
-                                    key = { it.index },
-                                ) { chapter ->
-                                    ReaderChapterRow(
-                                        chapter = chapter,
-                                        isCurrent = chapter.index == currentChapterIndex,
-                                        onSelect = onSelect,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
         }
+    }
     }
 }
 

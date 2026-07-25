@@ -6,13 +6,14 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.os.Build
 import android.util.Log
-import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Image
@@ -46,8 +47,6 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -98,6 +97,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -156,16 +156,9 @@ fun ReaderScreen(
     var showControls by remember { mutableStateOf(false) }
 
     val view = LocalView.current
-    val context = LocalContext.current
     val window = (view.context as? Activity)?.window
 
     val readerMessage = viewModel.readerMessage
-    LaunchedEffect(readerMessage) {
-        readerMessage?.let {
-            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
-            viewModel.consumeReaderMessage()
-        }
-    }
 
     // 统一的退出路径：先结算阅读会话、恢复系统栏、再 pop。
     // 若等离开组合后才恢复（onDispose），返回动画播完时 insets 才从 0 跳回，
@@ -245,6 +238,8 @@ fun ReaderScreen(
                     showControls = showControls,
                     onToggleControls = { showControls = !showControls },
                     onNavigateToModelDownload = onNavigateToModelDownload,
+                    readerMessage = readerMessage,
+                    onReaderMessageConsumed = viewModel::consumeReaderMessage,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -275,6 +270,8 @@ private fun ComicPager(
     showControls: Boolean,
     onToggleControls: () -> Unit,
     onNavigateToModelDownload: () -> Unit,
+    readerMessage: String?,
+    onReaderMessageConsumed: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -291,8 +288,8 @@ private fun ComicPager(
     var zoomTogglePage by remember { mutableIntStateOf(-1) }
     var zoomResetPage by remember { mutableIntStateOf(-1) }
     var zoomToggleAnchor by remember { mutableStateOf(Offset.Unspecified) }
-    var showBookmarks by remember { mutableStateOf(false) }
-    var showChapters by remember { mutableStateOf(false) }
+    var activePanel by remember { mutableStateOf<ReaderPanel?>(null) }
+    var filmstripExpanded by remember { mutableStateOf(false) }
     var chapterLayoutVersion by remember(volume) { mutableIntStateOf(0) }
     val ocrResults = remember { mutableStateMapOf<Int, OcrPageResult>() }
     val ocrResultOrder = remember { ArrayDeque<Int>() }
@@ -302,6 +299,9 @@ private fun ComicPager(
     var showOcrLongPressMenu by remember { mutableStateOf(false) }
     var ocrLongPressAnchor by remember { mutableStateOf(Offset.Zero) }
     var pendingOcrPage by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(showControls) {
+        if (!showControls) filmstripExpanded = false
+    }
     LaunchedEffect(pagerState.currentPage) {
         zoomedPage = null
         ocrSelection = ocrSelection.onPageChanged(pagerState.currentPage)
@@ -417,6 +417,12 @@ private fun ComicPager(
 
     val activeOcrResult = ocrResults[pagerState.currentPage]
         ?.takeIf { ocrSelection.activePage == pagerState.currentPage }
+
+    SnackbarMessageEffect(
+        message = readerMessage,
+        hostState = snackbarHostState,
+        onConsumed = onReaderMessageConsumed,
+    )
 
     Box(
         modifier = modifier
@@ -563,7 +569,17 @@ private fun ComicPager(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
-                .padding(bottom = if (activeOcrResult == null) 16.dp else 96.dp),
+                .padding(
+                    bottom = when {
+                        activeOcrResult != null -> 96.dp
+                        showControls && activePanel == null &&
+                                ocrProcessingPage != pagerState.currentPage -> {
+                            if (filmstripExpanded) 232.dp else 120.dp
+                        }
+                        ocrProcessingPage == pagerState.currentPage -> 72.dp
+                        else -> 16.dp
+                    },
+                ),
         )
 
         if (!showControls && ocrProcessingPage != pagerState.currentPage && activeOcrResult == null) {
@@ -586,17 +602,9 @@ private fun ComicPager(
             visible = showControls && activeOcrResult == null,
             title = title,
             isBookmarked = bookmarkPages.containsKey(pagerState.currentPage),
-            isFavorite = favoritePages.containsKey(pagerState.currentPage),
             isZoomed = zoomedPage == pagerState.currentPage,
             onBack = onBack,
-            onOpenBookmarks = { showBookmarks = true },
-            showChapterMenu = shouldShowChapterMenu(volume.chapterCount),
-            onOpenChapters = { showChapters = true },
             onToggleBookmark = { onToggleBookmark(pagerState.currentPage) },
-            onToggleFavorite = { onToggleFavorite(pagerState.currentPage) },
-            onSetCover = { onSetCover(pagerState.currentPage) },
-            onRecognizePage = { recognizePage(pagerState.currentPage) },
-            ocrBusy = ocrProcessingPage != null,
             onResetZoom = {
                 zoomResetPage = pagerState.currentPage
                 zoomResetRequest++
@@ -604,47 +612,62 @@ private fun ComicPager(
             modifier = Modifier.align(Alignment.TopCenter),
         )
 
-        ReaderBottomBar(
-            visible = showControls && activeOcrResult == null,
+        ReaderBottomControls(
+            visible = showControls && activePanel == null && activeOcrResult == null &&
+                    ocrProcessingPage != pagerState.currentPage,
             pagerState = pagerState,
             pageCount = volume.totalPageCount,
+            chapterCount = volume.chapterCount,
             thumbnails = thumbnails,
             bookmarkPages = bookmarkPages,
             onNeedThumbnail = onNeedThumbnail,
+            filmstripExpanded = filmstripExpanded,
+            onToggleFilmstrip = { filmstripExpanded = !filmstripExpanded },
+            onOpenChapters = { activePanel = ReaderPanel.Chapters },
+            onOpenBookmarks = { activePanel = ReaderPanel.Bookmarks },
+            onOpenTools = { activePanel = ReaderPanel.Tools },
             modifier = Modifier.align(Alignment.BottomCenter),
         )
 
-        // 章节侧栏叠在阅读区之上（非 Popup），须落在此 Box 内才能盖住 pager/工具栏
-        if (showChapters) {
-            ReaderChaptersSheet(
-                volume = volume,
-                currentChapterIndex = chapterProgress.chapterIndex,
-                accent = readerAccentColor(),
-                onChaptersLoaded = { chapterLayoutVersion++ },
-                onSelect = { page ->
-                    showChapters = false
-                    scope.launch { pagerState.scrollToPage(page) }
-                },
-                onDismiss = { showChapters = false },
-            )
-        }
-    }
-
-    if (showBookmarks) {
-        ReaderBookmarksSheet(
-            bookmarks = resolvedBookmarks,
-            staleBookmarkIds = staleBookmarkIds,
-            thumbnails = thumbnails,
+        ReaderPanelHost(
+            panel = activePanel,
             accent = readerAccentColor(),
-            onNeedThumbnail = onNeedThumbnail,
-            onSelect = { page ->
-                showBookmarks = false
-                scope.launch { pagerState.scrollToPage(page) }
-            },
-            onRemove = onRemoveBookmark,
-            onRestore = onRestoreBookmark,
-            onDismiss = { showBookmarks = false },
-        )
+            onDismiss = { activePanel = null },
+        ) { panel ->
+            when (panel) {
+                ReaderPanel.Chapters -> ReaderChaptersPanelContent(
+                    volume = volume,
+                    currentChapterIndex = chapterProgress.chapterIndex,
+                    onChaptersLoaded = { chapterLayoutVersion++ },
+                    onSelect = { page ->
+                        activePanel = null
+                        scope.launch { pagerState.scrollToPage(page) }
+                    },
+                    onDismiss = { activePanel = null },
+                )
+                ReaderPanel.Bookmarks -> ReaderBookmarksPanelContent(
+                    bookmarks = resolvedBookmarks,
+                    staleBookmarkIds = staleBookmarkIds,
+                    thumbnails = thumbnails,
+                    onNeedThumbnail = onNeedThumbnail,
+                    onSelect = { page ->
+                        activePanel = null
+                        scope.launch { pagerState.scrollToPage(page) }
+                    },
+                    onRemove = onRemoveBookmark,
+                    onRestore = onRestoreBookmark,
+                    onDismiss = { activePanel = null },
+                )
+                ReaderPanel.Tools -> ReaderToolsPanelContent(
+                    isFavorite = favoritePages.containsKey(pagerState.currentPage),
+                    ocrBusy = ocrProcessingPage != null,
+                    onToggleFavorite = { onToggleFavorite(pagerState.currentPage) },
+                    onRecognizePage = { recognizePage(pagerState.currentPage) },
+                    onSetCover = { onSetCover(pagerState.currentPage) },
+                    onDismiss = { activePanel = null },
+                )
+            }
+        }
     }
 
     ocrSelection.detailText?.let { text ->
@@ -661,17 +684,9 @@ private fun ReaderTopBar(
     visible: Boolean,
     title: String,
     isBookmarked: Boolean,
-    isFavorite: Boolean,
     isZoomed: Boolean,
     onBack: () -> Unit,
-    onOpenBookmarks: () -> Unit,
-    showChapterMenu: Boolean,
-    onOpenChapters: () -> Unit,
     onToggleBookmark: () -> Unit,
-    onToggleFavorite: () -> Unit,
-    onSetCover: () -> Unit,
-    onRecognizePage: () -> Unit,
-    ocrBusy: Boolean,
     onResetZoom: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -682,7 +697,6 @@ private fun ReaderTopBar(
         modifier = modifier,
     ) {
         val accent = readerAccentColor()
-        var showMoreMenu by remember { mutableStateOf(false) }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -726,119 +740,27 @@ private fun ReaderTopBar(
                     tint = if (isBookmarked) accent else Color.White,
                 )
             }
-            Box {
-                IconButton(onClick = { showMoreMenu = true }) {
-                    Icon(
-                        Icons.Filled.MoreVert,
-                        contentDescription = "更多阅读操作",
-                        tint = Color.White,
-                    )
-                }
-                DropdownMenu(
-                    expanded = showMoreMenu,
-                    onDismissRequest = { showMoreMenu = false },
-                ) {
-                    DropdownMenuItem(
-                        text = { Text("本书书签") },
-                        leadingIcon = {
-                            Icon(
-                                painter = painterResource(R.drawable.ic_bookmark_border),
-                                contentDescription = null,
-                            )
-                        },
-                        onClick = {
-                            showMoreMenu = false
-                            onOpenBookmarks()
-                        },
-                    )
-                    if (showChapterMenu) {
-                        DropdownMenuItem(
-                            text = { Text("章节") },
-                            leadingIcon = {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.List,
-                                    contentDescription = null,
-                                )
-                            },
-                            onClick = {
-                                showMoreMenu = false
-                                onOpenChapters()
-                            },
-                        )
-                    }
-                    DropdownMenuItem(
-                        text = {
-                            Text(if (isFavorite) "取消收藏本页" else "收藏当前页图片")
-                        },
-                        leadingIcon = {
-                            Icon(
-                                painter = painterResource(
-                                    if (isFavorite) {
-                                        R.drawable.ic_favorite
-                                    } else {
-                                        R.drawable.ic_favorite_border
-                                    },
-                                ),
-                                contentDescription = null,
-                                tint = if (isFavorite) {
-                                    accent
-                                } else {
-                                    MaterialTheme.colorScheme.onSurface
-                                },
-                            )
-                        },
-                        onClick = {
-                            showMoreMenu = false
-                            onToggleFavorite()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text(if (ocrBusy) "正在识别文字…" else "识别当前页文字") },
-                        leadingIcon = {
-                            Icon(
-                                painter = painterResource(
-                                    MaterialSymbolsOutlinedR.drawable
-                                        .materialsymbols_ic_document_scanner_outlined,
-                                ),
-                                contentDescription = null,
-                            )
-                        },
-                        enabled = !ocrBusy,
-                        onClick = {
-                            showMoreMenu = false
-                            onRecognizePage()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("设为封面") },
-                        leadingIcon = {
-                            Icon(
-                                painterResource(R.drawable.ic_image),
-                                contentDescription = null,
-                            )
-                        },
-                        onClick = {
-                            showMoreMenu = false
-                            onSetCover()
-                        },
-                    )
-                }
-            }
         }
     }
 }
 
-/** 底部工具栏：胶片缩略图导航 + 跳页进度滑杆 */
+/** Compact reader console with an expandable filmstrip and in-book navigation. */
 // Slider 的 thumb/track 自定义插槽在 M3 里仍标记为实验性 API
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ReaderBottomBar(
+private fun ReaderBottomControls(
     visible: Boolean,
     pagerState: PagerState,
     pageCount: Int,
+    chapterCount: Int,
     thumbnails: Map<Int, ImageBitmap>,
     bookmarkPages: Map<Int, BookmarkEntity>,
     onNeedThumbnail: (Int) -> Unit,
+    filmstripExpanded: Boolean,
+    onToggleFilmstrip: () -> Unit,
+    onOpenChapters: () -> Unit,
+    onOpenBookmarks: () -> Unit,
+    onOpenTools: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -863,26 +785,30 @@ private fun ReaderBottomBar(
             var draggingValue by remember { mutableStateOf<Float?>(null) }
             val shownPage = draggingValue?.roundToInt() ?: pagerState.currentPage
 
-            // 胶片条与滑杆共享 shownPage：拖滑杆时胶片实时跟随滚动，
-            // 形成"滑杆粗跳 + 胶片看准了再点"的两级定位
-            FilmstripRow(
-                pageCount = pageCount,
-                thumbnails = thumbnails,
-                bookmarkPages = bookmarkPages,
-                onNeedThumbnail = onNeedThumbnail,
-                currentPage = shownPage,
-                accent = accent,
-                // 拖动中胶片要瞬时贴住手指，不播追赶动画
-                isDragging = draggingValue != null,
-                onPageSelected = { page ->
-                    // 同滑杆：远距离跳页用瞬时 scrollToPage，避免逐页滑过去
-                    // 把途经的页全加载一遍
-                    scope.launch { pagerState.scrollToPage(page) }
-                },
-                modifier = Modifier.fillMaxWidth(),
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
+            AnimatedVisibility(
+                visible = filmstripExpanded,
+                enter = expandVertically(expandFrom = Alignment.Bottom) + fadeIn(),
+                exit = shrinkVertically(shrinkTowards = Alignment.Bottom) + fadeOut(),
+            ) {
+                Column {
+                    // 胶片条与滑杆共享 shownPage：拖滑杆时胶片实时跟随滚动，
+                    // 形成"滑杆粗跳 + 胶片看准了再点"的两级定位。
+                    FilmstripRow(
+                        pageCount = pageCount,
+                        thumbnails = thumbnails,
+                        bookmarkPages = bookmarkPages,
+                        onNeedThumbnail = onNeedThumbnail,
+                        currentPage = shownPage,
+                        accent = accent,
+                        isDragging = draggingValue != null,
+                        onPageSelected = { page ->
+                            scope.launch { pagerState.scrollToPage(page) }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+            }
 
             // 页码在滑杆两端的单行布局：当前页 | 粗轨道滑杆 | 总页数。
             // 比"页码单独一行 + 滑杆"省一行高度，也是控制态下唯一的页码来源
@@ -963,7 +889,128 @@ private fun ReaderBottomBar(
                     modifier = Modifier.widthIn(min = 36.dp),
                 )
             }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .height(1.dp)
+                    .background(Color.White.copy(alpha = 0.12f)),
+            )
+
+            ReaderDockRow(
+                destinations = readerDockDestinations(chapterCount),
+                filmstripExpanded = filmstripExpanded,
+                accent = accent,
+                onPagesClick = onToggleFilmstrip,
+                onChaptersClick = onOpenChapters,
+                onBookmarksClick = onOpenBookmarks,
+                onToolsClick = onOpenTools,
+            )
         }
+    }
+}
+
+internal enum class ReaderDockDestination(
+    val label: String,
+    val icon: Int,
+) {
+    Pages(
+        label = "页码",
+        icon = MaterialSymbolsOutlinedR.drawable.materialsymbols_ic_pages_outlined,
+    ),
+    Chapters(
+        label = "章节",
+        icon = MaterialSymbolsOutlinedR.drawable.materialsymbols_ic_list_alt_outlined,
+    ),
+    Bookmarks(
+        label = "书签",
+        icon = MaterialSymbolsOutlinedR.drawable.materialsymbols_ic_bookmarks_outlined,
+    ),
+    Tools(
+        label = "工具",
+        icon = MaterialSymbolsOutlinedR.drawable.materialsymbols_ic_handyman_outlined,
+    ),
+}
+
+internal fun readerDockDestinations(chapterCount: Int): List<ReaderDockDestination> = buildList {
+    add(ReaderDockDestination.Pages)
+    if (shouldShowChapterMenu(chapterCount)) add(ReaderDockDestination.Chapters)
+    add(ReaderDockDestination.Bookmarks)
+    add(ReaderDockDestination.Tools)
+}
+
+@Composable
+private fun ReaderDockRow(
+    destinations: List<ReaderDockDestination>,
+    filmstripExpanded: Boolean,
+    accent: Color,
+    onPagesClick: () -> Unit,
+    onChaptersClick: () -> Unit,
+    onBookmarksClick: () -> Unit,
+    onToolsClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(56.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        destinations.forEach { destination ->
+            ReaderDockItem(
+                destination = destination,
+                selected = destination == ReaderDockDestination.Pages && filmstripExpanded,
+                accent = accent,
+                onClick = when (destination) {
+                    ReaderDockDestination.Pages -> onPagesClick
+                    ReaderDockDestination.Chapters -> onChaptersClick
+                    ReaderDockDestination.Bookmarks -> onBookmarksClick
+                    ReaderDockDestination.Tools -> onToolsClick
+                },
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+@Composable
+internal fun ReaderDockItem(
+    destination: ReaderDockDestination,
+    selected: Boolean,
+    accent: Color,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+        modifier = modifier
+            .fillMaxHeight()
+            .clickable(onClick = onClick)
+            .semantics(mergeDescendants = true) { this.selected = selected },
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .size(width = 56.dp, height = 28.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(
+                    if (selected) accent.copy(alpha = 0.28f) else Color.Transparent,
+                ),
+        ) {
+            Icon(
+                painter = painterResource(destination.icon),
+                contentDescription = null,
+                tint = if (selected) accent else Color.White.copy(alpha = 0.82f),
+                modifier = Modifier.size(20.dp),
+            )
+        }
+        Text(
+            text = destination.label,
+            color = if (selected) Color.White else Color.White.copy(alpha = 0.72f),
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+        )
     }
 }
 
