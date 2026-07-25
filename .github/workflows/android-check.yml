@@ -37,43 +37,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Print runner system info
-        # Helps verify runner specs (4C/16G), JVM default, and available tools
-        # when diagnosing CI memory/parallelism tuning.
-        run: |
-          echo "=== OS ==="
-          cat /etc/os-release | head -5
-          echo "=== CPU ==="
-          nproc
-          grep -c ^processor /proc/cpuinfo
-          echo "=== Memory ==="
-          free -h
-          echo "=== Disk ==="
-          df -h /
-          echo "=== Java (default) ==="
-          which java && java -version 2>&1 || echo "no java on PATH yet"
-          echo "=== Ninja ==="
-          which ninja && ninja --version || echo "no ninja"
-          echo "=== Gradle (if preinstalled) ==="
-          which gradle && gradle --version 2>&1 | head -10 || echo "no gradle on PATH"
-
       - name: Set up JDK
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 25
 
-      - name: Set up Android SDK
-        if: env.CHECK_LEVEL == 'apk' || env.CHECK_LEVEL == 'full'
-        uses: android-actions/setup-android@v4.0.1
-
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6.2.0
         with:
-          cache-read-only: false
-
-      - name: Make Gradle wrapper executable
-        run: chmod +x gradlew
+          cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
       - name: Run selected check
         # Public ubuntu-latest is 4C/16G. -Xmx6g leaves room for AAPT2/Kotlin
@@ -88,7 +61,7 @@ jobs:
           )
           case "$CHECK_LEVEL" in
             check)
-              ./gradlew :app:compileDebugKotlin testDebugUnitTest lintDebug "${GRADLE_ARGS[@]}"
+              ./gradlew testDebugUnitTest lintDebug "${GRADLE_ARGS[@]}"
               ;;
             apk)
               ./gradlew assembleDebug "${GRADLE_ARGS[@]}"
@@ -110,6 +83,7 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 7
+          compression-level: 0
 
       - name: Upload lint report
         if: failure() && (env.CHECK_LEVEL == 'check' || env.CHECK_LEVEL == 'full')

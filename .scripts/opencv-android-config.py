@@ -2,7 +2,7 @@
 #
 # Goal: produce a minimal libopencv_java4.so for arm64-v8a only, containing
 # just the modules actually used by ppocr-sdk + app:
-#   core, imgproc, imgcodecs, java (JNI binding), geometry (OpenCV 5.x).
+#   core, imgproc, imgcodecs, java (JNI binding), geometry, videoio (OpenCV 5.x).
 #
 # Consumed by .github/workflows/build-opencv-aar.yml via:
 #   python3 build_sdk.py --config inkleaf-config.py --modules_list "..." ...

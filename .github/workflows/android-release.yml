@@ -88,14 +88,10 @@ jobs:
           distribution: temurin
           java-version: 25
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v4.0.1
-
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6.2.0
-
-      - name: Make Gradle wrapper executable
-        run: chmod +x gradlew
+        with:
+          cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
       - name: Validate signing secrets
         run: |
@@ -115,9 +111,9 @@ jobs:
           INKLEAF_KEYSTORE_BASE64: ${{ secrets.INKLEAF_KEYSTORE_BASE64 }}
 
       - name: Run unit tests and build release APK
-        # Single ./gradlew invocation reuses configuration cache + daemon across
-        # both tasks. Signing env is only read by assembleRelease; harmless to
-        # expose to testDebugUnitTest. Heap lowered to 6g to leave room for
+        # A single invocation avoids duplicate Gradle startup/configuration and
+        # lets Gradle schedule both tasks in one graph. Signing env is only read
+        # by assembleRelease; harmless to expose to testDebugUnitTest. A 6g heap leaves room for
         # AAPT2/Kotlin workers on 4C/16G runner; Kotlin daemon (default strategy)
         # avoids classloading contention with parallel workers.
         run: |
