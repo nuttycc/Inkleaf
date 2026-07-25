@@ -72,6 +72,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateSetOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -306,7 +307,7 @@ private fun ComicPager(
     val ocrResults = remember { mutableStateMapOf<Int, OcrPageResult>() }
     val ocrResultOrder = remember { ArrayDeque<Int>() }
     val snackbarHostState = remember { SnackbarHostState() }
-    val bookmarkRemovalsInFlight = remember { mutableStateMapOf<Long, Boolean>() }
+    val bookmarkRemovalsInFlight = remember { mutableStateSetOf<Long>() }
     var bottomControlsHeightPx by remember { mutableIntStateOf(0) }
     var ocrProcessingPage by remember { mutableStateOf<Int?>(null) }
     var ocrSelection by remember { mutableStateOf(OcrSelectionSession()) }
@@ -389,7 +390,7 @@ private fun ComicPager(
     }
 
     fun removeBookmark(bookmark: BookmarkEntity) {
-        if (bookmarkRemovalsInFlight.put(bookmark.id, true) != null) return
+        if (!bookmarkRemovalsInFlight.add(bookmark.id)) return
         scope.launch {
             try {
                 onRemoveBookmark(bookmark)
@@ -674,11 +675,7 @@ private fun ComicPager(
             onHeightChanged = { bottomControlsHeightPx = it },
             activePanel = activePanel,
             onPanelSelected = { panel ->
-                if (activePanel == panel) {
-                    activePanel = null
-                } else {
-                    activePanel = panel
-                }
+                activePanel = if (activePanel == panel) null else panel
             },
             attachedContent = { panel ->
                 when (panel) {
@@ -699,7 +696,7 @@ private fun ComicPager(
                             activePanel = null
                             scope.launch { pagerState.scrollToPage(page) }
                         },
-                        removalsInFlight = bookmarkRemovalsInFlight.keys.toSet(),
+                        removalsInFlight = bookmarkRemovalsInFlight,
                         onRemove = ::removeBookmark,
                     )
                     ReaderPanel.Tools -> ReaderToolsPanelContent(
@@ -972,22 +969,28 @@ private fun ReaderBottomControls(
 internal enum class ReaderDockDestination(
     val label: String,
     @DrawableRes val icon: Int,
+    // null 表示"页码"这个默认态：不对应任何附加面板
+    val panel: ReaderPanel?,
 ) {
     Pages(
         label = "页码",
         icon = MaterialSymbolsOutlinedR.drawable.materialsymbols_ic_pages_outlined,
+        panel = null,
     ),
     Chapters(
         label = "章节",
         icon = MaterialSymbolsOutlinedR.drawable.materialsymbols_ic_list_alt_outlined,
+        panel = ReaderPanel.Chapters,
     ),
     Bookmarks(
         label = "书签",
         icon = MaterialSymbolsOutlinedR.drawable.materialsymbols_ic_bookmarks_outlined,
+        panel = ReaderPanel.Bookmarks,
     ),
     Tools(
         label = "工具",
         icon = MaterialSymbolsOutlinedR.drawable.materialsymbols_ic_handyman_outlined,
+        panel = ReaderPanel.Tools,
     ),
 }
 
@@ -1013,26 +1016,15 @@ private fun ReaderDockRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         destinations.forEach { destination ->
+            val panel = destination.panel
             ReaderDockItem(
                 destination = destination,
-                selected = when (destination) {
-                    ReaderDockDestination.Pages -> activePanel == null
-                    ReaderDockDestination.Chapters -> activePanel == ReaderPanel.Chapters
-                    ReaderDockDestination.Bookmarks -> activePanel == ReaderPanel.Bookmarks
-                    ReaderDockDestination.Tools -> activePanel == ReaderPanel.Tools
-                },
+                selected = activePanel == panel,
                 accent = accent,
-                onClick = when (destination) {
-                    ReaderDockDestination.Pages -> onPagesClick
-                    ReaderDockDestination.Chapters -> {
-                        { onPanelSelected(ReaderPanel.Chapters) }
-                    }
-                    ReaderDockDestination.Bookmarks -> {
-                        { onPanelSelected(ReaderPanel.Bookmarks) }
-                    }
-                    ReaderDockDestination.Tools -> {
-                        { onPanelSelected(ReaderPanel.Tools) }
-                    }
+                onClick = if (panel != null) {
+                    { onPanelSelected(panel) }
+                } else {
+                    onPagesClick
                 },
                 modifier = Modifier.weight(1f),
             )

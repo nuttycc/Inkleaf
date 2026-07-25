@@ -21,7 +21,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -127,10 +126,7 @@ internal fun ColumnScope.ReaderChaptersPanelContent(
     ReaderAttachedPanelHeader(
         title = "${ReaderPanel.Chapters.title()}${chapters?.let { " · ${it.size}" } ?: ""}",
     )
-    HorizontalDivider(
-        modifier = Modifier.padding(horizontal = 16.dp),
-        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
-    )
+    ReaderAttachedPanelDivider()
     key(chapters) {
         val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialListIndex)
         LazyColumn(
