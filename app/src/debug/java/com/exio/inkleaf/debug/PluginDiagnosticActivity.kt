@@ -53,7 +53,7 @@ class PluginDiagnosticActivity : AppCompatActivity() {
         }, matchWrap())
         urlField = EditText(this).apply {
             hint = "插件 URL（HTTP/HTTPS）"
-            singleLine = true
+            isSingleLine = true
         }
         root.addView(urlField, matchWrap())
         root.addView(Button(this).apply {
