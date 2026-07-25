@@ -48,12 +48,12 @@ jobs:
 
       - name: Resolve NDK path
         run: |
-          NDK_PATH=$(ls -d "$ANDROID_HOME"/ndk/* 2>/dev/null | head -1)
-          if [ -z "$NDK_PATH" ]; then
-            echo "NDK not found under $ANDROID_HOME/ndk" >&2
-            exit 1
-          fi
+          NDK_PATH="$ANDROID_HOME/ndk/27.2.12479018"
+          CMAKE_PATH="$ANDROID_HOME/cmake/3.22.1"
+          test -d "$NDK_PATH"
+          test -d "$CMAKE_PATH"
           echo "ANDROID_NDK_ROOT=$NDK_PATH" >> "$GITHUB_ENV"
+          echo "ANDROID_CMAKE_ROOT=$CMAKE_PATH" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
           echo "Resolved NDK: $NDK_PATH"
 
@@ -70,7 +70,7 @@ jobs:
         run: cp .scripts/opencv-android-config.py /opt/opencv/platforms/android/inkleaf-config.py
 
       - name: Build OpenCV Android SDK
-        # Run from platforms/android so config.py can `from build_sdk_helper import ABI`.
+        # Run from platforms/android so build_sdk.py can load the colocated config.
         working-directory: /opt/opencv/platforms/android
         run: |
           python3 build_sdk.py \
@@ -84,7 +84,13 @@ jobs:
       - name: Build AAR
         working-directory: /opt/opencv/platforms/android
         run: |
-          python3 build_java_shared_aar.py /opt/opencv_build/OpenCV-android-sdk
+          python3 build_java_shared_aar.py \
+            --ndk_location "$ANDROID_NDK_ROOT" \
+            --cmake_location "$ANDROID_CMAKE_ROOT" \
+            --android_compile_sdk 36 \
+            --android_target_sdk 36 \
+            --android_min_sdk 24 \
+            /opt/opencv_build/OpenCV-android-sdk
 
       - name: Locate AAR and report size
         run: |
