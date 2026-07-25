@@ -57,5 +57,10 @@ fixed host DTOs, and no plugin-provided Android UI or native code.
 - Device feature probe completed before implementation: OnePlus PJF110,
   Android 16 / SDK 36, Google WebView 150.0.7871.124; all required features and
   recovery probes passed.
-- Local Gradle tasks are intentionally not run. Remote Android CI will be
-  triggered after the branch is committed.
+- Local Gradle tasks are intentionally not run, per the implementation
+  constraint. GitHub Actions `Android Check (full)` run `30174930927` for
+  commit `ff65862` passed in 4m29s, including compilation, JVM tests,
+  androidTest compilation, lint, and debug APK packaging/upload.
+- The remaining verification is phone acceptance of the debug APK through the
+  plugin runtime diagnostic entry point and the bundled fixture; no emulator or
+  real-device test was run by the agent.
