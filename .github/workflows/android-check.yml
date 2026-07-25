@@ -51,6 +51,9 @@ jobs:
         with:
           cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
+      - name: Spotless check
+        run: ./gradlew spotlessCheck
+
       - name: Run selected check
         # Public ubuntu-latest is 4C/16G. -Xmx6g leaves room for AAPT2/Kotlin
         # workers/OS page cache; Kotlin daemon (default strategy) reuses JIT
