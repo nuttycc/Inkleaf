@@ -617,7 +617,7 @@ private fun ComicPager(
                 .padding(
                     bottom = when {
                         activeOcrResult != null -> 96.dp
-                        showControls && ocrProcessingPage != pagerState.currentPage -> {
+                        bottomControlsHeightPx > 0 && ocrProcessingPage != pagerState.currentPage -> {
                             bottomControlsHeight + 12.dp
                         }
                         ocrProcessingPage == pagerState.currentPage -> 72.dp
@@ -626,7 +626,12 @@ private fun ComicPager(
                 ),
         )
 
-        if (!showControls && ocrProcessingPage != pagerState.currentPage && activeOcrResult == null) {
+        if (
+            !showControls &&
+            ocrProcessingPage != pagerState.currentPage &&
+            activeOcrResult == null &&
+            snackbarHostState.currentSnackbarData == null
+        ) {
             val pageCountLabel = "${pagerState.currentPage + 1} / ${volume.totalPageCount}"
             val pageLabel = if (volume.chapterCount > 1) {
                 "$chapterTitle · $pageCountLabel"
@@ -826,6 +831,10 @@ private fun ReaderBottomControls(
         exit = slideOutVertically { it } + fadeOut(),
         modifier = modifier,
     ) {
+        DisposableEffect(Unit) {
+            onDispose { onHeightChanged(0) }
+        }
+
         Column(
             modifier = Modifier
                 .fillMaxWidth()
