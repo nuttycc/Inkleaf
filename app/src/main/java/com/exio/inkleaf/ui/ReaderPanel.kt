@@ -20,7 +20,7 @@ internal enum class ReaderPanel {
     Tools,
 }
 
-private fun ReaderPanel.title(): String = when (this) {
+internal fun ReaderPanel.title(): String = when (this) {
     ReaderPanel.Chapters -> "章节列表"
     ReaderPanel.Bookmarks -> "本书书签"
     ReaderPanel.Tools -> "当前页工具"

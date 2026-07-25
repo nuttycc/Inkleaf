@@ -6,6 +6,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.os.Build
 import android.util.Log
+import androidx.annotation.DrawableRes
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
@@ -93,6 +94,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -304,6 +306,8 @@ private fun ComicPager(
     val ocrResults = remember { mutableStateMapOf<Int, OcrPageResult>() }
     val ocrResultOrder = remember { ArrayDeque<Int>() }
     val snackbarHostState = remember { SnackbarHostState() }
+    val bookmarkRemovalsInFlight = remember { mutableStateMapOf<Long, Boolean>() }
+    var bottomControlsHeightPx by remember { mutableIntStateOf(0) }
     var ocrProcessingPage by remember { mutableStateOf<Int?>(null) }
     var ocrSelection by remember { mutableStateOf(OcrSelectionSession()) }
     var showOcrLongPressMenu by remember { mutableStateOf(false) }
@@ -384,6 +388,32 @@ private fun ComicPager(
         }
     }
 
+    fun removeBookmark(bookmark: BookmarkEntity) {
+        if (bookmarkRemovalsInFlight.put(bookmark.id, true) != null) return
+        scope.launch {
+            try {
+                onRemoveBookmark(bookmark)
+                val result = snackbarHostState.showSnackbar(
+                    message = "已移除书签",
+                    actionLabel = "撤销",
+                )
+                if (result == SnackbarResult.ActionPerformed) {
+                    try {
+                        onRestoreBookmark(bookmark)
+                    } catch (error: Exception) {
+                        if (error is CancellationException) throw error
+                        snackbarHostState.showSnackbar("恢复书签失败")
+                    }
+                }
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                snackbarHostState.showSnackbar("移除书签失败")
+            } finally {
+                bookmarkRemovalsInFlight.remove(bookmark.id)
+            }
+        }
+    }
+
     // 从模型下载界面返回后，自动重试之前挂起的 OCR 操作
     androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
         val page = pendingOcrPage ?: return@LifecycleEventEffect
@@ -431,6 +461,7 @@ private fun ComicPager(
 
     val activeOcrResult = ocrResults[pagerState.currentPage]
         ?.takeIf { ocrSelection.activePage == pagerState.currentPage }
+    val bottomControlsHeight = with(LocalDensity.current) { bottomControlsHeightPx.toDp() }
 
     SnackbarMessageEffect(
         message = readerMessage,
@@ -586,8 +617,9 @@ private fun ComicPager(
                 .padding(
                     bottom = when {
                         activeOcrResult != null -> 96.dp
-                        showControls && activePanel == null &&
-                                ocrProcessingPage != pagerState.currentPage -> 232.dp
+                        showControls && ocrProcessingPage != pagerState.currentPage -> {
+                            bottomControlsHeight + 12.dp
+                        }
                         ocrProcessingPage == pagerState.currentPage -> 72.dp
                         else -> 16.dp
                     },
@@ -634,6 +666,7 @@ private fun ComicPager(
             bookmarkPages = bookmarkPages,
             onNeedThumbnail = onNeedThumbnail,
             onPagesSelected = { activePanel = null },
+            onHeightChanged = { bottomControlsHeightPx = it },
             activePanel = activePanel,
             onPanelSelected = { panel ->
                 if (activePanel == panel) {
@@ -661,8 +694,8 @@ private fun ComicPager(
                             activePanel = null
                             scope.launch { pagerState.scrollToPage(page) }
                         },
-                        onRemove = onRemoveBookmark,
-                        onRestore = onRestoreBookmark,
+                        removalsInFlight = bookmarkRemovalsInFlight.keys.toSet(),
+                        onRemove = ::removeBookmark,
                     )
                     ReaderPanel.Tools -> ReaderToolsPanelContent(
                         isFavorite = favoritePages.containsKey(pagerState.currentPage),
@@ -682,7 +715,8 @@ private fun ComicPager(
                     )
                 }
             },
-            modifier = Modifier.align(Alignment.BottomCenter),
+            modifier = Modifier
+                .align(Alignment.BottomCenter),
         )
     }
 
@@ -773,6 +807,7 @@ private fun ReaderBottomControls(
     bookmarkPages: Map<Int, BookmarkEntity>,
     onNeedThumbnail: (Int) -> Unit,
     onPagesSelected: () -> Unit,
+    onHeightChanged: (Int) -> Unit,
     activePanel: ReaderPanel?,
     onPanelSelected: (ReaderPanel) -> Unit,
     attachedContent: @Composable ColumnScope.(ReaderPanel) -> Unit,
@@ -798,6 +833,7 @@ private fun ReaderBottomControls(
                 // This is one shared reader-control surface, not a translucent sheet.
                 .background(Color.Black)
                 .navigationBarsPadding()
+                .onSizeChanged { onHeightChanged(it.height) }
                 .padding(vertical = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
@@ -926,7 +962,7 @@ private fun ReaderBottomControls(
 
 internal enum class ReaderDockDestination(
     val label: String,
-    val icon: Int,
+    @DrawableRes val icon: Int,
 ) {
     Pages(
         label = "页码",

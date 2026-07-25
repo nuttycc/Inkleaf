@@ -1,5 +1,6 @@
 package com.exio.inkleaf.ui
 
+import androidx.annotation.DrawableRes
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -30,7 +31,7 @@ internal fun ReaderToolsPanelContent(
             .padding(bottom = 12.dp),
     ) {
         ReaderAttachedPanelHeader(
-            title = "当前页工具",
+            title = ReaderPanel.Tools.title(),
         )
         ReaderToolRow(
             label = if (isFavorite) "取消收藏当前页图片" else "收藏当前页图片",
@@ -64,7 +65,7 @@ internal fun ReaderToolsPanelContent(
 @Composable
 private fun ReaderToolRow(
     label: String,
-    icon: Int,
+    @DrawableRes icon: Int,
     onClick: () -> Unit,
     enabled: Boolean = true,
 ) {

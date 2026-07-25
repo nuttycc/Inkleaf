@@ -21,18 +21,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,8 +40,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.exio.inkleaf.R
 import com.exio.inkleaf.data.db.BookmarkEntity
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.launch
 
 @Composable
 internal fun ColumnScope.ReaderBookmarksPanelContent(
@@ -55,12 +48,9 @@ internal fun ColumnScope.ReaderBookmarksPanelContent(
     thumbnails: Map<Int, ImageBitmap>,
     onNeedThumbnail: (Int) -> Unit,
     onSelect: (Int) -> Unit,
-    onRemove: suspend (BookmarkEntity) -> Unit,
-    onRestore: suspend (BookmarkEntity) -> Unit,
+    removalsInFlight: Set<Long>,
+    onRemove: (BookmarkEntity) -> Unit,
 ) {
-    val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
-    val removalsInFlight = remember { mutableStateMapOf<Long, Boolean>() }
     var pendingStaleSelection by remember {
         mutableStateOf<Pair<Int, BookmarkEntity>?>(null)
     }
@@ -68,9 +58,9 @@ internal fun ColumnScope.ReaderBookmarksPanelContent(
 
     ReaderAttachedPanelHeader(
         title = if (orderedBookmarks.isEmpty()) {
-            "本书书签"
+            ReaderPanel.Bookmarks.title()
         } else {
-            "本书书签 · ${orderedBookmarks.size}"
+            "${ReaderPanel.Bookmarks.title()} · ${orderedBookmarks.size}"
         },
     )
     HorizontalDivider(
@@ -83,7 +73,7 @@ internal fun ColumnScope.ReaderBookmarksPanelContent(
             .weight(1f),
     ) {
         LazyColumn(
-            contentPadding = PaddingValues(bottom = 88.dp),
+            contentPadding = PaddingValues(bottom = 12.dp),
             modifier = Modifier.fillMaxSize(),
         ) {
             if (orderedBookmarks.isEmpty()) {
@@ -101,7 +91,7 @@ internal fun ColumnScope.ReaderBookmarksPanelContent(
                         globalPage = globalPage,
                         thumbnail = thumbnails[globalPage],
                         stale = stale,
-                        removalInFlight = removalsInFlight[bookmark.id] == true,
+                        removalInFlight = bookmark.id in removalsInFlight,
                         onNeedThumbnail = onNeedThumbnail,
                         onClick = {
                             if (stale) {
@@ -110,44 +100,11 @@ internal fun ColumnScope.ReaderBookmarksPanelContent(
                                 onSelect(globalPage)
                             }
                         },
-                        onRemove = {
-                            if (!removalsInFlight.containsKey(bookmark.id)) {
-                                removalsInFlight[bookmark.id] = true
-                                scope.launch {
-                                    try {
-                                        onRemove(bookmark)
-                                        val result = snackbarHostState.showSnackbar(
-                                            message = "已移除书签",
-                                            actionLabel = "撤销",
-                                        )
-                                        if (result == SnackbarResult.ActionPerformed) {
-                                            try {
-                                                onRestore(bookmark)
-                                            } catch (error: Exception) {
-                                                if (error is CancellationException) throw error
-                                                snackbarHostState.showSnackbar("恢复书签失败")
-                                            }
-                                        }
-                                    } catch (error: Exception) {
-                                        if (error is CancellationException) throw error
-                                        snackbarHostState.showSnackbar("移除书签失败")
-                                    } finally {
-                                        removalsInFlight.remove(bookmark.id)
-                                    }
-                                }
-                            }
-                        },
+                        onRemove = { onRemove(bookmark) },
                     )
                 }
             }
         }
-
-        SnackbarHost(
-            hostState = snackbarHostState,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-        )
     }
 
     pendingStaleSelection?.let { (globalPage, _) ->

@@ -119,20 +119,19 @@ internal fun ColumnScope.ReaderChaptersPanelContent(
     currentChapterIndex: Int,
     onSelect: (Int) -> Unit,
 ) {
-    val loadedChapters = chapters
     val initialListIndex = readerChapterInitialListIndex(
-        chapterCount = loadedChapters?.size ?: 0,
+        chapterCount = chapters?.size ?: 0,
         currentChapterIndex = currentChapterIndex,
     )
 
     ReaderAttachedPanelHeader(
-        title = "章节列表${loadedChapters?.let { " · ${it.size}" } ?: ""}",
+        title = "${ReaderPanel.Chapters.title()}${chapters?.let { " · ${it.size}" } ?: ""}",
     )
     HorizontalDivider(
         modifier = Modifier.padding(horizontal = 16.dp),
         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
     )
-    key(loadedChapters, currentChapterIndex) {
+    key(chapters) {
         val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialListIndex)
         LazyColumn(
             state = listState,
@@ -142,13 +141,13 @@ internal fun ColumnScope.ReaderChaptersPanelContent(
                 .fillMaxWidth()
                 .weight(1f),
         ) {
-            if (loadedChapters == null) {
+            if (chapters == null) {
                 item { ChapterPanelLoading() }
-            } else if (loadedChapters.isEmpty()) {
+            } else if (chapters.isEmpty()) {
                 item { ReaderChaptersEmptyState() }
             } else {
                 items(
-                    items = loadedChapters,
+                    items = chapters,
                     key = { it.index },
                 ) { chapter ->
                     ReaderChapterRow(
