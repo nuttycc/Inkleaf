@@ -23,22 +23,19 @@ internal fun ReaderToolsPanelContent(
     onToggleFavorite: () -> Unit,
     onRecognizePage: () -> Unit,
     onSetCover: () -> Unit,
-    onDismiss: () -> Unit,
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(bottom = 12.dp),
     ) {
-        ReaderPanelHeader(
+        ReaderAttachedPanelHeader(
             title = "当前页工具",
-            onDismiss = onDismiss,
         )
         ReaderToolRow(
             label = if (isFavorite) "取消收藏当前页图片" else "收藏当前页图片",
             icon = if (isFavorite) R.drawable.ic_favorite else R.drawable.ic_favorite_border,
             onClick = {
-                onDismiss()
                 onToggleFavorite()
             },
         )
@@ -47,7 +44,6 @@ internal fun ReaderToolsPanelContent(
             icon = MaterialSymbolsOutlinedR.drawable.materialsymbols_ic_document_scanner_outlined,
             enabled = !ocrBusy,
             onClick = {
-                onDismiss()
                 onRecognizePage()
             },
         )
@@ -59,7 +55,6 @@ internal fun ReaderToolsPanelContent(
             label = "设为封面",
             icon = R.drawable.ic_image,
             onClick = {
-                onDismiss()
                 onSetCover()
             },
         )

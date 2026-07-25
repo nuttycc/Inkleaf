@@ -120,7 +120,6 @@ internal fun ColumnScope.ReaderChaptersPanelContent(
     currentChapterIndex: Int,
     onChaptersLoaded: () -> Unit,
     onSelect: (Int) -> Unit,
-    onDismiss: () -> Unit,
 ) {
     val chapters by produceState<List<ReaderChapterItem>?>(
         initialValue = null,
@@ -144,9 +143,8 @@ internal fun ColumnScope.ReaderChaptersPanelContent(
         listState.scrollToItem(targetIndex)
     }
 
-    ReaderPanelHeader(
+    ReaderAttachedPanelHeader(
         title = "章节列表${loadedChapters?.let { " · ${it.size}" } ?: ""}",
-        onDismiss = onDismiss,
     )
     HorizontalDivider(
         modifier = Modifier.padding(horizontal = 16.dp),

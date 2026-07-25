@@ -56,7 +56,6 @@ internal fun ColumnScope.ReaderBookmarksPanelContent(
     onSelect: (Int) -> Unit,
     onRemove: suspend (BookmarkEntity) -> Unit,
     onRestore: suspend (BookmarkEntity) -> Unit,
-    onDismiss: () -> Unit,
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -66,15 +65,11 @@ internal fun ColumnScope.ReaderBookmarksPanelContent(
     }
     val orderedBookmarks = bookmarks.sortedBy { it.globalPage }
 
-    ReaderPanelHeader(
+    ReaderAttachedPanelHeader(
         title = if (orderedBookmarks.isEmpty()) {
             "本书书签"
         } else {
             "本书书签 · ${orderedBookmarks.size}"
-        },
-        onDismiss = {
-            snackbarHostState.currentSnackbarData?.dismiss()
-            onDismiss()
         },
     )
     HorizontalDivider(

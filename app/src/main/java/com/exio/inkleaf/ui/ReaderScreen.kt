@@ -26,6 +26,7 @@ import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -393,6 +394,11 @@ private fun ComicPager(
         }
     }
 
+    BackHandler(enabled = activePanel != null || filmstripExpanded) {
+        activePanel = null
+        filmstripExpanded = false
+    }
+
     // 当前页对应的章节信息，用于多章书籍的界面提示
     val currentPage = pagerState.currentPage
     val chapterProgress = remember(currentPage, volume, chapterLayoutVersion) {
@@ -572,8 +578,7 @@ private fun ComicPager(
                 .padding(
                     bottom = when {
                         activeOcrResult != null -> 96.dp
-                        showControls && activePanel == null &&
-                                ocrProcessingPage != pagerState.currentPage -> {
+                        showControls && ocrProcessingPage != pagerState.currentPage -> {
                             if (filmstripExpanded) 232.dp else 120.dp
                         }
                         ocrProcessingPage == pagerState.currentPage -> 72.dp
@@ -613,7 +618,7 @@ private fun ComicPager(
         )
 
         ReaderBottomControls(
-            visible = showControls && activePanel == null && activeOcrResult == null &&
+            visible = showControls && activeOcrResult == null &&
                     ocrProcessingPage != pagerState.currentPage,
             pagerState = pagerState,
             pageCount = volume.totalPageCount,
@@ -622,52 +627,62 @@ private fun ComicPager(
             bookmarkPages = bookmarkPages,
             onNeedThumbnail = onNeedThumbnail,
             filmstripExpanded = filmstripExpanded,
-            onToggleFilmstrip = { filmstripExpanded = !filmstripExpanded },
-            onOpenChapters = { activePanel = ReaderPanel.Chapters },
-            onOpenBookmarks = { activePanel = ReaderPanel.Bookmarks },
-            onOpenTools = { activePanel = ReaderPanel.Tools },
+            onToggleFilmstrip = {
+                activePanel = null
+                filmstripExpanded = !filmstripExpanded
+            },
+            activePanel = activePanel,
+            onPanelSelected = { panel ->
+                if (activePanel == panel) {
+                    activePanel = null
+                } else {
+                    activePanel = panel
+                    filmstripExpanded = false
+                }
+            },
+            attachedContent = { panel ->
+                when (panel) {
+                    ReaderPanel.Chapters -> ReaderChaptersPanelContent(
+                        volume = volume,
+                        currentChapterIndex = chapterProgress.chapterIndex,
+                        onChaptersLoaded = { chapterLayoutVersion++ },
+                        onSelect = { page ->
+                            activePanel = null
+                            scope.launch { pagerState.scrollToPage(page) }
+                        },
+                    )
+                    ReaderPanel.Bookmarks -> ReaderBookmarksPanelContent(
+                        bookmarks = resolvedBookmarks,
+                        staleBookmarkIds = staleBookmarkIds,
+                        thumbnails = thumbnails,
+                        onNeedThumbnail = onNeedThumbnail,
+                        onSelect = { page ->
+                            activePanel = null
+                            scope.launch { pagerState.scrollToPage(page) }
+                        },
+                        onRemove = onRemoveBookmark,
+                        onRestore = onRestoreBookmark,
+                    )
+                    ReaderPanel.Tools -> ReaderToolsPanelContent(
+                        isFavorite = favoritePages.containsKey(pagerState.currentPage),
+                        ocrBusy = ocrProcessingPage != null,
+                        onToggleFavorite = {
+                            activePanel = null
+                            onToggleFavorite(pagerState.currentPage)
+                        },
+                        onRecognizePage = {
+                            activePanel = null
+                            recognizePage(pagerState.currentPage)
+                        },
+                        onSetCover = {
+                            activePanel = null
+                            onSetCover(pagerState.currentPage)
+                        },
+                    )
+                }
+            },
             modifier = Modifier.align(Alignment.BottomCenter),
         )
-
-        ReaderPanelHost(
-            panel = activePanel,
-            accent = readerAccentColor(),
-            onDismiss = { activePanel = null },
-        ) { panel ->
-            when (panel) {
-                ReaderPanel.Chapters -> ReaderChaptersPanelContent(
-                    volume = volume,
-                    currentChapterIndex = chapterProgress.chapterIndex,
-                    onChaptersLoaded = { chapterLayoutVersion++ },
-                    onSelect = { page ->
-                        activePanel = null
-                        scope.launch { pagerState.scrollToPage(page) }
-                    },
-                    onDismiss = { activePanel = null },
-                )
-                ReaderPanel.Bookmarks -> ReaderBookmarksPanelContent(
-                    bookmarks = resolvedBookmarks,
-                    staleBookmarkIds = staleBookmarkIds,
-                    thumbnails = thumbnails,
-                    onNeedThumbnail = onNeedThumbnail,
-                    onSelect = { page ->
-                        activePanel = null
-                        scope.launch { pagerState.scrollToPage(page) }
-                    },
-                    onRemove = onRemoveBookmark,
-                    onRestore = onRestoreBookmark,
-                    onDismiss = { activePanel = null },
-                )
-                ReaderPanel.Tools -> ReaderToolsPanelContent(
-                    isFavorite = favoritePages.containsKey(pagerState.currentPage),
-                    ocrBusy = ocrProcessingPage != null,
-                    onToggleFavorite = { onToggleFavorite(pagerState.currentPage) },
-                    onRecognizePage = { recognizePage(pagerState.currentPage) },
-                    onSetCover = { onSetCover(pagerState.currentPage) },
-                    onDismiss = { activePanel = null },
-                )
-            }
-        }
     }
 
     ocrSelection.detailText?.let { text ->
@@ -758,9 +773,9 @@ private fun ReaderBottomControls(
     onNeedThumbnail: (Int) -> Unit,
     filmstripExpanded: Boolean,
     onToggleFilmstrip: () -> Unit,
-    onOpenChapters: () -> Unit,
-    onOpenBookmarks: () -> Unit,
-    onOpenTools: () -> Unit,
+    activePanel: ReaderPanel?,
+    onPanelSelected: (ReaderPanel) -> Unit,
+    attachedContent: @Composable ColumnScope.(ReaderPanel) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -780,6 +795,17 @@ private fun ReaderBottomControls(
                 .padding(vertical = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
+            ReaderAttachedPanel(
+                panel = activePanel,
+                accent = accent,
+                content = attachedContent,
+                modifier = if (activePanel == ReaderPanel.Tools) {
+                    Modifier
+                } else {
+                    Modifier.fillMaxHeight(0.65f)
+                },
+            )
+
             // 拖动中的临时值；null = 未在拖动，滑杆跟随真实页码。
             // 松手才真正跳页：拖动中实时翻页会狂触发图片加载
             var draggingValue by remember { mutableStateOf<Float?>(null) }
@@ -900,12 +926,11 @@ private fun ReaderBottomControls(
 
             ReaderDockRow(
                 destinations = readerDockDestinations(chapterCount),
+                activePanel = activePanel,
                 filmstripExpanded = filmstripExpanded,
                 accent = accent,
                 onPagesClick = onToggleFilmstrip,
-                onChaptersClick = onOpenChapters,
-                onBookmarksClick = onOpenBookmarks,
-                onToolsClick = onOpenTools,
+                onPanelSelected = onPanelSelected,
             )
         }
     }
@@ -943,12 +968,11 @@ internal fun readerDockDestinations(chapterCount: Int): List<ReaderDockDestinati
 @Composable
 private fun ReaderDockRow(
     destinations: List<ReaderDockDestination>,
+    activePanel: ReaderPanel?,
     filmstripExpanded: Boolean,
     accent: Color,
     onPagesClick: () -> Unit,
-    onChaptersClick: () -> Unit,
-    onBookmarksClick: () -> Unit,
-    onToolsClick: () -> Unit,
+    onPanelSelected: (ReaderPanel) -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -959,13 +983,24 @@ private fun ReaderDockRow(
         destinations.forEach { destination ->
             ReaderDockItem(
                 destination = destination,
-                selected = destination == ReaderDockDestination.Pages && filmstripExpanded,
+                selected = when (destination) {
+                    ReaderDockDestination.Pages -> activePanel == null || filmstripExpanded
+                    ReaderDockDestination.Chapters -> activePanel == ReaderPanel.Chapters
+                    ReaderDockDestination.Bookmarks -> activePanel == ReaderPanel.Bookmarks
+                    ReaderDockDestination.Tools -> activePanel == ReaderPanel.Tools
+                },
                 accent = accent,
                 onClick = when (destination) {
                     ReaderDockDestination.Pages -> onPagesClick
-                    ReaderDockDestination.Chapters -> onChaptersClick
-                    ReaderDockDestination.Bookmarks -> onBookmarksClick
-                    ReaderDockDestination.Tools -> onToolsClick
+                    ReaderDockDestination.Chapters -> {
+                        { onPanelSelected(ReaderPanel.Chapters) }
+                    }
+                    ReaderDockDestination.Bookmarks -> {
+                        { onPanelSelected(ReaderPanel.Bookmarks) }
+                    }
+                    ReaderDockDestination.Tools -> {
+                        { onPanelSelected(ReaderPanel.Tools) }
+                    }
                 },
                 modifier = Modifier.weight(1f),
             )
