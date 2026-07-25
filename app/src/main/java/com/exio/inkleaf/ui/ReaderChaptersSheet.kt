@@ -177,7 +177,6 @@ internal fun ColumnScope.ReaderChaptersPanelContent(
             }
         }
     }
-    }
 }
 
 @Composable
