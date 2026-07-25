@@ -38,6 +38,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
@@ -779,6 +780,10 @@ private fun ReaderBottomControls(
 ) {
     val scope = rememberCoroutineScope()
     val accent = readerAccentColor()
+    // Keep the exact filmstrip position while another dock tab replaces the page content.
+    val filmstripListState = rememberLazyListState(
+        initialFirstVisibleItemIndex = pagerState.currentPage,
+    )
 
     AnimatedVisibility(
         visible = visible,
@@ -818,6 +823,7 @@ private fun ReaderBottomControls(
                     // 形成"滑杆粗跳 + 胶片看准了再点"的两级定位。
                     FilmstripRow(
                         pageCount = pageCount,
+                        listState = filmstripListState,
                         thumbnails = thumbnails,
                         bookmarkPages = bookmarkPages,
                         onNeedThumbnail = onNeedThumbnail,
@@ -1034,6 +1040,7 @@ internal fun ReaderDockItem(
 @Composable
 private fun FilmstripRow(
     pageCount: Int,
+    listState: LazyListState,
     thumbnails: Map<Int, ImageBitmap>,
     bookmarkPages: Map<Int, BookmarkEntity>,
     onNeedThumbnail: (Int) -> Unit,
@@ -1043,8 +1050,6 @@ private fun FilmstripRow(
     onPageSelected: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val listState = rememberLazyListState()
-
     // 当前页变化时让对应缩略图保持居中。
     // 用户手动横滑浏览时 currentPage 不变，不会触发回滚，互不打架
     var hasCentered by remember { mutableStateOf(false) }
