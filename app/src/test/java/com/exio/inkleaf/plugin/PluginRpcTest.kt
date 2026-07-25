@@ -88,7 +88,10 @@ class PluginRpcTest {
             assertTrue(cancel is PluginRpcMessage.Cancel)
             assertEquals((first as PluginRpcMessage.Request).requestId, (cancel as PluginRpcMessage.Cancel).requestId)
             delay(20L)
-            assertTrue(transport.values.none { codec.decode(it) is PluginRpcMessage.Request })
+            assertEquals(
+                1,
+                transport.values.count { codec.decode(it) is PluginRpcMessage.Request },
+            )
         } finally {
             client.close()
         }
