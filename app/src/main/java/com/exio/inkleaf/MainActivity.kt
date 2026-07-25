@@ -63,6 +63,9 @@ import com.exio.inkleaf.ui.AlbumEditorScreen
 import com.exio.inkleaf.ui.FavoriteViewerScreen
 import com.exio.inkleaf.ui.HistoryScreen
 import com.exio.inkleaf.ui.OcrModelDownloadScreen
+import com.exio.inkleaf.ui.OnlineComicScreen
+import com.exio.inkleaf.ui.OnlineReaderScreen
+import com.exio.inkleaf.ui.PluginDiscoverScreen
 import com.exio.inkleaf.ui.ReaderScreen
 import com.exio.inkleaf.ui.SavedScreen
 import com.exio.inkleaf.ui.SettingsScreen
@@ -98,6 +101,24 @@ import kotlinx.serialization.Serializable
 
 @Serializable data object OcrModelDownloadRoute
 
+@Serializable data object PluginDiscoverRoute
+
+@Serializable
+data class OnlineComicRoute(
+    val pluginId: String,
+    val sourceId: String,
+    val opaqueContextJson: String? = null,
+)
+
+@Serializable
+data class OnlineReaderRoute(
+    val pluginId: String,
+    val sourceId: String,
+    val chapterId: String,
+    val chapterRevision: String? = null,
+    val opaqueContextJson: String? = null,
+)
+
 /** 外层壳↔二级：全宽滑动的运动量大，350~450ms 区间体感比较合适 */
 private const val NAV_TRANSITION_MS = 400
 
@@ -109,6 +130,7 @@ private enum class TopLevelDestination {
     SHELF,
     HISTORY,
     FAVORITES,
+    DISCOVER,
 }
 
 private data class ExternalOpenRequest(val id: Long, val uri: Uri)
@@ -136,10 +158,12 @@ private fun InkleafBottomBar(
     onOpenShelf: () -> Unit,
     onOpenHistory: () -> Unit,
     onSelectFavorites: () -> Unit,
+    onOpenDiscover: () -> Unit,
 ) {
     val shelfSelected = selectedDestination == TopLevelDestination.SHELF
     val historySelected = selectedDestination == TopLevelDestination.HISTORY
     val favoritesSelected = selectedDestination == TopLevelDestination.FAVORITES
+    val discoverSelected = selectedDestination == TopLevelDestination.DISCOVER
 
     Box(
         modifier =
@@ -194,7 +218,18 @@ private fun InkleafBottomBar(
                     tint = tint,
                 )
             }
-            CompactBottomBarPlaceholder(iconRes = R.drawable.ic_tune)
+            CompactBottomBarItem(
+                selected = discoverSelected,
+                onClick = {
+                    if (!discoverSelected) onOpenDiscover()
+                },
+            ) { tint ->
+                Icon(
+                    painter = painterResource(R.drawable.ic_tune),
+                    contentDescription = "发现",
+                    tint = tint,
+                )
+            }
         }
     }
 }
@@ -205,6 +240,7 @@ private fun TopLevelScaffold(
     onOpenShelf: () -> Unit,
     onOpenHistory: () -> Unit,
     onSelectFavorites: () -> Unit,
+    onOpenDiscover: () -> Unit,
     content: @Composable (PaddingValues) -> Unit,
 ) {
     Scaffold(
@@ -217,6 +253,7 @@ private fun TopLevelScaffold(
                 onOpenShelf = onOpenShelf,
                 onOpenHistory = onOpenHistory,
                 onSelectFavorites = onSelectFavorites,
+                onOpenDiscover = onOpenDiscover,
             )
         },
         content = content,
@@ -416,6 +453,8 @@ class MainActivity : AppCompatActivity() {
                                         TopLevelDestination.HISTORY
                                     innerDestination?.hasRoute<FavoritesRoute>() == true ->
                                         TopLevelDestination.FAVORITES
+                                    innerDestination?.hasRoute<PluginDiscoverRoute>() == true ->
+                                        TopLevelDestination.DISCOVER
                                     else -> TopLevelDestination.SHELF
                                 }
                             // 收藏查看结果写在外层 Shell entry 上，再桥进内层已保存页
@@ -434,6 +473,9 @@ class MainActivity : AppCompatActivity() {
                                 },
                                 onSelectFavorites = {
                                     innerNavController.navigateTopLevel(FavoritesRoute)
+                                },
+                                onOpenDiscover = {
+                                    innerNavController.navigateTopLevel(PluginDiscoverRoute)
                                 },
                             ) { topLevelPadding ->
                                 NavHost(
@@ -487,6 +529,19 @@ class MainActivity : AppCompatActivity() {
                                                     null,
                                                 )
                                             },
+                                        )
+                                    }
+                                    composable<PluginDiscoverRoute> {
+                                        PluginDiscoverScreen(
+                                            onOpenComic = { pluginId, comic ->
+                                                outerNavController.navigate(
+                                                    OnlineComicRoute(
+                                                        pluginId = pluginId,
+                                                        sourceId = comic.sourceId,
+                                                        opaqueContextJson = comic.opaqueContext?.toString(),
+                                                    )
+                                                )
+                                            }
                                         )
                                     }
                                 }
@@ -554,6 +609,37 @@ class MainActivity : AppCompatActivity() {
                         }
                         composable<OcrModelDownloadRoute> {
                             OcrModelDownloadScreen(onBack = { outerNavController.popBackStack() })
+                        }
+                        composable<OnlineComicRoute> { entry ->
+                            val route = entry.toRoute<OnlineComicRoute>()
+                            OnlineComicScreen(
+                                pluginId = route.pluginId,
+                                sourceId = route.sourceId,
+                                opaqueContextJson = route.opaqueContextJson,
+                                onBack = { outerNavController.popBackStack() },
+                                onOpenChapter = { chapter, effectiveContext ->
+                                    outerNavController.navigate(
+                                        OnlineReaderRoute(
+                                            pluginId = route.pluginId,
+                                            sourceId = route.sourceId,
+                                            chapterId = chapter.chapterId,
+                                            chapterRevision = chapter.revision,
+                                            opaqueContextJson = effectiveContext?.toString(),
+                                        )
+                                    )
+                                },
+                            )
+                        }
+                        composable<OnlineReaderRoute> { entry ->
+                            val route = entry.toRoute<OnlineReaderRoute>()
+                            OnlineReaderScreen(
+                                pluginId = route.pluginId,
+                                sourceId = route.sourceId,
+                                chapterId = route.chapterId,
+                                chapterRevision = route.chapterRevision,
+                                opaqueContextJson = route.opaqueContextJson,
+                                onBack = { outerNavController.popBackStack() },
+                            )
                         }
                     }
                 }

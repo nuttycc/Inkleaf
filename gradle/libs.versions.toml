@@ -29,6 +29,7 @@ coroutines = "1.11.0"
 paging = "3.5.0"
 okhttp = "4.12.0"
 spotless = "8.8.0"
+javascriptengine = "1.1.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -72,6 +73,7 @@ onnxruntime-android = { group = "com.microsoft.onnxruntime", name = "onnxruntime
 opencv-android = { group = "org.opencv", name = "opencv", version.ref = "opencv" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
+androidx-javascriptengine = { group = "androidx.javascriptengine", name = "javascriptengine", version.ref = "javascriptengine" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

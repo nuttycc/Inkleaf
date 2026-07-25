@@ -6,6 +6,11 @@ import com.exio.inkleaf.data.AlbumExporter
 import com.exio.inkleaf.data.AlbumRepository
 import com.exio.inkleaf.data.ComicRepository
 import com.exio.inkleaf.data.ReaderCache
+import com.exio.inkleaf.plugin.PluginCatalog
+import com.exio.inkleaf.plugin.PluginManager
+import com.exio.inkleaf.plugin.OnlineContentRepository
+import com.exio.inkleaf.plugin.PluginPackageStore
+import com.exio.inkleaf.plugin.PluginRuntimeManager
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -18,6 +23,21 @@ import kotlinx.coroutines.launch
 
 class InkleafApplication : Application() {
     internal val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    val pluginPackageStore: PluginPackageStore by lazy {
+        PluginPackageStore(File(filesDir, "plugins"))
+    }
+    val pluginRuntimeManager: PluginRuntimeManager by lazy {
+        PluginRuntimeManager(this, pluginPackageStore)
+    }
+    val pluginCatalog: PluginCatalog by lazy {
+        PluginCatalog(pluginRuntimeManager)
+    }
+    val pluginManager: PluginManager by lazy {
+        PluginManager(this, pluginPackageStore, pluginRuntimeManager, onlineContentRepository)
+    }
+    val onlineContentRepository: OnlineContentRepository by lazy {
+        OnlineContentRepository(File(filesDir, "online-content/state.json"))
+    }
     private lateinit var shelfWarmup: Deferred<Unit>
 
     override fun onCreate() {

@@ -135,6 +135,9 @@ dependencies {
     implementation(libs.material.kolor)
     implementation(libs.okhttp)
 
+    // The plugin runtime is feature-gated at startup and fails closed when the WebView lacks it.
+    implementation(libs.androidx.javascriptengine)
+
     implementation(libs.coil.compose)
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)

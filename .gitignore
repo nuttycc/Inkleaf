@@ -12,6 +12,7 @@ local.properties
 *.keystore
 !app/debug.keystore
 /app/release/
+/plugin-fixtures/dist/
 
 
 .agents/
