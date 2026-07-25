@@ -10,6 +10,7 @@ import androidx.annotation.DrawableRes
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -38,6 +39,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
@@ -61,6 +63,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -102,6 +105,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpOffset
@@ -1009,25 +1013,36 @@ private fun ReaderDockRow(
     onPagesClick: () -> Unit,
     onPanelSelected: (ReaderPanel) -> Unit,
 ) {
-    Row(
+    Surface(
+        shape = RoundedCornerShape(28.dp),
+        color = Color(0xFF1C1B1F).copy(alpha = 0.95f),
+        tonalElevation = 8.dp,
+        shadowElevation = 12.dp,
         modifier = Modifier
             .fillMaxWidth()
-            .height(56.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .padding(horizontal = 16.dp, vertical = 4.dp),
     ) {
-        destinations.forEach { destination ->
-            val panel = destination.panel
-            ReaderDockItem(
-                destination = destination,
-                selected = activePanel == panel,
-                accent = accent,
-                onClick = if (panel != null) {
-                    { onPanelSelected(panel) }
-                } else {
-                    onPagesClick
-                },
-                modifier = Modifier.weight(1f),
-            )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(60.dp)
+                .padding(horizontal = 6.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            destinations.forEach { destination ->
+                val panel = destination.panel
+                ReaderDockItem(
+                    destination = destination,
+                    selected = activePanel == panel,
+                    accent = accent,
+                    onClick = if (panel != null) {
+                        { onPanelSelected(panel) }
+                    } else {
+                        onPagesClick
+                    },
+                    modifier = Modifier.weight(1f),
+                )
+            }
         }
     }
 }
@@ -1040,35 +1055,54 @@ internal fun ReaderDockItem(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val indicatorColor by animateColorAsState(
+        targetValue = if (selected) accent.copy(alpha = 0.28f) else Color.Transparent,
+        label = "dock-item-indicator",
+    )
+    val iconTint by animateColorAsState(
+        targetValue = if (selected) accent else Color.White.copy(alpha = 0.75f),
+        label = "dock-item-icon",
+    )
+    val textColor by animateColorAsState(
+        targetValue = if (selected) Color.White else Color.White.copy(alpha = 0.65f),
+        label = "dock-item-text",
+    )
+
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
         modifier = modifier
             .fillMaxHeight()
+            .clip(RoundedCornerShape(20.dp))
             .clickable(onClick = onClick)
+            .padding(vertical = 2.dp)
             .semantics(mergeDescendants = true) { this.selected = selected },
     ) {
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier
-                .size(width = 56.dp, height = 28.dp)
-                .background(Color.Transparent),
+                .size(width = 52.dp, height = 28.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(indicatorColor),
         ) {
             Icon(
                 painter = painterResource(destination.icon),
                 contentDescription = null,
-                tint = if (selected) accent else Color.White.copy(alpha = 0.82f),
+                tint = iconTint,
                 modifier = Modifier.size(20.dp),
             )
         }
+        Spacer(modifier = Modifier.height(2.dp))
         Text(
             text = destination.label,
-            color = if (selected) Color.White else Color.White.copy(alpha = 0.72f),
+            color = textColor,
             style = MaterialTheme.typography.labelSmall,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
             maxLines = 1,
         )
     }
 }
+
 
 /**
  * 胶片式缩略图导航条：横向一行迷你缩略图，当前页高亮并保持居中。

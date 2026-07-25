@@ -2,17 +2,25 @@ package com.exio.inkleaf.ui
 
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.composables.icons.materialsymbols.outlined.R as MaterialSymbolsOutlinedR
 import com.exio.inkleaf.R
@@ -28,55 +36,131 @@ internal fun ReaderToolsPanelContent(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(bottom = 12.dp),
+            .padding(bottom = 16.dp),
     ) {
         ReaderAttachedPanelHeader(
             title = ReaderPanel.Tools.title(),
         )
-        ReaderToolRow(
-            label = if (isFavorite) "取消收藏当前页图片" else "收藏当前页图片",
-            icon = if (isFavorite) R.drawable.ic_favorite else R.drawable.ic_favorite_border,
-            onClick = {
-                onToggleFavorite()
-            },
-        )
-        ReaderToolRow(
-            label = if (ocrBusy) "正在识别当前页文字…" else "识别当前页文字",
-            icon = MaterialSymbolsOutlinedR.drawable.materialsymbols_ic_document_scanner_outlined,
-            enabled = !ocrBusy,
-            onClick = {
-                onRecognizePage()
-            },
-        )
-        HorizontalDivider(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-            color = MaterialTheme.colorScheme.outlineVariant,
-        )
-        ReaderToolRow(
-            label = "设为封面",
-            icon = R.drawable.ic_image,
-            onClick = {
-                onSetCover()
-            },
-        )
+        ReaderAttachedPanelDivider()
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // 2x2 Expressive Control Grid
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+        ) {
+            ReaderToolCard(
+                label = if (isFavorite) "已收藏图片" else "收藏图片",
+                subtitle = if (isFavorite) "取消收藏" else "存入全书收藏集",
+                icon = if (isFavorite) R.drawable.ic_favorite else R.drawable.ic_favorite_border,
+                isActive = isFavorite,
+                onClick = onToggleFavorite,
+                modifier = Modifier.weight(1f),
+            )
+            ReaderToolCard(
+                label = "识字 (OCR)",
+                subtitle = if (ocrBusy) "正在扫描…" else "提取单页文本",
+                icon = MaterialSymbolsOutlinedR.drawable.materialsymbols_ic_document_scanner_outlined,
+                enabled = !ocrBusy,
+                onClick = onRecognizePage,
+                modifier = Modifier.weight(1f),
+            )
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+        ) {
+            ReaderToolCard(
+                label = "设为封面",
+                subtitle = "设置为漫画书缩略图",
+                icon = R.drawable.ic_image,
+                onClick = onSetCover,
+                modifier = Modifier.weight(1f),
+            )
+            // Empty balance card or future extensible tool card
+            Spacer(modifier = Modifier.weight(1f))
+        }
     }
 }
 
 @Composable
-private fun ReaderToolRow(
+private fun ReaderToolCard(
     label: String,
+    subtitle: String,
     @DrawableRes icon: Int,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    isActive: Boolean = false,
 ) {
-    ListItem(
-        headlineContent = { Text(label) },
-        leadingContent = {
-            Icon(
-                painter = painterResource(icon),
-                contentDescription = null,
+    val containerColor = when {
+        isActive -> MaterialTheme.colorScheme.primaryContainer
+        enabled -> MaterialTheme.colorScheme.surfaceContainerLow
+        else -> MaterialTheme.colorScheme.surfaceContainerLowest.copy(alpha = 0.5f)
+    }
+
+    val contentColor = when {
+        isActive -> MaterialTheme.colorScheme.onPrimaryContainer
+        enabled -> MaterialTheme.colorScheme.onSurface
+        else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+    }
+
+    val iconTint = when {
+        isActive -> MaterialTheme.colorScheme.primary
+        enabled -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+    }
+
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        shape = RoundedCornerShape(16.dp),
+        color = containerColor,
+        contentColor = contentColor,
+        tonalElevation = if (isActive) 4.dp else 1.dp,
+        modifier = modifier,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(
+                    painter = painterResource(icon),
+                    contentDescription = null,
+                    tint = iconTint,
+                    modifier = Modifier.size(24.dp),
+                )
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                text = label,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
-        },
-        modifier = Modifier.clickable(enabled = enabled, onClick = onClick),
-    )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.labelSmall,
+                color = contentColor.copy(alpha = 0.7f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
 }
+

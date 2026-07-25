@@ -8,18 +8,23 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -34,6 +39,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -68,13 +74,16 @@ internal fun ColumnScope.ReaderBookmarksPanelContent(
             .fillMaxWidth()
             .weight(1f),
     ) {
-        LazyColumn(
-            contentPadding = PaddingValues(bottom = 12.dp),
-            modifier = Modifier.fillMaxSize(),
-        ) {
-            if (orderedBookmarks.isEmpty()) {
-                item { ReaderBookmarksEmptyState() }
-            } else {
+        if (orderedBookmarks.isEmpty()) {
+            ReaderBookmarksEmptyState()
+        } else {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxSize(),
+            ) {
                 items(
                     items = orderedBookmarks,
                     key = { it.bookmark.id },
@@ -82,7 +91,7 @@ internal fun ColumnScope.ReaderBookmarksPanelContent(
                     val globalPage = item.globalPage
                     val bookmark = item.bookmark
                     val stale = bookmark.id in staleBookmarkIds
-                    ReaderBookmarkRow(
+                    ReaderBookmarkCard(
                         bookmark = bookmark,
                         globalPage = globalPage,
                         thumbnail = thumbnails[globalPage],
@@ -105,35 +114,35 @@ internal fun ColumnScope.ReaderBookmarksPanelContent(
 
     pendingStaleSelection?.let { (globalPage, _) ->
         AlertDialog(
-                onDismissRequest = { pendingStaleSelection = null },
-                title = { Text("源内容已变化") },
-                text = {
-                    Text(
-                        "漫画内容或页面顺序在添加书签后发生了变化。" +
-                                "当前只能打开推测的全书第 ${globalPage + 1} 页，仍要打开吗？"
-                    )
-                },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            pendingStaleSelection = null
-                            onSelect(globalPage)
-                        },
-                    ) {
-                        Text("仍然打开")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { pendingStaleSelection = null }) {
-                        Text("取消")
-                    }
-                },
+            onDismissRequest = { pendingStaleSelection = null },
+            title = { Text("源内容已变化") },
+            text = {
+                Text(
+                    "漫画内容或页面顺序在添加书签后发生了变化。" +
+                            "当前只能打开推测的全书第 ${globalPage + 1} 页，仍要打开吗？"
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingStaleSelection = null
+                        onSelect(globalPage)
+                    },
+                ) {
+                    Text("仍然打开")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingStaleSelection = null }) {
+                    Text("取消")
+                }
+            },
         )
     }
 }
 
 @Composable
-private fun ReaderBookmarkRow(
+private fun ReaderBookmarkCard(
     bookmark: BookmarkEntity,
     globalPage: Int,
     thumbnail: ImageBitmap?,
@@ -147,34 +156,26 @@ private fun ReaderBookmarkRow(
         LaunchedEffect(globalPage) { onNeedThumbnail(globalPage) }
     }
 
-    ListItem(
-        headlineContent = {
-            Text(
-                text = bookmark.chapterTitle.ifBlank {
-                    "第 ${bookmark.chapterIndex + 1} 章"
-                },
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        },
-        supportingContent = {
-            Column {
-                Text("章节第 ${bookmark.pageIndex + 1} 页 · 全书第 ${globalPage + 1} 页")
-                if (stale) {
-                    Text(
-                        text = "源内容已变化，当前页码为近似位置",
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
-            }
-        },
-        leadingContent = {
+    Surface(
+        onClick = onClick,
+        enabled = !removalInFlight,
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        tonalElevation = 2.dp,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(6.dp),
+        ) {
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
-                    .size(width = 48.dp, height = 68.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                    .fillMaxWidth()
+                    .aspectRatio(1.25f)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest),
             ) {
                 if (!stale && thumbnail != null) {
                     Image(
@@ -188,27 +189,72 @@ private fun ReaderBookmarkRow(
                         painter = painterResource(R.drawable.ic_bookmark_border),
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(28.dp),
+                    )
+                }
+
+                // Top-right delete bookmark icon
+                IconButton(
+                    onClick = onRemove,
+                    enabled = !removalInFlight,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(2.dp)
+                        .size(28.dp)
+                        .background(
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.75f),
+                            shape = RoundedCornerShape(14.dp),
+                        ),
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_bookmark),
+                        contentDescription = "移除书签",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+
+                // Page badge
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(4.dp),
+                ) {
+                    Text(
+                        text = "P.${globalPage + 1}",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                     )
                 }
             }
-        },
-        trailingContent = {
-            IconButton(
-                onClick = onRemove,
-                enabled = !removalInFlight,
-            ) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_bookmark),
-                    contentDescription = "移除全书第 ${globalPage + 1} 页书签",
-                    tint = MaterialTheme.colorScheme.primary,
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Text(
+                text = bookmark.chapterTitle.ifBlank {
+                    "第 ${bookmark.chapterIndex + 1} 章"
+                },
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = 4.dp),
+            )
+
+            if (stale) {
+                Text(
+                    text = "源内容已变化",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(horizontal = 4.dp),
                 )
             }
-        },
-        modifier = Modifier.clickable(
-            enabled = !removalInFlight,
-            onClick = onClick,
-        ),
-    )
+        }
+    }
 }
 
 @Composable
@@ -241,3 +287,4 @@ private fun ReaderBookmarksEmptyState() {
         )
     }
 }
+

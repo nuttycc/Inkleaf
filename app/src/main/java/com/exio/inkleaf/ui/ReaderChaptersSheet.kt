@@ -228,9 +228,9 @@ internal fun ReaderChapterRow(
     }
 
     val containerColor = if (isCurrent) {
-        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f)
     } else {
-        Color.Transparent
+        MaterialTheme.colorScheme.surfaceContainerLow
     }
 
     val contentColor = if (isCurrent) {
@@ -244,9 +244,10 @@ internal fun ReaderChapterRow(
     Surface(
         onClick = { onSelect(chapter.startPage) },
         enabled = chapter.isReadable,
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(14.dp),
         color = containerColor,
         contentColor = contentColor,
+        tonalElevation = if (isCurrent) 4.dp else 1.dp,
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 2.dp)
@@ -326,3 +327,4 @@ internal fun ReaderChapterRow(
         }
     }
 }
+
