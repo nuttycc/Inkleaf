@@ -26,3 +26,6 @@ local.properties
 skills-lock.json
 adb-connect.ps1
 .scripts/install-debug.ps1
+AGENTS.md
+CLAUDE.md
+CONTEXT.md
