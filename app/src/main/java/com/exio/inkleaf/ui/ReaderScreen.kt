@@ -578,7 +578,8 @@ private fun ComicPager(
                 .padding(
                     bottom = when {
                         activeOcrResult != null -> 96.dp
-                        showControls && ocrProcessingPage != pagerState.currentPage -> {
+                        showControls && activePanel == null &&
+                                ocrProcessingPage != pagerState.currentPage -> {
                             if (filmstripExpanded) 232.dp else 120.dp
                         }
                         ocrProcessingPage == pagerState.currentPage -> 72.dp
@@ -628,8 +629,12 @@ private fun ComicPager(
             onNeedThumbnail = onNeedThumbnail,
             filmstripExpanded = filmstripExpanded,
             onToggleFilmstrip = {
-                activePanel = null
-                filmstripExpanded = !filmstripExpanded
+                if (activePanel != null) {
+                    activePanel = null
+                    filmstripExpanded = false
+                } else {
+                    filmstripExpanded = !filmstripExpanded
+                }
             },
             activePanel = activePanel,
             onPanelSelected = { panel ->
@@ -790,7 +795,9 @@ private fun ReaderBottomControls(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color.Black.copy(alpha = 0.65f))
+                // Attached content must remain legible over monochrome artwork.
+                // This is one shared reader-control surface, not a translucent sheet.
+                .background(Color.Black)
                 .navigationBarsPadding()
                 .padding(vertical = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -806,123 +813,117 @@ private fun ReaderBottomControls(
                 },
             )
 
-            // 拖动中的临时值；null = 未在拖动，滑杆跟随真实页码。
-            // 松手才真正跳页：拖动中实时翻页会狂触发图片加载
-            var draggingValue by remember { mutableStateOf<Float?>(null) }
-            val shownPage = draggingValue?.roundToInt() ?: pagerState.currentPage
-
             AnimatedVisibility(
-                visible = filmstripExpanded,
-                enter = expandVertically(expandFrom = Alignment.Bottom) + fadeIn(),
-                exit = shrinkVertically(shrinkTowards = Alignment.Bottom) + fadeOut(),
+                visible = activePanel == null,
+                enter = fadeIn(tween(150)),
+                exit = fadeOut(tween(150)),
             ) {
                 Column {
-                    // 胶片条与滑杆共享 shownPage：拖滑杆时胶片实时跟随滚动，
-                    // 形成"滑杆粗跳 + 胶片看准了再点"的两级定位。
-                    FilmstripRow(
-                        pageCount = pageCount,
-                        thumbnails = thumbnails,
-                        bookmarkPages = bookmarkPages,
-                        onNeedThumbnail = onNeedThumbnail,
-                        currentPage = shownPage,
-                        accent = accent,
-                        isDragging = draggingValue != null,
-                        onPageSelected = { page ->
-                            scope.launch { pagerState.scrollToPage(page) }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    // 拖动中的临时值；null = 未在拖动，滑杆跟随真实页码。
+                    // 松手才真正跳页：拖动中实时翻页会狂触发图片加载
+                    var draggingValue by remember { mutableStateOf<Float?>(null) }
+                    val shownPage = draggingValue?.roundToInt() ?: pagerState.currentPage
+
+                    AnimatedVisibility(
+                        visible = filmstripExpanded,
+                        enter = expandVertically(expandFrom = Alignment.Bottom) + fadeIn(),
+                        exit = shrinkVertically(shrinkTowards = Alignment.Bottom) + fadeOut(),
+                    ) {
+                        Column {
+                            // 胶片条与滑杆共享 shownPage：拖滑杆时胶片实时跟随滚动，
+                            // 形成"滑杆粗跳 + 胶片看准了再点"的两级定位。
+                            FilmstripRow(
+                                pageCount = pageCount,
+                                thumbnails = thumbnails,
+                                bookmarkPages = bookmarkPages,
+                                onNeedThumbnail = onNeedThumbnail,
+                                currentPage = shownPage,
+                                accent = accent,
+                                isDragging = draggingValue != null,
+                                onPageSelected = { page ->
+                                    scope.launch { pagerState.scrollToPage(page) }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+                    }
+
+                    // 页码在滑杆两端的单行布局：当前页 | 粗轨道滑杆 | 总页数。
+                    // 比"页码单独一行 + 滑杆"省一行高度，也是控制态下唯一的页码来源
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp),
+                    ) {
+                        Text(
+                            text = "${shownPage + 1}",
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelLarge,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.widthIn(min = 36.dp),
+                        )
+                        Slider(
+                            value = draggingValue ?: pagerState.currentPage.toFloat(),
+                            onValueChange = { draggingValue = it },
+                            onValueChangeFinished = {
+                                draggingValue?.let { value ->
+                                    scope.launch {
+                                        pagerState.scrollToPage(value.roundToInt())
+                                        draggingValue = null
+                                    }
+                                }
+                            },
+                            valueRange = 0f..(pageCount - 1).coerceAtLeast(0).toFloat(),
+                            thumb = {
+                                Box(
+                                    modifier = Modifier
+                                        .size(width = 5.dp, height = 28.dp)
+                                        .clip(RoundedCornerShape(2.5.dp))
+                                        .background(Color.White),
+                                )
+                            },
+                            track = {
+                                val fraction = if (pageCount > 1) {
+                                    (draggingValue ?: pagerState.currentPage.toFloat()) / (pageCount - 1)
+                                } else {
+                                    0f
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(14.dp),
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .matchParentSize()
+                                            .clip(RoundedCornerShape(7.dp))
+                                            .background(Color.White.copy(alpha = 0.25f)),
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth(fraction)
+                                            .fillMaxHeight()
+                                            .clip(RoundedCornerShape(7.dp))
+                                            .background(accent),
+                                    )
+                                }
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = 12.dp),
+                        )
+                        Text(
+                            text = "$pageCount",
+                            color = Color.White.copy(alpha = 0.7f),
+                            style = MaterialTheme.typography.labelLarge,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.widthIn(min = 36.dp),
+                        )
+                    }
                 }
             }
-
-            // 页码在滑杆两端的单行布局：当前页 | 粗轨道滑杆 | 总页数。
-            // 比"页码单独一行 + 滑杆"省一行高度，也是控制态下唯一的页码来源
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-            ) {
-                Text(
-                    text = "${shownPage + 1}",
-                    color = Color.White,
-                    style = MaterialTheme.typography.labelLarge,
-                    textAlign = TextAlign.Center,
-                    // 锁最小宽度：页码 9→10 位数变化时文字变宽，
-                    // 不锁的话滑杆轨道会跟着抖一下
-                    modifier = Modifier.widthIn(min = 36.dp),
-                )
-                Slider(
-                    value = draggingValue ?: pagerState.currentPage.toFloat(),
-                    onValueChange = { draggingValue = it },
-                    onValueChangeFinished = {
-                        draggingValue?.let { v ->
-                            scope.launch {
-                                // 远距离跳页用瞬时 scrollToPage：animateScrollToPage
-                                // 会逐页滑过去，把途经的页全加载一遍
-                                pagerState.scrollToPage(v.roundToInt())
-                                draggingValue = null
-                            }
-                        }
-                    },
-                    valueRange = 0f..(pageCount - 1).coerceAtLeast(0).toFloat(),
-                    // 自绘粗轨道 + 竖条手柄，不依赖 M3 各版本默认滑杆样式的差异；
-                    // 进度填充与胶片高亮同一强调色，视觉语言统一
-                    thumb = {
-                        Box(
-                            modifier = Modifier
-                                .size(width = 5.dp, height = 28.dp)
-                                .clip(RoundedCornerShape(2.5.dp))
-                                .background(Color.White),
-                        )
-                    },
-                    track = {
-                        val fraction = if (pageCount > 1) {
-                            (draggingValue ?: pagerState.currentPage.toFloat()) / (pageCount - 1)
-                        } else {
-                            0f
-                        }
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(14.dp),
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .matchParentSize()
-                                    .clip(RoundedCornerShape(7.dp))
-                                    .background(Color.White.copy(alpha = 0.25f)),
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth(fraction)
-                                    .fillMaxHeight()
-                                    .clip(RoundedCornerShape(7.dp))
-                                    .background(accent),
-                            )
-                        }
-                    },
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(horizontal = 12.dp),
-                )
-                Text(
-                    text = "$pageCount",
-                    color = Color.White.copy(alpha = 0.7f),
-                    style = MaterialTheme.typography.labelLarge,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.widthIn(min = 36.dp),
-                )
-            }
-
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .height(1.dp)
-                    .background(Color.White.copy(alpha = 0.12f)),
-            )
 
             ReaderDockRow(
                 destinations = readerDockDestinations(chapterCount),
@@ -1028,10 +1029,7 @@ internal fun ReaderDockItem(
             contentAlignment = Alignment.Center,
             modifier = Modifier
                 .size(width = 56.dp, height = 28.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(
-                    if (selected) accent.copy(alpha = 0.28f) else Color.Transparent,
-                ),
+                .background(Color.Transparent),
         ) {
             Icon(
                 painter = painterResource(destination.icon),
