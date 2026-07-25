@@ -10,10 +10,8 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Image
@@ -290,7 +288,6 @@ private fun ComicPager(
     var zoomResetPage by remember { mutableIntStateOf(-1) }
     var zoomToggleAnchor by remember { mutableStateOf(Offset.Unspecified) }
     var activePanel by remember { mutableStateOf<ReaderPanel?>(null) }
-    var filmstripExpanded by remember { mutableStateOf(false) }
     var chapterLayoutVersion by remember(volume) { mutableIntStateOf(0) }
     val readerChapters by produceState<List<ReaderChapterItem>?>(
         initialValue = null,
@@ -312,10 +309,7 @@ private fun ComicPager(
     var ocrLongPressAnchor by remember { mutableStateOf(Offset.Zero) }
     var pendingOcrPage by remember { mutableStateOf<Int?>(null) }
     LaunchedEffect(showControls) {
-        if (!showControls) {
-            activePanel = null
-            filmstripExpanded = false
-        }
+        if (!showControls) activePanel = null
     }
     LaunchedEffect(pagerState.currentPage) {
         zoomedPage = null
@@ -408,9 +402,8 @@ private fun ComicPager(
         }
     }
 
-    BackHandler(enabled = activePanel != null || filmstripExpanded) {
+    BackHandler(enabled = activePanel != null) {
         activePanel = null
-        filmstripExpanded = false
     }
 
     // 当前页对应的章节信息，用于多章书籍的界面提示
@@ -593,9 +586,7 @@ private fun ComicPager(
                     bottom = when {
                         activeOcrResult != null -> 96.dp
                         showControls && activePanel == null &&
-                                ocrProcessingPage != pagerState.currentPage -> {
-                            if (filmstripExpanded) 232.dp else 120.dp
-                        }
+                                ocrProcessingPage != pagerState.currentPage -> 232.dp
                         ocrProcessingPage == pagerState.currentPage -> 72.dp
                         else -> 16.dp
                     },
@@ -641,22 +632,13 @@ private fun ComicPager(
             thumbnails = thumbnails,
             bookmarkPages = bookmarkPages,
             onNeedThumbnail = onNeedThumbnail,
-            filmstripExpanded = filmstripExpanded,
-            onToggleFilmstrip = {
-                if (activePanel != null) {
-                    activePanel = null
-                    filmstripExpanded = false
-                } else {
-                    filmstripExpanded = !filmstripExpanded
-                }
-            },
+            onPagesSelected = { activePanel = null },
             activePanel = activePanel,
             onPanelSelected = { panel ->
                 if (activePanel == panel) {
                     activePanel = null
                 } else {
                     activePanel = panel
-                    filmstripExpanded = false
                 }
             },
             attachedContent = { panel ->
@@ -777,7 +759,7 @@ private fun ReaderTopBar(
     }
 }
 
-/** Compact reader console with an expandable filmstrip and in-book navigation. */
+/** Compact reader console with always-visible page navigation and attached book tools. */
 // Slider 的 thumb/track 自定义插槽在 M3 里仍标记为实验性 API
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -789,8 +771,7 @@ private fun ReaderBottomControls(
     thumbnails: Map<Int, ImageBitmap>,
     bookmarkPages: Map<Int, BookmarkEntity>,
     onNeedThumbnail: (Int) -> Unit,
-    filmstripExpanded: Boolean,
-    onToggleFilmstrip: () -> Unit,
+    onPagesSelected: () -> Unit,
     activePanel: ReaderPanel?,
     onPanelSelected: (ReaderPanel) -> Unit,
     attachedContent: @Composable ColumnScope.(ReaderPanel) -> Unit,
@@ -833,30 +814,22 @@ private fun ReaderBottomControls(
                     var draggingValue by remember { mutableStateOf<Float?>(null) }
                     val shownPage = draggingValue?.roundToInt() ?: pagerState.currentPage
 
-                    AnimatedVisibility(
-                        visible = filmstripExpanded,
-                        enter = expandVertically(expandFrom = Alignment.Bottom) + fadeIn(),
-                        exit = shrinkVertically(shrinkTowards = Alignment.Bottom) + fadeOut(),
-                    ) {
-                        Column {
-                            // 胶片条与滑杆共享 shownPage：拖滑杆时胶片实时跟随滚动，
-                            // 形成"滑杆粗跳 + 胶片看准了再点"的两级定位。
-                            FilmstripRow(
-                                pageCount = pageCount,
-                                thumbnails = thumbnails,
-                                bookmarkPages = bookmarkPages,
-                                onNeedThumbnail = onNeedThumbnail,
-                                currentPage = shownPage,
-                                accent = accent,
-                                isDragging = draggingValue != null,
-                                onPageSelected = { page ->
-                                    scope.launch { pagerState.scrollToPage(page) }
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                        }
-                    }
+                    // 胶片条与滑杆共享 shownPage：拖滑杆时胶片实时跟随滚动，
+                    // 形成"滑杆粗跳 + 胶片看准了再点"的两级定位。
+                    FilmstripRow(
+                        pageCount = pageCount,
+                        thumbnails = thumbnails,
+                        bookmarkPages = bookmarkPages,
+                        onNeedThumbnail = onNeedThumbnail,
+                        currentPage = shownPage,
+                        accent = accent,
+                        isDragging = draggingValue != null,
+                        onPageSelected = { page ->
+                            scope.launch { pagerState.scrollToPage(page) }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
 
                     // 页码在滑杆两端的单行布局：当前页 | 粗轨道滑杆 | 总页数。
                     // 比"页码单独一行 + 滑杆"省一行高度，也是控制态下唯一的页码来源
@@ -937,9 +910,8 @@ private fun ReaderBottomControls(
             ReaderDockRow(
                 destinations = readerDockDestinations(chapterCount),
                 activePanel = activePanel,
-                filmstripExpanded = filmstripExpanded,
                 accent = accent,
-                onPagesClick = onToggleFilmstrip,
+                onPagesClick = onPagesSelected,
                 onPanelSelected = onPanelSelected,
             )
         }
@@ -979,7 +951,6 @@ internal fun readerDockDestinations(chapterCount: Int): List<ReaderDockDestinati
 private fun ReaderDockRow(
     destinations: List<ReaderDockDestination>,
     activePanel: ReaderPanel?,
-    filmstripExpanded: Boolean,
     accent: Color,
     onPagesClick: () -> Unit,
     onPanelSelected: (ReaderPanel) -> Unit,
@@ -994,7 +965,7 @@ private fun ReaderDockRow(
             ReaderDockItem(
                 destination = destination,
                 selected = when (destination) {
-                    ReaderDockDestination.Pages -> activePanel == null || filmstripExpanded
+                    ReaderDockDestination.Pages -> activePanel == null
                     ReaderDockDestination.Chapters -> activePanel == ReaderPanel.Chapters
                     ReaderDockDestination.Bookmarks -> activePanel == ReaderPanel.Bookmarks
                     ReaderDockDestination.Tools -> activePanel == ReaderPanel.Tools
