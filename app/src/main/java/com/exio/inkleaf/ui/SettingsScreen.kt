@@ -57,8 +57,11 @@ fun SettingsScreen(
     val cacheLimit by viewModel.cacheLimit.collectAsStateWithLifecycle()
     val cacheUsage by viewModel.cacheUsageBytes.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val activeOcrVariant by remember(context) { OcrModelSettingsRepository(context).activeVariant }
-        .collectAsStateWithLifecycle(initialValue = com.exio.inkleaf.data.ocr.OcrModelVariant.SMALL)
+    val activeOcrVariant by
+        remember(context) { OcrModelSettingsRepository(context).activeVariant }
+            .collectAsStateWithLifecycle(
+                initialValue = com.exio.inkleaf.data.ocr.OcrModelVariant.SMALL
+            )
     val cacheBudgetBytes = remember(cacheLimit, context) { cacheLimit.bytes(context) }
     val autoCacheBudgetBytes = remember(context) { CacheLimit.AUTO.bytes(context) }
     var showCacheLimitSheet by remember { mutableStateOf(false) }
@@ -67,11 +70,11 @@ fun SettingsScreen(
     var showFoldersSheet by rememberSaveable { mutableStateOf(false) }
     val lastPickedFolder by foldersViewModel.lastPickedFolder.collectAsStateWithLifecycle()
 
-    val treePicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocumentTree(),
-    ) { uri ->
-        if (uri != null) foldersViewModel.addFolder(uri)
-    }
+    val treePicker =
+        rememberLauncherForActivityResult(contract = ActivityResultContracts.OpenDocumentTree()) {
+            uri ->
+            if (uri != null) foldersViewModel.addFolder(uri)
+        }
     val topAppBarScrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
     Scaffold(
@@ -84,19 +87,18 @@ fun SettingsScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.Transparent,
-                    scrolledContainerColor = Color.Transparent,
-                ),
+                colors =
+                    TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.Transparent,
+                        scrolledContainerColor = Color.Transparent,
+                    ),
                 scrollBehavior = topAppBarScrollBehavior,
             )
         },
     ) { innerPadding ->
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .verticalScroll(rememberScrollState()),
+            modifier =
+                Modifier.fillMaxSize().padding(innerPadding).verticalScroll(rememberScrollState())
         ) {
             SectionLabel("个性化")
             InkleafActionListItem(
@@ -109,7 +111,8 @@ fun SettingsScreen(
             SectionLabel("存储")
             InkleafActionListItem(
                 headline = "漫画缓存上限",
-                supporting = "当前占用 ${formatBytes(cacheUsage)} · " +
+                supporting =
+                    "当前占用 ${formatBytes(cacheUsage)} · " +
                         cacheLimitSummary(cacheLimit, cacheBudgetBytes),
                 onClick = { showCacheLimitSheet = true },
                 trailingContent = { ForwardIcon() },
@@ -125,11 +128,12 @@ fun SettingsScreen(
             SectionLabel("文字识别")
             InkleafActionListItem(
                 headline = "OCR 模型",
-                supporting = if (isOcrModelReady(context.filesDir, activeOcrVariant)) {
-                    "${activeOcrVariant.displayName} · 已就绪"
-                } else {
-                    "${activeOcrVariant.displayName} · 未下载"
-                },
+                supporting =
+                    if (isOcrModelReady(context.filesDir, activeOcrVariant)) {
+                        "${activeOcrVariant.displayName} · 已就绪"
+                    } else {
+                        "${activeOcrVariant.displayName} · 未下载"
+                    },
                 onClick = onOpenOcrModelDownload,
                 trailingContent = { ForwardIcon() },
             )
@@ -206,11 +210,12 @@ private fun ForwardIcon() {
 }
 
 private fun themeSummary(settings: ThemeSettings): String {
-    val source = when {
-        settings.useWallpaper && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> "壁纸取色"
-        settings.useCustom -> "自定义色"
-        else -> settings.seed.label
-    }
+    val source =
+        when {
+            settings.useWallpaper && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> "壁纸取色"
+            settings.useCustom -> "自定义色"
+            else -> settings.seed.label
+        }
     return "$source · ${settings.darkMode.label}"
 }
 
@@ -241,9 +246,7 @@ private fun AboutSheetContent(
 }
 
 @Composable
-private fun ThirdPartyLicensesSheetContent(
-    modifier: Modifier = Modifier,
-) {
+private fun ThirdPartyLicensesSheetContent(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     SheetColumn(modifier = modifier, scrollable = true) {
         StandardSheetTitle("开源许可")
@@ -273,26 +276,27 @@ private data class ThirdPartyNotice(
     val url: String,
 )
 
-private val THIRD_PARTY_NOTICES = listOf(
-    ThirdPartyNotice(
-        name = "PP-OCRv6 / PaddleOCR",
-        summary = "轻量文字检测与识别引擎",
-        license = "Apache-2.0 · PaddlePaddle Authors",
-        url = "https://github.com/PaddlePaddle/PaddleOCR",
-    ),
-    ThirdPartyNotice(
-        name = "ONNX Runtime",
-        summary = "跨平台机器学习推理运行时",
-        license = "MIT · Microsoft Corporation",
-        url = "https://github.com/microsoft/onnxruntime",
-    ),
-    ThirdPartyNotice(
-        name = "OpenCV Android",
-        summary = "计算机视觉基础库",
-        license = "Apache-2.0 · OpenCV team",
-        url = "https://github.com/opencv/opencv",
-    ),
-)
+private val THIRD_PARTY_NOTICES =
+    listOf(
+        ThirdPartyNotice(
+            name = "PP-OCRv6 / PaddleOCR",
+            summary = "轻量文字检测与识别引擎",
+            license = "Apache-2.0 · PaddlePaddle Authors",
+            url = "https://github.com/PaddlePaddle/PaddleOCR",
+        ),
+        ThirdPartyNotice(
+            name = "ONNX Runtime",
+            summary = "跨平台机器学习推理运行时",
+            license = "MIT · Microsoft Corporation",
+            url = "https://github.com/microsoft/onnxruntime",
+        ),
+        ThirdPartyNotice(
+            name = "OpenCV Android",
+            summary = "计算机视觉基础库",
+            license = "Apache-2.0 · OpenCV team",
+            url = "https://github.com/opencv/opencv",
+        ),
+    )
 
 @Composable
 private fun CacheLimitSheetContent(
@@ -330,18 +334,19 @@ private fun SectionLabel(text: String) {
     )
 }
 
-private fun formatBytes(bytes: Long): String = when {
-    bytes >= 1L shl 30 -> {
-        val gb = 1L shl 30
-        if (bytes % gb == 0L) {
-            "${bytes / gb} GB"
-        } else {
-            "%.1f GB".format(bytes / (1024f * 1024f * 1024f))
+private fun formatBytes(bytes: Long): String =
+    when {
+        bytes >= 1L shl 30 -> {
+            val gb = 1L shl 30
+            if (bytes % gb == 0L) {
+                "${bytes / gb} GB"
+            } else {
+                "%.1f GB".format(bytes / (1024f * 1024f * 1024f))
+            }
         }
-    }
 
-    else -> "${bytes shr 20} MB"
-}
+        else -> "${bytes shr 20} MB"
+    }
 
 private fun cacheLimitSummary(limit: CacheLimit, budgetBytes: Long): String =
     if (limit == CacheLimit.AUTO) {
@@ -360,14 +365,14 @@ private fun cacheLimitDescription(limit: CacheLimit, autoBudgetBytes: Long): Str
 private const val GITHUB_URL = "https://github.com/nuttycc/inkleaf"
 
 private fun appVersionName(context: Context): String {
-    val packageInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        context.packageManager.getPackageInfo(
-            context.packageName,
-            PackageManager.PackageInfoFlags.of(0),
-        )
-    } else {
-        @Suppress("DEPRECATION")
-        context.packageManager.getPackageInfo(context.packageName, 0)
-    }
+    val packageInfo =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.packageManager.getPackageInfo(
+                context.packageName,
+                PackageManager.PackageInfoFlags.of(0),
+            )
+        } else {
+            @Suppress("DEPRECATION") context.packageManager.getPackageInfo(context.packageName, 0)
+        }
     return packageInfo.versionName ?: "未知"
 }

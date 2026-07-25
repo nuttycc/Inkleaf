@@ -3,9 +3,7 @@ package com.exio.inkleaf.data
 import java.time.Instant
 import java.time.ZoneId
 
-/**
- * Test clock with explicit millis and zone. Advance with [advanceBy] or [setNow].
- */
+/** Test clock with explicit millis and zone. Advance with [advanceBy] or [setNow]. */
 class FakeReadingClock(
     initialMillis: Long = 0L,
     private var zone: ZoneId = ZoneId.of("UTC"),

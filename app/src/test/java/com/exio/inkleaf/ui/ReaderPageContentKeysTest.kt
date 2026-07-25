@@ -50,18 +50,20 @@ class ReaderPageContentKeysTest {
         cacheKeyPrefix: String = "comic-1",
         isCurrentPage: Boolean = true,
         pageRenderRequest: PageRenderRequest? = null,
-    ): ReaderPageContentKeys = readerPageContentKeys(
-        volumeToken = volumeToken,
-        page = page,
-        cacheKeyPrefix = cacheKeyPrefix,
-        isCurrentPage = isCurrentPage,
-        pageRenderRequest = pageRenderRequest,
-    )
+    ): ReaderPageContentKeys =
+        readerPageContentKeys(
+            volumeToken = volumeToken,
+            page = page,
+            cacheKeyPrefix = cacheKeyPrefix,
+            isCurrentPage = isCurrentPage,
+            pageRenderRequest = pageRenderRequest,
+        )
 
-    private fun renderRequest(width: Int, height: Int) = PageRenderRequest(
-        maxWidthPx = width,
-        maxHeightPx = height,
-        maxPixels = 8_000_000,
-        maxDimensionPx = 4096,
-    )
+    private fun renderRequest(width: Int, height: Int) =
+        PageRenderRequest(
+            maxWidthPx = width,
+            maxHeightPx = height,
+            maxPixels = 8_000_000,
+            maxDimensionPx = 4096,
+        )
 }

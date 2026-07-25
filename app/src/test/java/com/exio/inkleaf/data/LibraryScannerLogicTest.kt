@@ -15,12 +15,13 @@ class LibraryScannerLogicTest {
 
     @Test
     fun `PDF ordering ignores folders until names tie`() {
-        val files = listOf(
-            scanned("101.pdf", "part-a/101.pdf", "101"),
-            scanned("2.pdf", "part-z/2.pdf", "2"),
-            scanned("1.pdf", "part-b/1.pdf", "1b"),
-            scanned("1.pdf", "part-a/1.pdf", "1a"),
-        )
+        val files =
+            listOf(
+                scanned("101.pdf", "part-a/101.pdf", "101"),
+                scanned("2.pdf", "part-z/2.pdf", "2"),
+                scanned("1.pdf", "part-b/1.pdf", "1b"),
+                scanned("1.pdf", "part-a/1.pdf", "1a"),
+            )
 
         val sorted = LibraryScanner.sortPdfs(files)
 
@@ -34,9 +35,8 @@ class LibraryScannerLogicTest {
     fun `soft threshold requests confirmation and hard threshold wins`() {
         val soft = LibraryScanner.SOFT_SCAN_THRESHOLDS
         val atSoft = LibraryScanner.ScanMetrics(pdfCount = soft.pdfCount)
-        val atHard = LibraryScanner.ScanMetrics(
-            pdfCount = LibraryScanner.HARD_SCAN_THRESHOLDS.pdfCount + 1,
-        )
+        val atHard =
+            LibraryScanner.ScanMetrics(pdfCount = LibraryScanner.HARD_SCAN_THRESHOLDS.pdfCount + 1)
 
         assertEquals(
             LibraryScanner.ScanStopReason.CONFIRMATION_REQUIRED to LibraryScanner.ScanLimit.PDFS,

@@ -13,7 +13,9 @@ abstract class ChapterDao {
     @Query("SELECT * FROM chapters WHERE comicId = :comicId ORDER BY chapterIndex")
     abstract suspend fun getByComicId(comicId: Long): List<ChapterEntity>
 
-    @Query("SELECT * FROM chapters WHERE comicId = :comicId AND isMissing = 0 ORDER BY chapterIndex")
+    @Query(
+        "SELECT * FROM chapters WHERE comicId = :comicId AND isMissing = 0 ORDER BY chapterIndex"
+    )
     abstract suspend fun getReadableByComicId(comicId: Long): List<ChapterEntity>
 
     @Query("SELECT * FROM chapters WHERE comicId = :comicId ORDER BY chapterIndex")
@@ -46,8 +48,7 @@ abstract class ChapterDao {
     @Query("DELETE FROM chapters WHERE comicId = :comicId")
     abstract suspend fun deleteByComicId(comicId: Long)
 
-    @Update
-    abstract suspend fun update(chapter: ChapterEntity)
+    @Update abstract suspend fun update(chapter: ChapterEntity)
 
     @Query("DELETE FROM chapters WHERE id IN (:ids)")
     abstract suspend fun deleteByIds(ids: List<Long>)
@@ -55,10 +56,9 @@ abstract class ChapterDao {
     /**
      * 把一次扫描 diff 原子地落到 chapters 表。
      *
-     * 必须是 @Transaction：syncSeriesChapters 的 diff 计算和落库之间若有并发
-     * 或中途崩溃，半残状态会让下次同步继续撞索引或丢失进度。整个应用过程
-     * 要么全成要么全回滚。重排通过 @Update（按主键 id 更新）改 chapterIndex，
-     * 不会撞索引（已去掉 (comicId, chapterIndex) 的 UNIQUE 约束）。
+     * 必须是 @Transaction：syncSeriesChapters 的 diff 计算和落库之间若有并发 或中途崩溃，半残状态会让下次同步继续撞索引或丢失进度。整个应用过程
+     * 要么全成要么全回滚。重排通过 @Update（按主键 id 更新）改 chapterIndex， 不会撞索引（已去掉 (comicId, chapterIndex) 的 UNIQUE
+     * 约束）。
      */
     @Transaction
     open suspend fun applyDiff(diff: ChapterDiff) {

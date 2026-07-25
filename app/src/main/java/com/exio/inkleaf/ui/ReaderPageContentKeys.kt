@@ -3,7 +3,8 @@ package com.exio.inkleaf.ui
 import com.exio.inkleaf.data.PageRenderRequest
 
 /**
- * Separates changes that invalidate the displayed page from changes that only refresh its processing.
+ * Separates changes that invalidate the displayed page from changes that only refresh its
+ * processing.
  */
 internal data class ReaderPageContentKeys(
     val stateReset: StateReset,
@@ -27,14 +28,17 @@ internal fun readerPageContentKeys(
     cacheKeyPrefix: String,
     isCurrentPage: Boolean,
     pageRenderRequest: PageRenderRequest?,
-): ReaderPageContentKeys = ReaderPageContentKeys(
-    stateReset = ReaderPageContentKeys.StateReset(
-        volumeToken = volumeToken,
-        page = page,
-        cacheKeyPrefix = cacheKeyPrefix,
-    ),
-    producerRestart = ReaderPageContentKeys.ProducerRestart(
-        isCurrentPage = isCurrentPage,
-        pageRenderRequest = pageRenderRequest,
-    ),
-)
+): ReaderPageContentKeys =
+    ReaderPageContentKeys(
+        stateReset =
+            ReaderPageContentKeys.StateReset(
+                volumeToken = volumeToken,
+                page = page,
+                cacheKeyPrefix = cacheKeyPrefix,
+            ),
+        producerRestart =
+            ReaderPageContentKeys.ProducerRestart(
+                isCurrentPage = isCurrentPage,
+                pageRenderRequest = pageRenderRequest,
+            ),
+    )

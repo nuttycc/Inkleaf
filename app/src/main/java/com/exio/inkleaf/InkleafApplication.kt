@@ -6,6 +6,7 @@ import com.exio.inkleaf.data.AlbumExporter
 import com.exio.inkleaf.data.AlbumRepository
 import com.exio.inkleaf.data.ComicRepository
 import com.exio.inkleaf.data.ReaderCache
+import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
@@ -14,7 +15,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import java.io.File
 
 class InkleafApplication : Application() {
     internal val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -51,21 +51,22 @@ class InkleafApplication : Application() {
     /** Remove generated storage owned exclusively by the retired enhancement feature. */
     private fun cleanupRetiredEnhancementStorage() {
         listOf(
-            File(filesDir, "image_enhancement_models"),
-            File(filesDir, "ai_enhanced_images"),
-            File(cacheDir, "ai_enhanced_images"),
-        ).forEach { directory ->
-            if (!directory.exists()) return@forEach
-            runCatching { directory.deleteRecursively() }
-                .onSuccess { deleted ->
-                    if (!deleted) {
-                        Log.w(TAG, "Unable to remove retired storage: ${directory.name}")
+                File(filesDir, "image_enhancement_models"),
+                File(filesDir, "ai_enhanced_images"),
+                File(cacheDir, "ai_enhanced_images"),
+            )
+            .forEach { directory ->
+                if (!directory.exists()) return@forEach
+                runCatching { directory.deleteRecursively() }
+                    .onSuccess { deleted ->
+                        if (!deleted) {
+                            Log.w(TAG, "Unable to remove retired storage: ${directory.name}")
+                        }
                     }
-                }
-                .onFailure { error ->
-                    Log.w(TAG, "Retired storage cleanup failed: ${directory.name}", error)
-                }
-        }
+                    .onFailure { error ->
+                        Log.w(TAG, "Retired storage cleanup failed: ${directory.name}", error)
+                    }
+            }
     }
 
     private companion object {

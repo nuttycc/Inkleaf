@@ -21,8 +21,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * In-memory Room checks for reading_sessions invariants.
- * Run via android-dev-check full (emulator), not on the local machine.
+ * In-memory Room checks for reading_sessions invariants. Run via android-dev-check full (emulator),
+ * not on the local machine.
  */
 @RunWith(AndroidJUnit4::class)
 class ReadingSessionRoomTest {
@@ -31,9 +31,10 @@ class ReadingSessionRoomTest {
     @Before
     fun setUp() {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
-            .allowMainThreadQueries()
-            .build()
+        db =
+            Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+                .allowMainThreadQueries()
+                .build()
     }
 
     @After
@@ -75,11 +76,12 @@ class ReadingSessionRoomTest {
     fun promotedResumable_appearsInPagingWithCheckpointEnd() = runBlocking {
         val dao = db.readingSessionDao()
         dao.insert(
-            resumable(id = "live", startedAt = 300, isPermanent = true).copy(
-                checkpointGlobalPageIndex = 7,
-                checkpointPageIndex = 7,
-                lastCheckpointAt = 350,
-            ),
+            resumable(id = "live", startedAt = 300, isPermanent = true)
+                .copy(
+                    checkpointGlobalPageIndex = 7,
+                    checkpointPageIndex = 7,
+                    lastCheckpointAt = 350,
+                )
         )
         val page = loadHistory()
         val row = page.data.single()
@@ -112,7 +114,7 @@ class ReadingSessionRoomTest {
                 coverPath = "/cover.png",
                 isMissing = false,
                 sourceType = BookSourceType.EXTERNAL_ARCHIVE,
-            ),
+            )
         )
         sessionDao.insert(completed(id = "s1", startedAt = 10, fileKey = "book-a", title = "Old"))
         val page = loadHistory()
@@ -146,14 +148,16 @@ class ReadingSessionRoomTest {
     @Test
     fun checkpointAndEndColumns_areIndependentOnCompletedRows() = runBlocking {
         val dao = db.readingSessionDao()
-        val entity = completed(id = "x", startedAt = 1).copy(
-            checkpointGlobalPageIndex = 5,
-            checkpointPageIndex = 5,
-            checkpointPageIdentity = "cp",
-            endGlobalPageIndex = 9,
-            endPageIndex = 9,
-            endPageIdentity = "end",
-        )
+        val entity =
+            completed(id = "x", startedAt = 1)
+                .copy(
+                    checkpointGlobalPageIndex = 5,
+                    checkpointPageIndex = 5,
+                    checkpointPageIdentity = "cp",
+                    endGlobalPageIndex = 9,
+                    endPageIndex = 9,
+                    endPageIdentity = "end",
+                )
         dao.insert(entity)
         val stored = dao.getById("x")!!
         assertEquals(5, stored.checkpointGlobalPageIndex)
@@ -161,13 +165,16 @@ class ReadingSessionRoomTest {
     }
 
     private suspend fun loadHistory(): PagingSource.LoadResult.Page<Int, HistoryRowProjection> {
-        val result = db.readingSessionDao().observeHistoryPaging().load(
-            PagingSource.LoadParams.Refresh(
-                key = null,
-                loadSize = 50,
-                placeholdersEnabled = false,
-            ),
-        )
+        val result =
+            db.readingSessionDao()
+                .observeHistoryPaging()
+                .load(
+                    PagingSource.LoadParams.Refresh(
+                        key = null,
+                        loadSize = 50,
+                        placeholdersEnabled = false,
+                    )
+                )
         @Suppress("UNCHECKED_CAST")
         return result as PagingSource.LoadResult.Page<Int, HistoryRowProjection>
     }
@@ -177,35 +184,37 @@ class ReadingSessionRoomTest {
         startedAt: Long,
         isPermanent: Boolean = false,
         fileKey: String = "book-a",
-    ) = base(
-        id = id,
-        startedAt = startedAt,
-        status = ReadingSessionStatus.PAUSED.name,
-        isPermanent = isPermanent,
-        resumableSlot = ReadingSessionEntity.RESUMABLE_SLOT,
-        endedAt = null,
-        endReason = null,
-        fileKey = fileKey,
-        fillEnd = false,
-    )
+    ) =
+        base(
+            id = id,
+            startedAt = startedAt,
+            status = ReadingSessionStatus.PAUSED.name,
+            isPermanent = isPermanent,
+            resumableSlot = ReadingSessionEntity.RESUMABLE_SLOT,
+            endedAt = null,
+            endReason = null,
+            fileKey = fileKey,
+            fillEnd = false,
+        )
 
     private fun completed(
         id: String,
         startedAt: Long,
         fileKey: String = "book-a",
         title: String = "Book A",
-    ) = base(
-        id = id,
-        startedAt = startedAt,
-        status = ReadingSessionStatus.COMPLETED.name,
-        isPermanent = true,
-        resumableSlot = null,
-        endedAt = startedAt + 1_000,
-        endReason = ReadingSessionEndReason.LEFT_READER.name,
-        fileKey = fileKey,
-        title = title,
-        fillEnd = true,
-    )
+    ) =
+        base(
+            id = id,
+            startedAt = startedAt,
+            status = ReadingSessionStatus.COMPLETED.name,
+            isPermanent = true,
+            resumableSlot = null,
+            endedAt = startedAt + 1_000,
+            endReason = ReadingSessionEndReason.LEFT_READER.name,
+            fileKey = fileKey,
+            title = title,
+            fillEnd = true,
+        )
 
     private fun base(
         id: String,
@@ -218,37 +227,38 @@ class ReadingSessionRoomTest {
         fileKey: String,
         title: String = "Book A",
         fillEnd: Boolean,
-    ) = ReadingSessionEntity(
-        id = id,
-        comicFileKey = fileKey,
-        titleSnapshot = title,
-        sourceType = BookSourceType.EXTERNAL_ARCHIVE,
-        status = status,
-        startedAt = startedAt,
-        lastCheckpointAt = startedAt + 500,
-        endedAt = endedAt,
-        activeReadingMillis = 40_000,
-        endReason = endReason,
-        timeZoneId = "UTC",
-        isPermanent = isPermanent,
-        resumableSlot = resumableSlot,
-        startPageIdentity = "p0",
-        startGlobalPageIndex = 0,
-        startChapterIndex = 0,
-        startPageIndex = 0,
-        startChapterTitle = "Ch 1",
-        startSourceRevision = "rev",
-        checkpointPageIdentity = "p1",
-        checkpointGlobalPageIndex = 1,
-        checkpointChapterIndex = 0,
-        checkpointPageIndex = 1,
-        checkpointChapterTitle = "Ch 1",
-        checkpointSourceRevision = "rev",
-        endPageIdentity = if (fillEnd) "p1" else null,
-        endGlobalPageIndex = if (fillEnd) 1 else null,
-        endChapterIndex = if (fillEnd) 0 else null,
-        endPageIndex = if (fillEnd) 1 else null,
-        endChapterTitle = if (fillEnd) "Ch 1" else null,
-        endSourceRevision = if (fillEnd) "rev" else null,
-    )
+    ) =
+        ReadingSessionEntity(
+            id = id,
+            comicFileKey = fileKey,
+            titleSnapshot = title,
+            sourceType = BookSourceType.EXTERNAL_ARCHIVE,
+            status = status,
+            startedAt = startedAt,
+            lastCheckpointAt = startedAt + 500,
+            endedAt = endedAt,
+            activeReadingMillis = 40_000,
+            endReason = endReason,
+            timeZoneId = "UTC",
+            isPermanent = isPermanent,
+            resumableSlot = resumableSlot,
+            startPageIdentity = "p0",
+            startGlobalPageIndex = 0,
+            startChapterIndex = 0,
+            startPageIndex = 0,
+            startChapterTitle = "Ch 1",
+            startSourceRevision = "rev",
+            checkpointPageIdentity = "p1",
+            checkpointGlobalPageIndex = 1,
+            checkpointChapterIndex = 0,
+            checkpointPageIndex = 1,
+            checkpointChapterTitle = "Ch 1",
+            checkpointSourceRevision = "rev",
+            endPageIdentity = if (fillEnd) "p1" else null,
+            endGlobalPageIndex = if (fillEnd) 1 else null,
+            endChapterIndex = if (fillEnd) 0 else null,
+            endPageIndex = if (fillEnd) 1 else null,
+            endChapterTitle = if (fillEnd) "Ch 1" else null,
+            endSourceRevision = if (fillEnd) "rev" else null,
+        )
 }

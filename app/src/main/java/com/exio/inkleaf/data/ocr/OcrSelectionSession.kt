@@ -1,4 +1,5 @@
-// Immutable reader selection state keeps navigation and back handling from clearing only part of OCR UI state.
+// Immutable reader selection state keeps navigation and back handling from clearing only part of
+// OCR UI state.
 package com.exio.inkleaf.data.ocr
 
 data class OcrSelectionSession(
@@ -30,6 +31,5 @@ data class OcrSelectionSession(
 
     fun exit(): OcrSelectionSession = OcrSelectionSession()
 
-    fun onPageChanged(page: Int): OcrSelectionSession =
-        if (activePage == page) this else exit()
+    fun onPageChanged(page: Int): OcrSelectionSession = if (activePage == page) this else exit()
 }

@@ -18,11 +18,9 @@ interface ComicDao {
     @Query("SELECT * FROM comics WHERE isDraft = 0 ORDER BY lastReadAt DESC, addedAt DESC")
     fun observeAll(): Flow<List<ComicEntity>>
 
-    @Query("SELECT * FROM comics WHERE id = :id")
-    suspend fun getById(id: Long): ComicEntity?
+    @Query("SELECT * FROM comics WHERE id = :id") suspend fun getById(id: Long): ComicEntity?
 
-    @Query("SELECT * FROM comics WHERE uri = :uri")
-    suspend fun getByUri(uri: String): ComicEntity?
+    @Query("SELECT * FROM comics WHERE uri = :uri") suspend fun getByUri(uri: String): ComicEntity?
 
     @Query("SELECT * FROM comics WHERE fileKey = :fileKey")
     suspend fun getByFileKey(fileKey: String): ComicEntity?
@@ -31,19 +29,21 @@ interface ComicDao {
     suspend fun getByFileKeys(fileKeys: List<String>): List<ComicEntity>
 
     /** 返回新插入行的自增 id；重复时返回 -1 */
-    @Insert(onConflict = OnConflictStrategy.IGNORE)
-    suspend fun insert(comic: ComicEntity): Long
+    @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insert(comic: ComicEntity): Long
 
-    @Query("UPDATE comics SET lastReadChapterIndex = :chapterIndex, lastReadPage = :page, lastReadAt = :time WHERE id = :id")
+    @Query(
+        "UPDATE comics SET lastReadChapterIndex = :chapterIndex, lastReadPage = :page, lastReadAt = :time WHERE id = :id"
+    )
     suspend fun updateProgress(id: Long, chapterIndex: Int, page: Int, time: Long)
 
-    @Query("UPDATE comics SET lastReadChapterIndex = 0, lastReadPage = :page, lastReadPageId = :pageId, lastReadAt = :time WHERE id = :id")
+    @Query(
+        "UPDATE comics SET lastReadChapterIndex = 0, lastReadPage = :page, lastReadPageId = :pageId, lastReadAt = :time WHERE id = :id"
+    )
     suspend fun updateAlbumProgress(id: Long, page: Int, pageId: String?, time: Long)
 
     /**
-     * 仅更新进度章节索引，不碰 lastReadPage / lastReadAt。
-     * 用于章节重排后把 [ComicEntity.lastReadChapterIndex] 重新指向同一章节的新位置——
-     * 不能用 [updateProgress]，那会污染最近阅读时间。
+     * 仅更新进度章节索引，不碰 lastReadPage / lastReadAt。 用于章节重排后把 [ComicEntity.lastReadChapterIndex]
+     * 重新指向同一章节的新位置—— 不能用 [updateProgress]，那会污染最近阅读时间。
      */
     @Query("UPDATE comics SET lastReadChapterIndex = :chapterIndex WHERE id = :id")
     suspend fun updateLastReadChapterIndex(id: Long, chapterIndex: Int)
@@ -54,18 +54,14 @@ interface ComicDao {
     @Query("UPDATE comics SET pageCount = :pageCount WHERE id = :id")
     suspend fun updatePageCount(id: Long, pageCount: Int)
 
-    @Query("DELETE FROM comics WHERE id = :id")
-    suspend fun deleteById(id: Long)
+    @Query("DELETE FROM comics WHERE id = :id") suspend fun deleteById(id: Long)
 
     // ===== 以下为目录扫描同步专用 =====
 
     @Query("SELECT * FROM comics WHERE folderId = :folderId")
     suspend fun getByFolderId(folderId: Long): List<ComicEntity>
 
-    /**
-     * IGNORE：撞 fileKey/uri 唯一索引时静默跳过该行而不是抛异常——
-     * 扫描不依赖返回值，让唯一索引成为真正的"兜底"而非崩溃点
-     */
+    /** IGNORE：撞 fileKey/uri 唯一索引时静默跳过该行而不是抛异常—— 扫描不依赖返回值，让唯一索引成为真正的"兜底"而非崩溃点 */
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertAll(comics: List<ComicEntity>): List<Long>
 
@@ -109,10 +105,7 @@ interface ComicDao {
     @Query("SELECT * FROM comics WHERE sourceType = :sourceType")
     suspend fun getBySourceType(sourceType: BookSourceType): List<ComicEntity>
 
-    /**
-     * 自动生成的封面只能填补当前快照里的空位/失效路径；如果用户已经手动
-     * 换了封面，coverPath 会改变，这次 UPDATE 就不会覆盖用户选择。
-     */
+    /** 自动生成的封面只能填补当前快照里的空位/失效路径；如果用户已经手动 换了封面，coverPath 会改变，这次 UPDATE 就不会覆盖用户选择。 */
     @Query(
         """UPDATE comics SET coverPath = :coverPath
            WHERE id = :id

@@ -14,8 +14,8 @@ internal object ThemeNightModeController {
      * Synchronizes the stored preference before content is composed.
      *
      * Returns true when applying the preference changes the effective uiMode and AppCompat will
-     * recreate the Activity. The caller must keep the splash screen visible and avoid composing
-     * the old Activity in that case.
+     * recreate the Activity. The caller must keep the splash screen visible and avoid composing the
+     * old Activity in that case.
      */
     fun synchronizeStartup(activity: AppCompatActivity, darkMode: DarkMode): Boolean {
         val currentIsDark = activity.resources.configuration.isDark()
@@ -30,12 +30,13 @@ internal object ThemeNightModeController {
         applied: ThemeSettings,
         committed: ThemeSettings,
     ) {
-        val plan = planThemeApplication(
-            applied = applied,
-            draft = committed,
-            currentIsDark = activity.resources.configuration.isDark(),
-            systemIsDark = isSystemCurrentlyDark(),
-        )
+        val plan =
+            planThemeApplication(
+                applied = applied,
+                draft = committed,
+                currentIsDark = activity.resources.configuration.isDark(),
+                systemIsDark = isSystemCurrentlyDark(),
+            )
         if (plan.updateNightMode) {
             applyAppCompatMode(committed.darkMode)
         }
@@ -54,8 +55,9 @@ internal fun isSystemCurrentlyDark(): Boolean = Resources.getSystem().configurat
 private fun Configuration.isDark(): Boolean =
     uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
 
-private fun DarkMode.toAppCompatMode(): Int = when (this) {
-    DarkMode.SYSTEM -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
-    DarkMode.LIGHT -> AppCompatDelegate.MODE_NIGHT_NO
-    DarkMode.DARK -> AppCompatDelegate.MODE_NIGHT_YES
-}
+private fun DarkMode.toAppCompatMode(): Int =
+    when (this) {
+        DarkMode.SYSTEM -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
+        DarkMode.LIGHT -> AppCompatDelegate.MODE_NIGHT_NO
+        DarkMode.DARK -> AppCompatDelegate.MODE_NIGHT_YES
+    }

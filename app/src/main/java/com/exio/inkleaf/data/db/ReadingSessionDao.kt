@@ -10,17 +10,14 @@ import androidx.room.Update
 /**
  * Persistence access for reading sessions.
  *
- * Inserts use ABORT so a second resumableSlot=1 row fails loudly instead of
- * silently replacing the global slot. The repository settles/deletes the prior
- * resumable row before inserting a new one.
+ * Inserts use ABORT so a second resumableSlot=1 row fails loudly instead of silently replacing the
+ * global slot. The repository settles/deletes the prior resumable row before inserting a new one.
  */
 @Dao
 interface ReadingSessionDao {
-    @Insert(onConflict = OnConflictStrategy.ABORT)
-    suspend fun insert(session: ReadingSessionEntity)
+    @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insert(session: ReadingSessionEntity)
 
-    @Update
-    suspend fun update(session: ReadingSessionEntity)
+    @Update suspend fun update(session: ReadingSessionEntity)
 
     @Query("SELECT * FROM reading_sessions WHERE id = :id")
     suspend fun getById(id: String): ReadingSessionEntity?
@@ -29,18 +26,17 @@ interface ReadingSessionDao {
     @Query("SELECT * FROM reading_sessions WHERE resumableSlot = 1 LIMIT 1")
     suspend fun getResumable(): ReadingSessionEntity?
 
-    @Query("DELETE FROM reading_sessions WHERE id = :id")
-    suspend fun deleteById(id: String)
+    @Query("DELETE FROM reading_sessions WHERE id = :id") suspend fun deleteById(id: String)
 
     /**
-     * Clear history: every permanent row plus the current resumable slot
-     * (which may still be temporary).
+     * Clear history: every permanent row plus the current resumable slot (which may still be
+     * temporary).
      */
     @Query(
         """
         DELETE FROM reading_sessions
         WHERE isPermanent = 1 OR resumableSlot = 1
-        """,
+        """
     )
     suspend fun clearHistory()
 
@@ -48,9 +44,8 @@ interface ReadingSessionDao {
     suspend fun countPermanent(): Long
 
     /**
-     * Permanent timeline, newest first. UUID [id] breaks same-millisecond ties.
-     * Shelf fields are left-joined by fileKey so deleted comics stay visible
-     * as unavailable history rows.
+     * Permanent timeline, newest first. UUID [id] breaks same-millisecond ties. Shelf fields are
+     * left-joined by fileKey so deleted comics stay visible as unavailable history rows.
      */
     @Query(
         """
@@ -80,7 +75,7 @@ interface ReadingSessionDao {
             ON c.fileKey = s.comicFileKey AND c.isDraft = 0
         WHERE s.isPermanent = 1
         ORDER BY s.startedAt DESC, s.id DESC
-        """,
+        """
     )
     fun observeHistoryPaging(): PagingSource<Int, HistoryRowProjection>
 }

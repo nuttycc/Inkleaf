@@ -7,10 +7,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 
-/**
- * 一次性消息 → Snackbar：展示完立即消费，防止旋转屏幕后重复弹出。
- * 各屏的"ViewModel 消息 + 展示后清空"契约收在这一处。
- */
+/** 一次性消息 → Snackbar：展示完立即消费，防止旋转屏幕后重复弹出。 各屏的"ViewModel 消息 + 展示后清空"契约收在这一处。 */
 @Composable
 internal fun SnackbarMessageEffect(
     message: String?,

@@ -14,9 +14,7 @@ private val Context.cacheSettingsDataStore by preferencesDataStore(name = "cache
 /**
  * 漫画缓存（zip 副本）总量的阶梯档位。
  *
- * 注意预算小于单本漫画体积时（如 512 MB 档遇上 1 GB 的大书），
- * "当前正读的书永不淘汰"的规则使实际语义退化为"只保留当前书"——
- * 这是物理边界而非失效，UI 文案需如实说明。
+ * 注意预算小于单本漫画体积时（如 512 MB 档遇上 1 GB 的大书）， "当前正读的书永不淘汰"的规则使实际语义退化为"只保留当前书"—— 这是物理边界而非失效，UI 文案需如实说明。
  */
 enum class CacheLimit(
     val label: String,
@@ -57,9 +55,11 @@ enum class CacheLimit(
         private const val AUTO_MAX_BYTES = 8_589_934_592L
 
         private fun recommendedBytes(context: Context): Long {
-            val availableBytes = runCatching {
-                StatFs(context.cacheDir.absolutePath).availableBytes
-            }.getOrDefault(AUTO_MIN_BYTES)
+            val availableBytes =
+                runCatching {
+                        StatFs(context.cacheDir.absolutePath).availableBytes
+                    }
+                    .getOrDefault(AUTO_MIN_BYTES)
 
             return (availableBytes * AUTO_FRACTION)
                 .toLong()
@@ -72,9 +72,10 @@ enum class CacheLimit(
 class CacheSettingsRepository(context: Context) {
     private val dataStore = context.applicationContext.cacheSettingsDataStore
 
-    val limit: Flow<CacheLimit> = dataStore.data.map { prefs ->
-        prefs[KEY_LIMIT].toEnum(CacheLimit.AUTO)
-    }
+    val limit: Flow<CacheLimit> =
+        dataStore.data.map { prefs ->
+            prefs[KEY_LIMIT].toEnum(CacheLimit.AUTO)
+        }
 
     suspend fun setLimit(value: CacheLimit) {
         dataStore.edit { it[KEY_LIMIT] = value.name }

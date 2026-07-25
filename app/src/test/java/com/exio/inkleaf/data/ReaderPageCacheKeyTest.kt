@@ -32,18 +32,20 @@ class ReaderPageCacheKeyTest {
 
     @Test
     fun `source revision changes the page cache key`() {
-        val oldKey = ReaderPageCacheKey.forPage(
-            "comic-42",
-            page = 1,
-            pageIdentity = "c",
-            sourceRevision = "old-source",
-        )
-        val newKey = ReaderPageCacheKey.forPage(
-            "comic-42",
-            page = 1,
-            pageIdentity = "c",
-            sourceRevision = "new-source",
-        )
+        val oldKey =
+            ReaderPageCacheKey.forPage(
+                "comic-42",
+                page = 1,
+                pageIdentity = "c",
+                sourceRevision = "old-source",
+            )
+        val newKey =
+            ReaderPageCacheKey.forPage(
+                "comic-42",
+                page = 1,
+                pageIdentity = "c",
+                sourceRevision = "new-source",
+            )
 
         assertNotEquals(oldKey, newKey)
     }

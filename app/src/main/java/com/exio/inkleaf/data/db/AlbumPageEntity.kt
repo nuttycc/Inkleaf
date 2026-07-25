@@ -8,18 +8,20 @@ import androidx.room.PrimaryKey
 /** A stable page record owned by a user-created album. */
 @Entity(
     tableName = "album_pages",
-    foreignKeys = [
-        ForeignKey(
-            entity = ComicEntity::class,
-            parentColumns = ["id"],
-            childColumns = ["comicId"],
-            onDelete = ForeignKey.CASCADE,
-        ),
-    ],
-    indices = [
-        Index(value = ["comicId"]),
-        Index(value = ["comicId", "position"]),
-    ],
+    foreignKeys =
+        [
+            ForeignKey(
+                entity = ComicEntity::class,
+                parentColumns = ["id"],
+                childColumns = ["comicId"],
+                onDelete = ForeignKey.CASCADE,
+            )
+        ],
+    indices =
+        [
+            Index(value = ["comicId"]),
+            Index(value = ["comicId", "position"]),
+        ],
 )
 data class AlbumPageEntity(
     @PrimaryKey val id: String,

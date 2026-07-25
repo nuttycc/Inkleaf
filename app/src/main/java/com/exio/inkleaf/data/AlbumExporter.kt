@@ -9,9 +9,6 @@ import androidx.core.content.FileProvider
 import com.exio.inkleaf.data.db.AlbumPageEntity
 import com.exio.inkleaf.data.db.AppDatabase
 import com.exio.inkleaf.data.db.BookSourceType
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileNotFoundException
 import java.io.IOException
@@ -22,6 +19,9 @@ import java.util.Locale
 import java.util.zip.Deflater
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 class AlbumExporter(context: Context) {
     private val appContext = context.applicationContext
@@ -46,39 +46,44 @@ class AlbumExporter(context: Context) {
     suspend fun createShareIntent(comicId: Long): Intent = albumFileMutex.withLock {
         withContext(Dispatchers.IO) {
             val album = loadAlbum(comicId)
-            val exportDirectory = File(exportsDirectory(appContext), comicId.toString()).apply {
-                mkdirs()
-            }
+            val exportDirectory =
+                File(exportsDirectory(appContext), comicId.toString()).apply {
+                    mkdirs()
+                }
             val exportFile = File(exportDirectory, fileNameForTitle(album.title))
             atomicWrite(exportFile) { output ->
                 writeCbz(output, album.title, album.coverPageId, album.pages, ::openPage)
             }
 
-            val contentUri = FileProvider.getUriForFile(
-                appContext,
-                "${appContext.packageName}.fileprovider",
-                exportFile,
-            )
-            val sendIntent = Intent(Intent.ACTION_SEND).apply {
-                type = CBZ_MIME_TYPE
-                putExtra(Intent.EXTRA_STREAM, contentUri)
-                clipData = ClipData.newUri(
-                    appContext.contentResolver,
-                    exportFile.name,
-                    contentUri,
+            val contentUri =
+                FileProvider.getUriForFile(
+                    appContext,
+                    "${appContext.packageName}.fileprovider",
+                    exportFile,
                 )
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
+            val sendIntent =
+                Intent(Intent.ACTION_SEND).apply {
+                    type = CBZ_MIME_TYPE
+                    putExtra(Intent.EXTRA_STREAM, contentUri)
+                    clipData =
+                        ClipData.newUri(
+                            appContext.contentResolver,
+                            exportFile.name,
+                            contentUri,
+                        )
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
             Intent.createChooser(sendIntent, "分享图册").apply {
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
         }
     }
 
-    suspend fun suggestedFileName(comicId: Long): String = withContext(Dispatchers.IO) {
-        val comic = comicDao.getById(comicId) ?: throw FileNotFoundException("图册不存在")
-        fileNameForTitle(comic.title)
-    }
+    suspend fun suggestedFileName(comicId: Long): String =
+        withContext(Dispatchers.IO) {
+            val comic = comicDao.getById(comicId) ?: throw FileNotFoundException("图册不存在")
+            fileNameForTitle(comic.title)
+        }
 
     private suspend fun loadAlbum(comicId: Long): ExportAlbum {
         val comic = comicDao.getById(comicId) ?: throw FileNotFoundException("图册不存在")
@@ -138,13 +143,14 @@ internal data class ExportPage(
     val extension: String,
 )
 
-private fun AlbumPageEntity.toExportPage() = ExportPage(
-    id = id,
-    position = position,
-    relativePath = relativePath,
-    displayName = displayName,
-    extension = extension,
-)
+private fun AlbumPageEntity.toExportPage() =
+    ExportPage(
+        id = id,
+        position = position,
+        relativePath = relativePath,
+        displayName = displayName,
+        extension = extension,
+    )
 
 internal fun writeCbz(
     output: OutputStream,
@@ -160,10 +166,11 @@ internal fun writeCbz(
         zip.putNextEntry(ZipEntry("ComicInfo.xml"))
         zip.write(
             comicInfoXml(
-                title,
-                orderedPages,
-                coverPageId
-            ).toByteArray(StandardCharsets.UTF_8)
+                    title,
+                    orderedPages,
+                    coverPageId,
+                )
+                .toByteArray(StandardCharsets.UTF_8)
         )
         zip.closeEntry()
 
@@ -177,21 +184,20 @@ internal fun writeCbz(
 
 internal fun pageEntryName(index: Int, pageCount: Int, extension: String): String {
     val width = maxOf(4, pageCount.toString().length)
-    val safeExtension = extension
-        .lowercase(Locale.ROOT)
-        .filter(Char::isLetterOrDigit)
-        .ifBlank { "jpg" }
+    val safeExtension =
+        extension.lowercase(Locale.ROOT).filter(Char::isLetterOrDigit).ifBlank { "jpg" }
     return "page-${(index + 1).toString().padStart(width, '0')}.$safeExtension"
 }
 
 internal fun fileNameForTitle(title: String): String {
-    val safeTitle = title
-        .replace(Regex("""[\\/:*?\"<>|\p{Cntrl}]"""), "_")
-        .trim()
-        .trimEnd('.', ' ')
-        .take(80)
-        .trimEnd('.', ' ')
-        .ifBlank { "Inkleaf" }
+    val safeTitle =
+        title
+            .replace(Regex("""[\\/:*?\"<>|\p{Cntrl}]"""), "_")
+            .trim()
+            .trimEnd('.', ' ')
+            .take(80)
+            .trimEnd('.', ' ')
+            .ifBlank { "Inkleaf" }
     return "$safeTitle.cbz"
 }
 
@@ -215,18 +221,19 @@ internal fun comicInfoXml(
     append("</ComicInfo>\n")
 }
 
-private fun xmlEscape(value: String): String = buildString(value.length) {
-    value.forEach { character ->
-        when (character) {
-            '&' -> append("&amp;")
-            '<' -> append("&lt;")
-            '>' -> append("&gt;")
-            '"' -> append("&quot;")
-            '\'' -> append("&apos;")
-            else -> append(character)
+private fun xmlEscape(value: String): String =
+    buildString(value.length) {
+        value.forEach { character ->
+            when (character) {
+                '&' -> append("&amp;")
+                '<' -> append("&lt;")
+                '>' -> append("&gt;")
+                '"' -> append("&quot;")
+                '\'' -> append("&apos;")
+                else -> append(character)
+            }
         }
     }
-}
 
 private inline fun atomicWrite(file: File, write: (OutputStream) -> Unit) {
     file.parentFile?.mkdirs()

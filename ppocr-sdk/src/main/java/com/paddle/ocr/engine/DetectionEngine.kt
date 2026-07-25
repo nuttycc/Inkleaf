@@ -65,23 +65,25 @@ class DetectionEngine(
         val preprocessMs = System.currentTimeMillis() - preStart
 
         val infStart = System.currentTimeMillis()
-        val (outputData, outputShape) = ortManager.runDetection(preResult.tensorData, preResult.shape)
+        val (outputData, outputShape) =
+            ortManager.runDetection(preResult.tensorData, preResult.shape)
         val inferenceMs = System.currentTimeMillis() - infStart
 
         val postStart = System.currentTimeMillis()
-        val boxes = DBPostProcessor.process(
-            pred = outputData,
-            predShape = outputShape,
-            thresh = config.detThresh,
-            boxThresh = config.detBoxThresh,
-            unclipRatio = config.detUnclipRatio,
-            maxCandidates = config.detMaxCandidates,
-            useDilation = config.detUseDilation,
-            scoreMode = config.detScoreMode,
-            boxType = config.detBoxType,
-            originalH = preResult.originalH,
-            originalW = preResult.originalW,
-        )
+        val boxes =
+            DBPostProcessor.process(
+                pred = outputData,
+                predShape = outputShape,
+                thresh = config.detThresh,
+                boxThresh = config.detBoxThresh,
+                unclipRatio = config.detUnclipRatio,
+                maxCandidates = config.detMaxCandidates,
+                useDilation = config.detUseDilation,
+                scoreMode = config.detScoreMode,
+                boxType = config.detBoxType,
+                originalH = preResult.originalH,
+                originalW = preResult.originalW,
+            )
         val postprocessMs = System.currentTimeMillis() - postStart
 
         return DetectionResult(

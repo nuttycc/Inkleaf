@@ -12,11 +12,12 @@ class ReadingSessionStateMachineTest {
     private lateinit var machine: ReadingSessionStateMachine
     private var nextId = 0
 
-    private val comic = ReadingSessionComicRef(
-        fileKey = "book-a",
-        titleSnapshot = "Book A",
-        sourceType = BookSourceType.EXTERNAL_ARCHIVE,
-    )
+    private val comic =
+        ReadingSessionComicRef(
+            fileKey = "book-a",
+            titleSnapshot = "Book A",
+            sourceType = BookSourceType.EXTERNAL_ARCHIVE,
+        )
     private val startPos = position(10)
     private val movedPos = position(12)
 
@@ -24,10 +25,11 @@ class ReadingSessionStateMachineTest {
     fun setUp() {
         clock = FakeReadingClock(initialMillis = 1_000_000L)
         nextId = 0
-        machine = ReadingSessionStateMachine(
-            clock = clock,
-            idGenerator = { "s-${++nextId}" },
-        )
+        machine =
+            ReadingSessionStateMachine(
+                clock = clock,
+                idGenerator = { "s-${++nextId}" },
+            )
     }
 
     @Test
@@ -109,9 +111,8 @@ class ReadingSessionStateMachineTest {
         openReadyVisibleForeground()
         clock.advanceBy(40_000L)
         val firstId = machine.resumable!!.id
-        val leaveEffects = machine.onEvent(
-            ReadingSessionEvent.LeaveReader(ReadingSessionEndReason.LEFT_READER),
-        )
+        val leaveEffects =
+            machine.onEvent(ReadingSessionEvent.LeaveReader(ReadingSessionEndReason.LEFT_READER))
         val completed = leaveEffects.filterIsInstance<ReadingSessionEffect.CompletePermanent>()
         assertEquals(1, completed.size)
         assertEquals(firstId, completed.single().session.id)
@@ -132,7 +133,8 @@ class ReadingSessionStateMachineTest {
         val firstId = machine.resumable!!.id
         val now = clock.nowMillis()
         val openEffects = machine.onEvent(ReadingSessionEvent.OpenComic(comic))
-        val settled = openEffects.filterIsInstance<ReadingSessionEffect.CompletePermanent>().single()
+        val settled =
+            openEffects.filterIsInstance<ReadingSessionEffect.CompletePermanent>().single()
         assertEquals(firstId, settled.session.id)
         assertEquals(ReadingSessionEndReason.LEFT_READER, settled.session.endReason)
         assertEquals(now, settled.session.endedAt)
@@ -148,9 +150,8 @@ class ReadingSessionStateMachineTest {
     fun `short unmoved session is discarded on leave`() {
         openReadyVisibleForeground()
         clock.advanceBy(10_000L)
-        val effects = machine.onEvent(
-            ReadingSessionEvent.LeaveReader(ReadingSessionEndReason.LEFT_READER),
-        )
+        val effects =
+            machine.onEvent(ReadingSessionEvent.LeaveReader(ReadingSessionEndReason.LEFT_READER))
         assertEquals(
             listOf(ReadingSessionEffect.DiscardTemporary("s-1")),
             effects,
@@ -163,9 +164,8 @@ class ReadingSessionStateMachineTest {
         openReadyVisibleForeground()
         clock.advanceBy(5_000L)
         machine.onEvent(ReadingSessionEvent.PageVisible(movedPos))
-        val effects = machine.onEvent(
-            ReadingSessionEvent.LeaveReader(ReadingSessionEndReason.LEFT_READER),
-        )
+        val effects =
+            machine.onEvent(ReadingSessionEvent.LeaveReader(ReadingSessionEndReason.LEFT_READER))
         val completed = effects.filterIsInstance<ReadingSessionEffect.CompletePermanent>()
         assertEquals(1, completed.size)
         assertEquals(movedPos, completed.single().session.endPosition)
@@ -230,9 +230,8 @@ class ReadingSessionStateMachineTest {
         machine.onEvent(ReadingSessionEvent.EnteredInteractiveForeground)
         val readyPos = position(10, revision = "rev-b")
         val readyEffects = machine.onEvent(ReadingSessionEvent.ReaderReady(readyPos))
-        val settled = readyEffects
-            .filterIsInstance<ReadingSessionEffect.CompletePermanent>()
-            .single()
+        val settled =
+            readyEffects.filterIsInstance<ReadingSessionEffect.CompletePermanent>().single()
         assertEquals(oldId, settled.session.id)
         assertEquals(ReadingSessionEndReason.SOURCE_CHANGED, settled.session.endReason)
         assertEquals(pauseCheckpoint, settled.session.endedAt)
@@ -242,7 +241,10 @@ class ReadingSessionStateMachineTest {
         assertNull(machine.resumable)
 
         val visibleEffects = machine.onEvent(ReadingSessionEvent.PageVisible(readyPos))
-        assertEquals(1, visibleEffects.filterIsInstance<ReadingSessionEffect.UpsertResumable>().size)
+        assertEquals(
+            1,
+            visibleEffects.filterIsInstance<ReadingSessionEffect.UpsertResumable>().size,
+        )
         assertEquals("s-2", machine.resumable!!.id)
     }
 
@@ -304,10 +306,8 @@ class ReadingSessionStateMachineTest {
 
         val restoredMachine = ReadingSessionStateMachine(clock) { "restored" }
         val restoreEffects = restoredMachine.onEvent(ReadingSessionEvent.ProcessRestored(snapshot))
-        val normalized = restoreEffects
-            .filterIsInstance<ReadingSessionEffect.UpsertResumable>()
-            .single()
-            .session
+        val normalized =
+            restoreEffects.filterIsInstance<ReadingSessionEffect.UpsertResumable>().single().session
         assertEquals(ReadingSessionStatus.PAUSED, normalized.status)
         assertEquals(snapshot.lastCheckpointAt, normalized.lastCheckpointAt)
         assertEquals(snapshot.activeReadingMillis, normalized.activeReadingMillis)
@@ -340,12 +340,13 @@ class ReadingSessionStateMachineTest {
         assertTrue(machine.resumable != null)
     }
 
-    private fun position(global: Int, revision: String = "rev-a") = ReadingPositionSnapshot(
-        pageIdentity = "p$global",
-        globalPageIndex = global,
-        chapterIndex = 0,
-        pageIndex = global,
-        chapterTitle = "Ch 1",
-        sourceRevision = revision,
-    )
+    private fun position(global: Int, revision: String = "rev-a") =
+        ReadingPositionSnapshot(
+            pageIdentity = "p$global",
+            globalPageIndex = global,
+            chapterIndex = 0,
+            pageIndex = global,
+            chapterTitle = "Ch 1",
+            sourceRevision = revision,
+        )
 }

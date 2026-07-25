@@ -8,24 +8,25 @@ import androidx.room.withTransaction
 import com.exio.inkleaf.data.db.AppDatabase
 import com.exio.inkleaf.data.db.HistoryRowProjection
 import com.exio.inkleaf.data.db.ReadingSessionEntity
+import java.util.UUID
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import java.util.UUID
 
 /**
  * Sole write boundary for reading-session state transitions.
  *
- * Applies [ReadingSessionEffect] values from [ReadingSessionStateMachine] inside
- * Room transactions so the unique resumable slot and permanence flags stay
- * consistent. UI and Reader never touch the DAO directly.
+ * Applies [ReadingSessionEffect] values from [ReadingSessionStateMachine] inside Room transactions
+ * so the unique resumable slot and permanence flags stay consistent. UI and Reader never touch the
+ * DAO directly.
  *
- * One process-wide instance owns the in-memory machine. A [Mutex] serializes
- * hydrate / dispatch / clear so concurrent coroutines cannot race the machine.
+ * One process-wide instance owns the in-memory machine. A [Mutex] serializes hydrate / dispatch /
+ * clear so concurrent coroutines cannot race the machine.
  *
  * Spec: #15 repository transaction boundary, #18 Paging config.
  */
-class ReadingSessionRepository private constructor(
+class ReadingSessionRepository
+private constructor(
     context: Context,
     private val clock: ReadingClock,
     private val idGenerator: () -> String,
@@ -39,16 +40,19 @@ class ReadingSessionRepository private constructor(
     private val machine = ReadingSessionStateMachine(clock, idGenerator)
     private var hydrated = false
 
-    fun historyPaging(): Flow<PagingData<HistoryRowProjection>> = Pager(
-        config = PagingConfig(
-            pageSize = 50,
-            initialLoadSize = 100,
-            prefetchDistance = 15,
-            enablePlaceholders = false,
-            maxSize = 250,
-        ),
-        pagingSourceFactory = { dao.observeHistoryPaging() },
-    ).flow
+    fun historyPaging(): Flow<PagingData<HistoryRowProjection>> =
+        Pager(
+                config =
+                    PagingConfig(
+                        pageSize = 50,
+                        initialLoadSize = 100,
+                        prefetchDistance = 15,
+                        enablePlaceholders = false,
+                        maxSize = 250,
+                    ),
+                pagingSourceFactory = { dao.observeHistoryPaging() },
+            )
+            .flow
 
     suspend fun deletePermanent(id: String): ReadingSessionEntity? = mutex.withLock {
         db.withTransaction {
@@ -80,15 +84,14 @@ class ReadingSessionRepository private constructor(
     }
 
     /** Dispatch a domain event and persist resulting effects atomically. */
-    suspend fun dispatch(event: ReadingSessionEvent): List<ReadingSessionEffect> =
-        mutex.withLock {
-            hydrateLocked()
-            db.withTransaction {
-                val effects = machine.onEvent(event)
-                applyEffects(effects)
-                effects
-            }
+    suspend fun dispatch(event: ReadingSessionEvent): List<ReadingSessionEffect> = mutex.withLock {
+        hydrateLocked()
+        db.withTransaction {
+            val effects = machine.onEvent(event)
+            applyEffects(effects)
+            effects
         }
+    }
 
     /** Caller must hold [mutex]. */
     private suspend fun hydrateLocked() {
@@ -110,7 +113,7 @@ class ReadingSessionRepository private constructor(
                     require(entity.endGlobalPageIndex == null)
                     require(
                         entity.status == ReadingSessionStatus.ACTIVE.name ||
-                            entity.status == ReadingSessionStatus.PAUSED.name,
+                            entity.status == ReadingSessionStatus.PAUSED.name
                     )
                     val existing = dao.getById(entity.id)
                     if (existing == null) {
@@ -142,20 +145,22 @@ class ReadingSessionRepository private constructor(
     }
 
     companion object {
-        @Volatile
-        private var instance: ReadingSessionRepository? = null
+        @Volatile private var instance: ReadingSessionRepository? = null
 
         fun getInstance(
             context: Context,
             clock: ReadingClock = SystemReadingClock(),
             idGenerator: () -> String = { UUID.randomUUID().toString() },
         ): ReadingSessionRepository =
-            instance ?: synchronized(this) {
-                instance ?: ReadingSessionRepository(
-                    context = context.applicationContext,
-                    clock = clock,
-                    idGenerator = idGenerator,
-                ).also { instance = it }
-            }
+            instance
+                ?: synchronized(this) {
+                    instance
+                        ?: ReadingSessionRepository(
+                                context = context.applicationContext,
+                                clock = clock,
+                                idGenerator = idGenerator,
+                            )
+                            .also { instance = it }
+                }
     }
 }

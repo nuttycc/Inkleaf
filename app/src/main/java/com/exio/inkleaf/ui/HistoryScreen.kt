@@ -93,11 +93,12 @@ fun HistoryScreen(
             when (event) {
                 is HistoryEvent.SessionDeleted -> {
                     pendingDelete = event
-                    val result = snackbarHostState.showSnackbar(
-                        message = "已删除阅读记录",
-                        actionLabel = "撤销",
-                        duration = SnackbarDuration.Long,
-                    )
+                    val result =
+                        snackbarHostState.showSnackbar(
+                            message = "已删除阅读记录",
+                            actionLabel = "撤销",
+                            duration = SnackbarDuration.Long,
+                        )
                     if (result == SnackbarResult.ActionPerformed) {
                         viewModel.restoreSession(event.snapshot)
                     }
@@ -145,41 +146,33 @@ fun HistoryScreen(
                         }
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                    scrolledContainerColor = MaterialTheme.colorScheme.background,
-                ),
+                colors =
+                    TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.background,
+                        scrolledContainerColor = MaterialTheme.colorScheme.background,
+                    ),
             )
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { innerPadding ->
         when {
-            showInitialSkeleton -> HistorySkeletonList(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding),
-            )
-            refresh is LoadState.Error && !hasItems -> HistoryError(
-                message = "无法加载阅读历史",
-                onRetry = { items.retry() },
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding),
-            )
-            showEmpty -> HistoryEmpty(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding),
-            )
-            else -> HistoryTimelineList(
-                items = items,
-                resolvingSessionId = viewModel.resolvingSessionId,
-                onOpen = viewModel::continueReading,
-                onDelete = { viewModel.deleteSession(it.id) },
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding),
-            )
+            showInitialSkeleton ->
+                HistorySkeletonList(modifier = Modifier.fillMaxSize().padding(innerPadding))
+            refresh is LoadState.Error && !hasItems ->
+                HistoryError(
+                    message = "无法加载阅读历史",
+                    onRetry = { items.retry() },
+                    modifier = Modifier.fillMaxSize().padding(innerPadding),
+                )
+            showEmpty -> HistoryEmpty(modifier = Modifier.fillMaxSize().padding(innerPadding))
+            else ->
+                HistoryTimelineList(
+                    items = items,
+                    resolvingSessionId = viewModel.resolvingSessionId,
+                    onOpen = viewModel::continueReading,
+                    onDelete = { viewModel.deleteSession(it.id) },
+                    modifier = Modifier.fillMaxSize().padding(innerPadding),
+                )
         }
     }
 
@@ -190,10 +183,7 @@ fun HistoryScreen(
             },
             title = { Text("清空阅读历史？") },
             text = {
-                Text(
-                    "所有阅读会话记录都会被删除，且无法撤销。" +
-                        "书架、阅读进度和已保存内容不会受到影响。",
-                )
+                Text("所有阅读会话记录都会被删除，且无法撤销。" + "书架、阅读进度和已保存内容不会受到影响。")
             },
             confirmButton = {
                 TextButton(
@@ -207,13 +197,17 @@ fun HistoryScreen(
                         showClearConfirm = false
                         clearInProgress = false
                     },
-                ) { Text("清空") }
+                ) {
+                    Text("清空")
+                }
             },
             dismissButton = {
                 TextButton(
                     enabled = !clearInProgress,
                     onClick = { showClearConfirm = false },
-                ) { Text("取消") }
+                ) {
+                    Text("取消")
+                }
             },
         )
     }
@@ -232,8 +226,10 @@ fun HistoryScreen(
                     onClick = {
                         sourceChanged = null
                         onOpenSession(pending.comicId, pending.approximatePage)
-                    },
-                ) { Text("仍然继续") }
+                    }
+                ) {
+                    Text("仍然继续")
+                }
             },
             dismissButton = {
                 TextButton(onClick = { sourceChanged = null }) { Text("取消") }
@@ -273,18 +269,18 @@ private fun HistoryTimelineList(
             }
         }
         when (items.loadState.append) {
-            is LoadState.Loading -> item(key = "append-skeleton") {
-                HistorySessionSkeletonRow()
-            }
-            is LoadState.Error -> item(key = "append-error") {
-                HistoryError(
-                    message = "无法加载更多记录",
-                    onRetry = { items.retry() },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                )
-            }
+            is LoadState.Loading ->
+                item(key = "append-skeleton") {
+                    HistorySessionSkeletonRow()
+                }
+            is LoadState.Error ->
+                item(key = "append-error") {
+                    HistoryError(
+                        message = "无法加载更多记录",
+                        onRetry = { items.retry() },
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    )
+                }
             else -> Unit
         }
     }
@@ -296,10 +292,10 @@ private fun HistoryDateHeader(label: String) {
         text = label,
         style = MaterialTheme.typography.titleSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surface)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+        modifier =
+            Modifier.fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(horizontal = 16.dp, vertical = 10.dp),
     )
 }
 
@@ -319,18 +315,18 @@ private fun HistorySessionRow(
     }
     var menuOpen by remember { mutableStateOf(false) }
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .then(
-                if (unavailable) {
-                    Modifier.semantics { contentDescription = rowDescription }
-                } else {
-                    Modifier
-                        .clickable(enabled = !resolving, onClick = onOpen)
-                        .semantics { contentDescription = rowDescription }
-                },
-            )
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+        modifier =
+            Modifier.fillMaxWidth()
+                .then(
+                    if (unavailable) {
+                        Modifier.semantics { contentDescription = rowDescription }
+                    } else {
+                        Modifier.clickable(enabled = !resolving, onClick = onOpen).semantics {
+                            contentDescription = rowDescription
+                        }
+                    }
+                )
+                .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -339,9 +335,7 @@ private fun HistorySessionRow(
             unavailable = unavailable,
         )
         Column(
-            modifier = Modifier
-                .weight(1f)
-                .alpha(if (unavailable) 0.8f else 1f),
+            modifier = Modifier.weight(1f).alpha(if (unavailable) 0.8f else 1f),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Text(
@@ -405,12 +399,12 @@ private fun HistoryCover(
 ) {
     val shape = RoundedCornerShape(6.dp)
     Box(
-        modifier = Modifier
-            .width(56.dp)
-            .aspectRatio(2f / 3f)
-            .clip(shape)
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-            .alpha(if (unavailable) 0.55f else 1f),
+        modifier =
+            Modifier.width(56.dp)
+                .aspectRatio(2f / 3f)
+                .clip(shape)
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                .alpha(if (unavailable) 0.55f else 1f),
         contentAlignment = Alignment.Center,
     ) {
         if (!coverPath.isNullOrBlank() && File(coverPath).isFile) {
@@ -486,42 +480,40 @@ private fun HistorySkeletonList(modifier: Modifier = Modifier) {
 private fun HistorySessionSkeletonRow() {
     val surface = MaterialTheme.colorScheme.surfaceContainerHigh
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Box(
-            modifier = Modifier
-                .width(56.dp)
-                .aspectRatio(2f / 3f)
-                .clip(RoundedCornerShape(6.dp))
-                .background(surface),
+            modifier =
+                Modifier.width(56.dp)
+                    .aspectRatio(2f / 3f)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(surface)
         )
         Column(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Box(
-                modifier = Modifier
-                    .fillMaxWidth(0.7f)
-                    .height(16.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(surface),
+                modifier =
+                    Modifier.fillMaxWidth(0.7f)
+                        .height(16.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(surface)
             )
             Box(
-                modifier = Modifier
-                    .fillMaxWidth(0.5f)
-                    .height(14.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(surface),
+                modifier =
+                    Modifier.fillMaxWidth(0.5f)
+                        .height(14.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(surface)
             )
             Box(
-                modifier = Modifier
-                    .fillMaxWidth(0.6f)
-                    .height(12.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(surface),
+                modifier =
+                    Modifier.fillMaxWidth(0.6f)
+                        .height(12.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(surface)
             )
         }
     }

@@ -71,7 +71,9 @@ fun OcrModelDownloadScreen(
             TopAppBar(
                 title = { Text("OCR 模型管理") },
                 navigationIcon = {
-                    IconButton(onClick = { if (downloading) showCancelDialog = true else onBack() }) {
+                    IconButton(
+                        onClick = { if (downloading) showCancelDialog = true else onBack() }
+                    ) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 },
@@ -113,11 +115,15 @@ fun OcrModelDownloadScreen(
             title = { Text("取消下载？") },
             text = { Text("已完成的文件会保留，下次可以继续下载。") },
             confirmButton = {
-                TextButton(onClick = {
-                    showCancelDialog = false
-                    viewModel.cancelDownload()
-                    onBack()
-                }) { Text("取消下载") }
+                TextButton(
+                    onClick = {
+                        showCancelDialog = false
+                        viewModel.cancelDownload()
+                        onBack()
+                    }
+                ) {
+                    Text("取消下载")
+                }
             },
             dismissButton = {
                 TextButton(onClick = { showCancelDialog = false }) { Text("继续下载") }
@@ -143,7 +149,7 @@ fun OcrModelDownloadScreen(
                     onClick = {
                         viewModel.deleteVariant(variant)
                         variantToDelete = null
-                    },
+                    }
                 ) {
                     Text("删除", color = MaterialTheme.colorScheme.error)
                 }
@@ -166,28 +172,28 @@ private fun ModelManagementCard(
 ) {
     val isTargetingThis = isSelectedVariant && state != null
 
-    val containerColor = if (option.active) {
-        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
-    } else if (option.installed) {
-        MaterialTheme.colorScheme.surfaceContainerLow
-    } else {
-        MaterialTheme.colorScheme.surfaceContainerLowest
-    }
+    val containerColor =
+        if (option.active) {
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
+        } else if (option.installed) {
+            MaterialTheme.colorScheme.surfaceContainerLow
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerLowest
+        }
 
-    val border = if (option.active) {
-        BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary)
-    } else {
-        BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-    }
+    val border =
+        if (option.active) {
+            BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary)
+        } else {
+            BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+        }
 
     OutlinedCard(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.outlinedCardColors(containerColor = containerColor),
         border = border,
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-        ) {
+        Column(modifier = Modifier.padding(16.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -208,7 +214,8 @@ private fun ModelManagementCard(
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                text = "${option.variant.languageSummary} · ${formatModelBytes(option.variant.totalBytes)}",
+                text =
+                    "${option.variant.languageSummary} · ${formatModelBytes(option.variant.totalBytes)}",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.outline,
             )
@@ -234,7 +241,11 @@ private fun ModelManagementCard(
                         }
                     }
                     is OcrDownloadUiState.Downloading -> {
-                        val fraction = (current.downloadedBytes.toFloat() / current.totalBytes).coerceIn(0f, 1f)
+                        val fraction =
+                            (current.downloadedBytes.toFloat() / current.totalBytes).coerceIn(
+                                0f,
+                                1f,
+                            )
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(
                                 "来源：${current.sourceName}",
@@ -264,7 +275,12 @@ private fun ModelManagementCard(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text(current.message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
+                            Text(
+                                current.message,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.weight(1f),
+                            )
                             TextButton(onClick = viewModel::retryDownload) { Text("重试") }
                         }
                     }
@@ -274,8 +290,15 @@ private fun ModelManagementCard(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text("下载源不可用，请检查网络", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
-                            TextButton(onClick = { viewModel.selectSource(autoStart = true) }) { Text("重试") }
+                            Text(
+                                "下载源不可用，请检查网络",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.weight(1f),
+                            )
+                            TextButton(onClick = { viewModel.selectSource(autoStart = true) }) {
+                                Text("重试")
+                            }
                         }
                     }
                     else -> Unit
@@ -293,15 +316,28 @@ private fun ModelManagementCard(
                                 onClick = {},
                                 enabled = false,
                             ) {
-                                Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Icon(
+                                    Icons.Filled.Check,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                )
                                 Spacer(Modifier.width(6.dp))
                                 Text("正在使用")
                             }
                             OutlinedButton(
                                 onClick = onDeleteClick,
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f)),
+                                border =
+                                    BorderStroke(
+                                        1.dp,
+                                        MaterialTheme.colorScheme.error.copy(alpha = 0.5f),
+                                    ),
                             ) {
-                                Icon(Icons.Filled.Delete, contentDescription = "删除", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
+                                Icon(
+                                    Icons.Filled.Delete,
+                                    contentDescription = "删除",
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(18.dp),
+                                )
                                 Spacer(Modifier.width(6.dp))
                                 Text("删除", color = MaterialTheme.colorScheme.error)
                             }
@@ -313,16 +349,23 @@ private fun ModelManagementCard(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Button(
-                                onClick = { viewModel.activateVariant(option.variant) },
-                            ) {
+                            Button(onClick = { viewModel.activateVariant(option.variant) }) {
                                 Text("切换使用")
                             }
                             OutlinedButton(
                                 onClick = onDeleteClick,
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f)),
+                                border =
+                                    BorderStroke(
+                                        1.dp,
+                                        MaterialTheme.colorScheme.error.copy(alpha = 0.5f),
+                                    ),
                             ) {
-                                Icon(Icons.Filled.Delete, contentDescription = "删除", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
+                                Icon(
+                                    Icons.Filled.Delete,
+                                    contentDescription = "删除",
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(18.dp),
+                                )
                                 Spacer(Modifier.width(6.dp))
                                 Text("删除", color = MaterialTheme.colorScheme.error)
                             }

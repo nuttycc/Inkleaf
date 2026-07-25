@@ -39,26 +39,28 @@ class SavedViewModel(app: Application) : AndroidViewModel(app) {
     private val repository = BookmarkRepository(app)
     private val hiddenBookmarkIds = MutableStateFlow<Set<Long>>(emptySet())
     internal val thumbnailStates = mutableStateMapOf<Long, BookmarkThumbnailState>()
-    private val repositoryBookmarks = repository.observeAll()
-        .onEach(::reconcileRemovedBookmarks)
-        .stateIn(viewModelScope, SharingStarted.Lazily, null)
+    private val repositoryBookmarks =
+        repository
+            .observeAll()
+            .onEach(::reconcileRemovedBookmarks)
+            .stateIn(viewModelScope, SharingStarted.Lazily, null)
     private val eventChannel = Channel<SavedEvent>(Channel.BUFFERED)
 
-    val bookmarks: StateFlow<List<BookmarkWithComic>?> = combine(
-        repositoryBookmarks,
-        hiddenBookmarkIds,
-    ) { storedBookmarks, hiddenIds ->
-        storedBookmarks?.filterNot { it.bookmark.id in hiddenIds }
-    }.stateIn(viewModelScope, SharingStarted.Lazily, null)
+    val bookmarks: StateFlow<List<BookmarkWithComic>?> =
+        combine(
+                repositoryBookmarks,
+                hiddenBookmarkIds,
+            ) { storedBookmarks, hiddenIds ->
+                storedBookmarks?.filterNot { it.bookmark.id in hiddenIds }
+            }
+            .stateIn(viewModelScope, SharingStarted.Lazily, null)
 
     internal val events = eventChannel.receiveAsFlow()
 
     private fun reconcileRemovedBookmarks(storedBookmarks: List<BookmarkWithComic>) {
         val storedIds = storedBookmarks.mapTo(mutableSetOf()) { it.bookmark.id }
         hiddenBookmarkIds.update { hiddenIds -> hiddenIds.intersect(storedIds) }
-        thumbnailStates.keys
-            .filterNot(storedIds::contains)
-            .forEach(thumbnailStates::remove)
+        thumbnailStates.keys.filterNot(storedIds::contains).forEach(thumbnailStates::remove)
     }
 
     fun loadThumbnail(bookmark: BookmarkEntity) {
@@ -66,15 +68,15 @@ class SavedViewModel(app: Application) : AndroidViewModel(app) {
         thumbnailStates[bookmark.id] = BookmarkThumbnailState.Loading
 
         viewModelScope.launch {
-            thumbnailStates[bookmark.id] = try {
-                repository.loadThumbnail(bookmark)
-                    ?.let(BookmarkThumbnailState::Ready)
-                    ?: BookmarkThumbnailState.Unavailable
-            } catch (error: CancellationException) {
-                throw error
-            } catch (_: Exception) {
-                BookmarkThumbnailState.Unavailable
-            }
+            thumbnailStates[bookmark.id] =
+                try {
+                    repository.loadThumbnail(bookmark)?.let(BookmarkThumbnailState::Ready)
+                        ?: BookmarkThumbnailState.Unavailable
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (_: Exception) {
+                    BookmarkThumbnailState.Unavailable
+                }
         }
     }
 
@@ -91,9 +93,7 @@ class SavedViewModel(app: Application) : AndroidViewModel(app) {
             } catch (error: Exception) {
                 hiddenBookmarkIds.update { it - bookmark.id }
                 eventChannel.send(
-                    SavedEvent.Message(
-                        error.message?.let { "移除书签失败：$it" } ?: "移除书签失败",
-                    ),
+                    SavedEvent.Message(error.message?.let { "移除书签失败：$it" } ?: "移除书签失败")
                 )
             }
         }
@@ -108,9 +108,7 @@ class SavedViewModel(app: Application) : AndroidViewModel(app) {
                 throw error
             } catch (error: Exception) {
                 eventChannel.send(
-                    SavedEvent.Message(
-                        error.message?.let { "恢复书签失败：$it" } ?: "恢复书签失败",
-                    ),
+                    SavedEvent.Message(error.message?.let { "恢复书签失败：$it" } ?: "恢复书签失败")
                 )
             }
         }
@@ -118,15 +116,14 @@ class SavedViewModel(app: Application) : AndroidViewModel(app) {
 
     fun resolve(bookmark: BookmarkEntity, onResolved: (BookmarkResolution) -> Unit) {
         viewModelScope.launch {
-            val resolution = try {
-                repository.resolve(bookmark)
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Exception) {
-                BookmarkResolution.Unavailable(
-                    error.message ?: "无法打开这个书签",
-                )
-            }
+            val resolution =
+                try {
+                    repository.resolve(bookmark)
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    BookmarkResolution.Unavailable(error.message ?: "无法打开这个书签")
+                }
             onResolved(resolution)
         }
     }

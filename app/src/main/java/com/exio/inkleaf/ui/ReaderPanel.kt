@@ -30,11 +30,12 @@ internal enum class ReaderPanel {
     Tools,
 }
 
-internal fun ReaderPanel.title(): String = when (this) {
-    ReaderPanel.Chapters -> "章节列表"
-    ReaderPanel.Bookmarks -> "本书书签"
-    ReaderPanel.Tools -> "当前页工具"
-}
+internal fun ReaderPanel.title(): String =
+    when (this) {
+        ReaderPanel.Chapters -> "章节列表"
+        ReaderPanel.Bookmarks -> "本书书签"
+        ReaderPanel.Tools -> "当前页工具"
+    }
 
 @Composable
 internal fun ReaderAttachedPanel(
@@ -50,23 +51,23 @@ internal fun ReaderAttachedPanel(
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 tonalElevation = 6.dp,
                 shadowElevation = 8.dp,
-                modifier = modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
-                    .semantics { paneTitle = shownPanel.title() },
+                modifier =
+                    modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).semantics {
+                        paneTitle = shownPanel.title()
+                    },
             ) {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
                     // Expressive drag handle indicator
                     Box(
-                        modifier = Modifier
-                            .padding(top = 8.dp, bottom = 4.dp)
-                            .width(32.dp)
-                            .height(4.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
-                            .align(Alignment.CenterHorizontally),
+                        modifier =
+                            Modifier.padding(top = 8.dp, bottom = 4.dp)
+                                .width(32.dp)
+                                .height(4.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                                )
+                                .align(Alignment.CenterHorizontally)
                     )
                     content(shownPanel)
                 }
@@ -85,9 +86,7 @@ internal fun ReaderAttachedPanelHeader(
         style = MaterialTheme.typography.titleMedium,
         fontWeight = FontWeight.Bold,
         color = MaterialTheme.colorScheme.onSurface,
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 8.dp),
+        modifier = modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
     )
 }
 

@@ -18,13 +18,11 @@ interface FavoriteDao {
 
     @Query(
         "SELECT * FROM favorite_pages " +
-                "WHERE sourceFileKey = :sourceFileKey AND pageIndex = :pageIndex LIMIT 1"
+            "WHERE sourceFileKey = :sourceFileKey AND pageIndex = :pageIndex LIMIT 1"
     )
     suspend fun getBySourcePage(sourceFileKey: String, pageIndex: Int): FavoritePageEntity?
 
-    @Insert
-    suspend fun insert(favorite: FavoritePageEntity): Long
+    @Insert suspend fun insert(favorite: FavoritePageEntity): Long
 
-    @Query("DELETE FROM favorite_pages WHERE id = :id")
-    suspend fun deleteById(id: Long)
+    @Query("DELETE FROM favorite_pages WHERE id = :id") suspend fun deleteById(id: Long)
 }

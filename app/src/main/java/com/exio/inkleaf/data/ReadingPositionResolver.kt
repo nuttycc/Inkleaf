@@ -39,10 +39,11 @@ object ReadingPositionResolver {
             return ReadingPositionResolution.Ready(approximatePage)
         }
 
-        val remappedPage = pageIdentity
-            ?.takeIf { it.isNotBlank() }
-            ?.let(findPageByIdentity)
-            ?.takeIf { it in 0 until currentPageCount }
+        val remappedPage =
+            pageIdentity
+                ?.takeIf { it.isNotBlank() }
+                ?.let(findPageByIdentity)
+                ?.takeIf { it in 0 until currentPageCount }
 
         if (sourceType == BookSourceType.PDF_SERIES) {
             return ReadingPositionResolution.SourceChanged(remappedPage ?: approximatePage)

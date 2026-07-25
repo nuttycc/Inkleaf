@@ -59,11 +59,12 @@ internal object DetPreprocessor {
     ): DetPreprocessResult {
         val originalH = src.rows()
         val originalW = src.cols()
-        val input = if (imgMode.uppercase() == "RGB") {
-            Mat().also { Imgproc.cvtColor(src, it, Imgproc.COLOR_BGR2RGB) }
-        } else {
-            src
-        }
+        val input =
+            if (imgMode.uppercase() == "RGB") {
+                Mat().also { Imgproc.cvtColor(src, it, Imgproc.COLOR_BGR2RGB) }
+            } else {
+                src
+            }
 
         val resized = ImageUtils.resizeToMultipleOf32(input, limitSideLen, limitType, maxSideLimit)
         if (input !== src) input.release()

@@ -31,7 +31,8 @@ data class AlbumEditorUiState(
     val message: String? = null,
 ) {
     val hasUnsavedChanges: Boolean
-        get() = title != initialTitle ||
+        get() =
+            title != initialTitle ||
                 pages.map { it.id } != initialPageIds ||
                 coverPageId != initialCoverPageId
 }
@@ -45,15 +46,16 @@ class AlbumEditorViewModel(
     private val sessionId = repository.newSessionId()
     private var currentComicId: Long? = comicId
 
-    val lastPickedFolder: StateFlow<String?> = settingsRepo.lastPickedFolder
-        .stateIn(viewModelScope, SharingStarted.Lazily, null)
+    val lastPickedFolder: StateFlow<String?> =
+        settingsRepo.lastPickedFolder.stateIn(viewModelScope, SharingStarted.Lazily, null)
 
-    private val _state = MutableStateFlow(
-        AlbumEditorUiState(
-            isLoading = comicId != null,
-            isPersisted = comicId != null,
+    private val _state =
+        MutableStateFlow(
+            AlbumEditorUiState(
+                isLoading = comicId != null,
+                isPersisted = comicId != null,
+            )
         )
-    )
     val state: StateFlow<AlbumEditorUiState> = _state.asStateFlow()
 
     private var sessionFinalized = false
@@ -79,10 +81,11 @@ class AlbumEditorViewModel(
             runCatchingPreservingCancellation { repository.stageUris(sessionId, uris) }
                 .onSuccess(::appendImportResult)
                 .onFailure { error ->
-                    _state.value = _state.value.copy(
-                        isImporting = false,
-                        message = error.userMessage("导入图片失败"),
-                    )
+                    _state.value =
+                        _state.value.copy(
+                            isImporting = false,
+                            message = error.userMessage("导入图片失败"),
+                        )
                 }
         }
     }
@@ -95,10 +98,11 @@ class AlbumEditorViewModel(
             runCatchingPreservingCancellation { repository.stageFolder(sessionId, treeUri) }
                 .onSuccess(::appendImportResult)
                 .onFailure { error ->
-                    _state.value = _state.value.copy(
-                        isImporting = false,
-                        message = error.userMessage("读取文件夹失败"),
-                    )
+                    _state.value =
+                        _state.value.copy(
+                            isImporting = false,
+                            message = error.userMessage("读取文件夹失败"),
+                        )
                 }
         }
     }
@@ -123,29 +127,34 @@ class AlbumEditorViewModel(
         if (_state.value.isSaving) return
         val oldState = _state.value
         val remainingPages = oldState.pages.filterNot { it.id == pageId }
-        val coverPageId = if (oldState.coverPageId == pageId) {
-            remainingPages.firstOrNull()?.id
-        } else {
-            oldState.coverPageId
-        }
-        _state.value = oldState.copy(
-            pages = remainingPages,
-            coverPageId = coverPageId,
-        )
+        val coverPageId =
+            if (oldState.coverPageId == pageId) {
+                remainingPages.firstOrNull()?.id
+            } else {
+                oldState.coverPageId
+            }
+        _state.value =
+            oldState.copy(
+                pages = remainingPages,
+                coverPageId = coverPageId,
+            )
     }
 
     fun restorePage(page: AlbumPageDraft, index: Int, previousCoverPageId: String?) {
         val current = _state.value
         if (current.isSaving || current.pages.any { it.id == page.id }) return
-        val pages = current.pages.toMutableList().apply {
-            add(index.coerceIn(0, size), page)
-        }
-        _state.value = current.copy(
-            pages = pages,
-            coverPageId = previousCoverPageId?.takeIf { coverId ->
-                pages.any { it.id == coverId }
-            } ?: current.coverPageId ?: pages.firstOrNull()?.id,
-        )
+        val pages =
+            current.pages.toMutableList().apply {
+                add(index.coerceIn(0, size), page)
+            }
+        _state.value =
+            current.copy(
+                pages = pages,
+                coverPageId =
+                    previousCoverPageId?.takeIf { coverId ->
+                        pages.any { it.id == coverId }
+                    } ?: current.coverPageId ?: pages.firstOrNull()?.id,
+            )
     }
 
     fun setCover(pageId: String) {
@@ -169,34 +178,39 @@ class AlbumEditorViewModel(
         viewModelScope.launch {
             _state.value = _state.value.copy(isSaving = true)
             runCatchingPreservingCancellation {
-                val savedId = repository.saveAlbum(
-                    comicId = currentComicId,
-                    title = current.title.trim(),
-                    orderedPages = current.pages,
-                    coverPageId = current.coverPageId,
-                )
-                savedId to repository.loadAlbum(savedId)
-            }.onSuccess { (savedId, snapshot) ->
-                currentComicId = savedId
-                val savedCoverPageId = snapshot.comic.coverPageId
-                    ?: snapshot.pages.firstOrNull()?.id
-                _state.value = _state.value.copy(
-                    title = snapshot.comic.title,
-                    pages = snapshot.pages,
-                    coverPageId = savedCoverPageId,
-                    initialTitle = snapshot.comic.title,
-                    initialPageIds = snapshot.pages.map { it.id },
-                    initialCoverPageId = savedCoverPageId,
-                    isPersisted = true,
-                    isSaving = false,
-                )
-                onSaved()
-            }.onFailure { error ->
-                _state.value = _state.value.copy(
-                    isSaving = false,
-                    message = error.userMessage("保存图册失败"),
-                )
-            }
+                    val savedId =
+                        repository.saveAlbum(
+                            comicId = currentComicId,
+                            title = current.title.trim(),
+                            orderedPages = current.pages,
+                            coverPageId = current.coverPageId,
+                        )
+                    savedId to repository.loadAlbum(savedId)
+                }
+                .onSuccess { (savedId, snapshot) ->
+                    currentComicId = savedId
+                    val savedCoverPageId =
+                        snapshot.comic.coverPageId ?: snapshot.pages.firstOrNull()?.id
+                    _state.value =
+                        _state.value.copy(
+                            title = snapshot.comic.title,
+                            pages = snapshot.pages,
+                            coverPageId = savedCoverPageId,
+                            initialTitle = snapshot.comic.title,
+                            initialPageIds = snapshot.pages.map { it.id },
+                            initialCoverPageId = savedCoverPageId,
+                            isPersisted = true,
+                            isSaving = false,
+                        )
+                    onSaved()
+                }
+                .onFailure { error ->
+                    _state.value =
+                        _state.value.copy(
+                            isSaving = false,
+                            message = error.userMessage("保存图册失败"),
+                        )
+                }
         }
     }
 
@@ -209,9 +223,7 @@ class AlbumEditorViewModel(
                     onDiscarded()
                 }
                 .onFailure { error ->
-                    _state.value = _state.value.copy(
-                        message = error.userMessage("清理临时图片失败，请重试"),
-                    )
+                    _state.value = _state.value.copy(message = error.userMessage("清理临时图片失败，请重试"))
                 }
         }
     }
@@ -222,11 +234,12 @@ class AlbumEditorViewModel(
 
     fun notifyBusy() {
         val current = _state.value
-        val message = when {
-            current.isSaving -> "正在保存图册，请稍候"
-            current.isImporting -> "正在导入图片，请稍候"
-            else -> return
-        }
+        val message =
+            when {
+                current.isSaving -> "正在保存图册，请稍候"
+                current.isImporting -> "正在导入图片，请稍候"
+                else -> return
+            }
         _state.value = current.copy(message = message)
     }
 
@@ -235,33 +248,36 @@ class AlbumEditorViewModel(
     }
 
     private fun loadAlbum(comicId: Long) {
-        _state.value = _state.value.copy(
-            isLoading = true,
-            loadError = null,
-            message = null,
-        )
+        _state.value =
+            _state.value.copy(
+                isLoading = true,
+                loadError = null,
+                message = null,
+            )
         viewModelScope.launch {
             runCatchingPreservingCancellation { repository.loadAlbum(comicId) }
                 .onSuccess { snapshot ->
-                    _state.value = _state.value.copy(
-                        title = snapshot.comic.title,
-                        pages = snapshot.pages,
-                        coverPageId = snapshot.comic.coverPageId
-                            ?: snapshot.pages.firstOrNull()?.id,
-                        initialTitle = snapshot.comic.title,
-                        initialPageIds = snapshot.pages.map { it.id },
-                        initialCoverPageId = snapshot.comic.coverPageId
-                            ?: snapshot.pages.firstOrNull()?.id,
-                        isPersisted = true,
-                        isLoading = false,
-                        loadError = null,
-                    )
+                    _state.value =
+                        _state.value.copy(
+                            title = snapshot.comic.title,
+                            pages = snapshot.pages,
+                            coverPageId =
+                                snapshot.comic.coverPageId ?: snapshot.pages.firstOrNull()?.id,
+                            initialTitle = snapshot.comic.title,
+                            initialPageIds = snapshot.pages.map { it.id },
+                            initialCoverPageId =
+                                snapshot.comic.coverPageId ?: snapshot.pages.firstOrNull()?.id,
+                            isPersisted = true,
+                            isLoading = false,
+                            loadError = null,
+                        )
                 }
                 .onFailure { error ->
-                    _state.value = _state.value.copy(
-                        isLoading = false,
-                        loadError = error.userMessage("无法打开图册"),
-                    )
+                    _state.value =
+                        _state.value.copy(
+                            isLoading = false,
+                            loadError = error.userMessage("无法打开图册"),
+                        )
                 }
         }
     }
@@ -270,20 +286,22 @@ class AlbumEditorViewModel(
         val current = _state.value
         val pages = current.pages + result.pages
         val coverPageId = current.coverPageId ?: pages.firstOrNull()?.id
-        _state.value = current.copy(
-            pages = pages,
-            coverPageId = coverPageId,
-            isImporting = false,
-            failedNames = (current.failedNames + result.failedNames).distinct(),
-            message = when {
-                result.pages.isEmpty() && result.failedNames.isEmpty() -> "没有找到可导入的图片"
-                result.pages.isEmpty() -> "所选图片均无法导入"
-                result.failedNames.isNotEmpty() ->
-                    "已导入 ${result.pages.size} 张，跳过 ${result.failedNames.size} 张"
+        _state.value =
+            current.copy(
+                pages = pages,
+                coverPageId = coverPageId,
+                isImporting = false,
+                failedNames = (current.failedNames + result.failedNames).distinct(),
+                message =
+                    when {
+                        result.pages.isEmpty() && result.failedNames.isEmpty() -> "没有找到可导入的图片"
+                        result.pages.isEmpty() -> "所选图片均无法导入"
+                        result.failedNames.isNotEmpty() ->
+                            "已导入 ${result.pages.size} 张，跳过 ${result.failedNames.size} 张"
 
-                else -> null
-            },
-        )
+                        else -> null
+                    },
+            )
     }
 
     override fun onCleared() {
@@ -293,13 +311,14 @@ class AlbumEditorViewModel(
     }
 }
 
-private inline fun <T> runCatchingPreservingCancellation(block: () -> T): Result<T> = try {
-    Result.success(block())
-} catch (error: CancellationException) {
-    throw error
-} catch (error: Exception) {
-    Result.failure(error)
-}
+private inline fun <T> runCatchingPreservingCancellation(block: () -> T): Result<T> =
+    try {
+        Result.success(block())
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Exception) {
+        Result.failure(error)
+    }
 
 private fun Throwable.userMessage(fallback: String): String {
     return message?.takeIf { it.isNotBlank() } ?: fallback

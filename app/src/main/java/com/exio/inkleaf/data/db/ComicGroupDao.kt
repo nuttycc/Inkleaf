@@ -37,8 +37,7 @@ interface ComicGroupDao {
     @Query("UPDATE comics SET groupId = NULL WHERE groupId = :groupId")
     suspend fun clearComicsInGroup(groupId: Long)
 
-    @Query("DELETE FROM comic_groups WHERE id = :id")
-    suspend fun deleteById(id: Long)
+    @Query("DELETE FROM comic_groups WHERE id = :id") suspend fun deleteById(id: Long)
 
     @Transaction
     suspend fun deleteKeepingComics(id: Long) {

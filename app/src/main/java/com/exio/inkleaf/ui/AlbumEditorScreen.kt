@@ -84,10 +84,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.exio.inkleaf.R
 import com.exio.inkleaf.data.AlbumPageDraft
+import java.io.File
 import kotlinx.coroutines.launch
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyGridState
-import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -96,10 +96,11 @@ fun AlbumEditorScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val viewModel: AlbumEditorViewModel = viewModel(key = "album-editor-${comicId ?: "new"}") {
-        val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY]!!
-        AlbumEditorViewModel(app, comicId)
-    }
+    val viewModel: AlbumEditorViewModel =
+        viewModel(key = "album-editor-${comicId ?: "new"}") {
+            val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY]!!
+            AlbumEditorViewModel(app, comicId)
+        }
     val state by viewModel.state.collectAsStateWithLifecycle()
     val lastPickedFolder by viewModel.lastPickedFolder.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -108,19 +109,21 @@ fun AlbumEditorScreen(
     var hasPromptedForInitialImport by rememberSaveable(comicId) { mutableStateOf(false) }
     var showDiscardDialog by remember { mutableStateOf(false) }
 
-    val photoPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickMultipleVisualMedia(),
-        onResult = viewModel::importUris,
-    )
-    val filePicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenMultipleDocuments(),
-        onResult = viewModel::importUris,
-    )
-    val folderPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocumentTree(),
-    ) { uri ->
-        uri?.let(viewModel::importFolder)
-    }
+    val photoPicker =
+        rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.PickMultipleVisualMedia(),
+            onResult = viewModel::importUris,
+        )
+    val filePicker =
+        rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.OpenMultipleDocuments(),
+            onResult = viewModel::importUris,
+        )
+    val folderPicker =
+        rememberLauncherForActivityResult(contract = ActivityResultContracts.OpenDocumentTree()) {
+            uri ->
+            uri?.let(viewModel::importFolder)
+        }
 
     SnackbarMessageEffect(
         message = state.message,
@@ -128,7 +131,8 @@ fun AlbumEditorScreen(
         onConsumed = viewModel::consumeMessage,
     )
     val canLeave = !state.isSaving && !state.isImporting
-    val canSave = !state.isLoading &&
+    val canSave =
+        !state.isLoading &&
             state.loadError == null &&
             !state.isImporting &&
             !state.isSaving &&
@@ -150,11 +154,12 @@ fun AlbumEditorScreen(
         viewModel.removePage(page.id)
         scope.launch {
             snackbarHostState.currentSnackbarData?.dismiss()
-            val result = snackbarHostState.showSnackbar(
-                message = "已移除第 ${index + 1} 页",
-                actionLabel = "撤销",
-                withDismissAction = true,
-            )
+            val result =
+                snackbarHostState.showSnackbar(
+                    message = "已移除第 ${index + 1} 页",
+                    actionLabel = "撤销",
+                    withDismissAction = true,
+                )
             if (result == SnackbarResult.ActionPerformed) {
                 viewModel.restorePage(page, index, previousCoverPageId)
             }
@@ -165,10 +170,10 @@ fun AlbumEditorScreen(
     LaunchedEffect(comicId, state.isLoading, state.loadError, state.pages.isEmpty()) {
         if (
             comicId == null &&
-            !state.isLoading &&
-            state.loadError == null &&
-            state.pages.isEmpty() &&
-            !hasPromptedForInitialImport
+                !state.isLoading &&
+                state.loadError == null &&
+                state.pages.isEmpty() &&
+                !hasPromptedForInitialImport
         ) {
             hasPromptedForInitialImport = true
             showAddSheet = true
@@ -190,11 +195,12 @@ fun AlbumEditorScreen(
                     ) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = if (state.hasUnsavedChanges) {
-                                "取消编辑"
-                            } else {
-                                "返回"
-                            },
+                            contentDescription =
+                                if (state.hasUnsavedChanges) {
+                                    "取消编辑"
+                                } else {
+                                    "返回"
+                                },
                         )
                     }
                 },
@@ -217,10 +223,11 @@ fun AlbumEditorScreen(
                         }
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.Transparent,
-                    scrolledContainerColor = Color.Transparent,
-                ),
+                colors =
+                    TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.Transparent,
+                        scrolledContainerColor = Color.Transparent,
+                    ),
                 scrollBehavior = topAppBarScrollBehavior,
             )
         },
@@ -229,11 +236,11 @@ fun AlbumEditorScreen(
             if (!state.isLoading && state.loadError == null && state.pages.isNotEmpty()) {
                 Surface(tonalElevation = 3.dp) {
                     Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .navigationBarsPadding()
-                            .imePadding()
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        modifier =
+                            Modifier.fillMaxWidth()
+                                .navigationBarsPadding()
+                                .imePadding()
+                                .padding(horizontal = 16.dp, vertical = 12.dp)
                     ) {
                         Button(
                             onClick = { showAddSheet = true },
@@ -250,52 +257,50 @@ fun AlbumEditorScreen(
         },
     ) { innerPadding ->
         when {
-            state.isLoading -> Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding),
-                contentAlignment = Alignment.Center,
-            ) {
-                CircularProgressIndicator()
-            }
+            state.isLoading ->
+                Box(
+                    modifier = Modifier.fillMaxSize().padding(innerPadding),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator()
+                }
 
-            state.loadError != null -> Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-                    .padding(32.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = "无法打开图册",
-                        style = MaterialTheme.typography.titleLarge,
-                    )
-                    Text(
-                        text = state.loadError.orEmpty(),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 8.dp, bottom = 16.dp),
-                    )
-                    Button(onClick = viewModel::retryLoad) {
-                        Text("重试")
-                    }
-                    TextButton(onClick = onBack) {
-                        Text("返回书架")
+            state.loadError != null ->
+                Box(
+                    modifier = Modifier.fillMaxSize().padding(innerPadding).padding(32.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "无法打开图册",
+                            style = MaterialTheme.typography.titleLarge,
+                        )
+                        Text(
+                            text = state.loadError.orEmpty(),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 8.dp, bottom = 16.dp),
+                        )
+                        Button(onClick = viewModel::retryLoad) {
+                            Text("重试")
+                        }
+                        TextButton(onClick = onBack) {
+                            Text("返回书架")
+                        }
                     }
                 }
-            }
 
-            else -> AlbumEditorContent(
-                state = state,
-                onTitleChange = viewModel::updateTitle,
-                onMovePage = viewModel::movePage,
-                onRemovePage = removePageWithUndo,
-                onSetCover = viewModel::setCover,
-                onClearFailures = viewModel::clearFailures,
-                onAdd = { showAddSheet = true },
-                modifier = Modifier.padding(innerPadding),
-            )
+            else ->
+                AlbumEditorContent(
+                    state = state,
+                    onTitleChange = viewModel::updateTitle,
+                    onMovePage = viewModel::movePage,
+                    onRemovePage = removePageWithUndo,
+                    onSetCover = viewModel::setCover,
+                    onClearFailures = viewModel::clearFailures,
+                    onAdd = { showAddSheet = true },
+                    modifier = Modifier.padding(innerPadding),
+                )
         }
     }
 
@@ -312,7 +317,9 @@ fun AlbumEditorScreen(
                     onClick = {
                         showAddSheet = false
                         photoPicker.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            PickVisualMediaRequest(
+                                ActivityResultContracts.PickVisualMedia.ImageOnly
+                            )
                         )
                     },
                     leadingContent = {
@@ -364,7 +371,7 @@ fun AlbumEditorScreen(
                     onClick = {
                         showDiscardDialog = false
                         viewModel.discard(onBack)
-                    },
+                    }
                 ) {
                     Text("放弃修改")
                 }
@@ -393,14 +400,15 @@ private fun AlbumEditorContent(
     val gridState = rememberLazyGridState()
     val hapticFeedback = LocalHapticFeedback.current
     var isReordering by remember { mutableStateOf(false) }
-    val reorderableState = rememberReorderableLazyGridState(gridState) { from, to ->
-        val movingPageId = from.key as? String
-        val targetPageId = to.key as? String
-        if (movingPageId != null && targetPageId != null && movingPageId != targetPageId) {
-            onMovePage(movingPageId, targetPageId)
-            hapticFeedback.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick)
+    val reorderableState =
+        rememberReorderableLazyGridState(gridState) { from, to ->
+            val movingPageId = from.key as? String
+            val targetPageId = to.key as? String
+            if (movingPageId != null && targetPageId != null && movingPageId != targetPageId) {
+                onMovePage(movingPageId, targetPageId)
+                hapticFeedback.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick)
+            }
         }
-    }
 
     Column(modifier = modifier.fillMaxSize()) {
         InkleafNameField(
@@ -411,16 +419,12 @@ private fun AlbumEditorContent(
             isError = state.title.isBlank(),
             singleLine = true,
             enabled = !state.isSaving,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
         )
 
         if (state.isImporting) {
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
             ) {
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 Text(
@@ -441,9 +445,7 @@ private fun AlbumEditorContent(
 
         if (state.pages.isEmpty()) {
             Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(32.dp),
+                modifier = Modifier.fillMaxSize().padding(32.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -484,9 +486,7 @@ private fun AlbumEditorContent(
                     items = state.pages,
                     key = { _, page -> page.id },
                 ) { index, page ->
-                    val pageActionsEnabled = !state.isSaving &&
-                            !state.isImporting &&
-                            !isReordering
+                    val pageActionsEnabled = !state.isSaving && !state.isImporting && !isReordering
                     ReorderableItem(
                         state = reorderableState,
                         key = page.id,
@@ -499,46 +499,49 @@ private fun AlbumEditorContent(
                             isDragging = isDragging,
                             onRemove = { onRemovePage(page, index) },
                             onSetCover = { onSetCover(page.id) },
-                            onMoveBackward = if (pageActionsEnabled) {
-                                state.pages.getOrNull(index - 1)?.let { previous ->
-                                    {
-                                        onMovePage(page.id, previous.id)
-                                        hapticFeedback.performHapticFeedback(
-                                            HapticFeedbackType.SegmentFrequentTick
-                                        )
+                            onMoveBackward =
+                                if (pageActionsEnabled) {
+                                    state.pages.getOrNull(index - 1)?.let { previous ->
+                                        {
+                                            onMovePage(page.id, previous.id)
+                                            hapticFeedback.performHapticFeedback(
+                                                HapticFeedbackType.SegmentFrequentTick
+                                            )
+                                        }
                                     }
-                                }
-                            } else {
-                                null
-                            },
-                            onMoveForward = if (pageActionsEnabled) {
-                                state.pages.getOrNull(index + 1)?.let { next ->
-                                    {
-                                        onMovePage(page.id, next.id)
-                                        hapticFeedback.performHapticFeedback(
-                                            HapticFeedbackType.SegmentFrequentTick
-                                        )
+                                } else {
+                                    null
+                                },
+                            onMoveForward =
+                                if (pageActionsEnabled) {
+                                    state.pages.getOrNull(index + 1)?.let { next ->
+                                        {
+                                            onMovePage(page.id, next.id)
+                                            hapticFeedback.performHapticFeedback(
+                                                HapticFeedbackType.SegmentFrequentTick
+                                            )
+                                        }
                                     }
-                                }
-                            } else {
-                                null
-                            },
+                                } else {
+                                    null
+                                },
                             enabled = pageActionsEnabled,
-                            modifier = Modifier.longPressDraggableHandle(
-                                enabled = !state.isSaving && !state.isImporting,
-                                onDragStarted = {
-                                    isReordering = true
-                                    hapticFeedback.performHapticFeedback(
-                                        HapticFeedbackType.GestureThresholdActivate
-                                    )
-                                },
-                                onDragStopped = {
-                                    isReordering = false
-                                    hapticFeedback.performHapticFeedback(
-                                        HapticFeedbackType.GestureEnd
-                                    )
-                                },
-                            ),
+                            modifier =
+                                Modifier.longPressDraggableHandle(
+                                    enabled = !state.isSaving && !state.isImporting,
+                                    onDragStarted = {
+                                        isReordering = true
+                                        hapticFeedback.performHapticFeedback(
+                                            HapticFeedbackType.GestureThresholdActivate
+                                        )
+                                    },
+                                    onDragStopped = {
+                                        isReordering = false
+                                        hapticFeedback.performHapticFeedback(
+                                            HapticFeedbackType.GestureEnd
+                                        )
+                                    },
+                                ),
                         )
                     }
                 }
@@ -563,26 +566,32 @@ private fun AlbumPageItem(
 ) {
     var showMenu by remember(page.id) { mutableStateOf(false) }
     val cardShape = RoundedCornerShape(12.dp)
-    val scale by animateFloatAsState(
-        targetValue = if (isDragging) 1.05f else 1f,
-        label = "album page drag scale",
-    )
-    val shadowElevation by animateDpAsState(
-        targetValue = if (isDragging) 12.dp else 0.dp,
-        label = "album page drag elevation",
-    )
+    val scale by
+        animateFloatAsState(
+            targetValue = if (isDragging) 1.05f else 1f,
+            label = "album page drag scale",
+        )
+    val shadowElevation by
+        animateDpAsState(
+            targetValue = if (isDragging) 12.dp else 0.dp,
+            label = "album page drag elevation",
+        )
     val accessibilityActions = buildList {
         onMoveBackward?.let { action ->
-            add(CustomAccessibilityAction("移到前一页") {
-                action()
-                true
-            })
+            add(
+                CustomAccessibilityAction("移到前一页") {
+                    action()
+                    true
+                }
+            )
         }
         onMoveForward?.let { action ->
-            add(CustomAccessibilityAction("移到后一页") {
-                action()
-                true
-            })
+            add(
+                CustomAccessibilityAction("移到后一页") {
+                    action()
+                    true
+                }
+            )
         }
     }
 
@@ -590,71 +599,72 @@ private fun AlbumPageItem(
         shape = cardShape,
         tonalElevation = 0.dp,
         shadowElevation = shadowElevation,
-        color = if (isCover) {
-            MaterialTheme.colorScheme.primaryContainer
-        } else {
-            MaterialTheme.colorScheme.surfaceContainer
-        },
-        modifier = modifier
-            .zIndex(if (isDragging) 10f else 0f)
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-                alpha = if (isDragging) 0.92f else 1f
-            }
-            .then(
-                if (isCover) {
-                    Modifier.border(1.dp, MaterialTheme.colorScheme.primary, cardShape)
-                } else {
-                    Modifier
+        color =
+            if (isCover) {
+                MaterialTheme.colorScheme.primaryContainer
+            } else {
+                MaterialTheme.colorScheme.surfaceContainer
+            },
+        modifier =
+            modifier
+                .zIndex(if (isDragging) 10f else 0f)
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                    alpha = if (isDragging) 0.92f else 1f
                 }
-            )
-            .semantics {
-                selected = isCover
-                stateDescription = if (isCover) {
-                    "第 $pageNumber 页，共 $pageCount 页，当前封面"
-                } else {
-                    "第 $pageNumber 页，共 $pageCount 页"
+                .then(
+                    if (isCover) {
+                        Modifier.border(1.dp, MaterialTheme.colorScheme.primary, cardShape)
+                    } else {
+                        Modifier
+                    }
+                )
+                .semantics {
+                    selected = isCover
+                    stateDescription =
+                        if (isCover) {
+                            "第 $pageNumber 页，共 $pageCount 页，当前封面"
+                        } else {
+                            "第 $pageNumber 页，共 $pageCount 页"
+                        }
+                    customActions = accessibilityActions
                 }
-                customActions = accessibilityActions
-            }
-            .then(
-                if (enabled && !isDragging && !isCover) {
-                    Modifier.clickable(
-                        onClickLabel = "设为封面",
-                        onClick = onSetCover,
-                    )
-                } else {
-                    Modifier
-                }
-            )
+                .then(
+                    if (enabled && !isDragging && !isCover) {
+                        Modifier.clickable(
+                            onClickLabel = "设为封面",
+                            onClick = onSetCover,
+                        )
+                    } else {
+                        Modifier
+                    }
+                ),
     ) {
         Column {
             AsyncImage(
                 model = File(page.filePath),
                 contentDescription = page.displayName,
                 contentScale = ContentScale.Fit,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(0.75f)
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                modifier =
+                    Modifier.fillMaxWidth()
+                        .aspectRatio(0.75f)
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
             )
 
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp)
-                    .padding(start = 8.dp),
+                modifier = Modifier.fillMaxWidth().height(48.dp).padding(start = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
                     text = if (isCover) "封面" else "第 $pageNumber 页",
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (isCover) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
+                    color =
+                        if (isCover) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
                     modifier = Modifier.weight(1f),
                 )
                 Box {
@@ -718,7 +728,8 @@ private fun ImportFailures(
                     style = MaterialTheme.typography.titleSmall,
                 )
                 Text(
-                    text = failedNames.take(4).joinToString("、") +
+                    text =
+                        failedNames.take(4).joinToString("、") +
                             if (failedNames.size > 4) " 等" else "",
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(top = 4.dp),

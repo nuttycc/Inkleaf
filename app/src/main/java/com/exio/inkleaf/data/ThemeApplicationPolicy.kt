@@ -1,11 +1,14 @@
 package com.exio.inkleaf.data
 
-/** Resolves the user's preference against the device mode without reading Android state directly. */
-internal fun DarkMode.resolveDark(systemIsDark: Boolean): Boolean = when (this) {
-    DarkMode.SYSTEM -> systemIsDark
-    DarkMode.LIGHT -> false
-    DarkMode.DARK -> true
-}
+/**
+ * Resolves the user's preference against the device mode without reading Android state directly.
+ */
+internal fun DarkMode.resolveDark(systemIsDark: Boolean): Boolean =
+    when (this) {
+        DarkMode.SYSTEM -> systemIsDark
+        DarkMode.LIGHT -> false
+        DarkMode.DARK -> true
+    }
 
 /** Describes the single recreation path needed after an atomic theme commit. */
 internal data class ThemeApplyPlan(

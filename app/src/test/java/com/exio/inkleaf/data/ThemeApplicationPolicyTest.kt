@@ -11,12 +11,13 @@ class ThemeApplicationPolicyTest {
         val applied = ThemeSettings(seed = ThemeSeed.INK, darkMode = DarkMode.LIGHT)
         val draft = applied.copy(seed = ThemeSeed.ROUGE)
 
-        val plan = planThemeApplication(
-            applied = applied,
-            draft = draft,
-            currentIsDark = false,
-            systemIsDark = true,
-        )
+        val plan =
+            planThemeApplication(
+                applied = applied,
+                draft = draft,
+                currentIsDark = false,
+                systemIsDark = true,
+            )
 
         assertFalse(plan.updateNightMode)
         assertTrue(plan.recreateExplicitly)
@@ -27,12 +28,13 @@ class ThemeApplicationPolicyTest {
         val applied = ThemeSettings(darkMode = DarkMode.LIGHT)
         val draft = applied.copy(darkMode = DarkMode.DARK)
 
-        val plan = planThemeApplication(
-            applied = applied,
-            draft = draft,
-            currentIsDark = false,
-            systemIsDark = false,
-        )
+        val plan =
+            planThemeApplication(
+                applied = applied,
+                draft = draft,
+                currentIsDark = false,
+                systemIsDark = false,
+            )
 
         assertTrue(plan.updateNightMode)
         assertFalse(plan.recreateExplicitly)
@@ -43,12 +45,13 @@ class ThemeApplicationPolicyTest {
         val applied = ThemeSettings(seed = ThemeSeed.INK, darkMode = DarkMode.LIGHT)
         val draft = applied.copy(seed = ThemeSeed.AMBER, darkMode = DarkMode.DARK)
 
-        val plan = planThemeApplication(
-            applied = applied,
-            draft = draft,
-            currentIsDark = false,
-            systemIsDark = false,
-        )
+        val plan =
+            planThemeApplication(
+                applied = applied,
+                draft = draft,
+                currentIsDark = false,
+                systemIsDark = false,
+            )
 
         assertTrue(plan.updateNightMode)
         assertFalse(plan.recreateExplicitly)
@@ -59,12 +62,13 @@ class ThemeApplicationPolicyTest {
         val applied = ThemeSettings(darkMode = DarkMode.LIGHT)
         val draft = applied.copy(darkMode = DarkMode.SYSTEM)
 
-        val plan = planThemeApplication(
-            applied = applied,
-            draft = draft,
-            currentIsDark = false,
-            systemIsDark = false,
-        )
+        val plan =
+            planThemeApplication(
+                applied = applied,
+                draft = draft,
+                currentIsDark = false,
+                systemIsDark = false,
+            )
 
         assertTrue(plan.updateNightMode)
         assertTrue(plan.recreateExplicitly)

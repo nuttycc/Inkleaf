@@ -15,8 +15,7 @@ interface AlbumPageDao {
     @Query("SELECT id FROM album_pages WHERE comicId = :comicId AND position = :position LIMIT 1")
     suspend fun getIdByPosition(comicId: Long, position: Int): String?
 
-    @Insert
-    suspend fun insertAll(pages: List<AlbumPageEntity>)
+    @Insert suspend fun insertAll(pages: List<AlbumPageEntity>)
 
     @Query("DELETE FROM album_pages WHERE comicId = :comicId")
     suspend fun deleteByComicId(comicId: Long)

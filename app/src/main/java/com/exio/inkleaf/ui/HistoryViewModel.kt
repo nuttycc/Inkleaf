@@ -19,6 +19,11 @@ import com.exio.inkleaf.data.SystemReadingClock
 import com.exio.inkleaf.data.db.BookSourceType
 import com.exio.inkleaf.data.db.HistoryRowProjection
 import com.exio.inkleaf.data.db.ReadingSessionEntity
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -30,11 +35,6 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
-import java.time.Instant
-import java.time.LocalDate
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import java.util.Locale
 
 sealed interface HistoryListItem {
     val stableKey: String
@@ -70,8 +70,11 @@ data class HistorySessionUi(
 
 sealed interface HistoryEvent {
     data class SessionDeleted(val snapshot: ReadingSessionEntity) : HistoryEvent
+
     data class Message(val text: String) : HistoryEvent
+
     data class NavigateToReader(val comicId: Long, val page: Int) : HistoryEvent
+
     data class ConfirmSourceChanged(
         val comicId: Long,
         val approximatePage: Int,
@@ -97,49 +100,52 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
 
     val events = eventChannel.receiveAsFlow()
 
-    val timeline: Flow<PagingData<HistoryListItem>> = todayRefresh
-        .flatMapLatest {
-            val today = Instant.ofEpochMilli(clock.nowMillis())
-                .atZone(ZoneId.systemDefault())
-                .toLocalDate()
-            sessionRepo.historyPaging()
-                .map { paging ->
+    val timeline: Flow<PagingData<HistoryListItem>> =
+        todayRefresh
+            .flatMapLatest {
+                val today =
+                    Instant.ofEpochMilli(clock.nowMillis())
+                        .atZone(ZoneId.systemDefault())
+                        .toLocalDate()
+                sessionRepo.historyPaging().map { paging ->
                     paging
                         .map { row -> row.toHistoryListItem() }
                         .insertSeparators { before, after ->
-                            val afterSession = after as? HistoryListItem.Session
-                                ?: return@insertSeparators null
-                            val afterDate = HistoryDateGrouping.sessionLocalDate(
-                                afterSession.row.startedAt,
-                                afterSession.row.timeZoneId,
-                            )
-                            val beforeDate = (before as? HistoryListItem.Session)?.let {
+                            val afterSession =
+                                after as? HistoryListItem.Session ?: return@insertSeparators null
+                            val afterDate =
                                 HistoryDateGrouping.sessionLocalDate(
-                                    it.row.startedAt,
-                                    it.row.timeZoneId,
+                                    afterSession.row.startedAt,
+                                    afterSession.row.timeZoneId,
                                 )
-                            }
+                            val beforeDate =
+                                (before as? HistoryListItem.Session)?.let {
+                                    HistoryDateGrouping.sessionLocalDate(
+                                        it.row.startedAt,
+                                        it.row.timeZoneId,
+                                    )
+                                }
                             if (beforeDate == afterDate) {
                                 null
                             } else {
                                 HistoryListItem.DateHeader(
                                     localDate = afterDate,
-                                    label = HistoryDateGrouping.labelFor(
-                                        afterDate,
-                                        today,
-                                        Locale.getDefault(),
-                                    ),
+                                    label =
+                                        HistoryDateGrouping.labelFor(
+                                            afterDate,
+                                            today,
+                                            Locale.getDefault(),
+                                        ),
                                 )
                             }
                         }
                 }
-        }
-        .cachedIn(viewModelScope)
+            }
+            .cachedIn(viewModelScope)
 
     fun refreshDateLabels() {
-        val today = Instant.ofEpochMilli(clock.nowMillis())
-            .atZone(ZoneId.systemDefault())
-            .toLocalDate()
+        val today =
+            Instant.ofEpochMilli(clock.nowMillis()).atZone(ZoneId.systemDefault()).toLocalDate()
         if (today == lastRefreshDate) return
         lastRefreshDate = today
         todayRefresh.value += 1
@@ -151,72 +157,79 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
         resolveJob?.cancel()
         val generation = ++resolveGeneration
         resolvingSessionId = session.id
-        val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
-            try {
-                val comic = comicRepo.getComic(session.comicId)
-                    ?.takeUnless { it.isMissing || it.isDraft }
-                if (comic == null) {
-                    if (generation == resolveGeneration) {
-                        eventChannel.send(HistoryEvent.Message("漫画内容当前不可用"))
-                    }
-                    return@launch
-                }
-                val volume = try {
-                    comicRepo.openBook(comic)
-                } catch (error: CancellationException) {
-                    throw error
-                } catch (_: Exception) {
-                    if (generation == resolveGeneration) {
-                        eventChannel.send(HistoryEvent.Message("漫画内容当前不可用"))
-                    }
-                    return@launch
-                }
+        val job =
+            viewModelScope.launch(start = CoroutineStart.LAZY) {
                 try {
-                    val resolution = ReadingPositionResolver.resolve(
-                        sourceType = session.sourceType,
-                        storedSourceRevision = session.endSourceRevision,
-                        storedGlobalPage = session.endGlobalPageIndex,
-                        pageIdentity = session.endPageIdentity,
-                        currentSourceRevision = volume.sourceRevision,
-                        currentPageCount = volume.totalPageCount,
-                        findPageByIdentity = volume::findPageByIdentity,
-                    )
-                    if (generation != resolveGeneration) return@launch
-                    when (resolution) {
-                        is ReadingPositionResolution.Ready -> {
-                            eventChannel.send(
-                                HistoryEvent.NavigateToReader(comic.id, resolution.globalPage),
-                            )
+                    val comic =
+                        comicRepo.getComic(session.comicId)?.takeUnless {
+                            it.isMissing || it.isDraft
                         }
-                        is ReadingPositionResolution.SourceChanged -> {
-                            val loc = volume.globalToChapterPage(resolution.approximateGlobalPage)
-                            val label = formatEndLocation(
-                                chapterTitle = volume.chapterTitle(loc.chapterIndex),
-                                chapterIndex = loc.chapterIndex,
-                                pageIndex = loc.pageIndex,
-                            )
-                            eventChannel.send(
-                                HistoryEvent.ConfirmSourceChanged(
-                                    comicId = comic.id,
-                                    approximatePage = resolution.approximateGlobalPage,
-                                    locationLabel = label,
-                                ),
-                            )
+                    if (comic == null) {
+                        if (generation == resolveGeneration) {
+                            eventChannel.send(HistoryEvent.Message("漫画内容当前不可用"))
                         }
-                        is ReadingPositionResolution.Unavailable -> {
-                            eventChannel.send(HistoryEvent.Message(resolution.message))
+                        return@launch
+                    }
+                    val volume =
+                        try {
+                            comicRepo.openBook(comic)
+                        } catch (error: CancellationException) {
+                            throw error
+                        } catch (_: Exception) {
+                            if (generation == resolveGeneration) {
+                                eventChannel.send(HistoryEvent.Message("漫画内容当前不可用"))
+                            }
+                            return@launch
                         }
+                    try {
+                        val resolution =
+                            ReadingPositionResolver.resolve(
+                                sourceType = session.sourceType,
+                                storedSourceRevision = session.endSourceRevision,
+                                storedGlobalPage = session.endGlobalPageIndex,
+                                pageIdentity = session.endPageIdentity,
+                                currentSourceRevision = volume.sourceRevision,
+                                currentPageCount = volume.totalPageCount,
+                                findPageByIdentity = volume::findPageByIdentity,
+                            )
+                        if (generation != resolveGeneration) return@launch
+                        when (resolution) {
+                            is ReadingPositionResolution.Ready -> {
+                                eventChannel.send(
+                                    HistoryEvent.NavigateToReader(comic.id, resolution.globalPage)
+                                )
+                            }
+                            is ReadingPositionResolution.SourceChanged -> {
+                                val loc =
+                                    volume.globalToChapterPage(resolution.approximateGlobalPage)
+                                val label =
+                                    formatEndLocation(
+                                        chapterTitle = volume.chapterTitle(loc.chapterIndex),
+                                        chapterIndex = loc.chapterIndex,
+                                        pageIndex = loc.pageIndex,
+                                    )
+                                eventChannel.send(
+                                    HistoryEvent.ConfirmSourceChanged(
+                                        comicId = comic.id,
+                                        approximatePage = resolution.approximateGlobalPage,
+                                        locationLabel = label,
+                                    )
+                                )
+                            }
+                            is ReadingPositionResolution.Unavailable -> {
+                                eventChannel.send(HistoryEvent.Message(resolution.message))
+                            }
+                        }
+                    } finally {
+                        volume.close()
                     }
                 } finally {
-                    volume.close()
-                }
-            } finally {
-                if (generation == resolveGeneration) {
-                    resolvingSessionId = null
-                    resolveJob = null
+                    if (generation == resolveGeneration) {
+                        resolvingSessionId = null
+                        resolveJob = null
+                    }
                 }
             }
-        }
         resolveJob = job
         job.start()
     }
@@ -274,10 +287,11 @@ private fun HistoryRowProjection.toHistoryListItem(): HistoryListItem =
 
 private fun HistoryRowProjection.toUi(): HistorySessionUi {
     val available = comicId != null && isMissing != true && isDraft != true
-    val title = when {
-        available && !currentTitle.isNullOrBlank() -> currentTitle
-        else -> titleSnapshot
-    }
+    val title =
+        when {
+            available && !currentTitle.isNullOrBlank() -> currentTitle
+            else -> titleSnapshot
+        }
     return HistorySessionUi(
         id = id,
         title = title,

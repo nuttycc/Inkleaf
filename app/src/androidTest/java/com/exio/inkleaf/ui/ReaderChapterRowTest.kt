@@ -19,8 +19,7 @@ import org.junit.Rule
 import org.junit.Test
 
 class ReaderChapterRowTest {
-    @get:Rule
-    val composeRule = createComposeRule()
+    @get:Rule val composeRule = createComposeRule()
 
     @Test
     fun readableChapterDispatchesPhysicalTap() {
@@ -28,22 +27,23 @@ class ReaderChapterRowTest {
         composeRule.setContent {
             MaterialTheme {
                 ReaderChapterRow(
-                    chapter = ReaderChapterItem(
-                        index = 2,
-                        title = "第三章",
-                        pageCount = 18,
-                        startPage = 42,
-                        isReadable = true,
-                    ),
+                    chapter =
+                        ReaderChapterItem(
+                            index = 2,
+                            title = "第三章",
+                            pageCount = 18,
+                            startPage = 42,
+                            isReadable = true,
+                        ),
                     onSelect = { selectedPage = it },
                     modifier = Modifier.testTag("readable-chapter"),
                 )
             }
         }
 
-        composeRule.onNodeWithTag("readable-chapter")
-            .assertIsEnabled()
-            .performTouchInput { click() }
+        composeRule.onNodeWithTag("readable-chapter").assertIsEnabled().performTouchInput {
+            click()
+        }
 
         composeRule.runOnIdle { assertEquals(42, selectedPage) }
     }
@@ -53,13 +53,14 @@ class ReaderChapterRowTest {
         composeRule.setContent {
             MaterialTheme {
                 ReaderChapterRow(
-                    chapter = ReaderChapterItem(
-                        index = 1,
-                        title = "第二章",
-                        pageCount = 18,
-                        startPage = 18,
-                        isReadable = true,
-                    ),
+                    chapter =
+                        ReaderChapterItem(
+                            index = 1,
+                            title = "第二章",
+                            pageCount = 18,
+                            startPage = 18,
+                            isReadable = true,
+                        ),
                     isCurrent = true,
                     onSelect = {},
                     modifier = Modifier.testTag("current-chapter"),
@@ -67,13 +68,14 @@ class ReaderChapterRowTest {
             }
         }
 
-        composeRule.onNodeWithTag("current-chapter")
+        composeRule
+            .onNodeWithTag("current-chapter")
             .assertIsSelected()
             .assert(
                 SemanticsMatcher.expectValue(
                     SemanticsProperties.StateDescription,
                     "当前章节",
-                ),
+                )
             )
     }
 
@@ -83,27 +85,29 @@ class ReaderChapterRowTest {
         composeRule.setContent {
             MaterialTheme {
                 ReaderChapterRow(
-                    chapter = ReaderChapterItem(
-                        index = 3,
-                        title = "损坏章节",
-                        pageCount = 0,
-                        startPage = 42,
-                        isReadable = false,
-                    ),
+                    chapter =
+                        ReaderChapterItem(
+                            index = 3,
+                            title = "损坏章节",
+                            pageCount = 0,
+                            startPage = 42,
+                            isReadable = false,
+                        ),
                     onSelect = { clicks++ },
                     modifier = Modifier.testTag("unreadable-chapter"),
                 )
             }
         }
 
-        composeRule.onNodeWithTag("unreadable-chapter")
+        composeRule
+            .onNodeWithTag("unreadable-chapter")
             .assertIsNotEnabled()
             .assertIsNotSelected()
             .assert(
                 SemanticsMatcher.expectValue(
                     SemanticsProperties.StateDescription,
                     "无法打开",
-                ),
+                )
             )
             .performTouchInput { click() }
 

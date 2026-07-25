@@ -77,27 +77,27 @@ internal data class SavedBookmarkGroup(
     val bookmarks: List<BookmarkWithComic>,
 )
 
-internal fun groupAndSortBookmarks(
-    bookmarks: List<BookmarkWithComic>,
-): List<SavedBookmarkGroup> = bookmarks
-    .groupBy { it.bookmark.comicId }
-    .map { (comicId, comicBookmarks) ->
-        val first = comicBookmarks.first()
-        SavedBookmarkGroup(
-            comicId = comicId,
-            comicTitle = first.comicTitle,
-            latestAddedAt = comicBookmarks.maxOf { it.bookmark.addedAt },
-            bookmarks = comicBookmarks.sortedWith(
-                compareBy<BookmarkWithComic> { it.bookmark.chapterIndex }
-                    .thenBy { it.bookmark.pageIndex }
-                    .thenBy { it.bookmark.id },
-            ),
+internal fun groupAndSortBookmarks(bookmarks: List<BookmarkWithComic>): List<SavedBookmarkGroup> =
+    bookmarks
+        .groupBy { it.bookmark.comicId }
+        .map { (comicId, comicBookmarks) ->
+            val first = comicBookmarks.first()
+            SavedBookmarkGroup(
+                comicId = comicId,
+                comicTitle = first.comicTitle,
+                latestAddedAt = comicBookmarks.maxOf { it.bookmark.addedAt },
+                bookmarks =
+                    comicBookmarks.sortedWith(
+                        compareBy<BookmarkWithComic> { it.bookmark.chapterIndex }
+                            .thenBy { it.bookmark.pageIndex }
+                            .thenBy { it.bookmark.id }
+                    ),
+            )
+        }
+        .sortedWith(
+            compareByDescending<SavedBookmarkGroup> { it.latestAddedAt }
+                .thenByDescending { group -> group.bookmarks.maxOf { it.bookmark.id } }
         )
-    }
-    .sortedWith(
-        compareByDescending<SavedBookmarkGroup> { it.latestAddedAt }
-            .thenByDescending { group -> group.bookmarks.maxOf { it.bookmark.id } },
-    )
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -131,11 +131,12 @@ fun SavedScreen(
         savedViewModel.events.collect { event ->
             when (event) {
                 is SavedEvent.BookmarkRemoved -> {
-                    val result = snackbarHostState.showSnackbar(
-                        message = "已移除书签",
-                        actionLabel = "撤销",
-                        duration = SnackbarDuration.Long,
-                    )
+                    val result =
+                        snackbarHostState.showSnackbar(
+                            message = "已移除书签",
+                            actionLabel = "撤销",
+                            duration = SnackbarDuration.Long,
+                        )
                     if (result == SnackbarResult.ActionPerformed) {
                         savedViewModel.restore(event.bookmark)
                     }
@@ -153,10 +154,11 @@ fun SavedScreen(
             Column {
                 TopAppBar(
                     title = { Text("已保存") },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.background,
-                        scrolledContainerColor = MaterialTheme.colorScheme.background,
-                    ),
+                    colors =
+                        TopAppBarDefaults.topAppBarColors(
+                            containerColor = MaterialTheme.colorScheme.background,
+                            scrolledContainerColor = MaterialTheme.colorScheme.background,
+                        ),
                 )
                 PrimaryTabRow(
                     selectedTabIndex = selectedTab,
@@ -178,40 +180,40 @@ fun SavedScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { innerPadding ->
         when (selectedTab) {
-            BOOKMARKS_TAB_INDEX -> BookmarksContent(
-                bookmarks = bookmarks,
-                thumbnailStates = savedViewModel.thumbnailStates,
-                onLoadThumbnail = savedViewModel::loadThumbnail,
-                onRemove = savedViewModel::remove,
-                onOpen = { bookmark ->
-                    savedViewModel.resolve(bookmark) { resolution ->
-                        when (resolution) {
-                            is BookmarkResolution.Ready -> onOpenBookmark(
-                                resolution.comicId,
-                                resolution.globalPage,
-                            )
+            BOOKMARKS_TAB_INDEX ->
+                BookmarksContent(
+                    bookmarks = bookmarks,
+                    thumbnailStates = savedViewModel.thumbnailStates,
+                    onLoadThumbnail = savedViewModel::loadThumbnail,
+                    onRemove = savedViewModel::remove,
+                    onOpen = { bookmark ->
+                        savedViewModel.resolve(bookmark) { resolution ->
+                            when (resolution) {
+                                is BookmarkResolution.Ready ->
+                                    onOpenBookmark(
+                                        resolution.comicId,
+                                        resolution.globalPage,
+                                    )
 
-                            is BookmarkResolution.SourceChanged -> sourceChanged = resolution
+                                is BookmarkResolution.SourceChanged -> sourceChanged = resolution
 
-                            is BookmarkResolution.Unavailable -> {
-                                // Route the transient failure through the ViewModel event stream.
-                                savedViewModel.showMessage(resolution.message)
+                                is BookmarkResolution.Unavailable -> {
+                                    // Route the transient failure through the ViewModel event
+                                    // stream.
+                                    savedViewModel.showMessage(resolution.message)
+                                }
                             }
                         }
-                    }
-                },
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding),
-            )
+                    },
+                    modifier = Modifier.fillMaxSize().padding(innerPadding),
+                )
 
-            else -> FavoritesContent(
-                favorites = favorites,
-                onOpenFavorite = onOpenFavorite,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding),
-            )
+            else ->
+                FavoritesContent(
+                    favorites = favorites,
+                    onOpenFavorite = onOpenFavorite,
+                    modifier = Modifier.fillMaxSize().padding(innerPadding),
+                )
         }
     }
 
@@ -225,7 +227,7 @@ fun SavedScreen(
                     onClick = {
                         sourceChanged = null
                         onOpenBookmark(resolution.comicId, resolution.approximateGlobalPage)
-                    },
+                    }
                 ) {
                     Text("仍打开")
                 }
@@ -282,10 +284,10 @@ private fun BookmarksContent(
 private fun BookmarkGroupHeader(group: SavedBookmarkGroup) {
     val missing = group.bookmarks.first().isMissing
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceContainer)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+        modifier =
+            Modifier.fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surfaceContainer)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -298,11 +300,12 @@ private fun BookmarkGroupHeader(group: SavedBookmarkGroup) {
         Text(
             text = if (missing) "原书不可用" else "${group.bookmarks.size} 个书签",
             style = MaterialTheme.typography.labelMedium,
-            color = if (missing) {
-                MaterialTheme.colorScheme.error
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            },
+            color =
+                if (missing) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
         )
     }
 }
@@ -317,26 +320,23 @@ private fun BookmarkRow(
 ) {
     var showMenu by remember { mutableStateOf(false) }
     Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .clickable(onClick = onClick)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         BookmarkThumbnail(
             item = item,
             state = thumbnailState,
-            modifier = Modifier
-                .width(56.dp)
-                .aspectRatio(2f / 3f)
-                .alpha(if (item.isMissing) 0.55f else 1f),
+            modifier =
+                Modifier.width(56.dp).aspectRatio(2f / 3f).alpha(if (item.isMissing) 0.55f else 1f),
         )
         Column(
             verticalArrangement = Arrangement.spacedBy(4.dp),
-            modifier = Modifier
-                .weight(1f)
-                .alpha(if (item.isMissing) 0.55f else 1f),
+            modifier = Modifier.weight(1f).alpha(if (item.isMissing) 0.55f else 1f),
         ) {
             Text(
                 text = item.comicTitle,
@@ -359,12 +359,12 @@ private fun BookmarkRow(
                 imageVector = Icons.Filled.MoreVert,
                 contentDescription = "书签操作",
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier
-                    .offset(x = 8.dp, y = 2.dp)
-                    .clip(CircleShape)
-                    .clickable { showMenu = true }
-                    .padding(4.dp)
-                    .size(16.dp),
+                modifier =
+                    Modifier.offset(x = 8.dp, y = 2.dp)
+                        .clip(CircleShape)
+                        .clickable { showMenu = true }
+                        .padding(4.dp)
+                        .size(16.dp),
             )
             DropdownMenu(
                 expanded = showMenu,
@@ -402,18 +402,20 @@ private fun BookmarkThumbnail(
     modifier: Modifier = Modifier,
 ) {
     Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(4.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant),
+        modifier =
+            modifier
+                .clip(RoundedCornerShape(4.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant),
         contentAlignment = Alignment.Center,
     ) {
         when (state) {
-            is BookmarkThumbnailState.Ready -> Image(
-                bitmap = state.image,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-            )
+            is BookmarkThumbnailState.Ready ->
+                Image(
+                    bitmap = state.image,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
 
             else -> BookmarkCoverFallback(item)
         }
@@ -422,9 +424,10 @@ private fun BookmarkThumbnail(
 
 @Composable
 private fun BookmarkCoverFallback(item: BookmarkWithComic) {
-    val cover = remember(item.coverPath) {
-        item.coverPath?.let(::File)?.takeIf(File::exists)
-    }
+    val cover =
+        remember(item.coverPath) {
+            item.coverPath?.let(::File)?.takeIf(File::exists)
+        }
     var coverFailed by remember(cover) { mutableStateOf(false) }
     if (cover != null && !coverFailed) {
         AsyncImage(

@@ -6,11 +6,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 章节扫描 diff 的 JVM 单测。覆盖 spec 建议的 "folder scan diff behavior"：
- * 追加 / 中间插章 / 删中间章 / 全删 / 恢复 / 重排 / no-op。
+ * 章节扫描 diff 的 JVM 单测。覆盖 spec 建议的 "folder scan diff behavior"： 追加 / 中间插章 / 删中间章 / 全删 / 恢复 / 重排 /
+ * no-op。
  *
- * 这里专门覆盖缺陷 1 的两个撞索引场景：中间插章 + 删中间章后重扫。
- * 不依赖 Room/Android，纯函数验证 diff 计算正确。
+ * 这里专门覆盖缺陷 1 的两个撞索引场景：中间插章 + 删中间章后重扫。 不依赖 Room/Android，纯函数验证 diff 计算正确。
  */
 class ChapterSyncTest {
 
@@ -29,17 +28,18 @@ class ChapterSyncTest {
         title: String = fileKey.substringBeforeLast('.'),
         pageCount: Int = 10,
         isMissing: Boolean = false,
-    ) = ChapterEntity(
-        id = id,
-        comicId = comicId,
-        chapterIndex = index,
-        uri = "uri://$fileKey",
-        fileKey = fileKey,
-        title = title,
-        relativePath = fileKey,
-        pageCount = pageCount,
-        isMissing = isMissing,
-    )
+    ) =
+        ChapterEntity(
+            id = id,
+            comicId = comicId,
+            chapterIndex = index,
+            uri = "uri://$fileKey",
+            fileKey = fileKey,
+            title = title,
+            relativePath = fileKey,
+            pageCount = pageCount,
+            isMissing = isMissing,
+        )
 
     @Test
     fun `first import inserts all chapters in scanned order`() {
@@ -57,10 +57,11 @@ class ChapterSyncTest {
 
     @Test
     fun `rescan with no changes is a no-op`() {
-        val existing = listOf(
-            existing(id = 1, index = 0, fileKey = "1.pdf"),
-            existing(id = 2, index = 1, fileKey = "2.pdf"),
-        )
+        val existing =
+            listOf(
+                existing(id = 1, index = 0, fileKey = "1.pdf"),
+                existing(id = 2, index = 1, fileKey = "2.pdf"),
+            )
         val scanned = listOf(scanned("1.pdf"), scanned("2.pdf"))
 
         val diff = ChapterSync.computeDiff(existing, scanned, comicId, titleOf)
@@ -73,20 +74,24 @@ class ChapterSyncTest {
     }
 
     /**
-     * 缺陷 1 的核心场景：[1,3,4].pdf 中间插入 2.pdf。
-     * 旧实现逐行 update 把 3.pdf→idx1、4.pdf→idx2，撞唯一索引崩。
-     * diff 应以 fileKey 匹配，3/4 走 toUpdate 改索引，2 走 toInsert。
+     * 缺陷 1 的核心场景：[1,3,4].pdf 中间插入 2.pdf。 旧实现逐行 update 把 3.pdf→idx1、4.pdf→idx2，撞唯一索引崩。 diff 应以
+     * fileKey 匹配，3/4 走 toUpdate 改索引，2 走 toInsert。
      */
     @Test
     fun `insert chapter in middle shifts later indices`() {
-        val existing = listOf(
-            existing(id = 1, index = 0, fileKey = "1.pdf"),
-            existing(id = 2, index = 1, fileKey = "3.pdf"),
-            existing(id = 3, index = 2, fileKey = "4.pdf"),
-        )
-        val scanned = listOf(
-            scanned("1.pdf"), scanned("2.pdf"), scanned("3.pdf"), scanned("4.pdf")
-        )
+        val existing =
+            listOf(
+                existing(id = 1, index = 0, fileKey = "1.pdf"),
+                existing(id = 2, index = 1, fileKey = "3.pdf"),
+                existing(id = 3, index = 2, fileKey = "4.pdf"),
+            )
+        val scanned =
+            listOf(
+                scanned("1.pdf"),
+                scanned("2.pdf"),
+                scanned("3.pdf"),
+                scanned("4.pdf"),
+            )
 
         val diff = ChapterSync.computeDiff(existing, scanned, comicId, titleOf)
 
@@ -108,17 +113,17 @@ class ChapterSyncTest {
     }
 
     /**
-     * 缺陷 1 的另一个场景：[1,2,3] 删掉中间 2.pdf 后重扫。
-     * 旧 deleteExceptIndices 按 [0,1] 删除索引 2，但 3.pdf 被 update 到 idx1 后
-     * dead 行 2.pdf 也在 idx1 → 永远清不掉。diff 应按 id 删 2.pdf、按 id 更新 3.pdf。
+     * 缺陷 1 的另一个场景：[1,2,3] 删掉中间 2.pdf 后重扫。 旧 deleteExceptIndices 按 [0,1] 删除索引 2，但 3.pdf 被 update 到
+     * idx1 后 dead 行 2.pdf 也在 idx1 → 永远清不掉。diff 应按 id 删 2.pdf、按 id 更新 3.pdf。
      */
     @Test
     fun `delete middle chapter reindexes later ones by id`() {
-        val existing = listOf(
-            existing(id = 1, index = 0, fileKey = "1.pdf"),
-            existing(id = 2, index = 1, fileKey = "2.pdf"),
-            existing(id = 3, index = 2, fileKey = "3.pdf"),
-        )
+        val existing =
+            listOf(
+                existing(id = 1, index = 0, fileKey = "1.pdf"),
+                existing(id = 2, index = 1, fileKey = "2.pdf"),
+                existing(id = 3, index = 2, fileKey = "3.pdf"),
+            )
         val scanned = listOf(scanned("1.pdf"), scanned("3.pdf"))
 
         val diff = ChapterSync.computeDiff(existing, scanned, comicId, titleOf)
@@ -134,10 +139,11 @@ class ChapterSyncTest {
 
     @Test
     fun `previously missing chapter that comes back is restored`() {
-        val existing = listOf(
-            existing(id = 1, index = 0, fileKey = "1.pdf"),
-            existing(id = 2, index = 1, fileKey = "2.pdf", isMissing = true),
-        )
+        val existing =
+            listOf(
+                existing(id = 1, index = 0, fileKey = "1.pdf"),
+                existing(id = 2, index = 1, fileKey = "2.pdf", isMissing = true),
+            )
         val scanned = listOf(scanned("1.pdf"), scanned("2.pdf"))
 
         val diff = ChapterSync.computeDiff(existing, scanned, comicId, titleOf)
@@ -148,18 +154,18 @@ class ChapterSyncTest {
     }
 
     /**
-     * 缺陷 4 的核心场景：之前已失效、重扫仍没找到的章节必须删掉。
-     * 旧 deleteExceptIndices 按索引范围删，重排后 dead 行索引可能落在保留区间，
+     * 缺陷 4 的核心场景：之前已失效、重扫仍没找到的章节必须删掉。 旧 deleteExceptIndices 按索引范围删，重排后 dead 行索引可能落在保留区间，
      * 永远清不掉——这正是缺陷 1 撞索引的来源之一。diff 按 id 删，干净。
      */
     @Test
     fun `long-missing chapter not in scan is deleted by id`() {
-        val existing = listOf(
-            existing(id = 1, index = 0, fileKey = "1.pdf"),
-            // 2.pdf 之前就失效了，重扫仍然没有
-            existing(id = 2, index = 1, fileKey = "2.pdf", isMissing = true),
-            existing(id = 3, index = 2, fileKey = "3.pdf"),
-        )
+        val existing =
+            listOf(
+                existing(id = 1, index = 0, fileKey = "1.pdf"),
+                // 2.pdf 之前就失效了，重扫仍然没有
+                existing(id = 2, index = 1, fileKey = "2.pdf", isMissing = true),
+                existing(id = 3, index = 2, fileKey = "3.pdf"),
+            )
         val scanned = listOf(scanned("1.pdf"), scanned("3.pdf"))
 
         val diff = ChapterSync.computeDiff(existing, scanned, comicId, titleOf)
@@ -175,10 +181,11 @@ class ChapterSyncTest {
 
     @Test
     fun `all chapters removed marks existing as missing`() {
-        val existing = listOf(
-            existing(id = 1, index = 0, fileKey = "1.pdf"),
-            existing(id = 2, index = 1, fileKey = "2.pdf"),
-        )
+        val existing =
+            listOf(
+                existing(id = 1, index = 0, fileKey = "1.pdf"),
+                existing(id = 2, index = 1, fileKey = "2.pdf"),
+            )
 
         val diff = ChapterSync.computeDiff(existing, emptyList(), comicId, titleOf)
 
@@ -191,9 +198,7 @@ class ChapterSyncTest {
 
     @Test
     fun `title rename without index change triggers update`() {
-        val existing = listOf(
-            existing(id = 1, index = 0, fileKey = "1.pdf", title = "old title"),
-        )
+        val existing = listOf(existing(id = 1, index = 0, fileKey = "1.pdf", title = "old title"))
         val scanned = listOf(scanned("1.pdf"))
 
         val diff = ChapterSync.computeDiff(existing, scanned, comicId, titleOf)
@@ -205,13 +210,17 @@ class ChapterSyncTest {
 
     @Test
     fun `append new chapter at end leaves existing untouched`() {
-        val existing = listOf(
-            existing(id = 1, index = 0, fileKey = "1.pdf"),
-            existing(id = 2, index = 1, fileKey = "2.pdf"),
-        )
-        val scanned = listOf(
-            scanned("1.pdf"), scanned("2.pdf"), scanned("3.pdf")
-        )
+        val existing =
+            listOf(
+                existing(id = 1, index = 0, fileKey = "1.pdf"),
+                existing(id = 2, index = 1, fileKey = "2.pdf"),
+            )
+        val scanned =
+            listOf(
+                scanned("1.pdf"),
+                scanned("2.pdf"),
+                scanned("3.pdf"),
+            )
 
         val diff = ChapterSync.computeDiff(existing, scanned, comicId, titleOf)
 
@@ -223,10 +232,11 @@ class ChapterSyncTest {
 
     @Test
     fun `duplicate display names use shortest unique relative path titles`() {
-        val scanned = listOf(
-            scanned("1.pdf", "a").copy(relativePath = "part-a/1.pdf"),
-            scanned("1.pdf", "b").copy(relativePath = "part-b/1.pdf"),
-        )
+        val scanned =
+            listOf(
+                scanned("1.pdf", "a").copy(relativePath = "part-a/1.pdf"),
+                scanned("1.pdf", "b").copy(relativePath = "part-b/1.pdf"),
+            )
 
         val diff = ChapterSync.computeDiff(emptyList(), scanned, comicId, titleOf)
 
@@ -235,19 +245,21 @@ class ChapterSyncTest {
 
     @Test
     fun `partial scan defers new chapters and removals until a complete scan`() {
-        val existing = listOf(
-            existing(id = 1, index = 0, fileKey = "1.pdf"),
-            existing(id = 2, index = 1, fileKey = "2.pdf"),
-        )
+        val existing =
+            listOf(
+                existing(id = 1, index = 0, fileKey = "1.pdf"),
+                existing(id = 2, index = 1, fileKey = "2.pdf"),
+            )
         val scanned = listOf(scanned("3.pdf"))
 
-        val diff = ChapterSync.computeDiff(
-            existing = existing,
-            scanned = scanned,
-            comicId = comicId,
-            titleOf = titleOf,
-            completeScan = false,
-        )
+        val diff =
+            ChapterSync.computeDiff(
+                existing = existing,
+                scanned = scanned,
+                comicId = comicId,
+                titleOf = titleOf,
+                completeScan = false,
+            )
 
         assertTrue(diff.toInsert.isEmpty())
         assertTrue(diff.toUpdate.isEmpty())
@@ -257,10 +269,12 @@ class ChapterSyncTest {
 
     @Test
     fun `changed file metadata invalidates cached page count`() {
-        val existing = existing(id = 1, index = 0, fileKey = "1.pdf").copy(
-            size = 100,
-            lastModified = 10,
-        )
+        val existing =
+            existing(id = 1, index = 0, fileKey = "1.pdf")
+                .copy(
+                    size = 100,
+                    lastModified = 10,
+                )
         val scanned = scanned("1.pdf").copy(size = 120, lastModified = 11)
 
         val diff = ChapterSync.computeDiff(listOf(existing), listOf(scanned), comicId, titleOf)
@@ -270,20 +284,22 @@ class ChapterSyncTest {
 
     // ===== 进度重映射 =====
 
-    /**
-     * 用户读到第 3 章（index=2），前面插入新章后第 3 章变成 index=3。
-     * 重映射应让进度继续指向同一章节（3.pdf）的新索引 3，而不是错位到新插入的章节。
-     */
+    /** 用户读到第 3 章（index=2），前面插入新章后第 3 章变成 index=3。 重映射应让进度继续指向同一章节（3.pdf）的新索引 3，而不是错位到新插入的章节。 */
     @Test
     fun `remap chapter index after inserting in middle`() {
-        val existing = listOf(
-            existing(id = 1, index = 0, fileKey = "1.pdf"),
-            existing(id = 2, index = 1, fileKey = "2.pdf"),
-            existing(id = 3, index = 2, fileKey = "3.pdf"),  // 用户读到这章
-        )
-        val scanned = listOf(
-            scanned("1.pdf"), scanned("1.5.pdf"), scanned("2.pdf"), scanned("3.pdf")
-        )
+        val existing =
+            listOf(
+                existing(id = 1, index = 0, fileKey = "1.pdf"),
+                existing(id = 2, index = 1, fileKey = "2.pdf"),
+                existing(id = 3, index = 2, fileKey = "3.pdf"), // 用户读到这章
+            )
+        val scanned =
+            listOf(
+                scanned("1.pdf"),
+                scanned("1.5.pdf"),
+                scanned("2.pdf"),
+                scanned("3.pdf"),
+            )
         val diff = ChapterSync.computeDiff(existing, scanned, comicId, titleOf)
 
         // 3.pdf 从 index=2 重排到 index=3
@@ -291,16 +307,15 @@ class ChapterSyncTest {
         assertEquals(3, newIndex)
     }
 
-    /**
-     * 删中间章后，用户读到的章节前移。重映射应指向新索引。
-     */
+    /** 删中间章后，用户读到的章节前移。重映射应指向新索引。 */
     @Test
     fun `remap chapter index after deleting in middle`() {
-        val existing = listOf(
-            existing(id = 1, index = 0, fileKey = "1.pdf"),
-            existing(id = 2, index = 1, fileKey = "2.pdf"),
-            existing(id = 3, index = 2, fileKey = "3.pdf"),  // 用户读到这章
-        )
+        val existing =
+            listOf(
+                existing(id = 1, index = 0, fileKey = "1.pdf"),
+                existing(id = 2, index = 1, fileKey = "2.pdf"),
+                existing(id = 3, index = 2, fileKey = "3.pdf"), // 用户读到这章
+            )
         // 2.pdf 被删
         val scanned = listOf(scanned("1.pdf"), scanned("3.pdf"))
         val diff = ChapterSync.computeDiff(existing, scanned, comicId, titleOf)
@@ -310,18 +325,20 @@ class ChapterSyncTest {
         assertEquals(1, newIndex)
     }
 
-    /**
-     * 末尾追加章节不影响已读章节的索引，重映射返回 null（无需更新）。
-     */
+    /** 末尾追加章节不影响已读章节的索引，重映射返回 null（无需更新）。 */
     @Test
     fun `remap returns null when index unchanged`() {
-        val existing = listOf(
-            existing(id = 1, index = 0, fileKey = "1.pdf"),
-            existing(id = 2, index = 1, fileKey = "2.pdf"),
-        )
-        val scanned = listOf(
-            scanned("1.pdf"), scanned("2.pdf"), scanned("3.pdf")
-        )
+        val existing =
+            listOf(
+                existing(id = 1, index = 0, fileKey = "1.pdf"),
+                existing(id = 2, index = 1, fileKey = "2.pdf"),
+            )
+        val scanned =
+            listOf(
+                scanned("1.pdf"),
+                scanned("2.pdf"),
+                scanned("3.pdf"),
+            )
         val diff = ChapterSync.computeDiff(existing, scanned, comicId, titleOf)
 
         // 用户读到 index=1（2.pdf），它没被重排
@@ -329,15 +346,14 @@ class ChapterSyncTest {
         assertEquals(null, newIndex)
     }
 
-    /**
-     * 用户读到的章节被删除（失效后清理）：不重写索引，让打开时 coerceIn 兜底。
-     */
+    /** 用户读到的章节被删除（失效后清理）：不重写索引，让打开时 coerceIn 兜底。 */
     @Test
     fun `remap returns null when read chapter is gone`() {
-        val existing = listOf(
-            existing(id = 1, index = 0, fileKey = "1.pdf"),
-            existing(id = 2, index = 1, fileKey = "2.pdf", isMissing = true),  // 用户读到这章，但它已失效
-        )
+        val existing =
+            listOf(
+                existing(id = 1, index = 0, fileKey = "1.pdf"),
+                existing(id = 2, index = 1, fileKey = "2.pdf", isMissing = true), // 用户读到这章，但它已失效
+            )
         // 2.pdf 重扫仍然没有 → 被删除
         val scanned = listOf(scanned("1.pdf"))
         val diff = ChapterSync.computeDiff(existing, scanned, comicId, titleOf)

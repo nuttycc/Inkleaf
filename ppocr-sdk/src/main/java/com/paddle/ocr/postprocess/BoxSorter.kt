@@ -31,8 +31,9 @@ object BoxSorter {
             while (j >= 0) {
                 val next = list[j + 1]
                 val curr = list[j]
-                if (kotlin.math.abs(next.points[0].y - curr.points[0].y) < ROW_THRESHOLD_Y &&
-                    next.points[0].x < curr.points[0].x
+                if (
+                    kotlin.math.abs(next.points[0].y - curr.points[0].y) < ROW_THRESHOLD_Y &&
+                        next.points[0].x < curr.points[0].x
                 ) {
                     list[j] = next
                     list[j + 1] = curr

@@ -14,9 +14,7 @@ class OcrReadingOrderTest {
 
         assertEquals(
             listOf(upperRight, upperLeft, lowerRight),
-            sortPixelOcrRegionsInReadingOrder(
-                listOf(lowerRight, upperLeft, upperRight),
-            ),
+            sortPixelOcrRegionsInReadingOrder(listOf(lowerRight, upperLeft, upperRight)),
         )
     }
 
@@ -25,16 +23,18 @@ class OcrReadingOrderTest {
         val upperRight = verticalLine("上右", 700f, 100f, 760f, 400f)
         val upperLeft = verticalLine("上左", 250f, 120f, 310f, 420f)
         val lowerRight = verticalLine("下右", 800f, 720f, 860f, 980f)
-        val panels = listOf(
-            PixelOcrPanel(10, 520f, 20f, 980f, 520f),
-            PixelOcrPanel(11, 20f, 20f, 500f, 520f),
-            PixelOcrPanel(12, 20f, 560f, 980f, 1150f),
-        )
+        val panels =
+            listOf(
+                PixelOcrPanel(10, 520f, 20f, 980f, 520f),
+                PixelOcrPanel(11, 20f, 20f, 500f, 520f),
+                PixelOcrPanel(12, 20f, 560f, 980f, 1150f),
+            )
 
-        val layout = orderPixelOcrLayout(
-            regions = listOf(lowerRight, upperLeft, upperRight),
-            panels = panels,
-        )
+        val layout =
+            orderPixelOcrLayout(
+                regions = listOf(lowerRight, upperLeft, upperRight),
+                panels = panels,
+            )
 
         assertEquals(listOf(10, 11, 12), layout.panels.map { it.panel.id })
         assertEquals(
@@ -52,9 +52,7 @@ class OcrReadingOrderTest {
 
         assertEquals(
             listOf(upperLeft, upperRight, lowerLeft),
-            sortPixelOcrRegionsInReadingOrder(
-                listOf(lowerLeft, upperRight, upperLeft),
-            ),
+            sortPixelOcrRegionsInReadingOrder(listOf(lowerLeft, upperRight, upperLeft)),
         )
     }
 
@@ -81,29 +79,32 @@ class OcrReadingOrderTest {
         right: Float,
         bottom: Float,
         isVertical: Boolean,
-    ): PixelOcrRegion = PixelOcrRegion(
-        confidence = 0.9f,
-        points = rectangle(left, top, right, bottom),
-        sourceTile = tile,
-        characters = listOf(
-            PixelOcrCharacter(
-                text = text,
-                confidence = 0.9f,
-                points = rectangle(left, top, right, bottom),
-            )
-        ),
-        isVertical = isVertical,
-    )
+    ): PixelOcrRegion =
+        PixelOcrRegion(
+            confidence = 0.9f,
+            points = rectangle(left, top, right, bottom),
+            sourceTile = tile,
+            characters =
+                listOf(
+                    PixelOcrCharacter(
+                        text = text,
+                        confidence = 0.9f,
+                        points = rectangle(left, top, right, bottom),
+                    )
+                ),
+            isVertical = isVertical,
+        )
 
     private fun rectangle(
         left: Float,
         top: Float,
         right: Float,
         bottom: Float,
-    ): List<OcrPoint> = listOf(
-        OcrPoint(left, top),
-        OcrPoint(right, top),
-        OcrPoint(right, bottom),
-        OcrPoint(left, bottom),
-    )
+    ): List<OcrPoint> =
+        listOf(
+            OcrPoint(left, top),
+            OcrPoint(right, top),
+            OcrPoint(right, bottom),
+            OcrPoint(left, bottom),
+        )
 }

@@ -3,8 +3,8 @@ package com.exio.inkleaf.data
 import com.exio.inkleaf.data.db.ReadingSessionEntity
 
 /**
- * Maps between domain session models and the flattened Room entity.
- * Keeps status/reason enums out of the DAO layer.
+ * Maps between domain session models and the flattened Room entity. Keeps status/reason enums out
+ * of the DAO layer.
  */
 internal object ReadingSessionMapping {
     fun toResumable(entity: ReadingSessionEntity): ResumableSession {
@@ -20,11 +20,12 @@ internal object ReadingSessionMapping {
         }
         return ResumableSession(
             id = entity.id,
-            comic = ReadingSessionComicRef(
-                fileKey = entity.comicFileKey,
-                titleSnapshot = entity.titleSnapshot,
-                sourceType = entity.sourceType,
-            ),
+            comic =
+                ReadingSessionComicRef(
+                    fileKey = entity.comicFileKey,
+                    titleSnapshot = entity.titleSnapshot,
+                    sourceType = entity.sourceType,
+                ),
             status = status,
             startedAt = entity.startedAt,
             lastCheckpointAt = entity.lastCheckpointAt,
@@ -115,52 +116,57 @@ internal object ReadingSessionMapping {
         val endedAt = requireNotNull(entity.endedAt) { "Completed row requires endedAt" }
         val endReasonName = requireNotNull(entity.endReason) { "Completed row requires endReason" }
         require(endReasonName.isNotBlank())
-        val endGlobal = requireNotNull(entity.endGlobalPageIndex) { "Completed row requires end page" }
+        val endGlobal =
+            requireNotNull(entity.endGlobalPageIndex) { "Completed row requires end page" }
         val endChapter = requireNotNull(entity.endChapterIndex)
         val endPage = requireNotNull(entity.endPageIndex)
         val endTitle = requireNotNull(entity.endChapterTitle)
         val endRevision = requireNotNull(entity.endSourceRevision)
         return CompletedSession(
             id = entity.id,
-            comic = ReadingSessionComicRef(
-                fileKey = entity.comicFileKey,
-                titleSnapshot = entity.titleSnapshot,
-                sourceType = entity.sourceType,
-            ),
+            comic =
+                ReadingSessionComicRef(
+                    fileKey = entity.comicFileKey,
+                    titleSnapshot = entity.titleSnapshot,
+                    sourceType = entity.sourceType,
+                ),
             startedAt = entity.startedAt,
             lastCheckpointAt = entity.lastCheckpointAt,
             endedAt = endedAt,
             activeReadingMillis = entity.activeReadingMillis,
             startPosition = startPositionOf(entity),
             checkpointPosition = checkpointPositionOf(entity),
-            endPosition = ReadingPositionSnapshot(
-                pageIdentity = entity.endPageIdentity,
-                globalPageIndex = endGlobal,
-                chapterIndex = endChapter,
-                pageIndex = endPage,
-                chapterTitle = endTitle,
-                sourceRevision = endRevision,
-            ),
+            endPosition =
+                ReadingPositionSnapshot(
+                    pageIdentity = entity.endPageIdentity,
+                    globalPageIndex = endGlobal,
+                    chapterIndex = endChapter,
+                    pageIndex = endPage,
+                    chapterTitle = endTitle,
+                    sourceRevision = endRevision,
+                ),
             timeZoneId = entity.timeZoneId,
             endReason = ReadingSessionEndReason.valueOf(endReasonName),
         )
     }
 
-    private fun startPositionOf(entity: ReadingSessionEntity) = ReadingPositionSnapshot(
-        pageIdentity = entity.startPageIdentity,
-        globalPageIndex = entity.startGlobalPageIndex,
-        chapterIndex = entity.startChapterIndex,
-        pageIndex = entity.startPageIndex,
-        chapterTitle = entity.startChapterTitle,
-        sourceRevision = entity.startSourceRevision,
-    )
+    private fun startPositionOf(entity: ReadingSessionEntity) =
+        ReadingPositionSnapshot(
+            pageIdentity = entity.startPageIdentity,
+            globalPageIndex = entity.startGlobalPageIndex,
+            chapterIndex = entity.startChapterIndex,
+            pageIndex = entity.startPageIndex,
+            chapterTitle = entity.startChapterTitle,
+            sourceRevision = entity.startSourceRevision,
+        )
 
-    private fun checkpointPositionOf(entity: ReadingSessionEntity) = ReadingPositionSnapshot(
-        pageIdentity = entity.checkpointPageIdentity,
-        globalPageIndex = entity.checkpointGlobalPageIndex,
-        chapterIndex = entity.checkpointChapterIndex,
-        pageIndex = entity.checkpointPageIndex,
-        chapterTitle = entity.checkpointChapterTitle,
-        sourceRevision = entity.checkpointSourceRevision,
-    )
+    private fun checkpointPositionOf(entity: ReadingSessionEntity) =
+        ReadingPositionSnapshot(
+            pageIdentity = entity.checkpointPageIdentity,
+            globalPageIndex = entity.checkpointGlobalPageIndex,
+            chapterIndex = entity.checkpointChapterIndex,
+            pageIndex = entity.checkpointPageIndex,
+            chapterTitle = entity.checkpointChapterTitle,
+            sourceRevision = entity.checkpointSourceRevision,
+        )
 }

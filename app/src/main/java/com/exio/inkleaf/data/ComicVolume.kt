@@ -53,12 +53,13 @@ interface ComicVolume {
     fun isChapterReadable(chapterIndex: Int): Boolean = chapterPageCount(chapterIndex) > 0
 
     /** Reads chapter metadata as one immutable snapshot for chapter-list UIs. */
-    fun probeChapterMetadata(): List<ChapterMetadata> = List(chapterCount) { chapterIndex ->
-        ChapterMetadata(
-            pageCount = chapterPageCount(chapterIndex).coerceAtLeast(0),
-            isReadable = isChapterReadable(chapterIndex),
-        )
-    }
+    fun probeChapterMetadata(): List<ChapterMetadata> =
+        List(chapterCount) { chapterIndex ->
+            ChapterMetadata(
+                pageCount = chapterPageCount(chapterIndex).coerceAtLeast(0),
+                isReadable = isChapterReadable(chapterIndex),
+            )
+        }
 
     /** Finds the first chapter that can currently be opened. */
     fun firstReadableChapterIndex(): Int? =
@@ -73,8 +74,8 @@ interface ComicVolume {
     fun chapterPageToGlobal(chapterIndex: Int, pageIndex: Int): Int
 
     /**
-     * Stable identity for a page when the underlying book can be edited.
-     * Immutable volumes can use the default null value and fall back to the page index.
+     * Stable identity for a page when the underlying book can be edited. Immutable volumes can use
+     * the default null value and fall back to the page index.
      */
     fun pageIdentity(globalPage: Int): String? = null
 
@@ -94,9 +95,8 @@ interface ComicVolume {
     /**
      * 直接读取第 [globalPage] 页的位图，跳过 [loadPageBytes] 的"渲染→压缩→UI 再解码"往返。
      *
-     * 默认返回 null：zip/cbz 走 [loadPageBytes] + Coil 解码即可（本来就是压缩图片字节，
-     * 不存在往返）；PdfComicVolume 覆盖此方法直接返回 PdfiumCore 渲染好的 ImageBitmap，
-     * 省一次 PNG 压缩 + 一次解码，翻页更跟手。
+     * 默认返回 null：zip/cbz 走 [loadPageBytes] + Coil 解码即可（本来就是压缩图片字节， 不存在往返）；PdfComicVolume 覆盖此方法直接返回
+     * PdfiumCore 渲染好的 ImageBitmap， 省一次 PNG 压缩 + 一次解码，翻页更跟手。
      *
      * 返回 null 时调用方应 fallback 到 [loadPageBytes]。
      */
@@ -121,8 +121,8 @@ interface ComicVolume {
     suspend fun loadThumbnailPageBytes(globalPage: Int): ByteArray
 
     /**
-     * 生成第 [globalPage] 页的缩略图位图。默认实现走 [loadThumbnailPageBytes] +
-     * [Covers.decodeSampled] 通用通道，zip/cbz 与 PDF 都适用。
+     * 生成第 [globalPage] 页的缩略图位图。默认实现走 [loadThumbnailPageBytes] + [Covers.decodeSampled] 通用通道，zip/cbz
+     * 与 PDF 都适用。
      */
     suspend fun renderThumbnail(globalPage: Int, targetWidth: Int): ImageBitmap? {
         val bytes = loadThumbnailPageBytes(globalPage)

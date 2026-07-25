@@ -34,6 +34,7 @@ import com.exio.inkleaf.data.db.BookSourceType
 import com.exio.inkleaf.data.db.BookmarkEntity
 import com.exio.inkleaf.data.db.ComicEntity
 import com.exio.inkleaf.data.db.FavoritePageEntity
+import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -44,25 +45,25 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlin.time.Duration.Companion.milliseconds
 
 /** 阅读页状态机：打开中 / 失败 / 就绪（带恢复的起始页码） */
 sealed interface ReaderUiState {
     data object Loading : ReaderUiState
+
     data class Error(val message: String) : ReaderUiState
+
     data class Ready(
         val volume: ComicVolume,
         val startPage: Int,
         val title: String,
     ) : ReaderUiState
 }
+
 /**
  * 阅读页的状态与资源持有者。
  *
- * 为什么引入 ViewModel：它存活于 Activity 重建（旋转屏幕、深色模式切换等
- * "配置变更"）之外。之前 ComicBook 由 Composable 持有，旋转一次就要
- * 重新复制整个 zip；现在搬进 ViewModel，旋转时 state 原封不动，
- * 界面瞬间恢复。
+ * 为什么引入 ViewModel：它存活于 Activity 重建（旋转屏幕、深色模式切换等 "配置变更"）之外。之前 ComicBook 由 Composable 持有，旋转一次就要
+ * 重新复制整个 zip；现在搬进 ViewModel，旋转时 state 原封不动， 界面瞬间恢复。
  */
 class ReaderViewModel(
     app: Application,
@@ -86,8 +87,7 @@ class ReaderViewModel(
      * 2. 预热协程由 viewModelScope 托管，退出阅读页自动取消；
      * 3. 预热与按需加载在同一处去重，不会重复解码。
      *
-     * 占用账：RGB_565 下每张约 80KB，400 页约 32MB，可接受；
-     * 超过 PREWARM_MAX_PAGES 的书不做全量预热（见 prewarmThumbnails）。
+     * 占用账：RGB_565 下每张约 80KB，400 页约 32MB，可接受； 超过 PREWARM_MAX_PAGES 的书不做全量预热（见 prewarmThumbnails）。
      */
     val thumbnails = mutableStateMapOf<Int, ImageBitmap>()
     val bookmarkPages = mutableStateMapOf<Int, BookmarkEntity>()
@@ -122,77 +122,78 @@ class ReaderViewModel(
     private var checkpointJob: Job? = null
     private var processLifecycleAttached = false
 
-    private val processLifecycleObserver = object : DefaultLifecycleObserver {
-        override fun onResume(owner: LifecycleOwner) {
-            dispatchSessionEvent(ReadingSessionEvent.EnteredInteractiveForeground)
-            startCheckpointLoop()
-        }
+    private val processLifecycleObserver =
+        object : DefaultLifecycleObserver {
+            override fun onResume(owner: LifecycleOwner) {
+                dispatchSessionEvent(ReadingSessionEvent.EnteredInteractiveForeground)
+                startCheckpointLoop()
+            }
 
-        override fun onPause(owner: LifecycleOwner) {
-            stopCheckpointLoop()
-            dispatchSessionEvent(ReadingSessionEvent.LeftInteractiveForeground)
+            override fun onPause(owner: LifecycleOwner) {
+                stopCheckpointLoop()
+                dispatchSessionEvent(ReadingSessionEvent.LeftInteractiveForeground)
+            }
         }
-    }
 
     init {
         viewModelScope.launch {
-            state = try {
-                val comic = repo.getComic(comicId)
-                    ?: throw ComicOpenException("书架记录不存在")
-                this@ReaderViewModel.comic = comic
-                // Identify the comic before open; source revision arrives on Ready.
-                dispatchSessionEvent(
-                    ReadingSessionEvent.OpenComic(
-                        ReadingSessionComicRef(
-                            fileKey = comic.fileKey,
-                            titleSnapshot = comic.title.ifBlank { "未命名漫画" },
-                            sourceType = comic.sourceType,
-                        ),
-                    ),
-                )
-                observeFavorites(comic.fileKey)
-                val opened = withContext(Dispatchers.IO) { repo.openBook(comic) }
-                volume = opened
-                observeBookmarks(opened)
-                // 首次打开回填页数和封面；Room Flow 会自动刷新书架。
-                // openBook 内部 PdfComicVolume 的 PDF 解析走 IO，这里包一层
-                // withContext 兜底，避免某些路径在主线程做 native 打开。
-                withContext(Dispatchers.IO) { repo.backfillMetadata(comic, opened) }
-                // 全章都打不开（损坏/加密/权限全失效）→ 给清晰提示而非崩在
-                // coerceIn(0, -1)。spec：corrupt/encrypted PDF 不崩溃。
-                if (opened.totalPageCount <= 0) {
-                    opened.close()
-                    throw ComicOpenException("无法打开任何章节，PDF 文件可能已损坏或加密")
+            state =
+                try {
+                    val comic = repo.getComic(comicId) ?: throw ComicOpenException("书架记录不存在")
+                    this@ReaderViewModel.comic = comic
+                    // Identify the comic before open; source revision arrives on Ready.
+                    dispatchSessionEvent(
+                        ReadingSessionEvent.OpenComic(
+                            ReadingSessionComicRef(
+                                fileKey = comic.fileKey,
+                                titleSnapshot = comic.title.ifBlank { "未命名漫画" },
+                                sourceType = comic.sourceType,
+                            )
+                        )
+                    )
+                    observeFavorites(comic.fileKey)
+                    val opened = withContext(Dispatchers.IO) { repo.openBook(comic) }
+                    volume = opened
+                    observeBookmarks(opened)
+                    // 首次打开回填页数和封面；Room Flow 会自动刷新书架。
+                    // openBook 内部 PdfComicVolume 的 PDF 解析走 IO，这里包一层
+                    // withContext 兜底，避免某些路径在主线程做 native 打开。
+                    withContext(Dispatchers.IO) { repo.backfillMetadata(comic, opened) }
+                    // 全章都打不开（损坏/加密/权限全失效）→ 给清晰提示而非崩在
+                    // coerceIn(0, -1)。spec：corrupt/encrypted PDF 不崩溃。
+                    if (opened.totalPageCount <= 0) {
+                        opened.close()
+                        throw ComicOpenException("无法打开任何章节，PDF 文件可能已损坏或加密")
+                    }
+                    val startPage =
+                        initialPageOverride
+                            ?: opened.chapterPageToGlobal(
+                                comic.lastReadChapterIndex,
+                                comic.lastReadPage,
+                            )
+                    val safeStartPage = startPage.coerceIn(0, opened.totalPageCount - 1)
+                    currentPage = safeStartPage
+                    dispatchSessionEvent(
+                        ReadingSessionEvent.ReaderReady(positionSnapshot(opened, safeStartPage))
+                    )
+                    attachProcessLifecycle()
+                    // 后台预热胶片缩略图：呼出工具栏时大概率已全部就绪
+                    prewarmThumbnails(opened, safeStartPage)
+                    ReaderUiState.Ready(
+                        volume = opened,
+                        // 原文件可能被换成页数更少的版本，夹紧防止越界
+                        startPage = safeStartPage,
+                        title = comic.title,
+                    )
+                } catch (e: ComicOpenException) {
+                    ReaderUiState.Error(e.message ?: "打开失败")
                 }
-                val startPage = initialPageOverride ?: opened.chapterPageToGlobal(
-                    comic.lastReadChapterIndex,
-                    comic.lastReadPage,
-                )
-                val safeStartPage = startPage.coerceIn(0, opened.totalPageCount - 1)
-                currentPage = safeStartPage
-                dispatchSessionEvent(
-                    ReadingSessionEvent.ReaderReady(positionSnapshot(opened, safeStartPage)),
-                )
-                attachProcessLifecycle()
-                // 后台预热胶片缩略图：呼出工具栏时大概率已全部就绪
-                prewarmThumbnails(opened, safeStartPage)
-                ReaderUiState.Ready(
-                    volume = opened,
-                    // 原文件可能被换成页数更少的版本，夹紧防止越界
-                    startPage = safeStartPage,
-                    title = comic.title,
-                )
-            } catch (e: ComicOpenException) {
-                ReaderUiState.Error(e.message ?: "打开失败")
-            }
         }
     }
 
     /**
-     * 进度写库按 trailing 节流：快速连翻/拖滑杆跳页时不逐页写——每次写库
-     * 都会让书架侧仍在订阅的 Room Flow 在后台重查一轮。窗口内只记最新进度，
-     * 到期写一次；退出阅读页取消协程时由 finally + NonCancellable
-     * 保证最后的进度必然落库。
+     * 进度写库按 trailing 节流：快速连翻/拖滑杆跳页时不逐页写——每次写库 都会让书架侧仍在订阅的 Room Flow 在后台重查一轮。窗口内只记最新进度，
+     * 到期写一次；退出阅读页取消协程时由 finally + NonCancellable 保证最后的进度必然落库。
      *
      * UI 仍使用全局页码；内部按 (章节, 页) 落库。
      */
@@ -201,7 +202,7 @@ class ReaderViewModel(
         val opened = volume
         if (opened != null && globalPage in 0 until opened.totalPageCount) {
             dispatchSessionEvent(
-                ReadingSessionEvent.PageVisible(positionSnapshot(opened, globalPage)),
+                ReadingSessionEvent.PageVisible(positionSnapshot(opened, globalPage))
             )
         }
         val progress = opened?.globalToChapterPage(globalPage) ?: ChapterProgress(0, globalPage)
@@ -239,12 +240,10 @@ class ReaderViewModel(
     }
 
     /**
-     * Explicit Reader leave (toolbar Back / system Back). Idempotent so
-     * BackHandler + dispose cannot complete the same session twice.
+     * Explicit Reader leave (toolbar Back / system Back). Idempotent so BackHandler + dispose
+     * cannot complete the same session twice.
      */
-    fun endReadingSession(
-        reason: ReadingSessionEndReason = ReadingSessionEndReason.LEFT_READER,
-    ) {
+    fun endReadingSession(reason: ReadingSessionEndReason = ReadingSessionEndReason.LEFT_READER) {
         if (sessionEnded) return
         sessionEnded = true
         stopCheckpointLoop()
@@ -351,9 +350,8 @@ class ReaderViewModel(
     }
 
     /**
-     * 后台预热：从当前页向后到结尾、再从当前页向前到开头。
-     * 顺序串行——loadThumbnail 逐个 suspend 完成，天然不会挤爆 IO；
-     * 用户滑到未预热区域时 requestThumbnail 并发插队，zip 锁自动排队。
+     * 后台预热：从当前页向后到结尾、再从当前页向前到开头。 顺序串行——loadThumbnail 逐个 suspend 完成，天然不会挤爆 IO； 用户滑到未预热区域时
+     * requestThumbnail 并发插队，zip 锁自动排队。
      */
     private fun prewarmThumbnails(volume: ComicVolume, startPage: Int) {
         // 超大书全量预热会吃掉过多内存（每张约 80KB），只走按需加载。
@@ -388,17 +386,18 @@ class ReaderViewModel(
         opened: ComicVolume,
         bookmarks: List<BookmarkEntity>,
     ) {
-        val resolutions = withContext(Dispatchers.IO) {
-            bookmarks.mapNotNull { bookmark ->
-                resolveBookmarkPage(opened, bookmark)?.let { resolution ->
-                    ResolvedReaderBookmark(
-                        bookmark = bookmark,
-                        globalPage = resolution.globalPage,
-                        stale = resolution.stale,
-                    )
+        val resolutions =
+            withContext(Dispatchers.IO) {
+                bookmarks.mapNotNull { bookmark ->
+                    resolveBookmarkPage(opened, bookmark)?.let { resolution ->
+                        ResolvedReaderBookmark(
+                            bookmark = bookmark,
+                            globalPage = resolution.globalPage,
+                            stale = resolution.stale,
+                        )
+                    }
                 }
             }
-        }
 
         bookmarkPages.clear()
         resolvedBookmarks.clear()
@@ -422,10 +421,11 @@ class ReaderViewModel(
         if (bookmark.sourceRevision == opened.sourceRevision) {
             return ReaderBookmarkResolution(approximatePage, stale = false)
         }
-        val remappedPage = bookmark.pageIdentity
-            ?.takeIf { it.isNotBlank() }
-            ?.let(opened::findPageByIdentity)
-            ?.takeIf { it in 0 until opened.totalPageCount }
+        val remappedPage =
+            bookmark.pageIdentity
+                ?.takeIf { it.isNotBlank() }
+                ?.let(opened::findPageByIdentity)
+                ?.takeIf { it in 0 until opened.totalPageCount }
         val sourceType = comic?.sourceType
         return ReaderBookmarkResolution(
             globalPage = remappedPage ?: approximatePage,
@@ -478,10 +478,7 @@ class ReaderViewModel(
         }
     }
 
-    /**
-     * ViewModel 真正销毁时调用（返回书架弹出导航栈、或 App 退出）。
-     * 注意旋转屏幕不会走到这里——这正是资源不被重复释放/创建的关键。
-     */
+    /** ViewModel 真正销毁时调用（返回书架弹出导航栈、或 App 退出）。 注意旋转屏幕不会走到这里——这正是资源不被重复释放/创建的关键。 */
     override fun onCleared() {
         stopCheckpointLoop()
         detachProcessLifecycle()
@@ -502,9 +499,11 @@ class ReaderViewModel(
         ProcessLifecycleOwner.get().lifecycle.addObserver(processLifecycleObserver)
         // ProcessLifecycleOwner replays current state, but default machine
         // foreground is false — still emit enter when already resumed.
-        if (ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(
-                androidx.lifecycle.Lifecycle.State.RESUMED,
-            )
+        if (
+            ProcessLifecycleOwner.get()
+                .lifecycle
+                .currentState
+                .isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)
         ) {
             dispatchSessionEvent(ReadingSessionEvent.EnteredInteractiveForeground)
             startCheckpointLoop()
@@ -547,7 +546,8 @@ class ReaderViewModel(
     }
 
     private fun dispatchTerminalSessionEvent(event: ReadingSessionEvent) {
-        // Start immediately so the terminal event is queued before navigation creates another Reader.
+        // Start immediately so the terminal event is queued before navigation creates another
+        // Reader.
         applicationScope.launch(start = CoroutineStart.UNDISPATCHED) {
             try {
                 sessionRepo.dispatch(event)

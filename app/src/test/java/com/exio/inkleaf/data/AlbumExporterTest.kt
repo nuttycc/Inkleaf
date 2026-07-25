@@ -1,13 +1,13 @@
 package com.exio.inkleaf.data
 
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.util.zip.ZipInputStream
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
-import java.util.zip.ZipInputStream
 
 class AlbumExporterTest {
     @Test
@@ -30,11 +30,12 @@ class AlbumExporterTest {
 
     @Test
     fun `cbz uses stable page order zero padded names and streamed bytes`() {
-        val pages = listOf(
-            page(id = "30", position = 2, extension = "PNG"),
-            page(id = "10", position = 0, extension = "jpg"),
-            page(id = "20", position = 1, extension = "webp"),
-        )
+        val pages =
+            listOf(
+                page(id = "30", position = 2, extension = "PNG"),
+                page(id = "10", position = 0, extension = "jpg"),
+                page(id = "20", position = 1, extension = "webp"),
+            )
         val bytesById = pages.associate { it.id to "page-${it.id}".toByteArray() }
         val output = ByteArrayOutputStream()
 
@@ -51,7 +52,10 @@ class AlbumExporterTest {
         assertArrayEquals(bytesById.getValue("20"), entries[2].second)
         assertArrayEquals(bytesById.getValue("30"), entries[3].second)
         assertTrue(
-            entries.first().second.toString(Charsets.UTF_8)
+            entries
+                .first()
+                .second
+                .toString(Charsets.UTF_8)
                 .contains("Image=\"1\" Type=\"FrontCover\"")
         )
     }
@@ -66,13 +70,14 @@ class AlbumExporterTest {
         id: String,
         position: Int,
         extension: String = "jpg",
-    ) = ExportPage(
-        id = id,
-        position = position,
-        relativePath = "albums/1/pages/$id.$extension",
-        displayName = "$id.$extension",
-        extension = extension,
-    )
+    ) =
+        ExportPage(
+            id = id,
+            position = position,
+            relativePath = "albums/1/pages/$id.$extension",
+            displayName = "$id.$extension",
+            extension = extension,
+        )
 
     private fun readZip(bytes: ByteArray): List<Pair<String, ByteArray>> {
         val entries = mutableListOf<Pair<String, ByteArray>>()

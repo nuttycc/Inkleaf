@@ -1,7 +1,6 @@
 package com.exio.inkleaf.ui
 
 import androidx.annotation.DrawableRes
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -32,23 +31,15 @@ internal fun ReaderToolsPanelContent(
     onRecognizePage: () -> Unit,
     onSetCover: () -> Unit,
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(bottom = 16.dp),
-    ) {
-        ReaderAttachedPanelHeader(
-            title = ReaderPanel.Tools.title(),
-        )
+    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+        ReaderAttachedPanelHeader(title = ReaderPanel.Tools.title())
         ReaderAttachedPanelDivider()
         Spacer(modifier = Modifier.height(8.dp))
 
         // 2x2 Expressive Control Grid
         Row(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
         ) {
             ReaderToolCard(
                 label = if (isFavorite) "已收藏图片" else "收藏图片",
@@ -61,7 +52,8 @@ internal fun ReaderToolsPanelContent(
             ReaderToolCard(
                 label = "识字 (OCR)",
                 subtitle = if (ocrBusy) "正在扫描…" else "提取单页文本",
-                icon = MaterialSymbolsOutlinedR.drawable.materialsymbols_ic_document_scanner_outlined,
+                icon =
+                    MaterialSymbolsOutlinedR.drawable.materialsymbols_ic_document_scanner_outlined,
                 enabled = !ocrBusy,
                 onClick = onRecognizePage,
                 modifier = Modifier.weight(1f),
@@ -72,9 +64,7 @@ internal fun ReaderToolsPanelContent(
 
         Row(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
         ) {
             ReaderToolCard(
                 label = "设为封面",
@@ -99,22 +89,25 @@ private fun ReaderToolCard(
     enabled: Boolean = true,
     isActive: Boolean = false,
 ) {
-    val containerColor = when {
-        !enabled -> MaterialTheme.colorScheme.surfaceContainerLowest.copy(alpha = 0.5f)
-        isActive -> MaterialTheme.colorScheme.primaryContainer
-        else -> MaterialTheme.colorScheme.surfaceContainerLow
-    }
+    val containerColor =
+        when {
+            !enabled -> MaterialTheme.colorScheme.surfaceContainerLowest.copy(alpha = 0.5f)
+            isActive -> MaterialTheme.colorScheme.primaryContainer
+            else -> MaterialTheme.colorScheme.surfaceContainerLow
+        }
 
-    val contentColor = when {
-        !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-        isActive -> MaterialTheme.colorScheme.onPrimaryContainer
-        else -> MaterialTheme.colorScheme.onSurface
-    }
+    val contentColor =
+        when {
+            !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+            isActive -> MaterialTheme.colorScheme.onPrimaryContainer
+            else -> MaterialTheme.colorScheme.onSurface
+        }
 
-    val iconTint = when {
-        !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
-        else -> MaterialTheme.colorScheme.primary
-    }
+    val iconTint =
+        when {
+            !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+            else -> MaterialTheme.colorScheme.primary
+        }
 
     Surface(
         onClick = onClick,
@@ -125,11 +118,7 @@ private fun ReaderToolCard(
         tonalElevation = if (isActive) 4.dp else 1.dp,
         modifier = modifier,
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-        ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp)) {
             Icon(
                 painter = painterResource(icon),
                 contentDescription = null,

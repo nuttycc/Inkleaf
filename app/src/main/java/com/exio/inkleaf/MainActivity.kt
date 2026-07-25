@@ -69,47 +69,34 @@ import com.exio.inkleaf.ui.SettingsScreen
 import com.exio.inkleaf.ui.ShelfScreen
 import com.exio.inkleaf.ui.ThemeSettingsScreen
 import com.exio.inkleaf.ui.theme.InkleafTheme
+import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
-import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.serialization.Serializable
 
-/**
- * 类型安全路由：路由就是普通数据类（类比 react-router 的 path + params，
- * 但参数有编译期类型保障）。@Serializable 让编译器生成参数的编解码器。
- */
-@Serializable
-data object ShellRoute
+/** 类型安全路由：路由就是普通数据类（类比 react-router 的 path + params， 但参数有编译期类型保障）。@Serializable 让编译器生成参数的编解码器。 */
+@Serializable data object ShellRoute
 
-@Serializable
-data object ShelfRoute
+@Serializable data object ShelfRoute
 
-@Serializable
-data class ReaderRoute(val comicId: Long, val initialPage: Int? = null)
+@Serializable data class ReaderRoute(val comicId: Long, val initialPage: Int? = null)
 
-@Serializable
-data class AlbumEditorRoute(val comicId: Long? = null)
+@Serializable data class AlbumEditorRoute(val comicId: Long? = null)
 
-@Serializable
-data object HistoryRoute
+@Serializable data object HistoryRoute
 
-@Serializable
-data object FavoritesRoute
+@Serializable data object FavoritesRoute
 
-@Serializable
-data class FavoriteViewerRoute(val favoriteId: Long)
+@Serializable data class FavoriteViewerRoute(val favoriteId: Long)
 
-@Serializable
-data object SettingsRoute
+@Serializable data object SettingsRoute
 
-@Serializable
-data object ThemeSettingsRoute
+@Serializable data object ThemeSettingsRoute
 
-@Serializable
-data object OcrModelDownloadRoute
+@Serializable data object OcrModelDownloadRoute
 
 /** 外层壳↔二级：全宽滑动的运动量大，350~450ms 区间体感比较合适 */
 private const val NAV_TRANSITION_MS = 400
@@ -126,10 +113,7 @@ private enum class TopLevelDestination {
 
 private data class ExternalOpenRequest(val id: Long, val uri: Uri)
 
-/**
- * M3 emphasized 缓动：起步快、减速段长，比默认 FastOutSlowIn 的收尾
- * 更舒展——同样时长下动画"可见的部分"更多，不会显得一闪而过
- */
+/** M3 emphasized 缓动：起步快、减速段长，比默认 FastOutSlowIn 的收尾 更舒展——同样时长下动画"可见的部分"更多，不会显得一闪而过 */
 private val NavEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
 
 private fun <T> navSpec() = tween<T>(NAV_TRANSITION_MS, easing = NavEasing)
@@ -158,15 +142,13 @@ private fun InkleafBottomBar(
     val favoritesSelected = selectedDestination == TopLevelDestination.FAVORITES
 
     Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surface)
-            .navigationBarsPadding(),
+        modifier =
+            Modifier.fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surface)
+                .navigationBarsPadding()
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(48.dp),
+            modifier = Modifier.fillMaxWidth().height(48.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             CompactBottomBarItem(
@@ -200,13 +182,14 @@ private fun InkleafBottomBar(
                 },
             ) { tint ->
                 Icon(
-                    painter = painterResource(
-                        if (favoritesSelected) {
-                            R.drawable.ic_favorite
-                        } else {
-                            R.drawable.ic_favorite_border
-                        }
-                    ),
+                    painter =
+                        painterResource(
+                            if (favoritesSelected) {
+                                R.drawable.ic_favorite
+                            } else {
+                                R.drawable.ic_favorite_border
+                            }
+                        ),
                     contentDescription = "已保存",
                     tint = tint,
                 )
@@ -251,21 +234,21 @@ private fun RowScope.CompactBottomBarItem(
     val indicatorColor = if (selected) colors.secondaryContainer else Color.Transparent
 
     Box(
-        modifier = Modifier
-            .weight(1f)
-            .height(48.dp)
-            .selectable(
-                selected = selected,
-                onClick = onClick,
-                role = Role.Tab,
-            ),
+        modifier =
+            Modifier.weight(1f)
+                .height(48.dp)
+                .selectable(
+                    selected = selected,
+                    onClick = onClick,
+                    role = Role.Tab,
+                ),
         contentAlignment = Alignment.Center,
     ) {
         Box(
-            modifier = Modifier
-                .size(width = 56.dp, height = 32.dp)
-                .clip(CircleShape)
-                .background(indicatorColor),
+            modifier =
+                Modifier.size(width = 56.dp, height = 32.dp)
+                    .clip(CircleShape)
+                    .background(indicatorColor),
             contentAlignment = Alignment.Center,
         ) {
             icon(tint)
@@ -278,9 +261,7 @@ private fun RowScope.CompactBottomBarPlaceholder(iconRes: Int) {
     val tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.32f)
 
     Box(
-        modifier = Modifier
-            .weight(1f)
-            .height(48.dp),
+        modifier = Modifier.weight(1f).height(48.dp),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
@@ -303,14 +284,14 @@ class MainActivity : AppCompatActivity() {
         enableEdgeToEdge()
 
         externalOpenSequence = savedInstanceState?.getLong(STATE_EXTERNAL_OPEN_SEQUENCE) ?: 0L
-        val restoredExternalUri = savedInstanceState
-            ?.getString(STATE_EXTERNAL_OPEN_URI)
-            ?.let(Uri::parse)
+        val restoredExternalUri =
+            savedInstanceState?.getString(STATE_EXTERNAL_OPEN_URI)?.let(Uri::parse)
         if (restoredExternalUri != null) {
-            externalOpenRequest = ExternalOpenRequest(
-                id = savedInstanceState.getLong(STATE_EXTERNAL_OPEN_ID),
-                uri = restoredExternalUri,
-            )
+            externalOpenRequest =
+                ExternalOpenRequest(
+                    id = savedInstanceState.getLong(STATE_EXTERNAL_OPEN_ID),
+                    uri = restoredExternalUri,
+                )
         } else if (savedInstanceState == null) {
             queueExternalOpen(intent)
         }
@@ -321,21 +302,23 @@ class MainActivity : AppCompatActivity() {
         // 画面盖住了首帧之前的空窗，同样不闪默认色，但主线程零阻塞
         var initialTheme by mutableStateOf<ThemeSettings?>(null)
         lifecycleScope.launch {
-            val loadedTheme = try {
-                withTimeout(THEME_LOAD_TIMEOUT_MS.milliseconds) { themeRepo.settings.first() }
-            } catch (error: TimeoutCancellationException) {
-                Log.e(LOG_TAG, "Timed out while loading theme settings", error)
-                ThemeSettings()
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Exception) {
-                Log.e(LOG_TAG, "Failed to load theme settings", error)
-                ThemeSettings()
-            }
-            val awaitingRecreation = ThemeNightModeController.synchronizeStartup(
-                activity = this@MainActivity,
-                darkMode = loadedTheme.darkMode,
-            )
+            val loadedTheme =
+                try {
+                    withTimeout(THEME_LOAD_TIMEOUT_MS.milliseconds) { themeRepo.settings.first() }
+                } catch (error: TimeoutCancellationException) {
+                    Log.e(LOG_TAG, "Timed out while loading theme settings", error)
+                    ThemeSettings()
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    Log.e(LOG_TAG, "Failed to load theme settings", error)
+                    ThemeSettings()
+                }
+            val awaitingRecreation =
+                ThemeNightModeController.synchronizeStartup(
+                    activity = this@MainActivity,
+                    darkMode = loadedTheme.darkMode,
+                )
             if (!awaitingRecreation) {
                 initialTheme = loadedTheme
             }
@@ -374,21 +357,23 @@ class MainActivity : AppCompatActivity() {
 
                 LaunchedEffect(pendingExternalOpen) {
                     val request = pendingExternalOpen ?: return@LaunchedEffect
-                    val comicId = try {
-                        ComicRepository(this@MainActivity).addOrGetComic(request.uri).comic.id
-                    } catch (error: CancellationException) {
-                        throw error
-                    } catch (error: Exception) {
-                        Log.w(LOG_TAG, "Failed to open external comic", error)
-                        if (consumeExternalOpenRequest(request)) {
-                            Toast.makeText(
-                                this@MainActivity,
-                                "无法打开该漫画文件",
-                                Toast.LENGTH_SHORT,
-                            ).show()
+                    val comicId =
+                        try {
+                            ComicRepository(this@MainActivity).addOrGetComic(request.uri).comic.id
+                        } catch (error: CancellationException) {
+                            throw error
+                        } catch (error: Exception) {
+                            Log.w(LOG_TAG, "Failed to open external comic", error)
+                            if (consumeExternalOpenRequest(request)) {
+                                Toast.makeText(
+                                        this@MainActivity,
+                                        "无法打开该漫画文件",
+                                        Toast.LENGTH_SHORT,
+                                    )
+                                    .show()
+                            }
+                            return@LaunchedEffect
                         }
-                        return@LaunchedEffect
-                    }
                     if (!consumeExternalOpenRequest(request)) return@LaunchedEffect
                     outerNavController.navigate(ReaderRoute(comicId)) {
                         launchSingleTop = true
@@ -397,7 +382,7 @@ class MainActivity : AppCompatActivity() {
 
                 Surface(
                     modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
+                    color = MaterialTheme.colorScheme.background,
                 ) {
                     // 外层转场：全宽水平推入——前进时新页从右侧整页滑入，
                     // 旧页同步整页滑出；返回相反。刻意不加 fade。
@@ -422,19 +407,22 @@ class MainActivity : AppCompatActivity() {
                     ) {
                         composable<ShellRoute> { shellEntry ->
                             val innerNavController = rememberNavController()
-                            val innerBackStackEntry by innerNavController.currentBackStackEntryAsState()
+                            val innerBackStackEntry by
+                                innerNavController.currentBackStackEntryAsState()
                             val innerDestination = innerBackStackEntry?.destination
-                            val selectedDestination = when {
-                                innerDestination?.hasRoute<HistoryRoute>() == true ->
-                                    TopLevelDestination.HISTORY
-                                innerDestination?.hasRoute<FavoritesRoute>() == true ->
-                                    TopLevelDestination.FAVORITES
-                                else -> TopLevelDestination.SHELF
-                            }
+                            val selectedDestination =
+                                when {
+                                    innerDestination?.hasRoute<HistoryRoute>() == true ->
+                                        TopLevelDestination.HISTORY
+                                    innerDestination?.hasRoute<FavoritesRoute>() == true ->
+                                        TopLevelDestination.FAVORITES
+                                    else -> TopLevelDestination.SHELF
+                                }
                             // 收藏查看结果写在外层 Shell entry 上，再桥进内层已保存页
-                            val viewerMessage by shellEntry.savedStateHandle
-                                .getStateFlow<String?>(FAVORITES_RESULT_MESSAGE_KEY, null)
-                                .collectAsStateWithLifecycle()
+                            val viewerMessage by
+                                shellEntry.savedStateHandle
+                                    .getStateFlow<String?>(FAVORITES_RESULT_MESSAGE_KEY, null)
+                                    .collectAsStateWithLifecycle()
 
                             TopLevelScaffold(
                                 selectedDestination = selectedDestination,
@@ -451,9 +439,7 @@ class MainActivity : AppCompatActivity() {
                                 NavHost(
                                     navController = innerNavController,
                                     startDestination = ShelfRoute,
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .padding(topLevelPadding),
+                                    modifier = Modifier.fillMaxSize().padding(topLevelPadding),
                                     enterTransition = { fadeIn(tabNavSpec()) },
                                     exitTransition = { fadeOut(tabNavSpec()) },
                                     popEnterTransition = { fadeIn(tabNavSpec()) },
@@ -468,9 +454,7 @@ class MainActivity : AppCompatActivity() {
                                                 outerNavController.navigate(AlbumEditorRoute())
                                             },
                                             onEditAlbum = { id ->
-                                                outerNavController.navigate(
-                                                    AlbumEditorRoute(id),
-                                                )
+                                                outerNavController.navigate(AlbumEditorRoute(id))
                                             },
                                             onOpenSettings = {
                                                 outerNavController.navigate(SettingsRoute)
@@ -481,22 +465,20 @@ class MainActivity : AppCompatActivity() {
                                         HistoryScreen(
                                             onOpenSession = { comicId, page ->
                                                 outerNavController.navigate(
-                                                    ReaderRoute(comicId, page),
+                                                    ReaderRoute(comicId, page)
                                                 )
-                                            },
+                                            }
                                         )
                                     }
                                     composable<FavoritesRoute> {
                                         SavedScreen(
                                             onOpenBookmark = { comicId, globalPage ->
                                                 outerNavController.navigate(
-                                                    ReaderRoute(comicId, globalPage),
+                                                    ReaderRoute(comicId, globalPage)
                                                 )
                                             },
                                             onOpenFavorite = { id ->
-                                                outerNavController.navigate(
-                                                    FavoriteViewerRoute(id),
-                                                )
+                                                outerNavController.navigate(FavoriteViewerRoute(id))
                                             },
                                             viewerMessage = viewerMessage,
                                             onViewerMessageConsumed = {
@@ -571,9 +553,7 @@ class MainActivity : AppCompatActivity() {
                             )
                         }
                         composable<OcrModelDownloadRoute> {
-                            OcrModelDownloadScreen(
-                                onBack = { outerNavController.popBackStack() },
-                            )
+                            OcrModelDownloadScreen(onBack = { outerNavController.popBackStack() })
                         }
                     }
                 }

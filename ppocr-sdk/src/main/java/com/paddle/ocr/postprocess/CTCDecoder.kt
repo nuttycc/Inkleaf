@@ -50,10 +50,7 @@ object CTCDecoder {
         val results = mutableListOf<DecodedText>()
         for (b in 0 until batchSize) {
             val baseOffset = b * timeSteps * numClasses
-            val sampleTimeSteps = validTimeSteps
-                ?.getOrNull(b)
-                ?.coerceIn(1, timeSteps)
-                ?: timeSteps
+            val sampleTimeSteps = validTimeSteps?.getOrNull(b)?.coerceIn(1, timeSteps) ?: timeSteps
 
             val indices = IntArray(sampleTimeSteps)
             val probs = FloatArray(sampleTimeSteps)
@@ -81,12 +78,13 @@ object CTCDecoder {
                 if (activeIndex == BLANK_IDX) return
                 val characterIndex = activeIndex - 1
                 val token = characterList.getOrNull(characterIndex) ?: return
-                runs += CharacterRun(
-                    text = token,
-                    confidence = activeConfidence,
-                    startStep = activeStart,
-                    endStep = endStep,
-                )
+                runs +=
+                    CharacterRun(
+                        text = token,
+                        confidence = activeConfidence,
+                        startStep = activeStart,
+                        endStep = endStep,
+                    )
             }
 
             for (t in 0 until sampleTimeSteps) {
@@ -101,21 +99,24 @@ object CTCDecoder {
             finishRun(sampleTimeSteps)
 
             val timedCharacters = runs.flatMapIndexed { index, run ->
-                val startStep = if (index == 0) {
-                    run.startStep.toFloat()
-                } else {
-                    (runs[index - 1].endStep + run.startStep) / 2f
-                }
-                val endStep = if (index == runs.lastIndex) {
-                    run.endStep.toFloat()
-                } else {
-                    (run.endStep + runs[index + 1].startStep) / 2f
-                }
+                val startStep =
+                    if (index == 0) {
+                        run.startStep.toFloat()
+                    } else {
+                        (runs[index - 1].endStep + run.startStep) / 2f
+                    }
+                val endStep =
+                    if (index == runs.lastIndex) {
+                        run.endStep.toFloat()
+                    } else {
+                        (run.endStep + runs[index + 1].startStep) / 2f
+                    }
                 val tokens = splitToken(run.text)
                 tokens.mapIndexedNotNull { tokenIndex, token ->
                     if (token.isBlank()) return@mapIndexedNotNull null
                     val tokenStart = startStep + (endStep - startStep) * tokenIndex / tokens.size
-                    val tokenEnd = startStep + (endStep - startStep) * (tokenIndex + 1) / tokens.size
+                    val tokenEnd =
+                        startStep + (endStep - startStep) * (tokenIndex + 1) / tokens.size
                     DecodedCharacter(
                         text = token,
                         confidence = run.confidence,
@@ -125,23 +126,23 @@ object CTCDecoder {
                 }
             }
             val decodedCharacters = assignCharacterCells(timedCharacters)
-            val confidence = if (decodedCharacters.isEmpty()) {
-                0f
-            } else {
-                decodedCharacters.map(DecodedCharacter::confidence).average().toFloat()
-            }
-            results += DecodedText(
-                text = decodedCharacters.joinToString("") { it.text },
-                confidence = confidence,
-                characters = decodedCharacters,
-            )
+            val confidence =
+                if (decodedCharacters.isEmpty()) {
+                    0f
+                } else {
+                    decodedCharacters.map(DecodedCharacter::confidence).average().toFloat()
+                }
+            results +=
+                DecodedText(
+                    text = decodedCharacters.joinToString("") { it.text },
+                    confidence = confidence,
+                    characters = decodedCharacters,
+                )
         }
         return results
     }
 
-    private fun assignCharacterCells(
-        characters: List<DecodedCharacter>,
-    ): List<DecodedCharacter> {
+    private fun assignCharacterCells(characters: List<DecodedCharacter>): List<DecodedCharacter> {
         if (characters.isEmpty()) return emptyList()
         if (characters.size == 1) {
             return listOf(characters.single().copy(startFraction = 0f, endFraction = 1f))
@@ -153,8 +154,8 @@ object CTCDecoder {
         val boundaries = FloatArray(characters.size + 1)
         boundaries[0] = 0f
         for (index in 1 until characters.size) {
-            boundaries[index] = ((centers[index - 1] + centers[index]) / 2f)
-                .coerceIn(boundaries[index - 1], 1f)
+            boundaries[index] =
+                ((centers[index - 1] + centers[index]) / 2f).coerceIn(boundaries[index - 1], 1f)
         }
         boundaries[characters.size] = 1f
 
@@ -168,7 +169,6 @@ object CTCDecoder {
         }
     }
 
-    private fun splitToken(token: String): List<String> = token.codePoints()
-        .toArray()
-        .map { codePoint -> String(Character.toChars(codePoint)) }
+    private fun splitToken(token: String): List<String> =
+        token.codePoints().toArray().map { codePoint -> String(Character.toChars(codePoint)) }
 }

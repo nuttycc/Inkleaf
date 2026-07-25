@@ -6,12 +6,19 @@ package com.exio.inkleaf.data
  * 单文件漫画逻辑上只有一个章节，chapterIndex 固定为 0。
  */
 class ZipComicVolume(private val book: ComicBook, private val title: String) : ComicVolume {
-    override val totalPageCount: Int get() = book.pageCount
-    override val sourceRevision: String get() = book.sourceRevision
-    override val chapterCount: Int get() = 1
+    override val totalPageCount: Int
+        get() = book.pageCount
+
+    override val sourceRevision: String
+        get() = book.sourceRevision
+
+    override val chapterCount: Int
+        get() = 1
 
     override fun chapterTitle(chapterIndex: Int): String = title
+
     override fun chapterStartPage(chapterIndex: Int): Int = 0
+
     override fun chapterPageCount(chapterIndex: Int): Int = book.pageCount
 
     override fun globalToChapterPage(globalPage: Int): ChapterProgress =

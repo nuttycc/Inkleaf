@@ -81,11 +81,7 @@ fun FavoriteViewerScreen(
         }
     }
 
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(Color.Black),
-    ) {
+    Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
         val list = favorites.orEmpty()
         val startIndex = initialIndex
         if (startIndex != null && list.isNotEmpty()) {
@@ -124,10 +120,8 @@ fun FavoriteViewerScreen(
 
         SnackbarHost(
             hostState = snackbarHostState,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-                .padding(16.dp),
+            modifier =
+                Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(16.dp),
         )
     }
 }
@@ -144,16 +138,13 @@ private fun FavoriteViewer(
     modifier: Modifier = Modifier,
 ) {
     var pendingDelete by remember { mutableStateOf<FavoritePageEntity?>(null) }
-    val pagerState = rememberPagerState(
-        initialPage = initialIndex,
-        pageCount = { favorites.size },
-    )
+    val pagerState =
+        rememberPagerState(
+            initialPage = initialIndex,
+            pageCount = { favorites.size },
+        )
 
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(Color.Black),
-    ) {
+    Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
         HorizontalPager(
             state = pagerState,
             beyondViewportPageCount = 1,
@@ -191,12 +182,12 @@ private fun FavoriteViewer(
                 textAlign = TextAlign.Center,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .background(Color.Black.copy(alpha = 0.65f))
-                    .navigationBarsPadding()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                modifier =
+                    Modifier.align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .background(Color.Black.copy(alpha = 0.65f))
+                        .navigationBarsPadding()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
             )
         }
     }
@@ -227,11 +218,12 @@ private fun ViewerTopBar(
     modifier: Modifier = Modifier,
 ) {
     Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .background(Color.Black.copy(alpha = 0.65f))
-            .statusBarsPadding()
-            .padding(horizontal = 4.dp, vertical = 4.dp),
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .background(Color.Black.copy(alpha = 0.65f))
+                .statusBarsPadding()
+                .padding(horizontal = 4.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconButton(onClick = onBack) {

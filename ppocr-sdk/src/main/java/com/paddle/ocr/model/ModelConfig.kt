@@ -23,34 +23,38 @@ data class ModelConfig(
 ) {
     companion object {
         fun parse(context: Context, assetPath: String): ModelConfig {
-            val content = try {
-                context.assets.open(assetPath).bufferedReader().use { it.readText() }
-            } catch (t: Throwable) {
-                throw OCRError.ConfigParseFailed(assetPath, t)
-            }
+            val content =
+                try {
+                    context.assets.open(assetPath).bufferedReader().use { it.readText() }
+                } catch (t: Throwable) {
+                    throw OCRError.ConfigParseFailed(assetPath, t)
+                }
             return parseContent(content, assetPath)
         }
 
         fun parse(file: java.io.File): ModelConfig {
-            val content = try {
-                file.bufferedReader().use { it.readText() }
-            } catch (t: Throwable) {
-                throw OCRError.ConfigParseFailed(file.absolutePath, t)
-            }
+            val content =
+                try {
+                    file.bufferedReader().use { it.readText() }
+                } catch (t: Throwable) {
+                    throw OCRError.ConfigParseFailed(file.absolutePath, t)
+                }
             return parseContent(content, file.absolutePath)
         }
 
         private fun parseContent(content: String, pathForError: String): ModelConfig {
-            val characterDict = try {
-                extractCharacterDict(content, pathForError)
-            } catch (e: OCRError.ConfigParseFailed) {
-                throw e
-            } catch (t: Throwable) {
-                throw OCRError.ConfigParseFailed(pathForError, t)
-            }
-            val charListWithSpace = characterDict.toMutableList().apply {
-                if (lastOrNull() != " ") add(" ")
-            }
+            val characterDict =
+                try {
+                    extractCharacterDict(content, pathForError)
+                } catch (e: OCRError.ConfigParseFailed) {
+                    throw e
+                } catch (t: Throwable) {
+                    throw OCRError.ConfigParseFailed(pathForError, t)
+                }
+            val charListWithSpace =
+                characterDict.toMutableList().apply {
+                    if (lastOrNull() != " ") add(" ")
+                }
 
             return ModelConfig(
                 characterList = charListWithSpace,
@@ -58,15 +62,15 @@ data class ModelConfig(
             )
         }
 
-        private fun extractImageMode(content: String): String = content
-            .lineSequence()
-            .map { it.trim() }
-            .firstOrNull { it.startsWith("img_mode:") }
-            ?.substringAfter(':')
-            ?.trim()
-            ?.uppercase()
-            ?.takeIf { it == "BGR" || it == "RGB" }
-            ?: "RGB"
+        private fun extractImageMode(content: String): String =
+            content
+                .lineSequence()
+                .map { it.trim() }
+                .firstOrNull { it.startsWith("img_mode:") }
+                ?.substringAfter(':')
+                ?.trim()
+                ?.uppercase()
+                ?.takeIf { it == "BGR" || it == "RGB" } ?: "RGB"
 
         private fun extractCharacterDict(content: String, assetPath: String): List<String> {
             val lines = content.replace("\r\n", "\n").replace('\r', '\n').lines()
@@ -76,7 +80,8 @@ data class ModelConfig(
             }
 
             val postProcessIndent = YamlUtils.leadingSpaces(lines[postProcessLine])
-            val characterDictLine = findCharacterDictLine(lines, postProcessLine + 1, postProcessIndent)
+            val characterDictLine =
+                findCharacterDictLine(lines, postProcessLine + 1, postProcessIndent)
             if (characterDictLine < 0) {
                 throw OCRError.ConfigParseFailed("Missing character_dict in $assetPath")
             }
@@ -137,7 +142,8 @@ data class ModelConfig(
                 return value.substring(1, value.length - 1).replace("''", "'")
             }
             if (value.length >= 2 && value.first() == '"' && value.last() == '"') {
-                return value.substring(1, value.length - 1)
+                return value
+                    .substring(1, value.length - 1)
                     .replace("\\\"", "\"")
                     .replace("\\\\", "\\")
                     .replace("\\n", "\n")

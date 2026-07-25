@@ -34,8 +34,7 @@ internal object ReaderPageCacheKey {
     }
 
     fun thumbnailFileName(page: Int, pageIdentity: String?): String {
-        val identity = pageIdentity?.takeIf { it.isNotBlank() }
-            ?: return "$page.jpg"
+        val identity = pageIdentity?.takeIf { it.isNotBlank() } ?: return "$page.jpg"
         val token = sha256Hex(identity.toByteArray(Charsets.UTF_8))
         return "id-$token.jpg"
     }

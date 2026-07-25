@@ -17,8 +17,8 @@ import kotlinx.coroutines.launch
 class FavoritesViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = FavoriteRepository(app)
 
-    val favorites: StateFlow<List<FavoritePageEntity>?> = repo.observeAll()
-        .stateIn(viewModelScope, SharingStarted.Lazily, null)
+    val favorites: StateFlow<List<FavoritePageEntity>?> =
+        repo.observeAll().stateIn(viewModelScope, SharingStarted.Lazily, null)
 
     var message by mutableStateOf<String?>(null)
         private set

@@ -20,10 +20,9 @@ internal object BookmarkPageIdentity {
 
     fun pdfLocalPage(identity: String): Int? {
         if (!identity.startsWith(PDF_PREFIX)) return null
-        return identity.substringAfter(PDF_PREFIX)
-            .substringBefore(':')
-            .toIntOrNull()
-            ?.takeIf { it >= 0 }
+        return identity.substringAfter(PDF_PREFIX).substringBefore(':').toIntOrNull()?.takeIf {
+            it >= 0
+        }
     }
 
     private const val PDF_PREFIX = "pdf-v1:"

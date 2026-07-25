@@ -15,8 +15,7 @@ import org.junit.Rule
 import org.junit.Test
 
 class ReaderDockItemTest {
-    @get:Rule
-    val composeRule = createComposeRule()
+    @get:Rule val composeRule = createComposeRule()
 
     @Test
     fun pageItemExposesExpandedSelection() {
@@ -50,9 +49,9 @@ class ReaderDockItemTest {
             }
         }
 
-        composeRule.onNodeWithTag("bookmark-dock-item")
-            .assertIsNotSelected()
-            .performTouchInput { click() }
+        composeRule.onNodeWithTag("bookmark-dock-item").assertIsNotSelected().performTouchInput {
+            click()
+        }
 
         composeRule.runOnIdle { assertEquals(1, clicks) }
     }

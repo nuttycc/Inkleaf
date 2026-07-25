@@ -1,21 +1,22 @@
 package com.exio.inkleaf.data
 
+import java.util.zip.ZipEntry
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
-import java.util.zip.ZipEntry
 
 class BookmarkPageIdentityTest {
     @Test
     fun `zip identity follows an entry when archive order changes`() {
         val target = zipEntry("chapter/010.jpg", crc = 1234L, size = 8192L)
         val identity = BookmarkPageIdentity.zip(target)
-        val reordered = listOf(
-            zipEntry("chapter/001.jpg", crc = 1L, size = 100L),
-            zipEntry("chapter/020.jpg", crc = 2L, size = 200L),
-            target,
-        )
+        val reordered =
+            listOf(
+                zipEntry("chapter/001.jpg", crc = 1L, size = 100L),
+                zipEntry("chapter/020.jpg", crc = 2L, size = 200L),
+                target,
+            )
 
         assertEquals(2, BookmarkPageIdentity.findZipPage(reordered, identity))
     }
@@ -44,7 +45,7 @@ class BookmarkPageIdentityTest {
             BookmarkPageIdentity.findZipPage(
                 entries = listOf(replacement),
                 identity = BookmarkPageIdentity.zip(original),
-            ),
+            )
         )
     }
 
@@ -58,8 +59,9 @@ class BookmarkPageIdentityTest {
         assertNull(BookmarkPageIdentity.pdfLocalPage("album-page-id"))
     }
 
-    private fun zipEntry(name: String, crc: Long, size: Long) = ZipEntry(name).apply {
-        this.crc = crc
-        this.size = size
-    }
+    private fun zipEntry(name: String, crc: Long, size: Long) =
+        ZipEntry(name).apply {
+            this.crc = crc
+            this.size = size
+        }
 }

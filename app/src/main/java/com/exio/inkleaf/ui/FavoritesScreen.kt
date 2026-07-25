@@ -46,20 +46,21 @@ internal fun FavoritesContent(
 
         favorites.isEmpty() -> EmptyFavorites(modifier = modifier)
 
-        else -> LazyVerticalGrid(
-            columns = GridCells.Adaptive(minSize = GridDefaults.AdaptiveMinCellWidth),
-            contentPadding = PaddingValues(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = modifier,
-        ) {
-            items(favorites, key = { favorite -> favorite.id }) { favorite ->
-                FavoriteCard(
-                    favorite = favorite,
-                    onClick = { onOpenFavorite(favorite.id) },
-                )
+        else ->
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(minSize = GridDefaults.AdaptiveMinCellWidth),
+                contentPadding = PaddingValues(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = modifier,
+            ) {
+                items(favorites, key = { favorite -> favorite.id }) { favorite ->
+                    FavoriteCard(
+                        favorite = favorite,
+                        onClick = { onOpenFavorite(favorite.id) },
+                    )
+                }
             }
-        }
     }
 }
 
@@ -98,25 +99,20 @@ private fun FavoriteCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick),
-    ) {
+    Column(modifier = modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onClick)) {
         Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(2f / 3f)
-                .clip(RoundedCornerShape(8.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant),
+            modifier =
+                Modifier.fillMaxWidth()
+                    .aspectRatio(2f / 3f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
             contentAlignment = Alignment.Center,
         ) {
-            val imageFile = remember(favorite) {
-                favorite.thumbnailPath
-                    ?.let(::File)
-                    ?.takeIf { it.exists() }
-                    ?: File(favorite.imagePath).takeIf { it.exists() }
-            }
+            val imageFile =
+                remember(favorite) {
+                    favorite.thumbnailPath?.let(::File)?.takeIf { it.exists() }
+                        ?: File(favorite.imagePath).takeIf { it.exists() }
+                }
             if (imageFile != null) {
                 AsyncImage(
                     model = imageFile,

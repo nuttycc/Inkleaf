@@ -11,8 +11,8 @@ import androidx.room.PrimaryKey
 )
 data class LibraryFolderEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val treeUri: String,       // 目录树 Uri：一次授权覆盖整棵子树
-    val displayName: String,   // 目录名，列表展示用
+    val treeUri: String, // 目录树 Uri：一次授权覆盖整棵子树
+    val displayName: String, // 目录名，列表展示用
     val addedAt: Long,
     val type: LibraryFolderType = LibraryFolderType.LIBRARY,
     /** High-water marks approved by the user for large recursive PDF scans. */

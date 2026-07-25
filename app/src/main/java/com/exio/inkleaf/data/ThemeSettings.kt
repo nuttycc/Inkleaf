@@ -17,8 +17,8 @@ private val Context.themeDataStore by preferencesDataStore(name = "theme_setting
 
 /**
  * Built-in seeds use traditional Chinese colors and deliberately avoid the common indigo app
- * palette. Palette style is selected independently in advanced settings; low-chroma seeds are
- * still forced through Neutral at generation time so gray ink never drifts toward purple.
+ * palette. Palette style is selected independently in advanced settings; low-chroma seeds are still
+ * forced through Neutral at generation time so gray ink never drifts toward purple.
  */
 enum class ThemeSeed(val argb: Long, val label: String) {
     INK(0xFF2B2B2E, "墨"),
@@ -85,28 +85,29 @@ data class ThemeSettings(
     val useAmoled: Boolean = false,
 )
 
-/**
- * 主题设置的唯一持久化来源。只存"种子 + 模式"两三个原始值，
- * 整套 ColorScheme 由种子在运行时重新生成——不存派生数据。
- */
+/** 主题设置的唯一持久化来源。只存"种子 + 模式"两三个原始值， 整套 ColorScheme 由种子在运行时重新生成——不存派生数据。 */
 class ThemeSettingsRepository(context: Context) {
     private val dataStore = context.applicationContext.themeDataStore
 
-    val settings: Flow<ThemeSettings> = dataStore.data.map { prefs ->
-        ThemeSettings(
-            seed = prefs[KEY_SEED].toEnum(ThemeSeed.INK),
-            darkMode = prefs[KEY_DARK_MODE].toEnum(DarkMode.SYSTEM),
-            useWallpaper = prefs[KEY_USE_WALLPAPER] ?: false,
-            customArgb = prefs[KEY_CUSTOM_ARGB],
-            useCustom = prefs[KEY_USE_CUSTOM] ?: false,
-            customStyle = prefs[KEY_CUSTOM_STYLE].toEnum(CustomStyle.STANDARD),
-            colorSpec = prefs[KEY_COLOR_SPEC].toEnum(ThemeColorSpec.MATERIAL_2025),
-            contrast = prefs[KEY_CONTRAST].toEnum(ThemeContrast.DEFAULT),
-            useAmoled = prefs[KEY_USE_AMOLED] ?: false,
-        )
-    }
+    val settings: Flow<ThemeSettings> =
+        dataStore.data.map { prefs ->
+            ThemeSettings(
+                seed = prefs[KEY_SEED].toEnum(ThemeSeed.INK),
+                darkMode = prefs[KEY_DARK_MODE].toEnum(DarkMode.SYSTEM),
+                useWallpaper = prefs[KEY_USE_WALLPAPER] ?: false,
+                customArgb = prefs[KEY_CUSTOM_ARGB],
+                useCustom = prefs[KEY_USE_CUSTOM] ?: false,
+                customStyle = prefs[KEY_CUSTOM_STYLE].toEnum(CustomStyle.STANDARD),
+                colorSpec = prefs[KEY_COLOR_SPEC].toEnum(ThemeColorSpec.MATERIAL_2025),
+                contrast = prefs[KEY_CONTRAST].toEnum(ThemeContrast.DEFAULT),
+                useAmoled = prefs[KEY_USE_AMOLED] ?: false,
+            )
+        }
 
-    /** Persists the complete editor draft atomically so no partial theme can reach the next Activity. */
+    /**
+     * Persists the complete editor draft atomically so no partial theme can reach the next
+     * Activity.
+     */
     suspend fun setSettings(value: ThemeSettings) {
         dataStore.edit {
             it[KEY_SEED] = value.seed.name

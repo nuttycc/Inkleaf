@@ -12,15 +12,14 @@ internal fun ReaderSheetTheme(
     content: @Composable () -> Unit,
 ) {
     val currentScheme = MaterialTheme.colorScheme
-    val readerScheme = remember(accent, currentScheme) {
-        if (accent.isSpecified) {
-            currentScheme.copy(
-                primary = accent,
-            )
-        } else {
-            currentScheme
+    val readerScheme =
+        remember(accent, currentScheme) {
+            if (accent.isSpecified) {
+                currentScheme.copy(primary = accent)
+            } else {
+                currentScheme
+            }
         }
-    }
 
     MaterialTheme(
         colorScheme = readerScheme,

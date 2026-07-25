@@ -1,7 +1,7 @@
 package com.exio.inkleaf.ui
 
-import com.exio.inkleaf.data.ChapterProgress
 import com.exio.inkleaf.data.ChapterMetadata
+import com.exio.inkleaf.data.ChapterProgress
 import com.exio.inkleaf.data.ComicVolume
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -27,13 +27,14 @@ class ReaderChapterItemsTest {
 
     @Test
     fun `chapter items preserve source order and expose navigation state`() {
-        val items = buildReaderChapterItems(
-            chapterCount = 3,
-            titleOf = { index -> if (index == 0) "" else "Chapter ${index + 1}" },
-            pageCountOf = { index -> listOf(12, 0, -1)[index] },
-            startPageOf = { index -> listOf(0, 12, 12)[index] },
-            readableOf = { _, _ -> true },
-        )
+        val items =
+            buildReaderChapterItems(
+                chapterCount = 3,
+                titleOf = { index -> if (index == 0) "" else "Chapter ${index + 1}" },
+                pageCountOf = { index -> listOf(12, 0, -1)[index] },
+                startPageOf = { index -> listOf(0, 12, 12)[index] },
+                readableOf = { _, _ -> true },
+            )
 
         assertEquals(listOf(0, 1, 2), items.map { it.index })
         assertEquals("第 1 章", items[0].title)
@@ -47,12 +48,13 @@ class ReaderChapterItemsTest {
 
     @Test
     fun `loader snapshots source chapters including missing entries`() = runBlocking {
-        val volume = FakeChapterVolume(
-            titles = listOf("", "第二章", "损坏章节", "第四章"),
-            pageCounts = listOf(0, 12, 0, 5),
-            startPages = listOf(0, 0, 12, 12),
-            readable = listOf(false, true, false, true),
-        )
+        val volume =
+            FakeChapterVolume(
+                titles = listOf("", "第二章", "损坏章节", "第四章"),
+                pageCounts = listOf(0, 12, 0, 5),
+                startPages = listOf(0, 0, 12, 12),
+                readable = listOf(false, true, false, true),
+            )
         val items = loadReaderChapterItems(volume)
 
         assertEquals(listOf(0, 1, 2, 3), items.map { it.index })
@@ -67,12 +69,13 @@ class ReaderChapterItemsTest {
 
     @Test
     fun `first readable chapter probe stops in source order`() {
-        val volume = FakeChapterVolume(
-            titles = listOf("损坏章节", "第二章", "第三章"),
-            pageCounts = listOf(0, 4, 8),
-            startPages = listOf(0, 0, 4),
-            readable = listOf(false, true, true),
-        )
+        val volume =
+            FakeChapterVolume(
+                titles = listOf("损坏章节", "第二章", "第三章"),
+                pageCounts = listOf(0, 4, 8),
+                startPages = listOf(0, 0, 4),
+                readable = listOf(false, true, true),
+            )
 
         assertEquals(1, volume.firstReadableChapterIndex())
         assertEquals(2, volume.individualReadabilityProbeCount)

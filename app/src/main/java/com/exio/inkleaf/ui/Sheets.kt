@@ -19,16 +19,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
 /**
- * 本 App 所有 ModalBottomSheet 共用的状态：enabledValues 不含
- * PartiallyExpanded（= 旧 API 的 skipPartiallyExpanded = true）。
- * 这些 sheet 内容都不高，半展开态没有意义，一步到全展开。
+ * 本 App 所有 ModalBottomSheet 共用的状态：enabledValues 不含 PartiallyExpanded（= 旧 API 的
+ * skipPartiallyExpanded = true）。 这些 sheet 内容都不高，半展开态没有意义，一步到全展开。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun rememberExpandOnlySheetState() = rememberBottomSheetState(
-    initialValue = SheetValue.Hidden,
-    enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
-)
+internal fun rememberExpandOnlySheetState() =
+    rememberBottomSheetState(
+        initialValue = SheetValue.Hidden,
+        enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
+    )
 
 /** ModalBottomSheet 标题：对齐 Material3 ListItem 的 16dp 内容起始线。 */
 @Composable
@@ -44,9 +44,7 @@ internal fun StandardSheetTitle(
 }
 
 /**
- * sheet 内容列的统一骨架：铺满宽度 + 导航栏避让 + 底部呼吸留白。
- * 把 navigationBarsPadding 的约定收在一处，新增 sheet 不会漏掉
- * 而让内容被手势条遮住。
+ * sheet 内容列的统一骨架：铺满宽度 + 导航栏避让 + 底部呼吸留白。 把 navigationBarsPadding 的约定收在一处，新增 sheet 不会漏掉 而让内容被手势条遮住。
  */
 @Composable
 internal fun SheetColumn(
@@ -57,18 +55,19 @@ internal fun SheetColumn(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .then(
-                if (scrollable) {
-                    Modifier.verticalScroll(scrollState ?: rememberScrollState())
-                } else {
-                    Modifier
-                }
-            )
-            .then(if (selectable) Modifier.selectableGroup() else Modifier)
-            .padding(bottom = 12.dp),
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .then(
+                    if (scrollable) {
+                        Modifier.verticalScroll(scrollState ?: rememberScrollState())
+                    } else {
+                        Modifier
+                    }
+                )
+                .then(if (selectable) Modifier.selectableGroup() else Modifier)
+                .padding(bottom = 12.dp),
         content = content,
     )
 }

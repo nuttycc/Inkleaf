@@ -8,19 +8,21 @@ import androidx.room.PrimaryKey
 /** A lightweight reader location. Page artwork remains in the rebuildable reader cache. */
 @Entity(
     tableName = "bookmarks",
-    foreignKeys = [
-        ForeignKey(
-            entity = ComicEntity::class,
-            parentColumns = ["id"],
-            childColumns = ["comicId"],
-            onDelete = ForeignKey.CASCADE,
-        ),
-    ],
-    indices = [
-        Index(value = ["comicId"]),
-        Index(value = ["comicId", "targetKey"], unique = true),
-        Index(value = ["addedAt"]),
-    ],
+    foreignKeys =
+        [
+            ForeignKey(
+                entity = ComicEntity::class,
+                parentColumns = ["id"],
+                childColumns = ["comicId"],
+                onDelete = ForeignKey.CASCADE,
+            )
+        ],
+    indices =
+        [
+            Index(value = ["comicId"]),
+            Index(value = ["comicId", "targetKey"], unique = true),
+            Index(value = ["addedAt"]),
+        ],
 )
 data class BookmarkEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,

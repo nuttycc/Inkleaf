@@ -41,15 +41,17 @@ import com.exio.inkleaf.data.db.FolderWithCount
 import com.exio.inkleaf.data.db.LibraryFolderType
 
 /** 目录列表区的三态：作为 Crossfade 的 key，列表内容增删不触发整区动画 */
-private enum class FoldersPhase { LOADING, EMPTY, CONTENT }
+private enum class FoldersPhase {
+    LOADING,
+    EMPTY,
+    CONTENT,
+}
 
 /**
  * 漫画库目录管理（ModalBottomSheet 内容）：列表、添加、移除（级联删除该目录的书）。
  *
- * 目录选择器（OpenDocumentTree）的 launcher 不在这里——它跳的是外部全屏
- * Activity，期间本进程可能被杀；结果只会投递给重新注册的 launcher，所以
- * launcher 必须挂在始终参与组合的宿主（SettingsScreen）上，而不是这个
- * 随 sheet 开关条件组合的内容里。
+ * 目录选择器（OpenDocumentTree）的 launcher 不在这里——它跳的是外部全屏 Activity，期间本进程可能被杀；结果只会投递给重新注册的 launcher，所以
+ * launcher 必须挂在始终参与组合的宿主（SettingsScreen）上，而不是这个 随 sheet 开关条件组合的内容里。
  */
 @Composable
 fun FoldersSheetContent(
@@ -70,21 +72,22 @@ fun FoldersSheetContent(
 
     Box(modifier = modifier.navigationBarsPadding()) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                // sheet 高度随内容变（空状态 ↔ 列表、列表增删行）：
-                // 平滑过渡而不是跳变
-                .animateContentSize()
-                .padding(bottom = 12.dp),
+            modifier =
+                Modifier.fillMaxWidth()
+                    // sheet 高度随内容变（空状态 ↔ 列表、列表增删行）：
+                    // 平滑过渡而不是跳变
+                    .animateContentSize()
+                    .padding(bottom = 12.dp)
         ) {
             StandardSheetTitle("漫画库目录")
 
             val list = folders
-            val phase = when {
-                list == null -> FoldersPhase.LOADING
-                list.isEmpty() -> FoldersPhase.EMPTY
-                else -> FoldersPhase.CONTENT
-            }
+            val phase =
+                when {
+                    list == null -> FoldersPhase.LOADING
+                    list.isEmpty() -> FoldersPhase.EMPTY
+                    else -> FoldersPhase.CONTENT
+                }
             Crossfade(
                 targetState = phase,
                 animationSpec = tween(200),
@@ -96,62 +99,67 @@ fun FoldersSheetContent(
                 when (current) {
                     // Room 首批数据未到：不渲染空状态文案，避免闪现
                     FoldersPhase.LOADING -> Box(modifier = Modifier.fillMaxWidth())
-                    FoldersPhase.EMPTY -> Text(
-                        text = "还没有库目录，添加一个漫画文件夹开始扫描",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                    )
+                    FoldersPhase.EMPTY ->
+                        Text(
+                            text = "还没有库目录，添加一个漫画文件夹开始扫描",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        )
 
-                    FoldersPhase.CONTENT -> LazyColumn {
-                        // 渐变期间旧分支仍在组合，list 可能已变空——orEmpty 兜底
-                        items(list.orEmpty(), key = { it.folder.id }) { item ->
-                            ListItem(
-                                headlineContent = { Text(item.folder.displayName) },
-                                leadingContent = {
-                                    Icon(
-                                        painterResource(R.drawable.ic_folder),
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                },
-                                supportingContent = {
-                                    Column {
-                                        // 计数随扫描入库实时变化（刚添加的目录会从 0
-                                        // 涨到 N）：淡入淡出把"跳变"软化成"更新"
-                                        AnimatedContent(
-                                            targetState = item.comicCount,
-                                            transitionSpec = {
-                                                fadeIn(tween(150)) togetherWith fadeOut(tween(150))
-                                            },
-                                            label = "folderCount",
-                                        ) { count ->
-                                            val typeLabel = when (item.folder.type) {
-                                                LibraryFolderType.SERIES -> "PDF 章节目录"
-                                                LibraryFolderType.LIBRARY -> "漫画库"
+                    FoldersPhase.CONTENT ->
+                        LazyColumn {
+                            // 渐变期间旧分支仍在组合，list 可能已变空——orEmpty 兜底
+                            items(list.orEmpty(), key = { it.folder.id }) { item ->
+                                ListItem(
+                                    headlineContent = { Text(item.folder.displayName) },
+                                    leadingContent = {
+                                        Icon(
+                                            painterResource(R.drawable.ic_folder),
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    },
+                                    supportingContent = {
+                                        Column {
+                                            // 计数随扫描入库实时变化（刚添加的目录会从 0
+                                            // 涨到 N）：淡入淡出把"跳变"软化成"更新"
+                                            AnimatedContent(
+                                                targetState = item.comicCount,
+                                                transitionSpec = {
+                                                    fadeIn(tween(150)) togetherWith
+                                                        fadeOut(tween(150))
+                                                },
+                                                label = "folderCount",
+                                            ) { count ->
+                                                val typeLabel =
+                                                    when (item.folder.type) {
+                                                        LibraryFolderType.SERIES -> "PDF 章节目录"
+                                                        LibraryFolderType.LIBRARY -> "漫画库"
+                                                    }
+                                                Text("$typeLabel · $count 本漫画")
                                             }
-                                            Text("$typeLabel · $count 本漫画")
+                                            item.folder.scanIssue?.let { issue ->
+                                                Text(
+                                                    text = issue,
+                                                    color = MaterialTheme.colorScheme.error,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                )
+                                            }
                                         }
-                                        item.folder.scanIssue?.let { issue ->
-                                            Text(
-                                                text = issue,
-                                                color = MaterialTheme.colorScheme.error,
-                                                style = MaterialTheme.typography.bodySmall,
-                                            )
+                                    },
+                                    trailingContent = {
+                                        IconButton(onClick = { pendingDelete = item }) {
+                                            Icon(Icons.Filled.Delete, contentDescription = "移除目录")
                                         }
-                                    }
-                                },
-                                trailingContent = {
-                                    IconButton(onClick = { pendingDelete = item }) {
-                                        Icon(Icons.Filled.Delete, contentDescription = "移除目录")
-                                    }
-                                },
-                                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                                // 新行插入/删除时其余行平滑让位，而不是瞬移
-                                modifier = Modifier.animateItem(),
-                            )
+                                    },
+                                    colors =
+                                        ListItemDefaults.colors(containerColor = Color.Transparent),
+                                    // 新行插入/删除时其余行平滑让位，而不是瞬移
+                                    modifier = Modifier.animateItem(),
+                                )
+                            }
                         }
-                    }
                 }
             }
 
@@ -177,7 +185,8 @@ fun FoldersSheetContent(
     pendingDelete?.let { item ->
         ConfirmDialog(
             title = "移除库目录",
-            text = "移除「${item.folder.displayName}」？\n\n" +
+            text =
+                "移除「${item.folder.displayName}」？\n\n" +
                     "该目录扫描到的 ${item.comicCount} 本漫画及其阅读进度将一并移除。" +
                     "原文件不会被删除，手动添加的漫画不受影响。",
             confirmLabel = "移除",

@@ -9,21 +9,20 @@ import androidx.core.graphics.createBitmap
 import com.ahmer.pdfium.PdfiumCore
 import com.exio.inkleaf.data.PdfComicVolume.Companion.pdfiumLock
 import com.exio.inkleaf.data.db.ChapterEntity
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
+import kotlin.math.sqrt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
-import java.util.concurrent.locks.ReentrantLock
-import kotlin.concurrent.withLock
-import kotlin.math.sqrt
 
 private const val OCR_PDF_RENDER_SCALE = 4.0
 
 /**
  * 把包含多个 PDF 文件的目录作为一本书来阅读。
  *
- * 每个 PDF 对应一个章节，按文件名自然排序，阅读时跨章节连续翻页。
- * 每个章节使用独立的 [PdfiumCore] 实例，避免单核多文档状态切换的复杂度。
+ * 每个 PDF 对应一个章节，按文件名自然排序，阅读时跨章节连续翻页。 每个章节使用独立的 [PdfiumCore] 实例，避免单核多文档状态切换的复杂度。
  */
 class PdfComicVolume(
     context: Context,
@@ -43,34 +42,37 @@ class PdfComicVolume(
      * Compose can read an immutable layout without waiting for an unrelated page render.
      */
     @Volatile
-    private var chapterLayout = PdfChapterLayout(
-        IntArray(chapters.size) { index ->
-            if (chapters[index].isMissing) {
-                0
-            } else {
-                chapters[index].pageCount.takeIf { it > 0 } ?: UNKNOWN_PAGE_COUNT
+    private var chapterLayout =
+        PdfChapterLayout(
+            IntArray(chapters.size) { index ->
+                if (chapters[index].isMissing) {
+                    0
+                } else {
+                    chapters[index].pageCount.takeIf { it > 0 } ?: UNKNOWN_PAGE_COUNT
+                }
             }
-        },
-    )
+        )
 
     init {
         require(chapters.isNotEmpty()) { "PdfComicVolume 至少需要一章" }
     }
 
-    override val chapterCount: Int get() = chapters.size
+    override val chapterCount: Int
+        get() = chapters.size
 
-    override val sourceRevision: String = ReaderPageCacheKey.sourceRevision(
-        buildList {
-            add("pdf-series")
-            chapters.forEach { chapter ->
-                add(chapter.fileKey)
-                add(chapter.uri)
-                add((chapter.size ?: -1L).toString())
-                add((chapter.lastModified ?: -1L).toString())
-                add(chapter.isMissing.toString())
+    override val sourceRevision: String =
+        ReaderPageCacheKey.sourceRevision(
+            buildList {
+                add("pdf-series")
+                chapters.forEach { chapter ->
+                    add(chapter.fileKey)
+                    add(chapter.uri)
+                    add((chapter.size ?: -1L).toString())
+                    add((chapter.lastModified ?: -1L).toString())
+                    add(chapter.isMissing.toString())
+                }
             }
-        }
-    )
+        )
 
     override val totalPageCount: Int
         get() = resolvedChapterLayout().totalPageCount
@@ -105,15 +107,16 @@ class PdfComicVolume(
         if (chapterIndex !in chapters.indices || chapters[chapterIndex].isMissing) return false
         return pdfiumLock.withLock {
             if (closed) return@withLock false
-            val opened = openDocumentLocked(chapterIndex) ?: run {
-                publishPageCountLocked(chapterIndex, 0)
-                return@withLock false
-            }
+            val opened =
+                openDocumentLocked(chapterIndex)
+                    ?: run {
+                        publishPageCountLocked(chapterIndex, 0)
+                        return@withLock false
+                    }
             // A stored positive page count may belong to an older file revision; probe the
             // current document before exposing the chapter as selectable.
-            val actualPageCount = runCatching { opened.document.totalPages }
-                .getOrNull()
-                ?.coerceAtLeast(0)
+            val actualPageCount =
+                runCatching { opened.document.totalPages }.getOrNull()?.coerceAtLeast(0)
             if (actualPageCount == null) {
                 discardOpenChapterLocked(chapterIndex)
                 publishPageCountLocked(chapterIndex, 0)
@@ -174,23 +177,22 @@ class PdfComicVolume(
 
         // The requested page is past the resolved book end. Preserve the existing clamping
         // behavior so callers still receive a valid chapter-local position.
-        val chapter = (0 until chapterCount)
-            .lastOrNull { layout.startPages[it] <= globalPage }
-            ?: 0
+        val chapter = (0 until chapterCount).lastOrNull { layout.startPages[it] <= globalPage } ?: 0
         val pages = layout.pageCounts.getOrElse(chapter) { 0 }.coerceAtLeast(0)
         // An unreadable chapter has zero pages. Keep its local index at zero so the render path
         // can surface the existing chapter-open error without producing a negative page index.
-        val pageInChapter = if (pages <= 0) 0
-            else (globalPage - layout.startPages[chapter]).coerceIn(0, pages - 1)
+        val pageInChapter =
+            if (pages <= 0) 0 else (globalPage - layout.startPages[chapter]).coerceIn(0, pages - 1)
         return ChapterProgress(chapter, pageInChapter)
     }
 
     override fun chapterPageToGlobal(chapterIndex: Int, pageIndex: Int): Int {
         // Need chapters 0..chapterIndex resolved (including chapterIndex for page count)
         val layout = resolvedChapterLayout(requiredChapterIndex = chapterIndex)
-        val start = layout.startPages.getOrElse(chapterIndex) {
-            layout.startPages.lastOrNull() ?: 0
-        }
+        val start =
+            layout.startPages.getOrElse(chapterIndex) {
+                layout.startPages.lastOrNull() ?: 0
+            }
         val pageCount = layout.pageCounts.getOrElse(chapterIndex) { 0 }
         return start + pageIndex.coerceIn(0, (pageCount - 1).coerceAtLeast(0))
     }
@@ -210,33 +212,34 @@ class PdfComicVolume(
         return chapterPageToGlobal(chapterIndex, pageIndex)
     }
 
-    override suspend fun loadPageBytes(globalPage: Int): ByteArray = withContext(Dispatchers.IO) {
-        val (chapter, page) = globalToChapterPage(globalPage)
-        renderPageToPng(chapter, page, fullQuality = true)
-    }
+    override suspend fun loadPageBytes(globalPage: Int): ByteArray =
+        withContext(Dispatchers.IO) {
+            val (chapter, page) = globalToChapterPage(globalPage)
+            renderPageToPng(chapter, page, fullQuality = true)
+        }
 
     /**
-     * 直接返回渲染好的 [ImageBitmap]，跳过 [loadPageBytes] 的
-     * "Bitmap→PNG 压缩→Coil 解码回 Bitmap" 往返。PdfiumCore 渲染一次，
-     * 我们直接拿来用，省一次压缩 + 一次解码，翻页更跟手。
+     * 直接返回渲染好的 [ImageBitmap]，跳过 [loadPageBytes] 的 "Bitmap→PNG 压缩→Coil 解码回 Bitmap" 往返。PdfiumCore
+     * 渲染一次， 我们直接拿来用，省一次压缩 + 一次解码，翻页更跟手。
      *
-     * 章节打不开时返回 null，调用方 fallback 到 [loadPageBytes] 会抛
-     * ComicOpenException 给出清晰提示。
+     * 章节打不开时返回 null，调用方 fallback 到 [loadPageBytes] 会抛 ComicOpenException 给出清晰提示。
      */
     override val supportsTargetedPageBitmap: Boolean = true
 
     override suspend fun loadPageBitmap(
         globalPage: Int,
         request: PageRenderRequest?,
-    ): ImageBitmap? = withContext(Dispatchers.IO) {
-        val (chapter, page) = globalToChapterPage(globalPage)
-        renderPageBitmap(
-            chapterIndex = chapter,
-            pageIndex = page,
-            qualityScale = 1.0,
-            request = request,
-        )?.asImageBitmap()
-    }
+    ): ImageBitmap? =
+        withContext(Dispatchers.IO) {
+            val (chapter, page) = globalToChapterPage(globalPage)
+            renderPageBitmap(
+                    chapterIndex = chapter,
+                    pageIndex = page,
+                    qualityScale = 1.0,
+                    request = request,
+                )
+                ?.asImageBitmap()
+        }
 
     override suspend fun ocrPageSize(globalPage: Int): PagePixelSize? =
         withContext(Dispatchers.IO) {
@@ -257,36 +260,39 @@ class PdfComicVolume(
         top: Int,
         width: Int,
         height: Int,
-    ): Bitmap? = withContext(Dispatchers.IO) {
-        val (chapter, page) = globalToChapterPage(globalPage)
-        pdfiumLock.withLock {
-            val opened = openDocumentLocked(chapter) ?: return@withLock null
-            opened.document.openPage(page)
-            val pageSize = calculateOcrPdfPageSize(
-                pageWidthPoints = opened.core.getPageWidthPoint(page),
-                pageHeightPoints = opened.core.getPageHeightPoint(page),
-            )
-            require(left >= 0 && top >= 0 && width > 0 && height > 0)
-            require(left + width <= pageSize.width && top + height <= pageSize.height)
-            createBitmap(width, height).also { bitmap ->
-                bitmap.eraseColor(android.graphics.Color.WHITE)
-                opened.core.renderPageBitmap(
-                    page,
-                    bitmap,
-                    -left,
-                    -top,
-                    pageSize.width,
-                    pageSize.height,
-                    true,
-                )
+    ): Bitmap? =
+        withContext(Dispatchers.IO) {
+            val (chapter, page) = globalToChapterPage(globalPage)
+            pdfiumLock.withLock {
+                val opened = openDocumentLocked(chapter) ?: return@withLock null
+                opened.document.openPage(page)
+                val pageSize =
+                    calculateOcrPdfPageSize(
+                        pageWidthPoints = opened.core.getPageWidthPoint(page),
+                        pageHeightPoints = opened.core.getPageHeightPoint(page),
+                    )
+                require(left >= 0 && top >= 0 && width > 0 && height > 0)
+                require(left + width <= pageSize.width && top + height <= pageSize.height)
+                createBitmap(width, height).also { bitmap ->
+                    bitmap.eraseColor(android.graphics.Color.WHITE)
+                    opened.core.renderPageBitmap(
+                        page,
+                        bitmap,
+                        -left,
+                        -top,
+                        pageSize.width,
+                        pageSize.height,
+                        true,
+                    )
+                }
             }
         }
-    }
 
-    override suspend fun loadThumbnailPageBytes(globalPage: Int): ByteArray = withContext(Dispatchers.IO) {
-        val (chapter, page) = globalToChapterPage(globalPage)
-        renderPageToPng(chapter, page, fullQuality = false)
-    }
+    override suspend fun loadThumbnailPageBytes(globalPage: Int): ByteArray =
+        withContext(Dispatchers.IO) {
+            val (chapter, page) = globalToChapterPage(globalPage)
+            renderPageToPng(chapter, page, fullQuality = false)
+        }
 
     override fun close() {
         pdfiumLock.withLock {
@@ -306,9 +312,17 @@ class PdfComicVolume(
 
         // Fast-path: already fully resolved or resolved through required index
         if (requiredIndex == null) {
-            current.takeIf { it.isResolved }?.let { return it }
+            current
+                .takeIf { it.isResolved }
+                ?.let {
+                    return it
+                }
         } else {
-            current.takeIf { it.isResolvedThrough(requiredIndex) }?.let { return it }
+            current
+                .takeIf { it.isResolvedThrough(requiredIndex) }
+                ?.let {
+                    return it
+                }
         }
 
         val endIndex = requiredIndex ?: chapters.lastIndex
@@ -329,13 +343,14 @@ class PdfComicVolume(
         var accumulatedPages = 0
         for (index in chapters.indices) {
             val cached = chapterLayout.pageCounts[index]
-            val pageCount = if (cached >= 0) {
-                cached
-            } else {
-                probeChapterPageCount(index, keepOpen = false).also {
-                    discoveredCounts[index] = it
+            val pageCount =
+                if (cached >= 0) {
+                    cached
+                } else {
+                    probeChapterPageCount(index, keepOpen = false).also {
+                        discoveredCounts[index] = it
+                    }
                 }
-            }
             accumulatedPages += pageCount.coerceAtLeast(0)
             if (globalPage < accumulatedPages) break
         }
@@ -410,7 +425,9 @@ class PdfComicVolume(
 
     private fun openDocumentLocked(chapterIndex: Int): OpenChapter? {
         if (closed) return null
-        openChapters[chapterIndex]?.let { return it }
+        openChapters[chapterIndex]?.let {
+            return it
+        }
         val opened = createOpenChapter(chapterIndex) ?: return null
         openChapters[chapterIndex] = opened
         trimOpenChaptersLocked()
@@ -461,8 +478,7 @@ class PdfComicVolume(
                 pageIndex = pageIndex,
                 qualityScale = if (fullQuality) 1.0 else 0.5,
                 request = null,
-            )
-                ?: throw ComicOpenException("无法打开章节 PDF: ${chapters[chapterIndex].title}")
+            ) ?: throw ComicOpenException("无法打开章节 PDF: ${chapters[chapterIndex].title}")
         }
 
         val stream = java.io.ByteArrayOutputStream()
@@ -474,11 +490,10 @@ class PdfComicVolume(
     }
 
     /**
-     * 渲染一页到 [Bitmap]，不压缩。供 [loadPageBitmap] 直接使用（无往返），
-     * 也供 [renderPageToPng] 复用渲染逻辑。返回 null 表示章节打不开。
+     * 渲染一页到 [Bitmap]，不压缩。供 [loadPageBitmap] 直接使用（无往返）， 也供 [renderPageToPng] 复用渲染逻辑。返回 null 表示章节打不开。
      *
-     * 必须在 [pdfiumLock] 下调用：这个依赖版本的 PdfiumCore.close() 未完全使用其
-     * 内部全局锁，因此所有 volume 的 open/render/close 都必须由应用进程级锁串行化。
+     * 必须在 [pdfiumLock] 下调用：这个依赖版本的 PdfiumCore.close() 未完全使用其 内部全局锁，因此所有 volume 的 open/render/close
+     * 都必须由应用进程级锁串行化。
      */
     private suspend fun renderPageBitmap(
         chapterIndex: Int,
@@ -507,12 +522,13 @@ class PdfComicVolume(
         doc.openPage(pageIndex)
         val width = core.getPageWidthPoint(pageIndex)
         val height = core.getPageHeightPoint(pageIndex)
-        val size = calculatePdfRenderSize(
-            pageWidthPoints = width,
-            pageHeightPoints = height,
-            qualityScale = qualityScale,
-            request = request,
-        )
+        val size =
+            calculatePdfRenderSize(
+                pageWidthPoints = width,
+                pageHeightPoints = height,
+                qualityScale = qualityScale,
+                request = request,
+            )
 
         val bitmap = createBitmap(size.width, size.height)
         bitmap.eraseColor(android.graphics.Color.WHITE)
@@ -546,9 +562,10 @@ class PdfComicVolume(
 internal class PdfChapterLayout(pageCounts: IntArray) {
     val pageCounts: IntArray = pageCounts.copyOf()
     val startPages: IntArray = calculateChapterStartPages(this.pageCounts)
-    val totalPageCount: Int = startPages.lastOrNull()?.let { lastStart ->
-        lastStart + this.pageCounts.last().coerceAtLeast(0)
-    } ?: 0
+    val totalPageCount: Int =
+        startPages.lastOrNull()?.let { lastStart ->
+            lastStart + this.pageCounts.last().coerceAtLeast(0)
+        } ?: 0
     val isResolved: Boolean = this.pageCounts.all { it >= 0 }
 
     fun isResolvedThrough(chapterIndex: Int): Boolean {
@@ -594,9 +611,10 @@ internal fun calculatePdfRenderSize(
 ): PdfRenderSize {
     val pageWidth = pageWidthPoints.coerceAtLeast(1).toDouble()
     val pageHeight = pageHeightPoints.coerceAtLeast(1).toDouble()
-    var scale = request?.let {
-        minOf(it.maxWidthPx / pageWidth, it.maxHeightPx / pageHeight)
-    } ?: qualityScale
+    var scale =
+        request?.let {
+            minOf(it.maxWidthPx / pageWidth, it.maxHeightPx / pageHeight)
+        } ?: qualityScale
 
     request?.let {
         scale = minOf(scale, sqrt(it.maxPixels.toDouble() / (pageWidth * pageHeight)))

@@ -62,9 +62,7 @@ interface BookmarkDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(bookmark: BookmarkEntity): Long
 
-    @Query("DELETE FROM bookmarks WHERE id = :id")
-    suspend fun deleteById(id: Long)
+    @Query("DELETE FROM bookmarks WHERE id = :id") suspend fun deleteById(id: Long)
 
-    @Query("DELETE FROM bookmarks WHERE id IN (:ids)")
-    suspend fun deleteByIds(ids: List<Long>)
+    @Query("DELETE FROM bookmarks WHERE id IN (:ids)") suspend fun deleteByIds(ids: List<Long>)
 }

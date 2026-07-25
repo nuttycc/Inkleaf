@@ -14,8 +14,8 @@ import androidx.compose.ui.Modifier
 
 /**
  * Keeps Material 3 alpha list-item adoption behind an app-owned entry point. The new overloads own
- * click semantics and interaction shapes, so callers no longer attach a separate clickable
- * modifier that can drift from the component's visual state.
+ * click semantics and interaction shapes, so callers no longer attach a separate clickable modifier
+ * that can drift from the component's visual state.
  */
 @Composable
 internal fun InkleafActionListItem(
@@ -37,7 +37,9 @@ internal fun InkleafActionListItem(
     }
 }
 
-/** A non-interactive list item communicates information without implying that the whole row taps. */
+/**
+ * A non-interactive list item communicates information without implying that the whole row taps.
+ */
 @Composable
 internal fun InkleafInfoListItem(
     headline: String,

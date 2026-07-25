@@ -35,14 +35,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.PathOperation
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
-import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
@@ -78,51 +76,56 @@ internal fun ReaderOcrFocusLayer(
     val canBlur = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
     val density = LocalDensity.current
     Box(
-        modifier = modifier
-            .clearAndSetSemantics { }
-            .drawWithCache {
-                val layout = calculateOcrImageLayout(
-                    viewport = IntSize(size.width.toInt(), size.height.toInt()),
-                    imageWidth = result.imageWidth,
-                    imageHeight = result.imageHeight,
-                )
-                val pagePath = Path().apply {
-                    addRect(androidx.compose.ui.geometry.Rect(0f, 0f, size.width, size.height))
-                }
-                val spotlightPath = Path().apply {
-                    fillType = PathFillType.NonZero
-                    val minimumOutsetPx = with(density) { 2.dp.toPx() }
-                    val maximumOutsetPx = with(density) { 6.dp.toPx() }
-                    result.spotlightPolygons().forEach { points ->
-                        addPath(
-                            points.toSpotlightViewportPath(
-                                layout = layout,
-                                minimumOutsetPx = minimumOutsetPx,
-                                maximumOutsetPx = maximumOutsetPx,
-                            )
+        modifier =
+            modifier
+                .clearAndSetSemantics {}
+                .drawWithCache {
+                    val layout =
+                        calculateOcrImageLayout(
+                            viewport = IntSize(size.width.toInt(), size.height.toInt()),
+                            imageWidth = result.imageWidth,
+                            imageHeight = result.imageHeight,
                         )
+                    val pagePath =
+                        Path().apply {
+                            addRect(
+                                androidx.compose.ui.geometry.Rect(0f, 0f, size.width, size.height)
+                            )
+                        }
+                    val spotlightPath =
+                        Path().apply {
+                            fillType = PathFillType.NonZero
+                            val minimumOutsetPx = with(density) { 2.dp.toPx() }
+                            val maximumOutsetPx = with(density) { 6.dp.toPx() }
+                            result.spotlightPolygons().forEach { points ->
+                                addPath(
+                                    points.toSpotlightViewportPath(
+                                        layout = layout,
+                                        minimumOutsetPx = minimumOutsetPx,
+                                        maximumOutsetPx = maximumOutsetPx,
+                                    )
+                                )
+                            }
+                        }
+                    val backgroundMask =
+                        Path.combine(
+                            PathOperation.Difference,
+                            pagePath,
+                            spotlightPath,
+                        )
+                    onDrawWithContent {
+                        val contentDrawScope = this
+                        if (canBlur) {
+                            clipPath(backgroundMask) { contentDrawScope.drawContent() }
+                        }
+                        drawPath(backgroundMask, Color.Black.copy(alpha = 0.48f))
                     }
-                }
-                val backgroundMask = Path.combine(
-                    PathOperation.Difference,
-                    pagePath,
-                    spotlightPath,
-                )
-                onDrawWithContent {
-                    val contentDrawScope = this
-                    if (canBlur) {
-                        clipPath(backgroundMask) { contentDrawScope.drawContent() }
-                    }
-                    drawPath(backgroundMask, Color.Black.copy(alpha = 0.48f))
-                }
-            },
+                },
         contentAlignment = Alignment.Center,
     ) {
         if (canBlur) {
             Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .blur(6.dp),
+                modifier = Modifier.fillMaxSize().blur(6.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Image(
@@ -149,65 +152,72 @@ internal fun ReaderOcrPageOverlay(
     val currentOnRegionTapped by rememberUpdatedState(onRegionTapped)
     val currentOnRegionAdded by rememberUpdatedState(onRegionAdded)
     var magnifierCenter by remember(result) { mutableStateOf(Offset.Unspecified) }
-    
+
     val drawingModifier = Modifier.drawWithCache {
-        val layout = calculateOcrImageLayout(
-            viewport = IntSize(size.width.toInt(), size.height.toInt()),
-            imageWidth = result.imageWidth,
-            imageHeight = result.imageHeight,
-        )
+        val layout =
+            calculateOcrImageLayout(
+                viewport = IntSize(size.width.toInt(), size.height.toInt()),
+                imageWidth = result.imageWidth,
+                imageHeight = result.imageHeight,
+            )
         val visualOutsetPx = with(density) { 1.dp.toPx() }
-        val normalStroke = Stroke(
-            width = with(density) { 1.dp.toPx() },
-            cap = StrokeCap.Round,
-            join = StrokeJoin.Round,
-        )
-        val selectedGlowStroke = Stroke(
-            width = with(density) { 3.5.dp.toPx() },
-            cap = StrokeCap.Round,
-            join = StrokeJoin.Round,
-        )
-        val selectedMainStroke = Stroke(
-            width = with(density) { 1.8.dp.toPx() },
-            cap = StrokeCap.Round,
-            join = StrokeJoin.Round,
-        )
-        val selectedInnerLightStroke = Stroke(
-            width = with(density) { 1.2.dp.toPx() },
-            cap = StrokeCap.Round,
-            join = StrokeJoin.Round,
-        )
+        val normalStroke =
+            Stroke(
+                width = with(density) { 1.dp.toPx() },
+                cap = StrokeCap.Round,
+                join = StrokeJoin.Round,
+            )
+        val selectedGlowStroke =
+            Stroke(
+                width = with(density) { 3.5.dp.toPx() },
+                cap = StrokeCap.Round,
+                join = StrokeJoin.Round,
+            )
+        val selectedMainStroke =
+            Stroke(
+                width = with(density) { 1.8.dp.toPx() },
+                cap = StrokeCap.Round,
+                join = StrokeJoin.Round,
+            )
+        val selectedInnerLightStroke =
+            Stroke(
+                width = with(density) { 1.2.dp.toPx() },
+                cap = StrokeCap.Round,
+                join = StrokeJoin.Round,
+            )
 
         val neonBlueFill = Color(0xFF00E5FF).copy(alpha = 0.38f)
         val neonBlueGlowFill = Color(0xFF00B0FF).copy(alpha = 0.26f)
         val innerLightColor = Color.White.copy(alpha = 0.88f)
         val blueAccent = Color(0xFF00E5FF)
 
-        val regionPaths = result.regions.map { region ->
-            region to region.points.toViewportPath(layout, visualOutsetPx)
-        }
+        val regionPaths =
+            result.regions.map { region ->
+                region to region.points.toViewportPath(layout, visualOutsetPx)
+            }
         val selectedRegionPairs = regionPaths.filter { (region, _) -> region.id in selectedIds }
         val selectedPaths = selectedRegionPairs.map { (_, path) -> path }
 
-        val mergedSelectedPath = selectedPaths.firstOrNull()?.let { firstPath ->
-            selectedPaths.drop(1).fold(firstPath) { mergedPath, path ->
-                Path.combine(PathOperation.Union, mergedPath, path)
+        val mergedSelectedPath =
+            selectedPaths.firstOrNull()?.let { firstPath ->
+                selectedPaths.drop(1).fold(firstPath) { mergedPath, path ->
+                    Path.combine(PathOperation.Union, mergedPath, path)
+                }
             }
-        }
 
         // 按阅读顺序找到首尾选中区域，计算排版方向与手柄位置
-        val sortedSelectedRegions = result.regions
-            .filter { it.id in selectedIds }
-            .sortedBy { it.readingOrder }
+        val sortedSelectedRegions =
+            result.regions.filter { it.id in selectedIds }.sortedBy { it.readingOrder }
         val startRegion = sortedSelectedRegions.firstOrNull()
         val endRegion = sortedSelectedRegions.lastOrNull()
 
         val handleRadiusPx = with(density) { 7.dp.toPx() }
-        val handleBorderStroke = Stroke(
-            width = handleRadiusPx * 0.22f,
-            cap = StrokeCap.Round,
-            join = StrokeJoin.Round,
-        )
+        val handleBorderStroke =
+            Stroke(
+                width = handleRadiusPx * 0.22f,
+                cap = StrokeCap.Round,
+                join = StrokeJoin.Round,
+            )
         val handleShadowColor = Color.Black.copy(alpha = 0.25f)
         val innerDotColor = Color.White
 
@@ -299,55 +309,62 @@ internal fun ReaderOcrPageOverlay(
         }
     }
     Box(
-        modifier = modifier
-            .magnifier(sourceCenter = { magnifierCenter })
-            .pointerInput(result) {
-                detectTapGestures { position ->
-                    hitTestCharacter(
-                        result = result,
-                        viewport = size,
-                        position = position,
-                        expansionPx = with(density) { 24.dp.toPx() },
-                    )?.let { region -> currentOnRegionTapped(region.id) }
+        modifier =
+            modifier
+                .magnifier(sourceCenter = { magnifierCenter })
+                .pointerInput(result) {
+                    detectTapGestures { position ->
+                        hitTestCharacter(
+                                result = result,
+                                viewport = size,
+                                position = position,
+                                expansionPx = with(density) { 24.dp.toPx() },
+                            )
+                            ?.let { region -> currentOnRegionTapped(region.id) }
+                    }
                 }
-            }
-            .pointerInput(result) {
-                var lastAddedId: Int? = null
-                detectDragGesturesAfterLongPress(
-                    onDragStart = { position ->
-                        magnifierCenter = position
-                        lastAddedId = hitTestCharacter(
-                            result = result,
-                            viewport = size,
-                            position = position,
-                            expansionPx = with(density) { 24.dp.toPx() },
-                        )?.id?.also(currentOnRegionAdded)
-                    },
-                    onDrag = { change, _ ->
-                        change.consume()
-                        magnifierCenter = change.position
-                        val regionId = hitTestCharacter(
-                            result = result,
-                            viewport = size,
-                            position = change.position,
-                            expansionPx = with(density) { 24.dp.toPx() },
-                        )?.id
-                        if (regionId != null && regionId != lastAddedId) {
-                            currentOnRegionAdded(regionId)
-                            lastAddedId = regionId
-                        }
-                    },
-                    onDragEnd = {
-                        magnifierCenter = Offset.Unspecified
-                        lastAddedId = null
-                    },
-                    onDragCancel = {
-                        magnifierCenter = Offset.Unspecified
-                        lastAddedId = null
-                    },
-                )
-            }
-            .then(drawingModifier),
+                .pointerInput(result) {
+                    var lastAddedId: Int? = null
+                    detectDragGesturesAfterLongPress(
+                        onDragStart = { position ->
+                            magnifierCenter = position
+                            lastAddedId =
+                                hitTestCharacter(
+                                        result = result,
+                                        viewport = size,
+                                        position = position,
+                                        expansionPx = with(density) { 24.dp.toPx() },
+                                    )
+                                    ?.id
+                                    ?.also(currentOnRegionAdded)
+                        },
+                        onDrag = { change, _ ->
+                            change.consume()
+                            magnifierCenter = change.position
+                            val regionId =
+                                hitTestCharacter(
+                                        result = result,
+                                        viewport = size,
+                                        position = change.position,
+                                        expansionPx = with(density) { 24.dp.toPx() },
+                                    )
+                                    ?.id
+                            if (regionId != null && regionId != lastAddedId) {
+                                currentOnRegionAdded(regionId)
+                                lastAddedId = regionId
+                            }
+                        },
+                        onDragEnd = {
+                            magnifierCenter = Offset.Unspecified
+                            lastAddedId = null
+                        },
+                        onDragCancel = {
+                            magnifierCenter = Offset.Unspecified
+                            lastAddedId = null
+                        },
+                    )
+                }
+                .then(drawingModifier)
     ) {
         OcrRegionSemantics(
             result = result,
@@ -372,32 +389,36 @@ private fun OcrRegionSemantics(
         content = {
             result.regions.forEach { region ->
                 Box(
-                    modifier = Modifier.semantics {
-                        selected = region.id in selectedIds
-                        contentDescription = region.text
-                        onClick(label = if (region.id in selectedIds) "取消选择" else "选择文字") {
-                            onRegionTapped(region.id)
-                            true
+                    modifier =
+                        Modifier.semantics {
+                            selected = region.id in selectedIds
+                            contentDescription = region.text
+                            onClick(label = if (region.id in selectedIds) "取消选择" else "选择文字") {
+                                onRegionTapped(region.id)
+                                true
+                            }
                         }
-                    },
                 )
             }
         },
     ) { measurables, constraints ->
-        val imageLayout = calculateOcrImageLayout(
-            viewport = IntSize(constraints.maxWidth, constraints.maxHeight),
-            imageWidth = result.imageWidth,
-            imageHeight = result.imageHeight,
-        )
+        val imageLayout =
+            calculateOcrImageLayout(
+                viewport = IntSize(constraints.maxWidth, constraints.maxHeight),
+                imageWidth = result.imageWidth,
+                imageHeight = result.imageHeight,
+            )
         val placeables = measurables.mapIndexed { index, measurable ->
             val region = result.regions[index]
             val points = region.points.map(imageLayout::pageToViewport)
-            val width = (points.maxOf(Offset::x) - points.minOf(Offset::x))
-                .toInt()
-                .coerceAtLeast(minimumTargetPx)
-            val height = (points.maxOf(Offset::y) - points.minOf(Offset::y))
-                .toInt()
-                .coerceAtLeast(minimumTargetPx)
+            val width =
+                (points.maxOf(Offset::x) - points.minOf(Offset::x))
+                    .toInt()
+                    .coerceAtLeast(minimumTargetPx)
+            val height =
+                (points.maxOf(Offset::y) - points.minOf(Offset::y))
+                    .toInt()
+                    .coerceAtLeast(minimumTargetPx)
             measurable.measure(androidx.compose.ui.unit.Constraints.fixed(width, height))
         }
         layout(constraints.maxWidth, constraints.maxHeight) {
@@ -406,10 +427,17 @@ private fun OcrRegionSemantics(
                 val centerX = (points.minOf(Offset::x) + points.maxOf(Offset::x)) / 2f
                 val centerY = (points.minOf(Offset::y) + points.maxOf(Offset::y)) / 2f
                 placeable.place(
-                    x = (centerX - placeable.width / 2f).toInt()
-                        .coerceIn(0, (constraints.maxWidth - placeable.width).coerceAtLeast(0)),
-                    y = (centerY - placeable.height / 2f).toInt()
-                        .coerceIn(0, (constraints.maxHeight - placeable.height).coerceAtLeast(0)),
+                    x =
+                        (centerX - placeable.width / 2f)
+                            .toInt()
+                            .coerceIn(0, (constraints.maxWidth - placeable.width).coerceAtLeast(0)),
+                    y =
+                        (centerY - placeable.height / 2f)
+                            .toInt()
+                            .coerceIn(
+                                0,
+                                (constraints.maxHeight - placeable.height).coerceAtLeast(0),
+                            ),
                 )
             }
         }
@@ -427,15 +455,17 @@ private fun List<OcrPoint>.toSpotlightViewportPath(
     maximumOutsetPx: Float,
 ): Path {
     val mappedPoints = map(layout::pageToViewport)
-    val shortestEdgePx = mappedPoints.indices.minOf { index ->
-        val next = mappedPoints[(index + 1) % mappedPoints.size]
-        (next - mappedPoints[index]).getDistance()
-    }
-    val outsetPx = calculateOcrSpotlightOutset(
-        shortEdgePx = shortestEdgePx,
-        minimumPx = minimumOutsetPx,
-        maximumPx = maximumOutsetPx,
-    )
+    val shortestEdgePx =
+        mappedPoints.indices.minOf { index ->
+            val next = mappedPoints[(index + 1) % mappedPoints.size]
+            (next - mappedPoints[index]).getDistance()
+        }
+    val outsetPx =
+        calculateOcrSpotlightOutset(
+            shortEdgePx = shortestEdgePx,
+            minimumPx = minimumOutsetPx,
+            maximumPx = maximumOutsetPx,
+        )
     return mappedPoints.toClosedPath(outsetPx)
 }
 
@@ -455,14 +485,15 @@ private fun hitTestCharacter(
     position: Offset,
     expansionPx: Float,
 ): OcrRegion? {
-    val layout = calculateOcrImageLayout(
-        viewport = viewport,
-        imageWidth = result.imageWidth,
-        imageHeight = result.imageHeight,
-    )
+    val layout =
+        calculateOcrImageLayout(
+            viewport = viewport,
+            imageWidth = result.imageWidth,
+            imageHeight = result.imageHeight,
+        )
     if (
         position.x !in (layout.rect.left - expansionPx)..(layout.rect.right + expansionPx) ||
-        position.y !in (layout.rect.top - expansionPx)..(layout.rect.bottom + expansionPx)
+            position.y !in (layout.rect.top - expansionPx)..(layout.rect.bottom + expansionPx)
     ) {
         return null
     }
@@ -475,15 +506,14 @@ private fun hitTestCharacter(
 }
 
 @Composable
-internal fun ReaderOcrProcessingStatus(
-    modifier: Modifier = Modifier,
-) {
+internal fun ReaderOcrProcessingStatus(modifier: Modifier = Modifier) {
     Row(
-        modifier = modifier
-            .navigationBarsPadding()
-            .padding(bottom = 16.dp)
-            .background(Color.Black.copy(alpha = 0.72f), RoundedCornerShape(12.dp))
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+        modifier =
+            modifier
+                .navigationBarsPadding()
+                .padding(bottom = 16.dp)
+                .background(Color.Black.copy(alpha = 0.72f), RoundedCornerShape(12.dp))
+                .padding(horizontal = 12.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -508,51 +538,54 @@ internal fun ReaderOcrSelectionBar(
     modifier: Modifier = Modifier,
 ) {
     Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
         contentAlignment = Alignment.BottomCenter,
     ) {
         Column(
-            modifier = Modifier
-                .background(Color.Black.copy(alpha = 0.82f), RoundedCornerShape(12.dp))
-                // 手势屏障：吞掉点在栏内空白区的触摸，防止穿透到下层 OCR overlay 误触字符选择。
-                // awaitFirstDown 必须保持默认 requireUnconsumed = true：down 若已被子按钮消费，
-                // 父节点就不能进入消费循环——否则消费 MOVE 会触发 Compose clickable 的 Final pass
-                // 消费检查，把子按钮的点击整个取消掉（issue #11）。
-                .pointerInput(Unit) {
-                    awaitEachGesture {
-                        awaitFirstDown().consume()
-                        var pointerStillPressed: Boolean
-                        do {
-                            val event = awaitPointerEvent()
-                            event.changes.forEach { change -> change.consume() }
-                            pointerStillPressed = event.changes.any { change -> change.pressed }
-                        } while (pointerStillPressed)
+            modifier =
+                Modifier.background(Color.Black.copy(alpha = 0.82f), RoundedCornerShape(12.dp))
+                    // 手势屏障：吞掉点在栏内空白区的触摸，防止穿透到下层 OCR overlay 误触字符选择。
+                    // awaitFirstDown 必须保持默认 requireUnconsumed = true：down 若已被子按钮消费，
+                    // 父节点就不能进入消费循环——否则消费 MOVE 会触发 Compose clickable 的 Final pass
+                    // 消费检查，把子按钮的点击整个取消掉（issue #11）。
+                    .pointerInput(Unit) {
+                        awaitEachGesture {
+                            awaitFirstDown().consume()
+                            var pointerStillPressed: Boolean
+                            do {
+                                val event = awaitPointerEvent()
+                                event.changes.forEach { change -> change.consume() }
+                                pointerStillPressed = event.changes.any { change -> change.pressed }
+                            } while (pointerStillPressed)
+                        }
                     }
-                }
-                .padding(horizontal = 4.dp, vertical = 4.dp),
+                    .padding(horizontal = 4.dp, vertical = 4.dp)
         ) {
             Text(
-                text = if (selectedCount == 0) {
-                    "点击字符选择，长按拖动可连续选择"
-                } else {
-                    "已选 $selectedCount 字 · $selectedText"
-                },
+                text =
+                    if (selectedCount == 0) {
+                        "点击字符选择，长按拖动可连续选择"
+                    } else {
+                        "已选 $selectedCount 字 · $selectedText"
+                    },
                 color = Color.White,
                 style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .clearAndSetSemantics {
-                        contentDescription = if (selectedCount == 0) {
-                            "未选择字符"
-                        } else {
-                            "已选 $selectedCount 字"
+                modifier =
+                    Modifier.clearAndSetSemantics {
+                            contentDescription =
+                                if (selectedCount == 0) {
+                                    "未选择字符"
+                                } else {
+                                    "已选 $selectedCount 字"
+                                }
                         }
-                    }
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -588,9 +621,8 @@ internal fun ReaderOcrTextSheet(
                 Text(
                     text = text,
                     style = androidx.compose.material3.MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    modifier =
+                        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
                 )
             }
         }
@@ -606,28 +638,30 @@ private fun buildClosedExpressiveHandle(
     val r = handleRadiusPx
     val pinHeightPx = r * 1.3f
 
-    val bulbCenter = if (isStart) {
-        if (isVertical) Offset(tipPosition.x + r * 0.5f, tipPosition.y - pinHeightPx)
-        else Offset(tipPosition.x - r * 0.5f, tipPosition.y - pinHeightPx)
-    } else {
-        if (isVertical) Offset(tipPosition.x - r * 0.5f, tipPosition.y + pinHeightPx)
-        else Offset(tipPosition.x + r * 0.5f, tipPosition.y + pinHeightPx)
-    }
+    val bulbCenter =
+        if (isStart) {
+            if (isVertical) Offset(tipPosition.x + r * 0.5f, tipPosition.y - pinHeightPx)
+            else Offset(tipPosition.x - r * 0.5f, tipPosition.y - pinHeightPx)
+        } else {
+            if (isVertical) Offset(tipPosition.x - r * 0.5f, tipPosition.y + pinHeightPx)
+            else Offset(tipPosition.x + r * 0.5f, tipPosition.y + pinHeightPx)
+        }
 
-    val path = Path().apply {
-        addOval(
-            androidx.compose.ui.geometry.Rect(
-                bulbCenter.x - r,
-                bulbCenter.y - r,
-                bulbCenter.x + r,
-                bulbCenter.y + r,
+    val path =
+        Path().apply {
+            addOval(
+                androidx.compose.ui.geometry.Rect(
+                    bulbCenter.x - r,
+                    bulbCenter.y - r,
+                    bulbCenter.x + r,
+                    bulbCenter.y + r,
+                )
             )
-        )
-        moveTo(bulbCenter.x - r * 0.6f, bulbCenter.y)
-        lineTo(tipPosition.x, tipPosition.y)
-        lineTo(bulbCenter.x + r * 0.6f, bulbCenter.y)
-        close()
-    }
+            moveTo(bulbCenter.x - r * 0.6f, bulbCenter.y)
+            lineTo(tipPosition.x, tipPosition.y)
+            lineTo(bulbCenter.x + r * 0.6f, bulbCenter.y)
+            close()
+        }
 
     return path to bulbCenter
 }

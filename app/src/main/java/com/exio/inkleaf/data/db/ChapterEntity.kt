@@ -5,28 +5,27 @@ import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
-/**
- * 一本漫画的章节。对于 zip/cbz 单文件漫画，不创建章节行；
- * 对于 PDF 系列目录，每个 PDF 文件对应一行，按 [chapterIndex] 排序。
- */
+/** 一本漫画的章节。对于 zip/cbz 单文件漫画，不创建章节行； 对于 PDF 系列目录，每个 PDF 文件对应一行，按 [chapterIndex] 排序。 */
 @Entity(
     tableName = "chapters",
-    foreignKeys = [
-        ForeignKey(
-            entity = ComicEntity::class,
-            parentColumns = ["id"],
-            childColumns = ["comicId"],
-            onDelete = ForeignKey.CASCADE,
-        ),
-    ],
+    foreignKeys =
+        [
+            ForeignKey(
+                entity = ComicEntity::class,
+                parentColumns = ["id"],
+                childColumns = ["comicId"],
+                onDelete = ForeignKey.CASCADE,
+            )
+        ],
     // (comicId, chapterIndex) 不加 UNIQUE：章节重排时逐行 update 会撞唯一索引
     // （中间插章 / 删中间章场景）。最终顺序由 syncSeriesChapters 的 diff 保证，
     // 不需要 DB 层强制。fileKey 仍保持 UNIQUE——它是章节的稳定身份。
-    indices = [
-        Index(value = ["comicId", "chapterIndex"]),
-        Index(value = ["comicId"]),
-        Index(value = ["fileKey"], unique = true),
-    ],
+    indices =
+        [
+            Index(value = ["comicId", "chapterIndex"]),
+            Index(value = ["comicId"]),
+            Index(value = ["fileKey"], unique = true),
+        ],
 )
 data class ChapterEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,

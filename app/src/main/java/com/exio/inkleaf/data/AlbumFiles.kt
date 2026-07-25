@@ -1,8 +1,8 @@
 package com.exio.inkleaf.data
 
-import kotlinx.coroutines.sync.Mutex
 import java.io.File
 import java.io.IOException
+import kotlinx.coroutines.sync.Mutex
 
 /** Serializes album page replacement, export, deletion, and cold-start reconciliation. */
 internal val albumFileMutex = Mutex()

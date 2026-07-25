@@ -11,18 +11,18 @@ import kotlin.math.pow
 private const val OCR_SPOTLIGHT_OUTSET_RATIO = 0.12f
 private const val OCR_SPOTLIGHT_MITER_LIMIT = 4f
 
-data class OcrImageLayout(
-    val rect: Rect,
-) {
-    fun pageToViewport(point: OcrPoint): Offset = Offset(
-        x = rect.left + point.x * rect.width,
-        y = rect.top + point.y * rect.height,
-    )
+data class OcrImageLayout(val rect: Rect) {
+    fun pageToViewport(point: OcrPoint): Offset =
+        Offset(
+            x = rect.left + point.x * rect.width,
+            y = rect.top + point.y * rect.height,
+        )
 
-    fun viewportToNormalized(point: Offset): OcrPoint = OcrPoint(
-        x = ((point.x - rect.left) / rect.width).coerceIn(0f, 1f),
-        y = ((point.y - rect.top) / rect.height).coerceIn(0f, 1f),
-    )
+    fun viewportToNormalized(point: Offset): OcrPoint =
+        OcrPoint(
+            x = ((point.x - rect.left) / rect.width).coerceIn(0f, 1f),
+            y = ((point.y - rect.top) / rect.height).coerceIn(0f, 1f),
+        )
 }
 
 fun calculateOcrImageLayout(
@@ -32,10 +32,11 @@ fun calculateOcrImageLayout(
 ): OcrImageLayout {
     require(viewport.width > 0 && viewport.height > 0)
     require(imageWidth > 0 && imageHeight > 0)
-    val scale = min(
-        viewport.width.toFloat() / imageWidth,
-        viewport.height.toFloat() / imageHeight,
-    )
+    val scale =
+        min(
+            viewport.width.toFloat() / imageWidth,
+            viewport.height.toFloat() / imageHeight,
+        )
     val width = imageWidth * scale
     val height = imageHeight * scale
     val left = (viewport.width - width) / 2f
@@ -60,40 +61,46 @@ fun expandOcrViewportQuad(
     require(points.size == 4)
     require(outsetPx >= 0f)
     if (outsetPx == 0f) return points
-    val signedArea = points.indices.sumOf { index ->
-        val current = points[index]
-        val next = points[(index + 1) % points.size]
-        (current.x * next.y - next.x * current.y).toDouble()
-    }.toFloat() / 2f
+    val signedArea =
+        points.indices
+            .sumOf { index ->
+                val current = points[index]
+                val next = points[(index + 1) % points.size]
+                (current.x * next.y - next.x * current.y).toDouble()
+            }
+            .toFloat() / 2f
     if (abs(signedArea) <= 0.0001f) return points
 
-    val edgeDirections = points.indices.map { index ->
-        points[(index + 1) % points.size] - points[index]
-    }
+    val edgeDirections =
+        points.indices.map { index ->
+            points[(index + 1) % points.size] - points[index]
+        }
     if (edgeDirections.any { direction -> direction.getDistance() <= 0.0001f }) return points
 
-    val offsetEdges = points.indices.map { index ->
-        val start = points[index]
-        val direction = edgeDirections[index]
-        val length = direction.getDistance()
-        val outwardNormal = if (signedArea > 0f) {
-            Offset(direction.y, -direction.x) / length
-        } else {
-            Offset(-direction.y, direction.x) / length
+    val offsetEdges =
+        points.indices.map { index ->
+            val start = points[index]
+            val direction = edgeDirections[index]
+            val length = direction.getDistance()
+            val outwardNormal =
+                if (signedArea > 0f) {
+                    Offset(direction.y, -direction.x) / length
+                } else {
+                    Offset(-direction.y, direction.x) / length
+                }
+            OffsetEdge(
+                start = start + outwardNormal * outsetPx,
+                direction = direction,
+                outwardNormal = outwardNormal,
+            )
         }
-        OffsetEdge(
-            start = start + outwardNormal * outsetPx,
-            direction = direction,
-            outwardNormal = outwardNormal,
-        )
-    }
     return points.indices.flatMap { index ->
         val previous = offsetEdges[(index - 1 + points.size) % points.size]
         val current = offsetEdges[index]
         val intersection = intersectLines(previous, current)
         if (
             intersection != null &&
-            (intersection - points[index]).getDistance() <= outsetPx * OCR_SPOTLIGHT_MITER_LIMIT
+                (intersection - points[index]).getDistance() <= outsetPx * OCR_SPOTLIGHT_MITER_LIMIT
         ) {
             listOf(intersection)
         } else {
@@ -129,8 +136,9 @@ fun OcrRegion.contains(point: OcrPoint): Boolean {
     for (current in points) {
         val crosses = (current.y > point.y) != (previous.y > point.y)
         if (crosses) {
-            val edgeX = (previous.x - current.x) * (point.y - current.y) /
-                    (previous.y - current.y) + current.x
+            val edgeX =
+                (previous.x - current.x) * (point.y - current.y) / (previous.y - current.y) +
+                    current.x
             if (point.x < edgeX) inside = !inside
         }
         previous = current
@@ -143,30 +151,36 @@ fun hitTestOcrRegion(
     point: OcrPoint,
     expansionX: Float = 0f,
     expansionY: Float = 0f,
-): OcrRegion? = regions
-    .asSequence()
-    .filter { region ->
-        region.contains(point) || region.points.let { points ->
-            point.x in (points.minOf(OcrPoint::x) - expansionX)..
-                    (points.maxOf(OcrPoint::x) + expansionX) &&
-                    point.y in (points.minOf(OcrPoint::y) - expansionY)..
-                    (points.maxOf(OcrPoint::y) + expansionY)
+): OcrRegion? =
+    regions
+        .asSequence()
+        .filter { region ->
+            region.contains(point) ||
+                region.points.let { points ->
+                    point.x in
+                        (points.minOf(OcrPoint::x) - expansionX)..(points.maxOf(OcrPoint::x) +
+                                expansionX) &&
+                        point.y in
+                            (points.minOf(OcrPoint::y) - expansionY)..(points.maxOf(OcrPoint::y) +
+                                    expansionY)
+                }
         }
-    }
-    .minWithOrNull(
-        compareBy<OcrRegion> { region ->
-            val centerX = region.points.sumOf { it.x.toDouble() }.toFloat() / region.points.size
-            val centerY = region.points.sumOf { it.y.toDouble() }.toFloat() / region.points.size
-            val scaleX = expansionX.coerceAtLeast(0.0001f)
-            val scaleY = expansionY.coerceAtLeast(0.0001f)
-            ((point.x - centerX) / scaleX).pow(2) +
-                    ((point.y - centerY) / scaleY).pow(2)
-        }.thenBy { region ->
-            val width = region.points.maxOf(OcrPoint::x) - region.points.minOf(OcrPoint::x)
-            val height = region.points.maxOf(OcrPoint::y) - region.points.minOf(OcrPoint::y)
-            width * height
-        }
-    )
+        .minWithOrNull(
+            compareBy<OcrRegion> { region ->
+                    val centerX =
+                        region.points.sumOf { it.x.toDouble() }.toFloat() / region.points.size
+                    val centerY =
+                        region.points.sumOf { it.y.toDouble() }.toFloat() / region.points.size
+                    val scaleX = expansionX.coerceAtLeast(0.0001f)
+                    val scaleY = expansionY.coerceAtLeast(0.0001f)
+                    ((point.x - centerX) / scaleX).pow(2) + ((point.y - centerY) / scaleY).pow(2)
+                }
+                .thenBy { region ->
+                    val width = region.points.maxOf(OcrPoint::x) - region.points.minOf(OcrPoint::x)
+                    val height = region.points.maxOf(OcrPoint::y) - region.points.minOf(OcrPoint::y)
+                    width * height
+                }
+        )
 
 fun selectedOcrText(
     regions: List<OcrRegion>,

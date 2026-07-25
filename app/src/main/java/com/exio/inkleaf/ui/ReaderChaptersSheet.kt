@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -30,7 +29,6 @@ import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
@@ -74,43 +72,43 @@ internal fun buildReaderChapterItems(
     pageCountOf: (Int) -> Int,
     startPageOf: (Int) -> Int,
     readableOf: ((index: Int, pageCount: Int) -> Boolean)? = null,
-): List<ReaderChapterItem> = List(chapterCount) { index ->
-    val pageCount = pageCountOf(index).coerceAtLeast(0)
-    readerChapterItem(
-        index = index,
-        title = titleOf(index),
-        pageCount = pageCount,
-        startPage = startPageOf(index),
-        isReadable = readableOf?.invoke(index, pageCount) ?: true,
-    )
-}
-
-internal suspend fun loadReaderChapterItems(
-    volume: ComicVolume,
-): List<ReaderChapterItem> = withContext(Dispatchers.IO) {
-    val chapterCount = volume.chapterCount
-    val titles = Array(chapterCount) { "" }
-    val pageCounts = IntArray(chapterCount)
-    val startPages = IntArray(chapterCount)
-    val readable = BooleanArray(chapterCount)
-    val metadata = volume.probeChapterMetadata()
-    var nextStartPage = 0
-    for (index in 0 until chapterCount) {
-        val chapterMetadata = metadata.getOrNull(index)
-        titles[index] = volume.chapterTitle(index)
-        pageCounts[index] = chapterMetadata?.pageCount?.coerceAtLeast(0) ?: 0
-        readable[index] = chapterMetadata?.isReadable == true
-        startPages[index] = nextStartPage
-        nextStartPage += pageCounts[index]
+): List<ReaderChapterItem> =
+    List(chapterCount) { index ->
+        val pageCount = pageCountOf(index).coerceAtLeast(0)
+        readerChapterItem(
+            index = index,
+            title = titleOf(index),
+            pageCount = pageCount,
+            startPage = startPageOf(index),
+            isReadable = readableOf?.invoke(index, pageCount) ?: true,
+        )
     }
-    buildReaderChapterItems(
-        chapterCount = chapterCount,
-        titleOf = { index -> titles[index] },
-        pageCountOf = { index -> pageCounts[index] },
-        startPageOf = { index -> startPages[index] },
-        readableOf = { index, _ -> readable[index] },
-    )
-}
+
+internal suspend fun loadReaderChapterItems(volume: ComicVolume): List<ReaderChapterItem> =
+    withContext(Dispatchers.IO) {
+        val chapterCount = volume.chapterCount
+        val titles = Array(chapterCount) { "" }
+        val pageCounts = IntArray(chapterCount)
+        val startPages = IntArray(chapterCount)
+        val readable = BooleanArray(chapterCount)
+        val metadata = volume.probeChapterMetadata()
+        var nextStartPage = 0
+        for (index in 0 until chapterCount) {
+            val chapterMetadata = metadata.getOrNull(index)
+            titles[index] = volume.chapterTitle(index)
+            pageCounts[index] = chapterMetadata?.pageCount?.coerceAtLeast(0) ?: 0
+            readable[index] = chapterMetadata?.isReadable == true
+            startPages[index] = nextStartPage
+            nextStartPage += pageCounts[index]
+        }
+        buildReaderChapterItems(
+            chapterCount = chapterCount,
+            titleOf = { index -> titles[index] },
+            pageCountOf = { index -> pageCounts[index] },
+            startPageOf = { index -> startPages[index] },
+            readableOf = { index, _ -> readable[index] },
+        )
+    }
 
 @Composable
 internal fun ColumnScope.ReaderChaptersPanelContent(
@@ -118,13 +116,14 @@ internal fun ColumnScope.ReaderChaptersPanelContent(
     currentChapterIndex: Int,
     onSelect: (Int) -> Unit,
 ) {
-    val initialListIndex = readerChapterInitialListIndex(
-        chapterCount = chapters?.size ?: 0,
-        currentChapterIndex = currentChapterIndex,
-    )
+    val initialListIndex =
+        readerChapterInitialListIndex(
+            chapterCount = chapters?.size ?: 0,
+            currentChapterIndex = currentChapterIndex,
+        )
 
     ReaderAttachedPanelHeader(
-        title = "${ReaderPanel.Chapters.title()}${chapters?.let { " · ${it.size}" } ?: ""}",
+        title = "${ReaderPanel.Chapters.title()}${chapters?.let { " · ${it.size}" } ?: ""}"
     )
     ReaderAttachedPanelDivider()
     key(chapters) {
@@ -133,9 +132,7 @@ internal fun ColumnScope.ReaderChaptersPanelContent(
             state = listState,
             contentPadding = PaddingValues(top = 8.dp, bottom = 12.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f),
+            modifier = Modifier.fillMaxWidth().weight(1f),
         ) {
             if (chapters == null) {
                 item { ChapterPanelLoading() }
@@ -160,19 +157,18 @@ internal fun ColumnScope.ReaderChaptersPanelContent(
 internal fun readerChapterInitialListIndex(
     chapterCount: Int,
     currentChapterIndex: Int,
-): Int = if (chapterCount <= 0) {
-    0
-} else {
-    (currentChapterIndex - 1).coerceIn(0, chapterCount - 1)
-}
+): Int =
+    if (chapterCount <= 0) {
+        0
+    } else {
+        (currentChapterIndex - 1).coerceIn(0, chapterCount - 1)
+    }
 
 @Composable
 private fun ChapterPanelLoading() {
     Box(
         contentAlignment = Alignment.Center,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(32.dp),
+        modifier = Modifier.fillMaxWidth().padding(32.dp),
     ) {
         CircularProgressIndicator(
             color = MaterialTheme.colorScheme.primary,
@@ -186,9 +182,7 @@ private fun ReaderChaptersEmptyState() {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 24.dp, vertical = 32.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 32.dp),
     ) {
         Icon(
             imageVector = Icons.AutoMirrored.Filled.List,
@@ -220,26 +214,29 @@ internal fun ReaderChapterRow(
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val status = when {
-        isCurrent && !chapter.isReadable -> "当前章节，无法打开"
-        isCurrent -> "当前章节"
-        !chapter.isReadable -> "无法打开"
-        else -> null
-    }
+    val status =
+        when {
+            isCurrent && !chapter.isReadable -> "当前章节，无法打开"
+            isCurrent -> "当前章节"
+            !chapter.isReadable -> "无法打开"
+            else -> null
+        }
 
-    val containerColor = if (isCurrent) {
-        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f)
-    } else {
-        MaterialTheme.colorScheme.surfaceContainerLow
-    }
+    val containerColor =
+        if (isCurrent) {
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f)
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerLow
+        }
 
-    val contentColor = if (isCurrent) {
-        MaterialTheme.colorScheme.onPrimaryContainer
-    } else if (!chapter.isReadable) {
-        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-    } else {
-        MaterialTheme.colorScheme.onSurface
-    }
+    val contentColor =
+        if (isCurrent) {
+            MaterialTheme.colorScheme.onPrimaryContainer
+        } else if (!chapter.isReadable) {
+            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+        } else {
+            MaterialTheme.colorScheme.onSurface
+        }
 
     Surface(
         onClick = { onSelect(chapter.startPage) },
@@ -248,27 +245,23 @@ internal fun ReaderChapterRow(
         color = containerColor,
         contentColor = contentColor,
         tonalElevation = if (isCurrent) 4.dp else 1.dp,
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 2.dp)
-            .semantics {
+        modifier =
+            modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp).semantics {
                 status?.let { stateDescription = it }
             },
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 10.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
         ) {
             if (isCurrent) {
                 Box(
-                    modifier = Modifier
-                        .padding(end = 10.dp)
-                        .width(4.dp)
-                        .height(20.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primary),
+                    modifier =
+                        Modifier.padding(end = 10.dp)
+                            .width(4.dp)
+                            .height(20.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary)
                 )
             }
 
@@ -280,46 +273,53 @@ internal fun ReaderChapterRow(
                     text = chapter.title,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
-                    style = if (isCurrent) {
-                        MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
-                    } else {
-                        MaterialTheme.typography.bodyMedium
-                    },
+                    style =
+                        if (isCurrent) {
+                            MaterialTheme.typography.titleSmall.copy(
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        } else {
+                            MaterialTheme.typography.bodyMedium
+                        },
                 )
 
                 Text(
-                    text = if (chapter.isReadable) {
-                        "第 ${chapter.index + 1} 章"
-                    } else {
-                        "第 ${chapter.index + 1} 章 · 无法打开"
-                    },
+                    text =
+                        if (chapter.isReadable) {
+                            "第 ${chapter.index + 1} 章"
+                        } else {
+                            "第 ${chapter.index + 1} 章 · 无法打开"
+                        },
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (isCurrent) {
-                        MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
+                    color =
+                        if (isCurrent) {
+                            MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
                 )
             }
 
             if (chapter.isReadable) {
                 Surface(
                     shape = RoundedCornerShape(8.dp),
-                    color = if (isCurrent) {
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
-                    } else {
-                        MaterialTheme.colorScheme.surfaceContainerHighest
-                    },
+                    color =
+                        if (isCurrent) {
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                        } else {
+                            MaterialTheme.colorScheme.surfaceContainerHighest
+                        },
                     modifier = Modifier.padding(start = 8.dp),
                 ) {
                     Text(
                         text = "${chapter.pageCount} 页",
                         style = MaterialTheme.typography.labelSmall,
-                        color = if (isCurrent) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
+                        color =
+                            if (isCurrent) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                     )
                 }

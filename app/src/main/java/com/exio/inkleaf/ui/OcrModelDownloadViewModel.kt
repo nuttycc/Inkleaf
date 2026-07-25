@@ -9,9 +9,10 @@ import com.exio.inkleaf.data.ocr.OcrModelSettingsRepository
 import com.exio.inkleaf.data.ocr.OcrModelSource
 import com.exio.inkleaf.data.ocr.OcrModelVariant
 import com.exio.inkleaf.data.ocr.OcrSourceSelector
-import com.exio.inkleaf.data.ocr.ocrModelDir
 import com.exio.inkleaf.data.ocr.isOcrModelReady
+import com.exio.inkleaf.data.ocr.ocrModelDir
 import com.exio.inkleaf.data.ocr.totalBytes
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,18 +23,21 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
-import java.util.concurrent.TimeUnit
 
 sealed interface OcrDownloadUiState {
     data object SelectingSource : OcrDownloadUiState
+
     data class ReadyToDownload(val sourceName: String, val totalBytes: Long) : OcrDownloadUiState
+
     data class Downloading(
         val sourceName: String,
         val downloadedBytes: Long,
         val totalBytes: Long,
         val currentFileName: String,
     ) : OcrDownloadUiState
+
     data class Error(val message: String, val sourceName: String?) : OcrDownloadUiState
+
     data object NoSourceAvailable : OcrDownloadUiState
 }
 
@@ -44,11 +48,12 @@ data class OcrModelOption(
 )
 
 class OcrModelDownloadViewModel(app: Application) : AndroidViewModel(app) {
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .followRedirects(true)
-        .build()
+    private val client =
+        OkHttpClient.Builder()
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .followRedirects(true)
+            .build()
     private val sourceSelector = OcrSourceSelector(client)
     private val downloader = OcrModelDownloader(client)
     private val settings = OcrModelSettingsRepository(app)
@@ -62,12 +67,18 @@ class OcrModelDownloadViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _refreshTrigger = MutableStateFlow(0)
 
-    val options = combine(settings.activeVariant, _selectedVariant, _refreshTrigger) { active, selected, _ ->
-        OcrModelVariant.entries.map { variant ->
-            val installed = isOcrModelReady(filesDir, variant)
-            OcrModelOption(variant, installed, installed && variant == active)
-        }.also { if (selected !in OcrModelVariant.entries) _selectedVariant.value = active }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val options =
+        combine(settings.activeVariant, _selectedVariant, _refreshTrigger) { active, selected, _ ->
+                OcrModelVariant.entries
+                    .map { variant ->
+                        val installed = isOcrModelReady(filesDir, variant)
+                        OcrModelOption(variant, installed, installed && variant == active)
+                    }
+                    .also {
+                        if (selected !in OcrModelVariant.entries) _selectedVariant.value = active
+                    }
+            }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private var selectedSource: OcrModelSource? = null
     private var downloadJob: Job? = null
@@ -93,7 +104,8 @@ class OcrModelDownloadViewModel(app: Application) : AndroidViewModel(app) {
                 if (autoStart) {
                     startDownload()
                 } else {
-                    _state.value = OcrDownloadUiState.ReadyToDownload(source.name, variant.totalBytes)
+                    _state.value =
+                        OcrDownloadUiState.ReadyToDownload(source.name, variant.totalBytes)
                 }
             }
         }
@@ -101,12 +113,25 @@ class OcrModelDownloadViewModel(app: Application) : AndroidViewModel(app) {
 
     fun startDownload() {
         val variant = _selectedVariant.value
-        val source = selectedSource ?: run { selectSource(); return }
+        val source =
+            selectedSource
+                ?: run {
+                    selectSource()
+                    return
+                }
         downloadJob?.cancel()
         _state.value = OcrDownloadUiState.Downloading(source.name, 0L, variant.totalBytes, "")
         downloadJob = viewModelScope.launch {
-            downloader.download(source, ocrModelDir(filesDir, variant), variant).collect { progress: OcrDownloadProgress ->
-                _state.update { OcrDownloadUiState.Downloading(source.name, progress.downloadedBytes, progress.totalBytes, progress.currentFileName) }
+            downloader.download(source, ocrModelDir(filesDir, variant), variant).collect {
+                progress: OcrDownloadProgress ->
+                _state.update {
+                    OcrDownloadUiState.Downloading(
+                        source.name,
+                        progress.downloadedBytes,
+                        progress.totalBytes,
+                        progress.currentFileName,
+                    )
+                }
             }
             settings.setActiveVariant(variant)
             _refreshTrigger.value += 1

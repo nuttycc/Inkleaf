@@ -18,16 +18,15 @@ import android.content.Context
 import android.graphics.Bitmap
 import com.paddle.ocr.engine.OCREngine
 import com.paddle.ocr.engine.OCREngineResult
-import com.paddle.ocr.model.OCRRunResult
 import com.paddle.ocr.model.OCRError
+import com.paddle.ocr.model.OCRRunResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-class PaddleOCR private constructor(
-    private val engine: OCREngine,
-) {
+class PaddleOCR private constructor(private val engine: OCREngine) {
     /** Time spent loading ONNX models (milliseconds). */
-    val coldLoadTimeMs: Long get() = engine.coldLoadTimeMs
+    val coldLoadTimeMs: Long
+        get() = engine.coldLoadTimeMs
 
     companion object {
 
@@ -61,12 +60,15 @@ class PaddleOCR private constructor(
         ): PaddleOCR {
             val appContext = context.applicationContext
             return withContext(Dispatchers.IO) {
-                val engine = OCREngine(
-                    appContext, config, engineConfig,
-                    detModelAsset = detModelAssetPath,
-                    recModelAsset = recModelAssetPath,
-                    recConfigAsset = recConfigAssetPath,
-                )
+                val engine =
+                    OCREngine(
+                        appContext,
+                        config,
+                        engineConfig,
+                        detModelAsset = detModelAssetPath,
+                        recModelAsset = recModelAssetPath,
+                        recConfigAsset = recConfigAssetPath,
+                    )
                 PaddleOCR(engine)
             }
         }
@@ -81,12 +83,15 @@ class PaddleOCR private constructor(
         ): PaddleOCR {
             val appContext = context.applicationContext
             return withContext(Dispatchers.IO) {
-                val engine = OCREngine(
-                    appContext, config, engineConfig,
-                    detModelFile = detModelFile,
-                    recModelFile = recModelFile,
-                    recConfigFile = recConfigFile,
-                )
+                val engine =
+                    OCREngine(
+                        appContext,
+                        config,
+                        engineConfig,
+                        detModelFile = detModelFile,
+                        recModelFile = recModelFile,
+                        recConfigFile = recConfigFile,
+                    )
                 PaddleOCR(engine)
             }
         }

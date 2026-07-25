@@ -7,11 +7,11 @@ import androidx.room.PrimaryKey
 /**
  * One reading session row.
  *
- * No foreign key to [ComicEntity]: sessions outlive shelf rows and re-associate
- * by [comicFileKey]. Location fields are flattened (no JSON).
+ * No foreign key to [ComicEntity]: sessions outlive shelf rows and re-associate by [comicFileKey].
+ * Location fields are flattened (no JSON).
  *
- * Checkpoint columns always hold the last actually-visible page. End columns
- * are null while ACTIVE/PAUSED and filled only on COMPLETED permanent rows.
+ * Checkpoint columns always hold the last actually-visible page. End columns are null while
+ * ACTIVE/PAUSED and filled only on COMPLETED permanent rows.
  *
  * Uniqueness of the global resumable slot uses [resumableSlot]:
  * - ACTIVE/PAUSED → 1 (unique index allows only one such row)
@@ -23,12 +23,13 @@ import androidx.room.PrimaryKey
  */
 @Entity(
     tableName = "reading_sessions",
-    indices = [
-        Index(value = ["comicFileKey"]),
-        Index(value = ["resumableSlot"], unique = true),
-        // Permanent timeline: filter isPermanent + ORDER BY startedAt DESC, id DESC.
-        Index(value = ["isPermanent", "startedAt", "id"]),
-    ],
+    indices =
+        [
+            Index(value = ["comicFileKey"]),
+            Index(value = ["resumableSlot"], unique = true),
+            // Permanent timeline: filter isPermanent + ORDER BY startedAt DESC, id DESC.
+            Index(value = ["isPermanent", "startedAt", "id"]),
+        ],
 )
 data class ReadingSessionEntity(
     @PrimaryKey val id: String,
@@ -49,8 +50,8 @@ data class ReadingSessionEntity(
     /** True once the session has entered permanent history. */
     val isPermanent: Boolean,
     /**
-     * 1 while ACTIVE/PAUSED (global single slot); null when COMPLETED.
-     * Unique index + SQLite NULL rules enforce at most one resumable row.
+     * 1 while ACTIVE/PAUSED (global single slot); null when COMPLETED. Unique index + SQLite NULL
+     * rules enforce at most one resumable row.
      */
     val resumableSlot: Int?,
     // --- start position ---
@@ -81,8 +82,8 @@ data class ReadingSessionEntity(
 }
 
 /**
- * Lightweight row for the history timeline PagingSource.
- * Joins the current shelf record by fileKey when present.
+ * Lightweight row for the history timeline PagingSource. Joins the current shelf record by fileKey
+ * when present.
  */
 data class HistoryRowProjection(
     val id: String,

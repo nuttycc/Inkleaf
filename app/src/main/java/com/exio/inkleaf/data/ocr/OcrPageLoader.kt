@@ -14,6 +14,7 @@ import java.io.ByteArrayInputStream
 internal interface OcrPageSource : AutoCloseable {
     val width: Int
     val height: Int
+
     suspend fun load(bounds: OcrTileBounds): Bitmap
 }
 
@@ -41,29 +42,32 @@ internal suspend fun openOcrPageSource(volume: ComicVolume, page: Int): OcrPageS
 }
 
 @Suppress("DEPRECATION")
-private class RegionDecodedOcrPageSource(
-    bytes: ByteArray,
-) : OcrPageSource {
-    private val decoder = BitmapRegionDecoder.newInstance(bytes, 0, bytes.size, false)
-        ?: throw ComicOpenException("本页图像无法解码")
+private class RegionDecodedOcrPageSource(bytes: ByteArray) : OcrPageSource {
+    private val decoder =
+        BitmapRegionDecoder.newInstance(bytes, 0, bytes.size, false)
+            ?: throw ComicOpenException("本页图像无法解码")
     private val sourceWidth = decoder.width
     private val sourceHeight = decoder.height
-    private val orientation = runCatching {
-        ExifInterface(ByteArrayInputStream(bytes)).getAttributeInt(
-            ExifInterface.TAG_ORIENTATION,
-            ExifInterface.ORIENTATION_NORMAL,
-        )
-    }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+    private val orientation =
+        runCatching {
+                ExifInterface(ByteArrayInputStream(bytes))
+                    .getAttributeInt(
+                        ExifInterface.TAG_ORIENTATION,
+                        ExifInterface.ORIENTATION_NORMAL,
+                    )
+            }
+            .getOrDefault(ExifInterface.ORIENTATION_NORMAL)
     override val width: Int = if (orientation.swapsDimensions()) sourceHeight else sourceWidth
     override val height: Int = if (orientation.swapsDimensions()) sourceWidth else sourceHeight
 
     override suspend fun load(bounds: OcrTileBounds): Bitmap {
         val mapped = mapOrientedRectToSource(bounds, orientation, sourceWidth, sourceHeight)
         val sourceRect = Rect(mapped.left, mapped.top, mapped.right, mapped.bottom)
-        val decoded = decoder.decodeRegion(
-            sourceRect,
-            BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.ARGB_8888 },
-        ) ?: throw ComicOpenException("本页图像无法解码")
+        val decoded =
+            decoder.decodeRegion(
+                sourceRect,
+                BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.ARGB_8888 },
+            ) ?: throw ComicOpenException("本页图像无法解码")
         if (orientation == ExifInterface.ORIENTATION_NORMAL) return decoded
 
         return try {
@@ -74,7 +78,7 @@ private class RegionDecodedOcrPageSource(
                 decoded.width,
                 decoded.height,
                 rawOrientationMatrix(orientation),
-                true
+                true,
             )
         } finally {
             decoded.recycle()
@@ -99,74 +103,82 @@ internal fun mapOrientedRectToSource(
     val right = bounds.left + bounds.width
     val bottom = bounds.top + bounds.height
     return when (orientation) {
-        ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> OcrPixelRect(
-            sourceWidth - right,
-            top,
-            sourceWidth - left,
-            bottom
-        )
+        ExifInterface.ORIENTATION_FLIP_HORIZONTAL ->
+            OcrPixelRect(
+                sourceWidth - right,
+                top,
+                sourceWidth - left,
+                bottom,
+            )
 
-        ExifInterface.ORIENTATION_ROTATE_180 -> OcrPixelRect(
-            sourceWidth - right,
-            sourceHeight - bottom,
-            sourceWidth - left,
-            sourceHeight - top
-        )
+        ExifInterface.ORIENTATION_ROTATE_180 ->
+            OcrPixelRect(
+                sourceWidth - right,
+                sourceHeight - bottom,
+                sourceWidth - left,
+                sourceHeight - top,
+            )
 
-        ExifInterface.ORIENTATION_FLIP_VERTICAL -> OcrPixelRect(
-            left,
-            sourceHeight - bottom,
-            right,
-            sourceHeight - top
-        )
+        ExifInterface.ORIENTATION_FLIP_VERTICAL ->
+            OcrPixelRect(
+                left,
+                sourceHeight - bottom,
+                right,
+                sourceHeight - top,
+            )
 
         ExifInterface.ORIENTATION_TRANSPOSE -> OcrPixelRect(top, left, bottom, right)
-        ExifInterface.ORIENTATION_ROTATE_90 -> OcrPixelRect(
-            top,
-            sourceHeight - right,
-            bottom,
-            sourceHeight - left
-        )
+        ExifInterface.ORIENTATION_ROTATE_90 ->
+            OcrPixelRect(
+                top,
+                sourceHeight - right,
+                bottom,
+                sourceHeight - left,
+            )
 
-        ExifInterface.ORIENTATION_TRANSVERSE -> OcrPixelRect(
-            sourceWidth - bottom,
-            sourceHeight - right,
-            sourceWidth - top,
-            sourceHeight - left
-        )
+        ExifInterface.ORIENTATION_TRANSVERSE ->
+            OcrPixelRect(
+                sourceWidth - bottom,
+                sourceHeight - right,
+                sourceWidth - top,
+                sourceHeight - left,
+            )
 
-        ExifInterface.ORIENTATION_ROTATE_270 -> OcrPixelRect(
-            sourceWidth - bottom,
-            left,
-            sourceWidth - top,
-            right
-        )
+        ExifInterface.ORIENTATION_ROTATE_270 ->
+            OcrPixelRect(
+                sourceWidth - bottom,
+                left,
+                sourceWidth - top,
+                right,
+            )
 
         else -> OcrPixelRect(left, top, right, bottom)
     }
 }
 
-private fun Int.swapsDimensions(): Boolean = this == ExifInterface.ORIENTATION_TRANSPOSE ||
+private fun Int.swapsDimensions(): Boolean =
+    this == ExifInterface.ORIENTATION_TRANSPOSE ||
         this == ExifInterface.ORIENTATION_ROTATE_90 ||
         this == ExifInterface.ORIENTATION_TRANSVERSE ||
         this == ExifInterface.ORIENTATION_ROTATE_270
 
-private fun rawOrientationMatrix(orientation: Int): Matrix = Matrix().apply {
-    when (orientation) {
-        ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> setScale(-1f, 1f)
-        ExifInterface.ORIENTATION_ROTATE_180 -> setRotate(180f)
-        ExifInterface.ORIENTATION_FLIP_VERTICAL -> setScale(1f, -1f)
-        ExifInterface.ORIENTATION_TRANSPOSE -> {
-            setRotate(90f)
-            postScale(-1f, 1f)
-        }
+private fun rawOrientationMatrix(orientation: Int): Matrix =
+    Matrix().apply {
+        when (orientation) {
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> setScale(-1f, 1f)
+            ExifInterface.ORIENTATION_ROTATE_180 -> setRotate(180f)
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> setScale(1f, -1f)
+            ExifInterface.ORIENTATION_TRANSPOSE -> {
+                setRotate(90f)
+                postScale(-1f, 1f)
+            }
 
-        ExifInterface.ORIENTATION_ROTATE_90 -> setRotate(90f)
-        ExifInterface.ORIENTATION_TRANSVERSE -> {
-            setRotate(-90f)
-            postScale(-1f, 1f)
-        }
+            ExifInterface.ORIENTATION_ROTATE_90 -> setRotate(90f)
+            ExifInterface.ORIENTATION_TRANSVERSE -> {
+                setRotate(-90f)
+                postScale(-1f, 1f)
+            }
 
-        ExifInterface.ORIENTATION_ROTATE_270 -> setRotate(-90f)
+            ExifInterface.ORIENTATION_ROTATE_270 -> setRotate(-90f)
+        }
     }
-}

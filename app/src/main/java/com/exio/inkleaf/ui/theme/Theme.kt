@@ -32,13 +32,11 @@ internal fun resolvedPaletteStyle(argb: Long, preferred: PaletteStyle): PaletteS
 /**
  * 全 App 主题：由用户设置（种子色 + 壁纸取色）和 Activity 配置驱动。
  *
- * 整套 ColorScheme 是种子色的纯函数——存储里只有种子，30+ 个色彩角色
- * 由 material-kolor 在运行时按 M3 调色算法生成（自动满足对比度要求）。
- * 注意阅读页（ReaderScreen）基底不消费这里的颜色（沉浸阅读永远黑底白字），
- * 仅强调色（胶片高亮、滑杆填充）取自主题，并做了黑底亮度兜底。
+ * 整套 ColorScheme 是种子色的纯函数——存储里只有种子，30+ 个色彩角色 由 material-kolor 在运行时按 M3 调色算法生成（自动满足对比度要求）。
+ * 注意阅读页（ReaderScreen）基底不消费这里的颜色（沉浸阅读永远黑底白字）， 仅强调色（胶片高亮、滑杆填充）取自主题，并做了黑底亮度兜底。
  *
- * 深浅模式通过 Android uiMode 应用并重建 Activity。每个 Activity 实例只消费
- * 启动时读取的一份 ThemeSettings，因此 Material 组件不会保留旧主题颜色再各自动画。
+ * 深浅模式通过 Android uiMode 应用并重建 Activity。每个 Activity 实例只消费 启动时读取的一份 ThemeSettings，因此 Material
+ * 组件不会保留旧主题颜色再各自动画。
  */
 @Composable
 fun InkleafTheme(
@@ -70,28 +68,31 @@ fun InkleafTheme(
 internal fun rememberInkleafColorScheme(
     settings: ThemeSettings,
     isDark: Boolean,
-): ColorScheme = when {
+): ColorScheme =
+    when {
         settings.useWallpaper && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             // Material You 壁纸取色：系统算好的 scheme，API 31+
             val context = LocalContext.current
             if (isDark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         }
 
-        settings.useCustom && settings.customArgb != null -> rememberDynamicColorScheme(
-            seedColor = Color(settings.customArgb),
-            isDark = isDark,
-            isAmoled = isDark && settings.useAmoled,
-            style = resolvedPaletteStyle(settings.customArgb, settings.customStyle.style),
-            contrastLevel = settings.contrast.contrast.value,
-            specVersion = settings.colorSpec.specVersion,
-        )
+        settings.useCustom && settings.customArgb != null ->
+            rememberDynamicColorScheme(
+                seedColor = Color(settings.customArgb),
+                isDark = isDark,
+                isAmoled = isDark && settings.useAmoled,
+                style = resolvedPaletteStyle(settings.customArgb, settings.customStyle.style),
+                contrastLevel = settings.contrast.contrast.value,
+                specVersion = settings.colorSpec.specVersion,
+            )
 
-        else -> rememberDynamicColorScheme(
-            seedColor = Color(settings.seed.argb),
-            isDark = isDark,
-            isAmoled = isDark && settings.useAmoled,
-            style = resolvedPaletteStyle(settings.seed.argb, settings.customStyle.style),
-            contrastLevel = settings.contrast.contrast.value,
-            specVersion = settings.colorSpec.specVersion,
-        )
+        else ->
+            rememberDynamicColorScheme(
+                seedColor = Color(settings.seed.argb),
+                isDark = isDark,
+                isAmoled = isDark && settings.useAmoled,
+                style = resolvedPaletteStyle(settings.seed.argb, settings.customStyle.style),
+                contrastLevel = settings.contrast.contrast.value,
+                specVersion = settings.colorSpec.specVersion,
+            )
     }

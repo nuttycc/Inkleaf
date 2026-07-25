@@ -14,6 +14,8 @@ import com.exio.inkleaf.data.db.FolderWithCount
 import com.exio.inkleaf.data.db.GroupWithCount
 import com.exio.inkleaf.data.db.LibraryFolderEntity
 import com.exio.inkleaf.data.db.LibraryFolderType
+import java.io.File
+import java.util.zip.ZipInputStream
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
@@ -21,8 +23,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import java.io.File
-import java.util.zip.ZipInputStream
 
 /** 一次全库扫描的结果汇总 */
 data class ScanResult(
@@ -46,6 +46,7 @@ data class SeriesScanConfirmation(
 /** addFolderAndSync 的结果：目录是新加入的（携带首扫汇总）还是已存在 */
 sealed interface AddFolderOutcome {
     data class Added(val scan: ScanResult) : AddFolderOutcome
+
     data object Duplicate : AddFolderOutcome
 }
 
@@ -54,7 +55,9 @@ sealed interface AddComicOutcome {
     val comic: ComicEntity
 
     data class Added(override val comic: ComicEntity) : AddComicOutcome
+
     data class AlreadyInLibrary(override val comic: ComicEntity) : AddComicOutcome
+
     data class Restored(override val comic: ComicEntity) : AddComicOutcome
 }
 
@@ -69,17 +72,21 @@ sealed interface AddSeriesFolderOutcome {
     ) : AddSeriesFolderOutcome
 
     data class NeedsConfirmation(val request: SeriesScanConfirmation) : AddSeriesFolderOutcome
+
     data class HardLimit(
         val metrics: LibraryScanner.ScanMetrics,
         val limit: LibraryScanner.ScanLimit,
     ) : AddSeriesFolderOutcome
 
     data class Overlap(val comicTitle: String, val fileCount: Int) : AddSeriesFolderOutcome
+
     data class Incomplete(
         val discoveredPdfCount: Int,
         val inaccessibleDirectoryCount: Int,
     ) : AddSeriesFolderOutcome
+
     data object Duplicate : AddSeriesFolderOutcome
+
     data class Empty(
         val inaccessibleDirectoryCount: Int = 0,
         val skippedVirtualPdfCount: Int = 0,
@@ -88,15 +95,15 @@ sealed interface AddSeriesFolderOutcome {
 
 sealed interface GroupWriteOutcome {
     data class Success(val groupId: Long? = null) : GroupWriteOutcome
+
     data object BlankName : GroupWriteOutcome
+
     data object Duplicate : GroupWriteOutcome
+
     data object Missing : GroupWriteOutcome
 }
 
-/**
- * 业务数据的统一入口：ViewModel 不直接接触 DAO、文件系统和权限 API。
- * 自身无状态（数据库是单例），随处构造无代价——所以暂时不需要依赖注入框架。
- */
+/** 业务数据的统一入口：ViewModel 不直接接触 DAO、文件系统和权限 API。 自身无状态（数据库是单例），随处构造无代价——所以暂时不需要依赖注入框架。 */
 class ComicRepository(context: Context) {
     private val appContext = context.applicationContext
     private val db = AppDatabase.getInstance(appContext)
@@ -107,6 +114,7 @@ class ComicRepository(context: Context) {
 
     private sealed interface SeriesFolderSyncOutcome {
         data class Success(val added: Int, val warning: String? = null) : SeriesFolderSyncOutcome
+
         data class NeedsConfirmation(
             val request: SeriesScanConfirmation,
             val warning: String?,
@@ -139,8 +147,9 @@ class ComicRepository(context: Context) {
                 chapters = chapters,
                 pfdResolver = { uriString ->
                     runCatching {
-                        appContext.contentResolver.openFileDescriptor(uriString.toUri(), "r")
-                    }.getOrNull()
+                            appContext.contentResolver.openFileDescriptor(uriString.toUri(), "r")
+                        }
+                        .getOrNull()
                 },
             )
         } else {
@@ -158,12 +167,13 @@ class ComicRepository(context: Context) {
     suspend fun createGroup(name: String): GroupWriteOutcome {
         val normalized = normalizeGroupName(name) ?: return GroupWriteOutcome.BlankName
         if (groupDao.getByName(normalized) != null) return GroupWriteOutcome.Duplicate
-        val id = groupDao.insert(
-            ComicGroupEntity(
-                name = normalized,
-                createdAt = System.currentTimeMillis(),
+        val id =
+            groupDao.insert(
+                ComicGroupEntity(
+                    name = normalized,
+                    createdAt = System.currentTimeMillis(),
+                )
             )
-        )
         return if (id == -1L) {
             GroupWriteOutcome.Duplicate
         } else {
@@ -199,38 +209,44 @@ class ComicRepository(context: Context) {
     /**
      * 手动添加单个漫画；同一文件已在书架时直接返回已有记录，失效记录会恢复。
      *
-     * takePersistableUriPermission 把 SAF 的"本次会话可读"升级为
-     * "重启后仍可读"。个别文档提供方不支持持久化授权，失败也不阻断添加。
+     * takePersistableUriPermission 把 SAF 的"本次会话可读"升级为 "重启后仍可读"。个别文档提供方不支持持久化授权，失败也不阻断添加。
      */
     suspend fun addOrGetComic(uri: Uri): AddComicOutcome {
         runCatching {
             appContext.contentResolver.takePersistableUriPermission(
-                uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION,
             )
         }
 
         val uriString = uri.toString()
         val fileKey = withContext(Dispatchers.IO) { ComicIdentity.fileKey(appContext, uri) }
         return syncMutex.withLock {
-            dao.getByFileKey(fileKey)?.let { return@withLock existingComicOutcome(it) }
-            dao.getByUri(uriString)?.let { return@withLock existingComicOutcome(it) }
+            dao.getByFileKey(fileKey)?.let {
+                return@withLock existingComicOutcome(it)
+            }
+            dao.getByUri(uriString)?.let {
+                return@withLock existingComicOutcome(it)
+            }
 
             val now = System.currentTimeMillis()
-            val id = dao.insert(
-                ComicEntity(
-                    uri = uriString,
-                    fileKey = fileKey,
-                    title = guessTitle(uri),
-                    addedAt = now,
-                    lastReadAt = now,
+            val id =
+                dao.insert(
+                    ComicEntity(
+                        uri = uriString,
+                        fileKey = fileKey,
+                        title = guessTitle(uri),
+                        addedAt = now,
+                        lastReadAt = now,
+                    )
                 )
-            )
             if (id != -1L) {
                 AddComicOutcome.Added(dao.getById(id)!!)
             } else {
-                val existing = dao.getByFileKey(fileKey)
-                    ?: dao.getByUri(uriString)
-                    ?: error("Comic insert conflicted but no existing row was found")
+                val existing =
+                    dao.getByFileKey(fileKey)
+                        ?: dao.getByUri(uriString)
+                        ?: error("Comic insert conflicted but no existing row was found")
                 existingComicOutcome(existing)
             }
         }
@@ -253,26 +269,29 @@ class ComicRepository(context: Context) {
     /** 首次成功打开后回填真实页数和封面；Room Flow 会自动刷新书架 */
     suspend fun backfillMetadata(comic: ComicEntity, volume: ComicVolume) {
         val needCover = comic.coverPath == null || !File(comic.coverPath).exists()
-        val cover = if (needCover) {
-            if (comic.sourceType == BookSourceType.CREATED_ALBUM) {
-                val pages = db.albumPageDao().getByComicId(comic.id)
-                val page = pages.firstOrNull { it.id == comic.coverPageId } ?: pages.firstOrNull()
-                page?.let {
-                    runCatching {
-                        Covers.createCoverFile(
-                            appContext,
-                            comic.id,
-                            resolveAlbumPageFile(appContext.filesDir, it.relativePath),
-                        )
-                    }.getOrNull()
+        val cover =
+            if (needCover) {
+                if (comic.sourceType == BookSourceType.CREATED_ALBUM) {
+                    val pages = db.albumPageDao().getByComicId(comic.id)
+                    val page =
+                        pages.firstOrNull { it.id == comic.coverPageId } ?: pages.firstOrNull()
+                    page?.let {
+                        runCatching {
+                                Covers.createCoverFile(
+                                    appContext,
+                                    comic.id,
+                                    resolveAlbumPageFile(appContext.filesDir, it.relativePath),
+                                )
+                            }
+                            .getOrNull()
+                    }
+                } else {
+                    val pageBytes = runCatching { volume.loadPageBytes(0) }.getOrNull()
+                    pageBytes?.let { Covers.createCoverFile(appContext, comic.id, it) }
                 }
             } else {
-                val pageBytes = runCatching { volume.loadPageBytes(0) }.getOrNull()
-                pageBytes?.let { Covers.createCoverFile(appContext, comic.id, it) }
+                null
             }
-        } else {
-            null
-        }
         if (comic.pageCount != volume.totalPageCount) {
             dao.updatePageCount(comic.id, volume.totalPageCount)
         }
@@ -300,29 +319,26 @@ class ComicRepository(context: Context) {
         }
         val comic = dao.getById(comicId) ?: throw IllegalStateException("书架记录不存在")
         if (comic.sourceType == BookSourceType.CREATED_ALBUM) {
-            val pageId = db.albumPageDao().getIdByPosition(comicId, page)
-                ?: throw IllegalStateException("图册页面不存在")
-            val albumPage = db.albumPageDao().getById(pageId)
-                ?: throw IllegalStateException("图册页面不存在")
-            val cover = Covers.createCoverFile(
-                appContext,
-                comicId,
-                resolveAlbumPageFile(appContext.filesDir, albumPage.relativePath),
-            ) ?: throw IllegalStateException("封面生成失败")
+            val pageId =
+                db.albumPageDao().getIdByPosition(comicId, page)
+                    ?: throw IllegalStateException("图册页面不存在")
+            val albumPage =
+                db.albumPageDao().getById(pageId) ?: throw IllegalStateException("图册页面不存在")
+            val cover =
+                Covers.createCoverFile(
+                    appContext,
+                    comicId,
+                    resolveAlbumPageFile(appContext.filesDir, albumPage.relativePath),
+                ) ?: throw IllegalStateException("封面生成失败")
             dao.updateAlbumCover(comicId, cover.absolutePath, pageId)
-            comic.coverPath
-                ?.let(::File)
-                ?.takeIf { it.absolutePath != cover.absolutePath }
-                ?.delete()
+            comic.coverPath?.let(::File)?.takeIf { it.absolutePath != cover.absolutePath }?.delete()
         } else {
             val bytes = volume.loadPageBytes(page)
-            val cover = Covers.createCoverFile(appContext, comicId, bytes)
-                ?: throw IllegalStateException("封面生成失败")
+            val cover =
+                Covers.createCoverFile(appContext, comicId, bytes)
+                    ?: throw IllegalStateException("封面生成失败")
             dao.updateCover(comicId, cover.absolutePath)
-            comic.coverPath
-                ?.let(::File)
-                ?.takeIf { it.absolutePath != cover.absolutePath }
-                ?.delete()
+            comic.coverPath?.let(::File)?.takeIf { it.absolutePath != cover.absolutePath }?.delete()
         }
     }
 
@@ -339,15 +355,19 @@ class ComicRepository(context: Context) {
         deleteComicArtifacts(comic)
         // PDF 章节目录的书被移除时，一并移除目录记录，避免自动同步把它又加回来
         comic.folderId?.let { folderId ->
-            folderDao.getAll().find { it.id == folderId }?.let { folder ->
-                if (folder.type == LibraryFolderType.SERIES) {
-                    folderDao.deleteById(folder.id)
+            folderDao
+                .getAll()
+                .find { it.id == folderId }
+                ?.let { folder ->
+                    if (folder.type == LibraryFolderType.SERIES) {
+                        folderDao.deleteById(folder.id)
+                    }
                 }
-            }
         }
         runCatching {
             appContext.contentResolver.releasePersistableUriPermission(
-                comic.uri.toUri(), Intent.FLAG_GRANT_READ_URI_PERMISSION
+                comic.uri.toUri(),
+                Intent.FLAG_GRANT_READ_URI_PERMISSION,
             )
         }
     }
@@ -356,13 +376,14 @@ class ComicRepository(context: Context) {
 
     fun observeFolders(): Flow<List<FolderWithCount>> = folderDao.observeFoldersWithCount()
 
-    /**
-     * 添加库目录。树权限拿不到时扫描必然失败，所以这里不吞 SecurityException，
-     * 让调用方提示用户。返回 false 表示目录已存在。
-     */
-    suspend fun addFolder(treeUri: Uri, type: LibraryFolderType = LibraryFolderType.LIBRARY): Boolean {
+    /** 添加库目录。树权限拿不到时扫描必然失败，所以这里不吞 SecurityException， 让调用方提示用户。返回 false 表示目录已存在。 */
+    suspend fun addFolder(
+        treeUri: Uri,
+        type: LibraryFolderType = LibraryFolderType.LIBRARY,
+    ): Boolean {
         appContext.contentResolver.takePersistableUriPermission(
-            treeUri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+            treeUri,
+            Intent.FLAG_GRANT_READ_URI_PERMISSION,
         )
         if (folderDao.getByTreeUri(treeUri.toString()) != null) return false
 
@@ -379,8 +400,7 @@ class ComicRepository(context: Context) {
     }
 
     /**
-     * 移除库目录：应用层手动级联——删该目录扫出的漫画（含封面）、删目录行、
-     * 释放树权限。只 release 树 Uri：子文件从未单独 take 过权限
+     * 移除库目录：应用层手动级联——删该目录扫出的漫画（含封面）、删目录行、 释放树权限。只 release 树 Uri：子文件从未单独 take 过权限
      * （树授权覆盖整棵子树）。手动添加的条目（folderId=null）不受影响。
      */
     suspend fun removeFolder(folder: LibraryFolderEntity) {
@@ -389,15 +409,14 @@ class ComicRepository(context: Context) {
         folderDao.deleteById(folder.id)
         runCatching {
             appContext.contentResolver.releasePersistableUriPermission(
-                folder.treeUri.toUri(), Intent.FLAG_GRANT_READ_URI_PERMISSION
+                folder.treeUri.toUri(),
+                Intent.FLAG_GRANT_READ_URI_PERMISSION,
             )
         }
     }
 
     /**
-     * 添加库目录的完整编排：插库 → 首扫 → 补封面。
-     * 收在数据层，让多个入口（书架 FAB 菜单、设置页目录管理）共享同一份
-     * 业务逻辑——入口可以有多个，编排只能有一份。
+     * 添加库目录的完整编排：插库 → 首扫 → 补封面。 收在数据层，让多个入口（书架 FAB 菜单、设置页目录管理）共享同一份 业务逻辑——入口可以有多个，编排只能有一份。
      * SecurityException（树权限拿不到）原样上抛，由调用方提示用户
      */
     suspend fun addFolderAndSync(treeUri: Uri): AddFolderOutcome {
@@ -420,17 +439,18 @@ class ComicRepository(context: Context) {
             return AddSeriesFolderOutcome.Duplicate
         }
         val displayName = DocumentFile.fromTreeUri(appContext, treeUri)?.name ?: "未命名目录"
-        val scan = try {
-            scanner.scanPdfsRecursively(
-                treeUri = treeUri,
-                confirmationThresholds = if (approvedLargeScan) null
-                else LibraryScanner.SOFT_SCAN_THRESHOLDS,
-            )
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (error: LibraryScanner.FolderAccessException) {
-            throw error
-        }
+        val scan =
+            try {
+                scanner.scanPdfsRecursively(
+                    treeUri = treeUri,
+                    confirmationThresholds =
+                        if (approvedLargeScan) null else LibraryScanner.SOFT_SCAN_THRESHOLDS,
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: LibraryScanner.FolderAccessException) {
+                throw error
+            }
 
         when (scan.stopReason) {
             LibraryScanner.ScanStopReason.CONFIRMATION_REQUIRED -> {
@@ -485,19 +505,20 @@ class ComicRepository(context: Context) {
             db.withTransaction {
                 val metrics = scan.metrics.takeIf { approvedLargeScan }
                 val issue = seriesScanIssue(displayName, 0, scan.skippedVirtualPdfCount)
-                val folderId = folderDao.insert(
-                    LibraryFolderEntity(
-                        treeUri = treeUri.toString(),
-                        displayName = displayName,
-                        addedAt = System.currentTimeMillis(),
-                        type = LibraryFolderType.SERIES,
-                        approvedPdfCount = metrics?.pdfCount ?: 0,
-                        approvedDirectoryCount = metrics?.directoryCount ?: 0,
-                        approvedEntryCount = metrics?.entryCount ?: 0,
-                        scanIssueKey = issue?.first,
-                        scanIssue = issue?.second,
+                val folderId =
+                    folderDao.insert(
+                        LibraryFolderEntity(
+                            treeUri = treeUri.toString(),
+                            displayName = displayName,
+                            addedAt = System.currentTimeMillis(),
+                            type = LibraryFolderType.SERIES,
+                            approvedPdfCount = metrics?.pdfCount ?: 0,
+                            approvedDirectoryCount = metrics?.directoryCount ?: 0,
+                            approvedEntryCount = metrics?.entryCount ?: 0,
+                            scanIssueKey = issue?.first,
+                            scanIssue = issue?.second,
+                        )
                     )
-                )
                 val folder = folderDao.getAll().first { it.id == folderId }
                 val comic = ensureSeriesComic(folder, treeUri)
                 val added = syncSeriesChapters(comic, scan.files, completeScan = true)
@@ -515,13 +536,10 @@ class ComicRepository(context: Context) {
     }
 
     /**
-     * 全库同步：对每个目录做"扫描结果 vs 数据库"的集合 diff，三分类处理。
-     * 整个过程幂等（重复执行结果相同）——扫描中途被取消/杀进程都无害，
-     * 下次重扫即可收敛到正确状态。
+     * 全库同步：对每个目录做"扫描结果 vs 数据库"的集合 diff，三分类处理。 整个过程幂等（重复执行结果相同）——扫描中途被取消/杀进程都无害， 下次重扫即可收敛到正确状态。
      *
-     * 进程级锁串行化并发调用（Repository 随处构造，多个 ViewModel 可能
-     * 同时发起扫描）：两次扫描从同一快照各算一遍"新书"会重复插入；
-     * 排队的那次等到锁后跑的是无变化的空 diff，几乎零成本
+     * 进程级锁串行化并发调用（Repository 随处构造，多个 ViewModel 可能 同时发起扫描）：两次扫描从同一快照各算一遍"新书"会重复插入； 排队的那次等到锁后跑的是无变化的空
+     * diff，几乎零成本
      */
     suspend fun syncAllFolders(): ScanResult = syncMutex.withLock {
         var added = 0
@@ -566,8 +584,9 @@ class ComicRepository(context: Context) {
     }
 
     suspend fun approveSeriesFolderExpansion(folderId: Long): ScanResult = syncMutex.withLock {
-        val folder = folderDao.getAll().firstOrNull { it.id == folderId }
-            ?: return@withLock ScanResult(0, 0, 0, 0, listOf("目录不存在"))
+        val folder =
+            folderDao.getAll().firstOrNull { it.id == folderId }
+                ?: return@withLock ScanResult(0, 0, 0, 0, listOf("目录不存在"))
         val warnings = mutableListOf<String>()
         val failed = mutableListOf<String>()
         when (val outcome = syncSeriesFolder(folder, approvedExpansion = true)) {
@@ -578,17 +597,15 @@ class ComicRepository(context: Context) {
         ScanResult(0, 0, 0, 0, failed, warnings)
     }
 
-    /**
-     * 同步单个漫画库目录：每个文件是一本独立漫画。
-     * 返回该目录的 diff 计数，由 [syncAllFolders] 汇总。
-     */
+    /** 同步单个漫画库目录：每个文件是一本独立漫画。 返回该目录的 diff 计数，由 [syncAllFolders] 汇总。 */
     private suspend fun syncLibraryFolder(folder: LibraryFolderEntity): ScanResult {
-        val scanned = try {
-            scanner.scanFolder(folder.treeUri.toUri()).distinctBy { it.fileKey }
-        } catch (_: LibraryScanner.FolderAccessException) {
-            // 目录打不开：返回空结果，外层把它加入 failed
-            return ScanResult(0, 0, 0, 0, emptyList())
-        }
+        val scanned =
+            try {
+                scanner.scanFolder(folder.treeUri.toUri()).distinctBy { it.fileKey }
+            } catch (_: LibraryScanner.FolderAccessException) {
+                // 目录打不开：返回空结果，外层把它加入 failed
+                return ScanResult(0, 0, 0, 0, emptyList())
+            }
 
         var added = 0
         var markedMissing = 0
@@ -612,33 +629,30 @@ class ComicRepository(context: Context) {
         alreadyInLibrary += candidateFiles.size - newFiles.size
         if (newFiles.isNotEmpty()) {
             val now = System.currentTimeMillis()
-            val insertedIds = dao.insertAll(
-                newFiles.map {
-                    ComicEntity(
-                        uri = it.uri,
-                        fileKey = it.fileKey,
-                        title = titleFromFileName(it.displayName),
-                        folderId = folder.id,
-                        addedAt = now,
-                    )
-                }
-            )
+            val insertedIds =
+                dao.insertAll(
+                    newFiles.map {
+                        ComicEntity(
+                            uri = it.uri,
+                            fileKey = it.fileKey,
+                            title = titleFromFileName(it.displayName),
+                            folderId = folder.id,
+                            addedAt = now,
+                        )
+                    }
+                )
             added += insertedIds.count { it != -1L }
         }
 
         // 2) 库里有、目录里没有 → 标记失效（保留进度，文件回来可恢复）
-        val toMiss = existing
-            .filter { !it.isMissing && it.fileKey !in scannedKeys }
-            .map { it.id }
+        val toMiss = existing.filter { !it.isMissing && it.fileKey !in scannedKeys }.map { it.id }
         if (toMiss.isNotEmpty()) {
             dao.setMissing(toMiss, true)
             markedMissing += toMiss.size
         }
 
         // 3) 之前失效、现在又扫到了 → 恢复
-        val toRestore = existing
-            .filter { it.isMissing && it.fileKey in scannedKeys }
-            .map { it.id }
+        val toRestore = existing.filter { it.isMissing && it.fileKey in scannedKeys }.map { it.id }
         if (toRestore.isNotEmpty()) {
             dao.setMissing(toRestore, false)
             restored += toRestore.size
@@ -652,45 +666,49 @@ class ComicRepository(context: Context) {
         approvedExpansion: Boolean,
     ): SeriesFolderSyncOutcome {
         val treeUri = folder.treeUri.toUri()
-        val scan = try {
-            scanner.scanPdfsRecursively(
-                treeUri = treeUri,
-                confirmationThresholds = if (approvedExpansion) null
-                else confirmationThresholdsFor(folder),
-            )
-        } catch (_: LibraryScanner.FolderAccessException) {
-            val message = "无法访问目录：${folder.displayName}"
-            val changed = updateFolderIssue(folder, "root-inaccessible", message)
-            return SeriesFolderSyncOutcome.Failed(message.takeIf { changed })
-        }
+        val scan =
+            try {
+                scanner.scanPdfsRecursively(
+                    treeUri = treeUri,
+                    confirmationThresholds =
+                        if (approvedExpansion) null else confirmationThresholdsFor(folder),
+                )
+            } catch (_: LibraryScanner.FolderAccessException) {
+                val message = "无法访问目录：${folder.displayName}"
+                val changed = updateFolderIssue(folder, "root-inaccessible", message)
+                return SeriesFolderSyncOutcome.Failed(message.takeIf { changed })
+            }
 
         when (scan.stopReason) {
             LibraryScanner.ScanStopReason.CONFIRMATION_REQUIRED -> {
                 val issue = "《${folder.displayName}》目录规模显著增加，需要确认后继续扫描"
-                val changed = updateFolderIssue(
-                    folder,
-                    "confirmation:${scan.limit}:${scan.metrics}",
-                    issue,
-                )
+                val changed =
+                    updateFolderIssue(
+                        folder,
+                        "confirmation:${scan.limit}:${scan.metrics}",
+                        issue,
+                    )
                 return SeriesFolderSyncOutcome.NeedsConfirmation(
-                    request = SeriesScanConfirmation(
-                        treeUri = folder.treeUri,
-                        folderId = folder.id,
-                        displayName = folder.displayName,
-                        metrics = scan.metrics,
-                        limit = requireNotNull(scan.limit),
-                    ),
+                    request =
+                        SeriesScanConfirmation(
+                            treeUri = folder.treeUri,
+                            folderId = folder.id,
+                            displayName = folder.displayName,
+                            metrics = scan.metrics,
+                            limit = requireNotNull(scan.limit),
+                        ),
                     warning = issue.takeIf { changed },
                 )
             }
 
             LibraryScanner.ScanStopReason.HARD_LIMIT_REACHED -> {
                 val issue = "《${folder.displayName}》超过安全扫描上限"
-                val changed = updateFolderIssue(
-                    folder,
-                    "hard-limit:${scan.limit}",
-                    issue,
-                )
+                val changed =
+                    updateFolderIssue(
+                        folder,
+                        "hard-limit:${scan.limit}",
+                        issue,
+                    )
                 return SeriesFolderSyncOutcome.Failed(issue.takeIf { changed })
             }
 
@@ -700,13 +718,13 @@ class ComicRepository(context: Context) {
         return db.withTransaction {
             val comic = ensureSeriesComic(folder, treeUri)
             findSeriesOverlap(scan.files, excludeComicId = comic.id)?.let { overlap ->
-                val issue =
-                    "《${folder.displayName}》与《${overlap.first}》有 ${overlap.second} 个重复 PDF"
-                val changed = updateFolderIssue(
-                    folder,
-                    "overlap:${overlap.first}:${overlap.second}",
-                    issue,
-                )
+                val issue = "《${folder.displayName}》与《${overlap.first}》有 ${overlap.second} 个重复 PDF"
+                val changed =
+                    updateFolderIssue(
+                        folder,
+                        "overlap:${overlap.first}:${overlap.second}",
+                        issue,
+                    )
                 return@withTransaction SeriesFolderSyncOutcome.Failed(issue.takeIf { changed })
             }
 
@@ -720,56 +738,57 @@ class ComicRepository(context: Context) {
 
             var updatedFolder = folder
             if (approvedExpansion) {
-                updatedFolder = updatedFolder.copy(
-                    approvedPdfCount = scan.metrics.pdfCount,
-                    approvedDirectoryCount = scan.metrics.directoryCount,
-                    approvedEntryCount = scan.metrics.entryCount,
-                )
+                updatedFolder =
+                    updatedFolder.copy(
+                        approvedPdfCount = scan.metrics.pdfCount,
+                        approvedDirectoryCount = scan.metrics.directoryCount,
+                        approvedEntryCount = scan.metrics.entryCount,
+                    )
             }
-            val incompleteIssue = seriesScanIssue(
-                folder.displayName,
-                scan.inaccessibleDirectoryCount,
-                scan.skippedVirtualPdfCount,
-            )
-            val issueChanged = folder.scanIssueKey != incompleteIssue?.first ||
+            val incompleteIssue =
+                seriesScanIssue(
+                    folder.displayName,
+                    scan.inaccessibleDirectoryCount,
+                    scan.skippedVirtualPdfCount,
+                )
+            val issueChanged =
+                folder.scanIssueKey != incompleteIssue?.first ||
                     folder.scanIssue != incompleteIssue?.second
-            val finalFolder = updatedFolder.copy(
-                scanIssueKey = incompleteIssue?.first,
-                scanIssue = incompleteIssue?.second,
-            )
+            val finalFolder =
+                updatedFolder.copy(
+                    scanIssueKey = incompleteIssue?.first,
+                    scanIssue = incompleteIssue?.second,
+                )
             if (finalFolder != folder) folderDao.update(finalFolder)
             val warning = incompleteIssue?.second?.takeIf { issueChanged }
             SeriesFolderSyncOutcome.Success(added = added, warning = warning)
         }
     }
 
-    /**
-     * 保证指定 SERIES 目录在 comics 表里有一行记录。没有则插入，
-     * 有则返回已有记录（含失效记录）。
-     */
+    /** 保证指定 SERIES 目录在 comics 表里有一行记录。没有则插入， 有则返回已有记录（含失效记录）。 */
     private suspend fun ensureSeriesComic(folder: LibraryFolderEntity, treeUri: Uri): ComicEntity {
         val existing = dao.getByFolderId(folder.id).firstOrNull()
         if (existing != null) return existing
 
         val now = System.currentTimeMillis()
         val folderKey = ComicIdentity.folderKey(treeUri)
-        val id = dao.insert(
-            ComicEntity(
-                uri = treeUri.toString(),
-                fileKey = folderKey,
-                title = folder.displayName,
-                addedAt = now,
-                lastReadAt = now,
-                folderId = folder.id,
-                sourceType = BookSourceType.PDF_SERIES,
+        val id =
+            dao.insert(
+                ComicEntity(
+                    uri = treeUri.toString(),
+                    fileKey = folderKey,
+                    title = folder.displayName,
+                    addedAt = now,
+                    lastReadAt = now,
+                    folderId = folder.id,
+                    sourceType = BookSourceType.PDF_SERIES,
+                )
             )
-        )
         return dao.getById(id) ?: error("系列漫画插入失败")
     }
 
     /**
-     * 按扫描到的 PDF 列表同步章节表：新增、恢复、标记失效、清理已移除章节。
-     * diff 计算在 [ChapterSync.computeDiff]（纯函数，单测覆盖），落库在
+     * 按扫描到的 PDF 列表同步章节表：新增、恢复、标记失效、清理已移除章节。 diff 计算在 [ChapterSync.computeDiff]（纯函数，单测覆盖），落库在
      * `ChapterDao.applyDiff`（一个事务，原子提交）。返回实际新增的章节数。
      */
     private suspend fun syncSeriesChapters(
@@ -779,13 +798,14 @@ class ComicRepository(context: Context) {
     ): Int {
         val chapterDao = db.chapterDao()
         val existing = chapterDao.getByComicId(comic.id)
-        val diff = ChapterSync.computeDiff(
-            existing = existing,
-            scanned = scannedPdfs,
-            comicId = comic.id,
-            titleOf = ::titleFromFileName,
-            completeScan = completeScan,
-        )
+        val diff =
+            ChapterSync.computeDiff(
+                existing = existing,
+                scanned = scannedPdfs,
+                comicId = comic.id,
+                titleOf = ::titleFromFileName,
+                completeScan = completeScan,
+            )
         chapterDao.applyDiff(diff)
 
         // 章节重排后，用户上次读到的章节可能挪到了新位置。按 fileKey 跟踪
@@ -803,11 +823,12 @@ class ComicRepository(context: Context) {
         files: List<LibraryScanner.ScannedFile>,
         excludeComicId: Long?,
     ): Pair<String, Int>? {
-        val conflicts = files
-            .map { it.fileKey }
-            .chunked(SQLITE_MAX_VARIABLES)
-            .flatMap { keys -> db.chapterDao().getByFileKeys(keys) }
-            .filter { excludeComicId == null || it.comicId != excludeComicId }
+        val conflicts =
+            files
+                .map { it.fileKey }
+                .chunked(SQLITE_MAX_VARIABLES)
+                .flatMap { keys -> db.chapterDao().getByFileKeys(keys) }
+                .filter { excludeComicId == null || it.comicId != excludeComicId }
         if (conflicts.isEmpty()) return null
         val firstComicId = conflicts.first().comicId
         val title = dao.getById(firstComicId)?.title ?: "另一部漫画"
@@ -815,10 +836,7 @@ class ComicRepository(context: Context) {
     }
 
     private fun duplicateDisplayNameCount(files: List<LibraryScanner.ScannedFile>): Int =
-        groupScannedFilesByDisplayName(files)
-            .values
-            .filter { it.size > 1 }
-            .sumOf { it.size }
+        groupScannedFilesByDisplayName(files).values.filter { it.size > 1 }.sumOf { it.size }
 
     private fun seriesScanIssue(
         displayName: String,
@@ -826,16 +844,18 @@ class ComicRepository(context: Context) {
         skippedVirtualPdfCount: Int,
     ): Pair<String, String>? {
         if (inaccessibleDirectoryCount <= 0 && skippedVirtualPdfCount <= 0) return null
-        val details = buildList {
-            if (inaccessibleDirectoryCount > 0) {
-                add("$inaccessibleDirectoryCount 个目录暂时无法扫描")
-            }
-            if (skippedVirtualPdfCount > 0) {
-                add("$skippedVirtualPdfCount 个虚拟 PDF 无法直接打开")
-            }
-        }.joinToString("，")
+        val details =
+            buildList {
+                    if (inaccessibleDirectoryCount > 0) {
+                        add("$inaccessibleDirectoryCount 个目录暂时无法扫描")
+                    }
+                    if (skippedVirtualPdfCount > 0) {
+                        add("$skippedVirtualPdfCount 个虚拟 PDF 无法直接打开")
+                    }
+                }
+                .joinToString("，")
         return "scan-warning:$inaccessibleDirectoryCount:$skippedVirtualPdfCount" to
-                "《$displayName》$details"
+            "《$displayName》$details"
     }
 
     private suspend fun updateFolderIssue(
@@ -849,7 +869,7 @@ class ComicRepository(context: Context) {
     }
 
     private fun confirmationThresholdsFor(
-        folder: LibraryFolderEntity,
+        folder: LibraryFolderEntity
     ): LibraryScanner.ScanThresholds {
         fun next(approved: Int, soft: Int, hard: Int): Int {
             if (approved <= 0) return soft
@@ -863,21 +883,20 @@ class ComicRepository(context: Context) {
         val hard = LibraryScanner.HARD_SCAN_THRESHOLDS
         return LibraryScanner.ScanThresholds(
             pdfCount = next(folder.approvedPdfCount, soft.pdfCount, hard.pdfCount),
-            directoryCount = next(
-                folder.approvedDirectoryCount,
-                soft.directoryCount,
-                hard.directoryCount,
-            ),
+            directoryCount =
+                next(
+                    folder.approvedDirectoryCount,
+                    soft.directoryCount,
+                    hard.directoryCount,
+                ),
             entryCount = next(folder.approvedEntryCount, soft.entryCount, hard.entryCount),
         )
     }
 
     /**
-     * 给 PDF 章节目录补封面。首次导入时 comics 表刚插入，封面为空；
-     * 通过 [ComicVolume] 读第一个可读章节的第一页生成封面。
+     * 给 PDF 章节目录补封面。首次导入时 comics 表刚插入，封面为空； 通过 [ComicVolume] 读第一个可读章节的第一页生成封面。
      *
-     * 缺失章节可能排在可读章节之前，因此不能假定索引 0 一定能打开。所有
-     * PDF 打开都走 Dispatchers.IO，避免在主线程做 native 解析。
+     * 缺失章节可能排在可读章节之前，因此不能假定索引 0 一定能打开。所有 PDF 打开都走 Dispatchers.IO，避免在主线程做 native 解析。
      */
     private suspend fun backfillSeriesCover(outcome: AddSeriesFolderOutcome) {
         val comic = (outcome as? AddSeriesFolderOutcome.Added)?.comic ?: return
@@ -903,45 +922,45 @@ class ComicRepository(context: Context) {
     }
 
     /**
-     * 给没有封面的书补封面。用 ZipInputStream 顺序流读到第一个图片条目就停，
-     * 不需要像阅读那样把整个文件复制到缓存（封面不需要随机访问）。
-     * 每补一张就 UPDATE 一次 → 书架上封面逐张"长出来"。
+     * 给没有封面的书补封面。用 ZipInputStream 顺序流读到第一个图片条目就停， 不需要像阅读那样把整个文件复制到缓存（封面不需要随机访问）。 每补一张就 UPDATE 一次 →
+     * 书架上封面逐张"长出来"。
      */
-    suspend fun backfillCovers() = withContext(Dispatchers.IO) {
-        for (comic in dao.getComicsWithoutCover()) {
-            coroutineContext.ensureActive() // 用户退出时及时停下，下次继续（幂等）
-            if (comic.sourceType == BookSourceType.CREATED_ALBUM) {
-                val pages = db.albumPageDao().getByComicId(comic.id)
-                val coverPage =
-                    pages.firstOrNull { it.id == comic.coverPageId } ?: pages.firstOrNull()
-                val file = coverPage
-                    ?.let {
-                        runCatching {
-                            resolveAlbumPageFile(
-                                appContext.filesDir,
-                                it.relativePath
-                            )
-                        }.getOrNull()
-                    }
-                    ?.takeIf(File::isFile)
-                    ?: continue
-                val cover = Covers.createCoverFile(appContext, comic.id, file) ?: continue
+    suspend fun backfillCovers() =
+        withContext(Dispatchers.IO) {
+            for (comic in dao.getComicsWithoutCover()) {
+                coroutineContext.ensureActive() // 用户退出时及时停下，下次继续（幂等）
+                if (comic.sourceType == BookSourceType.CREATED_ALBUM) {
+                    val pages = db.albumPageDao().getByComicId(comic.id)
+                    val coverPage =
+                        pages.firstOrNull { it.id == comic.coverPageId } ?: pages.firstOrNull()
+                    val file =
+                        coverPage
+                            ?.let {
+                                runCatching {
+                                        resolveAlbumPageFile(
+                                            appContext.filesDir,
+                                            it.relativePath,
+                                        )
+                                    }
+                                    .getOrNull()
+                            }
+                            ?.takeIf(File::isFile) ?: continue
+                    val cover = Covers.createCoverFile(appContext, comic.id, file) ?: continue
+                    applyGeneratedCover(comic, cover)
+                    continue
+                }
+                // PDF 章节目录的封面在首次导入或首次打开时通过 PdfComicVolume 生成
+                if (db.chapterDao().countByComicId(comic.id) > 0) continue
+                val bytes =
+                    runCatching { readFirstImageBytes(comic.uri.toUri()) }.getOrNull() ?: continue
+                val cover = Covers.createCoverFile(appContext, comic.id, bytes) ?: continue
                 applyGeneratedCover(comic, cover)
-                continue
             }
-            // PDF 章节目录的封面在首次导入或首次打开时通过 PdfComicVolume 生成
-            if (db.chapterDao().countByComicId(comic.id) > 0) continue
-            val bytes = runCatching { readFirstImageBytes(comic.uri.toUri()) }
-                .getOrNull() ?: continue
-            val cover = Covers.createCoverFile(appContext, comic.id, bytes) ?: continue
-            applyGeneratedCover(comic, cover)
         }
-    }
 
     /**
-     * 顺序读 zip 流，返回第一个图片条目的字节。
-     * 注意 zip 条目顺序未必等于页码顺序，取到的可能不是第 1 页——
-     * 作为封面缩略图够用；首次打开时 backfillMetadata 不会覆盖已有封面。
+     * 顺序读 zip 流，返回第一个图片条目的字节。 注意 zip 条目顺序未必等于页码顺序，取到的可能不是第 1 页—— 作为封面缩略图够用；首次打开时 backfillMetadata
+     * 不会覆盖已有封面。
      */
     private fun readFirstImageBytes(uri: Uri): ByteArray? {
         appContext.contentResolver.openInputStream(uri)?.use { input ->
@@ -959,26 +978,26 @@ class ComicRepository(context: Context) {
     }
 
     /** 用 DocumentFile 查询文件的显示名（SAF Uri 本身不含可读文件名） */
-    private suspend fun guessTitle(uri: Uri): String = withContext(Dispatchers.IO) {
-        val name = DocumentFile.fromSingleUri(appContext, uri)?.name
-            ?: uri.lastPathSegment?.substringAfterLast('/')
-            ?: "未命名漫画"
-        titleFromFileName(name)
-    }
+    private suspend fun guessTitle(uri: Uri): String =
+        withContext(Dispatchers.IO) {
+            val name =
+                DocumentFile.fromSingleUri(appContext, uri)?.name
+                    ?: uri.lastPathSegment?.substringAfterLast('/')
+                    ?: "未命名漫画"
+            titleFromFileName(name)
+        }
 
     /** 文件名 → 书架标题的唯一规则（手动添加与目录扫描两条入库路径共用） */
     private fun titleFromFileName(name: String): String = name.substringBeforeLast('.')
 
-    /**
-     * 自动生成的封面落库。updateCoverIfUnchanged 只在行内 coverPath 仍是
-     * 快照值时生效——期间用户手动换过封面则放弃并删掉刚生成的文件
-     */
+    /** 自动生成的封面落库。updateCoverIfUnchanged 只在行内 coverPath 仍是 快照值时生效——期间用户手动换过封面则放弃并删掉刚生成的文件 */
     private suspend fun applyGeneratedCover(comic: ComicEntity, cover: File) {
-        val updated = dao.updateCoverIfUnchanged(
-            comic.id,
-            comic.coverPath,
-            cover.absolutePath,
-        )
+        val updated =
+            dao.updateCoverIfUnchanged(
+                comic.id,
+                comic.coverPath,
+                cover.absolutePath,
+            )
         if (updated == 0) {
             cover.delete()
         }
@@ -1005,8 +1024,7 @@ class ComicRepository(context: Context) {
         return distinctKeys.chunked(SQLITE_MAX_VARIABLES).flatMap { dao.getByFileKeys(it) }
     }
 
-    private fun normalizeGroupName(name: String): String? =
-        name.trim().takeIf { it.isNotEmpty() }
+    private fun normalizeGroupName(name: String): String? = name.trim().takeIf { it.isNotEmpty() }
 
     companion object {
         /** Repository 实例随处构造（自身无状态），扫描锁必须放进程级单例处 */

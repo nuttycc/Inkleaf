@@ -1,4 +1,5 @@
-// Detects strong comic panel borders on a small page preview; OCR geometry handles borderless pages.
+// Detects strong comic panel borders on a small page preview; OCR geometry handles borderless
+// pages.
 package com.exio.inkleaf.data.ocr
 
 import android.graphics.Bitmap
@@ -8,6 +9,9 @@ import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.RectF
 import androidx.core.graphics.createBitmap
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
 import org.opencv.android.Utils
 import org.opencv.core.Mat
 import org.opencv.core.MatOfPoint
@@ -15,9 +19,6 @@ import org.opencv.core.MatOfPoint2f
 import org.opencv.core.Size
 import org.opencv.geometry.Geometry
 import org.opencv.imgproc.Imgproc
-import kotlin.math.max
-import kotlin.math.min
-import kotlin.math.roundToInt
 
 private const val PANEL_PREVIEW_LONG_EDGE = 1024
 private const val MIN_PANEL_AREA_RATIO = 0.04
@@ -31,10 +32,12 @@ internal class ComicPanelPreview(
     private val pageHeight: Int,
 ) : AutoCloseable {
     private val scale = min(1f, PANEL_PREVIEW_LONG_EDGE.toFloat() / max(pageWidth, pageHeight))
-    private val bitmap = createBitmap(
-        (pageWidth * scale).roundToInt().coerceAtLeast(1),
-        (pageHeight * scale).roundToInt().coerceAtLeast(1),
-    ).apply { eraseColor(Color.WHITE) }
+    private val bitmap =
+        createBitmap(
+                (pageWidth * scale).roundToInt().coerceAtLeast(1),
+                (pageHeight * scale).roundToInt().coerceAtLeast(1),
+            )
+            .apply { eraseColor(Color.WHITE) }
     private val canvas = Canvas(bitmap)
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
 
@@ -110,7 +113,7 @@ internal fun detectComicPanels(
                 }
                 if (
                     rect.width < preview.width * MIN_PANEL_WIDTH_RATIO ||
-                    rect.height < preview.height * MIN_PANEL_HEIGHT_RATIO
+                        rect.height < preview.height * MIN_PANEL_HEIGHT_RATIO
                 ) {
                     return@mapNotNull null
                 }
@@ -143,11 +146,13 @@ internal fun detectComicPanels(
 
 private fun deduplicatePanels(candidates: List<PixelOcrPanel>): List<PixelOcrPanel> {
     val accepted = mutableListOf<PixelOcrPanel>()
-    candidates.sortedByDescending { panel -> panel.area }.forEach { candidate ->
-        if (accepted.none { existing -> intersectionOverUnion(existing, candidate) >= 0.82f }) {
-            accepted += candidate
+    candidates
+        .sortedByDescending { panel -> panel.area }
+        .forEach { candidate ->
+            if (accepted.none { existing -> intersectionOverUnion(existing, candidate) >= 0.82f }) {
+                accepted += candidate
+            }
         }
-    }
     return accepted
 }
 

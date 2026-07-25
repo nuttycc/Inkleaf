@@ -14,12 +14,12 @@
 
 package com.paddle.ocr.preprocess
 
+import kotlin.math.ceil
 import org.opencv.core.Core
 import org.opencv.core.CvType
 import org.opencv.core.Mat
 import org.opencv.core.Size
 import org.opencv.imgproc.Imgproc
-import kotlin.math.ceil
 
 internal class RecPreprocessResult(
     val tensorData: FloatArray,
@@ -34,11 +34,12 @@ internal object RecPreprocessor {
     fun preprocessBatch(crops: List<Mat>, imageMode: String): RecPreprocessResult {
         val resizedMats = mutableListOf<Mat>()
         for (crop in crops) {
-            val input = if (imageMode == "RGB") {
-                Mat().also { Imgproc.cvtColor(crop, it, Imgproc.COLOR_BGR2RGB) }
-            } else {
-                crop
-            }
+            val input =
+                if (imageMode == "RGB") {
+                    Mat().also { Imgproc.cvtColor(crop, it, Imgproc.COLOR_BGR2RGB) }
+                } else {
+                    crop
+                }
             val h = input.rows()
             val w = input.cols()
             val aspectRatio = if (h > 0) w.toDouble() / h else 1.0
@@ -50,7 +51,7 @@ internal object RecPreprocessor {
                 Size(newW.toDouble(), FIXED_HEIGHT.toDouble()),
                 0.0,
                 0.0,
-                Imgproc.INTER_LINEAR
+                Imgproc.INTER_LINEAR,
             )
             if (input !== crop) input.release()
             resizedMats.add(dst)
@@ -66,7 +67,7 @@ internal object RecPreprocessor {
             Core.subtract(floatMat, org.opencv.core.Scalar(1.0, 1.0, 1.0), floatMat)
 
             floatMats.add(floatMat)
-            mat.release()  // Release resized mat
+            mat.release() // Release resized mat
         }
         resizedMats.clear()
 

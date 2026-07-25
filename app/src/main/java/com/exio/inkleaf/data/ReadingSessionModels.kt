@@ -5,8 +5,8 @@ import com.exio.inkleaf.data.db.BookSourceType
 /**
  * Domain types for reading sessions.
  *
- * Persistence columns and UI models build on these; keep enums and snapshots
- * free of Room/Compose so JVM tests can drive the state machine directly.
+ * Persistence columns and UI models build on these; keep enums and snapshots free of Room/Compose
+ * so JVM tests can drive the state machine directly.
  *
  * Spec sources: GitHub issues #14 (boundaries), #15 (data contract).
  */
@@ -19,8 +19,8 @@ enum class ReadingSessionStatus {
 }
 
 /**
- * Why a session ended. Null while ACTIVE/PAUSED.
- * Clear-all and manual delete remove rows; they are not end reasons.
+ * Why a session ended. Null while ACTIVE/PAUSED. Clear-all and manual delete remove rows; they are
+ * not end reasons.
  */
 enum class ReadingSessionEndReason {
     LEFT_READER,
@@ -77,9 +77,8 @@ data class ReadingSessionComicRef(
 /**
  * In-memory working copy of the single global resumable session.
  *
- * [checkpointPosition] is the last actually-visible page persisted at the
- * latest checkpoint/pause — not an end position. End position only exists
- * after COMPLETED settlement.
+ * [checkpointPosition] is the last actually-visible page persisted at the latest checkpoint/pause —
+ * not an end position. End position only exists after COMPLETED settlement.
  */
 data class ResumableSession(
     val id: String,

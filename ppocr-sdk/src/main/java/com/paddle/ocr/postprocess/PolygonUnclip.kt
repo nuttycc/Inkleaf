@@ -14,7 +14,6 @@
 
 package com.paddle.ocr.postprocess
 
-import org.opencv.core.Point
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.acos
@@ -23,6 +22,7 @@ import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.sin
+import org.opencv.core.Point
 
 internal object PolygonUnclip {
     private const val EPS = 1e-6
@@ -51,11 +51,12 @@ internal object PolygonUnclip {
             val len = hypot(dx, dy)
             if (!len.isFinite() || len <= EPS) return points
 
-            val normal = if (clockwiseInImageCoords) {
-                Point(dy / len, -dx / len)
-            } else {
-                Point(-dy / len, dx / len)
-            }
+            val normal =
+                if (clockwiseInImageCoords) {
+                    Point(dy / len, -dx / len)
+                } else {
+                    Point(-dy / len, dx / len)
+                }
             normals.add(normal)
         }
 
@@ -98,7 +99,7 @@ internal object PolygonUnclip {
                 Point(
                     center.x + cos(angle) * distance,
                     center.y + sin(angle) * distance,
-                )
+                ),
             )
         }
     }

@@ -1,19 +1,29 @@
 package com.exio.inkleaf.data.ocr
 
+import java.io.File
+import java.nio.file.Files
+import kotlin.io.path.deleteIfExists
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.io.File
-import java.nio.file.Files
-import kotlin.io.path.deleteIfExists
 
 class OcrModelManifestTest {
 
     @Test
     fun `both model variants have independent directories and manifests`() {
-        assertTrue(ocrModelDir(File("/data"), OcrModelVariant.SMALL).path.replace(File.separator, "/").endsWith("/ocr/ppocrv6_small"))
-        assertTrue(ocrModelDir(File("/data"), OcrModelVariant.TINY).path.replace(File.separator, "/").endsWith("/ocr/ppocrv6_tiny"))
+        assertTrue(
+            ocrModelDir(File("/data"), OcrModelVariant.SMALL)
+                .path
+                .replace(File.separator, "/")
+                .endsWith("/ocr/ppocrv6_small")
+        )
+        assertTrue(
+            ocrModelDir(File("/data"), OcrModelVariant.TINY)
+                .path
+                .replace(File.separator, "/")
+                .endsWith("/ocr/ppocrv6_tiny")
+        )
         assertTrue(OcrModelVariant.TINY.totalBytes < OcrModelVariant.SMALL.totalBytes)
         OcrModelVariant.values().forEach { variant ->
             assertEquals(variant.totalBytes, variant.files.sumOf { it.sizeBytes })
@@ -51,7 +61,10 @@ class OcrModelManifestTest {
                 val url = source.resolveUrl(spec.repo, spec.fileName)
                 assertTrue("non-https from ${source.name}: $url", url.startsWith("https://"))
                 assertTrue("url missing repo for ${source.name}: $url", url.contains(spec.repo))
-                assertTrue("url missing fileName for ${source.name}: $url", url.contains(spec.fileName))
+                assertTrue(
+                    "url missing fileName for ${source.name}: $url",
+                    url.contains(spec.fileName),
+                )
             }
         }
     }
@@ -126,7 +139,10 @@ class OcrModelManifestTest {
         val base = newTempDir()
         try {
             val resolved = ocrModelDir(base)
-            assertEquals("ocr/ppocrv6_small", resolved.relativeTo(base).path.replace(File.separator, "/"))
+            assertEquals(
+                "ocr/ppocrv6_small",
+                resolved.relativeTo(base).path.replace(File.separator, "/"),
+            )
         } finally {
             cleanup(base)
         }
@@ -134,8 +150,7 @@ class OcrModelManifestTest {
 
     // ---- helpers ----
 
-    private fun newTempDir(): File =
-        Files.createTempDirectory("ocr-manifest-test").toFile()
+    private fun newTempDir(): File = Files.createTempDirectory("ocr-manifest-test").toFile()
 
     private fun cleanup(dir: File) {
         dir.walkBottomUp().forEach { it.delete() }

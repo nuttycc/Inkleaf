@@ -62,77 +62,96 @@ object DBPostProcessor {
             rawProb.put(0, 0, pred)
             val threshMat = Mat()
             try {
-                Imgproc.threshold(rawProb, threshMat, thresh.toDouble(), 255.0, Imgproc.THRESH_BINARY)
+                Imgproc.threshold(
+                    rawProb,
+                    threshMat,
+                    thresh.toDouble(),
+                    255.0,
+                    Imgproc.THRESH_BINARY,
+                )
                 threshMat.convertTo(mask, CvType.CV_8UC1)
             } finally {
                 threshMat.release()
             }
 
-            contourMask = if (useDilation) {
-                val kernel = Mat.ones(2, 2, CvType.CV_8UC1)
-                try {
-                    Mat().also { Imgproc.dilate(mask, it, kernel) }
-                } finally {
-                    kernel.release()
+            contourMask =
+                if (useDilation) {
+                    val kernel = Mat.ones(2, 2, CvType.CV_8UC1)
+                    try {
+                        Mat().also { Imgproc.dilate(mask, it, kernel) }
+                    } finally {
+                        kernel.release()
+                    }
+                } else {
+                    mask
                 }
-            } else {
-                mask
-            }
 
-            Imgproc.findContours(contourMask, contours, hierarchy, Imgproc.RETR_LIST, Imgproc.CHAIN_APPROX_SIMPLE)
+            Imgproc.findContours(
+                contourMask,
+                contours,
+                hierarchy,
+                Imgproc.RETR_LIST,
+                Imgproc.CHAIN_APPROX_SIMPLE,
+            )
             val boxes = mutableListOf<OCRBox>()
             val numContours = minOf(contours.size, maxCandidates)
             for (index in 0 until numContours) {
                 val contour = contours[index]
                 val contour2f = MatOfPoint2f(*contour.toArray())
-                val rect = try {
-                    Geometry.minAreaRect(contour2f)
-                } finally {
-                    contour2f.release()
-                }
+                val rect =
+                    try {
+                        Geometry.minAreaRect(contour2f)
+                    } finally {
+                        contour2f.release()
+                    }
                 val sside = minOf(rect.size.width, rect.size.height)
                 if (sside < MIN_SIZE_BEFORE_UNCLIP) continue
 
                 val rectPoints = Array(4) { Point() }
                 rect.points(rectPoints)
                 val orderedPoints = QuadGeometry.orderMinAreaRectPoints(rectPoints)
-                val score = if (normalizedScoreMode == "slow") {
-                    computeBoxScore(rawProb, contour.toList())
-                } else {
-                    computeBoxScore(rawProb, orderedPoints)
-                }
+                val score =
+                    if (normalizedScoreMode == "slow") {
+                        computeBoxScore(rawProb, contour.toList())
+                    } else {
+                        computeBoxScore(rawProb, orderedPoints)
+                    }
                 if (score < boxThresh) continue
 
                 val expandedPts = PolygonUnclip.unclip(orderedPoints, unclipRatio)
-                val expandedRect = MatOfPoint2f().let { expanded2f ->
-                    try {
-                        expanded2f.fromList(expandedPts)
-                        Geometry.minAreaRect(expanded2f)
-                    } finally {
-                        expanded2f.release()
+                val expandedRect =
+                    MatOfPoint2f().let { expanded2f ->
+                        try {
+                            expanded2f.fromList(expandedPts)
+                            Geometry.minAreaRect(expanded2f)
+                        } finally {
+                            expanded2f.release()
+                        }
                     }
-                }
                 val sside2 = minOf(expandedRect.size.width, expandedRect.size.height)
                 if (sside2 < MIN_SIZE_AFTER_UNCLIP) continue
 
                 val expandedBox = Array(4) { Point() }
                 expandedRect.points(expandedBox)
                 val ePts = QuadGeometry.orderMinAreaRectPoints(expandedBox)
-                val scaled = listOf(
-                    scalePoint(ePts[0], scaleX, scaleY, originalW, originalH),
-                    scalePoint(ePts[1], scaleX, scaleY, originalW, originalH),
-                    scalePoint(ePts[2], scaleX, scaleY, originalW, originalH),
-                    scalePoint(ePts[3], scaleX, scaleY, originalW, originalH),
-                )
+                val scaled =
+                    listOf(
+                        scalePoint(ePts[0], scaleX, scaleY, originalW, originalH),
+                        scalePoint(ePts[1], scaleX, scaleY, originalW, originalH),
+                        scalePoint(ePts[2], scaleX, scaleY, originalW, originalH),
+                        scalePoint(ePts[3], scaleX, scaleY, originalW, originalH),
+                    )
 
-                val boxW = kotlin.math.hypot(
-                    scaled[1].x - scaled[0].x,
-                    scaled[1].y - scaled[0].y,
-                )
-                val boxH = kotlin.math.hypot(
-                    scaled[3].x - scaled[0].x,
-                    scaled[3].y - scaled[0].y,
-                )
+                val boxW =
+                    kotlin.math.hypot(
+                        scaled[1].x - scaled[0].x,
+                        scaled[1].y - scaled[0].y,
+                    )
+                val boxH =
+                    kotlin.math.hypot(
+                        scaled[3].x - scaled[0].x,
+                        scaled[3].y - scaled[0].y,
+                    )
                 if (boxW <= 3 || boxH <= 3) continue
 
                 boxes.add(OCRBox(points = scaled))
@@ -173,11 +192,14 @@ object DBPostProcessor {
         val ymax = points.maxOf { kotlin.math.ceil(it.y).toInt() }.coerceIn(0, h - 1)
 
         val mask = Mat(ymax - ymin + 1, xmax - xmin + 1, CvType.CV_8UC1, Scalar(0.0))
-        val pts = MatOfPoint().apply {
-            fromList(
-                points.map { Point((it.x - xmin).toInt().toDouble(), (it.y - ymin).toInt().toDouble()) }
-            )
-        }
+        val pts =
+            MatOfPoint().apply {
+                fromList(
+                    points.map {
+                        Point((it.x - xmin).toInt().toDouble(), (it.y - ymin).toInt().toDouble())
+                    }
+                )
+            }
         Imgproc.fillPoly(mask, mutableListOf(pts), Scalar(1.0))
 
         val roi = probMap.submat(ymin, ymax + 1, xmin, xmax + 1)

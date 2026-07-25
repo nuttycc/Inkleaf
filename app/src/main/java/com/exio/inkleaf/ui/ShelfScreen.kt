@@ -94,12 +94,16 @@ import com.exio.inkleaf.data.ShelfLayoutSettings
 import com.exio.inkleaf.data.db.BookSourceType
 import com.exio.inkleaf.data.db.ComicEntity
 import com.exio.inkleaf.data.db.GroupWithCount
-import kotlinx.coroutines.delay
-import kotlin.time.Duration.Companion.milliseconds
 import java.io.File
+import kotlin.time.Duration.Companion.milliseconds
+import kotlinx.coroutines.delay
 
 /** 书架内容区的三态：作为 Crossfade 的 key，列表内容增删不触发整区动画 */
-private enum class ShelfPhase { LOADING, EMPTY, CONTENT }
+private enum class ShelfPhase {
+    LOADING,
+    EMPTY,
+    CONTENT,
+}
 
 internal fun buildFolderPickerInitialUri(lastPickedFolder: String?): Uri? {
     if (lastPickedFolder == null) return null
@@ -108,8 +112,8 @@ internal fun buildFolderPickerInitialUri(lastPickedFolder: String?): Uri? {
         val treeUri = lastPickedFolder.toUri()
         if (
             treeUri.scheme != ContentResolver.SCHEME_CONTENT ||
-            treeUri.authority.isNullOrBlank() ||
-            !DocumentsContract.isTreeUri(treeUri)
+                treeUri.authority.isNullOrBlank() ||
+                !DocumentsContract.isTreeUri(treeUri)
         ) {
             return null
         }
@@ -166,37 +170,39 @@ fun ShelfScreen(
 
     // OpenMultipleDocuments：系统多文件选择器。取消返回空列表而非 null，
     // 所以用 isNotEmpty() 判空——照搬旧的单选判空会触发空批量调用
-    val picker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenMultipleDocuments()
-    ) { uris ->
-        if (uris.isNotEmpty()) viewModel.addComics(uris)
-    }
+    val picker =
+        rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.OpenMultipleDocuments()
+        ) { uris ->
+            if (uris.isNotEmpty()) viewModel.addComics(uris)
+        }
 
     // OpenDocumentTree：系统目录选择器。launcher 挂屏幕层级而非菜单内容里：
     // 选目录期间本进程可能被杀，结果只会投递给重建后立即重新注册的接收器
-    val treePicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocumentTree()
-    ) { uri ->
-        if (uri != null) viewModel.addFolder(uri)
-    }
-
-    val seriesTreePicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocumentTree()
-    ) { uri ->
-        if (uri != null) viewModel.addSeriesFolder(uri)
-    }
-
-    val albumFileCreator = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("application/vnd.comicbook+zip")
-    ) { uri ->
-        val comicId = pendingSaveAlbumId
-        val title = pendingSaveAlbumTitle
-        pendingSaveAlbumId = null
-        pendingSaveAlbumTitle = null
-        if (uri != null && comicId != null) {
-            viewModel.exportAlbum(comicId, title ?: "图册", uri)
+    val treePicker =
+        rememberLauncherForActivityResult(contract = ActivityResultContracts.OpenDocumentTree()) {
+            uri ->
+            if (uri != null) viewModel.addFolder(uri)
         }
-    }
+
+    val seriesTreePicker =
+        rememberLauncherForActivityResult(contract = ActivityResultContracts.OpenDocumentTree()) {
+            uri ->
+            if (uri != null) viewModel.addSeriesFolder(uri)
+        }
+
+    val albumFileCreator =
+        rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.CreateDocument("application/vnd.comicbook+zip")
+        ) { uri ->
+            val comicId = pendingSaveAlbumId
+            val title = pendingSaveAlbumTitle
+            pendingSaveAlbumId = null
+            pendingSaveAlbumTitle = null
+            if (uri != null && comicId != null) {
+                viewModel.exportAlbum(comicId, title ?: "图册", uri)
+            }
+        }
 
     var showAddSheet by remember { mutableStateOf(false) }
 
@@ -209,13 +215,14 @@ fun ShelfScreen(
     scanState.seriesConfirmations.firstOrNull()?.let { request ->
         ConfirmDialog(
             title = "继续扫描大型 PDF 目录？",
-            text = buildString {
-                append("「${request.displayName}」已扫描到至少 ")
-                append("${request.metrics.pdfCount} 个 PDF、")
-                append("${request.metrics.directoryCount} 个目录和 ")
-                append("${request.metrics.entryCount} 个项目。\n\n")
-                append("继续后会重新扫描，并允许达到绝对安全上限。")
-            },
+            text =
+                buildString {
+                    append("「${request.displayName}」已扫描到至少 ")
+                    append("${request.metrics.pdfCount} 个 PDF、")
+                    append("${request.metrics.directoryCount} 个目录和 ")
+                    append("${request.metrics.entryCount} 个项目。\n\n")
+                    append("继续后会重新扫描，并允许达到绝对安全上限。")
+                },
             confirmLabel = "继续扫描",
             onConfirm = viewModel::confirmSeriesScan,
             onDismiss = viewModel::dismissSeriesScanConfirmation,
@@ -264,10 +271,11 @@ fun ShelfScreen(
                             Icon(Icons.Filled.Settings, contentDescription = "设置")
                         }
                     },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.background,
-                        scrolledContainerColor = MaterialTheme.colorScheme.background,
-                    ),
+                    colors =
+                        TopAppBarDefaults.topAppBarColors(
+                            containerColor = MaterialTheme.colorScheme.background,
+                            scrolledContainerColor = MaterialTheme.colorScheme.background,
+                        ),
                 )
                 ShelfGroupFilterBar(
                     label = groupTitle(selectedGroup, groups),
@@ -278,9 +286,7 @@ fun ShelfScreen(
         snackbarHost = {
             SnackbarHost(
                 hostState = snackbarHostState,
-                modifier = Modifier
-                    .navigationBarsPadding()
-                    .padding(start = 16.dp, end = 16.dp),
+                modifier = Modifier.navigationBarsPadding().padding(start = 16.dp, end = 16.dp),
                 snackbar = { data ->
                     Snackbar(
                         snackbarData = data,
@@ -295,19 +301,18 @@ fun ShelfScreen(
         PullToRefreshBox(
             isRefreshing = scanState.isScanning && scanState.isManual,
             onRefresh = { viewModel.refresh(manual = true) },
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding),
+            modifier = Modifier.fillMaxSize().padding(innerPadding),
         ) {
             val list = comics
             // Crossfade 的 key 用三态枚举而不是列表本身：扫描中增删条目
             // 不触发动画（LazyGrid 自己按 item key 处理），只有
             // 加载中/空/有内容 之间的切换才淡入淡出
-            val phase = when {
-                list == null -> ShelfPhase.LOADING
-                list.isEmpty() -> ShelfPhase.EMPTY
-                else -> ShelfPhase.CONTENT
-            }
+            val phase =
+                when {
+                    list == null -> ShelfPhase.LOADING
+                    list.isEmpty() -> ShelfPhase.EMPTY
+                    else -> ShelfPhase.CONTENT
+                }
             Crossfade(
                 targetState = phase,
                 animationSpec = tween(200),
@@ -316,45 +321,47 @@ fun ShelfScreen(
                 when (current) {
                     // Room 首批数据未到：留白（且通常被启动画面盖住）
                     ShelfPhase.LOADING -> Box(modifier = Modifier.fillMaxSize())
-                    ShelfPhase.EMPTY -> Box(
-                        // 空状态本身不需要滚动，但下拉刷新手势靠嵌套滚动
-                        // 传递——没有可滚动子项时空书架就拉不动了
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .verticalScroll(rememberScrollState()),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        // Filtered list can be empty for two reasons: brand-new library, or
-                        // the active group filter matches nothing. Copy and CTAs differ.
-                        ShelfEmptyState(
-                            selection = selectedGroup,
-                            groupLabel = groupTitle(selectedGroup, groups),
-                            onAddContent = { showAddSheet = true },
-                            modifier = Modifier.padding(32.dp),
-                        )
-                    }
-
-                    ShelfPhase.CONTENT -> LazyVerticalGrid(
-                        // 固定列数或按最小宽度自适应，由排版设置驱动
-                        columns = layout.columns.fixedCount
-                            ?.let { GridCells.Fixed(it) }
-                            ?: GridCells.Adaptive(minSize = GridDefaults.AdaptiveMinCellWidth),
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        // 渐变期间旧分支仍在组合，list 可能已退回空——orEmpty 兜底
-                        items(list.orEmpty(), key = { it.id }) { comic ->
-                            ComicCard(
-                                comic = comic,
-                                aspect = layout.aspect.ratio,
-                                crop = layout.crop,
-                                onClick = { onOpenComic(comic.id) },
-                                onLongClick = { pendingAction = comic },
+                    ShelfPhase.EMPTY ->
+                        Box(
+                            // 空状态本身不需要滚动，但下拉刷新手势靠嵌套滚动
+                            // 传递——没有可滚动子项时空书架就拉不动了
+                            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            // Filtered list can be empty for two reasons: brand-new library, or
+                            // the active group filter matches nothing. Copy and CTAs differ.
+                            ShelfEmptyState(
+                                selection = selectedGroup,
+                                groupLabel = groupTitle(selectedGroup, groups),
+                                onAddContent = { showAddSheet = true },
+                                modifier = Modifier.padding(32.dp),
                             )
                         }
-                    }
+
+                    ShelfPhase.CONTENT ->
+                        LazyVerticalGrid(
+                            // 固定列数或按最小宽度自适应，由排版设置驱动
+                            columns =
+                                layout.columns.fixedCount?.let { GridCells.Fixed(it) }
+                                    ?: GridCells.Adaptive(
+                                        minSize = GridDefaults.AdaptiveMinCellWidth
+                                    ),
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            // 渐变期间旧分支仍在组合，list 可能已退回空——orEmpty 兜底
+                            items(list.orEmpty(), key = { it.id }) { comic ->
+                                ComicCard(
+                                    comic = comic,
+                                    aspect = layout.aspect.ratio,
+                                    crop = layout.crop,
+                                    onClick = { onOpenComic(comic.id) },
+                                    onLongClick = { pendingAction = comic },
+                                )
+                            }
+                        }
                 }
             }
         }
@@ -366,7 +373,7 @@ fun ShelfScreen(
         ModalBottomSheet(
             onDismissRequest = { showLayoutSheet = false },
             sheetState = rememberExpandOnlySheetState(),
-            contentWindowInsets = { WindowInsets(0, 0, 0, 0) }
+            contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
         ) {
             LayoutSheetContent(
                 settings = layout,
@@ -510,8 +517,7 @@ fun ShelfScreen(
     pendingGroupDelete?.let { item ->
         ConfirmDialog(
             title = "删除分组",
-            text = "删除「${item.group.name}」？\n\n" +
-                    "该分组内的 ${item.comicCount} 本漫画会变为未分组，漫画不会被移除。",
+            text = "删除「${item.group.name}」？\n\n" + "该分组内的 ${item.comicCount} 本漫画会变为未分组，漫画不会被移除。",
             confirmLabel = "删除",
             onConfirm = {
                 viewModel.deleteGroup(item.group.id)
@@ -523,19 +529,21 @@ fun ShelfScreen(
 
     pendingDelete?.let { comic ->
         val isAlbum = comic.sourceType == BookSourceType.CREATED_ALBUM
-        val rescanHint = when {
-            isAlbum -> ""
-            comic.folderId == null || comic.isMissing -> ""
-            viewModel.isSeriesComic(comic) -> "\n注意：移除后将停止同步该 PDF 章节目录。"
-            else -> "\n注意：该漫画来自库目录，重新扫描后会再次出现。"
-        }
+        val rescanHint =
+            when {
+                isAlbum -> ""
+                comic.folderId == null || comic.isMissing -> ""
+                viewModel.isSeriesComic(comic) -> "\n注意：移除后将停止同步该 PDF 章节目录。"
+                else -> "\n注意：该漫画来自库目录，重新扫描后会再次出现。"
+            }
         ConfirmDialog(
             title = if (isAlbum) "删除图册" else "从书架移除",
-            text = if (isAlbum) {
-                "删除《${comic.title}》？\n应用内复制的图片会被彻底删除，已导出的 CBZ 不受影响。"
-            } else {
-                "移除《${comic.title}》？\n原文件不会被删除。$rescanHint"
-            },
+            text =
+                if (isAlbum) {
+                    "删除《${comic.title}》？\n应用内复制的图片会被彻底删除，已导出的 CBZ 不受影响。"
+                } else {
+                    "移除《${comic.title}》？\n原文件不会被删除。$rescanHint"
+                },
             confirmLabel = if (isAlbum) "删除" else "移除",
             onConfirm = {
                 viewModel.deleteComic(comic)
@@ -571,8 +579,8 @@ private fun GroupPickerSheetContent(
             },
         )
         groups.orEmpty().forEach { item ->
-            val isSelected = selected.kind == ShelfGroupFilterKind.GROUP &&
-                    selected.groupId == item.group.id
+            val isSelected =
+                selected.kind == ShelfGroupFilterKind.GROUP && selected.groupId == item.group.id
             InkleafChoiceListItem(
                 headline = item.group.name,
                 selected = isSelected,
@@ -758,16 +766,17 @@ private fun GroupNameDialog(
 private fun groupTitle(
     selected: ShelfGroupSelection,
     groups: List<GroupWithCount>?,
-): String = when (selected.kind) {
-    ShelfGroupFilterKind.ALL -> "全部"
-    ShelfGroupFilterKind.UNGROUPED -> "未分组"
-    ShelfGroupFilterKind.GROUP ->
-        groups?.firstOrNull { it.group.id == selected.groupId }?.group?.name ?: "全部"
-}
+): String =
+    when (selected.kind) {
+        ShelfGroupFilterKind.ALL -> "全部"
+        ShelfGroupFilterKind.UNGROUPED -> "未分组"
+        ShelfGroupFilterKind.GROUP ->
+            groups?.firstOrNull { it.group.id == selected.groupId }?.group?.name ?: "全部"
+    }
 
 /**
- * Empty shelf body. Library-empty (filter = all) offers one primary CTA into the shared add
- * sheet; group-filter empty only explains how to switch groups — imports stay on the top bar.
+ * Empty shelf body. Library-empty (filter = all) offers one primary CTA into the shared add sheet;
+ * group-filter empty only explains how to switch groups — imports stay on the top bar.
  */
 @Composable
 private fun ShelfEmptyState(
@@ -810,11 +819,12 @@ private fun ShelfEmptyState(
                 Text("添加内容")
             }
         } else {
-            val title = when (selection.kind) {
-                ShelfGroupFilterKind.UNGROUPED -> "没有未分组的漫画"
-                ShelfGroupFilterKind.GROUP -> "这个分组里还没有漫画"
-                ShelfGroupFilterKind.ALL -> error("library-empty branch handles ALL")
-            }
+            val title =
+                when (selection.kind) {
+                    ShelfGroupFilterKind.UNGROUPED -> "没有未分组的漫画"
+                    ShelfGroupFilterKind.GROUP -> "这个分组里还没有漫画"
+                    ShelfGroupFilterKind.ALL -> error("library-empty branch handles ALL")
+                }
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleLarge,
@@ -831,9 +841,7 @@ private fun ShelfEmptyState(
     }
 }
 
-/**
- * Pinned under the top app bar: shows the active group and opens the existing picker sheet.
- */
+/** Pinned under the top app bar: shows the active group and opens the existing picker sheet. */
 @Composable
 private fun ShelfGroupFilterBar(
     label: String,
@@ -841,12 +849,13 @@ private fun ShelfGroupFilterBar(
     modifier: Modifier = Modifier,
 ) {
     Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.background)
-            .clickable(onClick = onClick)
-            .semantics { contentDescription = "选择分组，$label" }
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.background)
+                .clickable(onClick = onClick)
+                .semantics { contentDescription = "选择分组，$label" }
+                .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -866,8 +875,7 @@ private fun ShelfGroupFilterBar(
 }
 
 /**
- * 添加入口的 sheet 内容：三个动作行。sheet 行的宽度优势用来放说明文字——
- * 把"目录 = 长期同步的库 / PDF 目录 = 单本多章 / 单本 = 一次性导入"的本质差异讲清楚
+ * 添加入口的 sheet 内容：三个动作行。sheet 行的宽度优势用来放说明文字—— 把"目录 = 长期同步的库 / PDF 目录 = 单本多章 / 单本 = 一次性导入"的本质差异讲清楚
  */
 @Composable
 private fun AddSheetContent(
@@ -941,12 +949,13 @@ private fun LayoutSheetContent(
     modifier: Modifier = Modifier,
 ) {
     Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp)
-            .navigationBarsPadding()
-            .padding(bottom = 16.dp),
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp)
+                .navigationBarsPadding()
+                .padding(bottom = 16.dp)
     ) {
         Text(text = "书架排版", style = MaterialTheme.typography.titleLarge)
 
@@ -1026,50 +1035,53 @@ private fun ComicCard(
     val contentAlpha = if (comic.isMissing) 0.45f else 1f
 
     Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(8.dp))
-            .combinedClickable(
-                onClick = onClick,
-                onLongClickLabel = if (comic.sourceType == BookSourceType.CREATED_ALBUM) {
-                    "打开图册操作"
-                } else {
-                    "打开漫画操作"
-                },
-                onLongClick = onLongClick,
-            ),
+        modifier =
+            modifier
+                .clip(RoundedCornerShape(8.dp))
+                .combinedClickable(
+                    onClick = onClick,
+                    onLongClickLabel =
+                        if (comic.sourceType == BookSourceType.CREATED_ALBUM) {
+                            "打开图册操作"
+                        } else {
+                            "打开漫画操作"
+                        },
+                    onLongClick = onLongClick,
+                )
     ) {
         Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(aspect)
-                .clip(RoundedCornerShape(8.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant),
+            modifier =
+                Modifier.fillMaxWidth()
+                    .aspectRatio(aspect)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
         ) {
             Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .alpha(contentAlpha),
+                modifier = Modifier.fillMaxSize().alpha(contentAlpha),
                 contentAlignment = Alignment.Center,
             ) {
                 // exists() 是磁盘 IO，不能在每次重组都跑——以 comic 行为 key
                 // 缓存判定结果：该行任何字段变化（进度更新、封面回填）都会
                 // 触发重查，封面"长出来"的刷新链路不受影响
-                val coverFile = remember(comic) {
-                    comic.coverPath?.let(::File)?.takeIf { it.exists() }
-                }
+                val coverFile =
+                    remember(comic) {
+                        comic.coverPath?.let(::File)?.takeIf { it.exists() }
+                    }
                 if (coverFile != null) {
                     AsyncImage(
                         model = coverFile,
                         contentDescription = comic.title,
                         // 填充方式是纯显示期行为：换设置不需要重新生成封面文件
-                        contentScale = when (crop) {
-                            CoverCrop.CONTAIN -> ContentScale.Fit
-                            else -> ContentScale.Crop
-                        },
-                        alignment = when (crop) {
-                            CoverCrop.TOP_CROP -> Alignment.TopCenter
-                            else -> Alignment.Center
-                        },
+                        contentScale =
+                            when (crop) {
+                                CoverCrop.CONTAIN -> ContentScale.Fit
+                                else -> ContentScale.Crop
+                            },
+                        alignment =
+                            when (crop) {
+                                CoverCrop.TOP_CROP -> Alignment.TopCenter
+                                else -> Alignment.Center
+                            },
                         modifier = Modifier.fillMaxSize(),
                     )
                 } else {
@@ -1086,14 +1098,14 @@ private fun ComicCard(
                     text = "已失效",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onErrorContainer,
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(4.dp)
-                        .background(
-                            MaterialTheme.colorScheme.errorContainer,
-                            RoundedCornerShape(4.dp),
-                        )
-                        .padding(horizontal = 4.dp, vertical = 2.dp),
+                    modifier =
+                        Modifier.align(Alignment.TopEnd)
+                            .padding(4.dp)
+                            .background(
+                                MaterialTheme.colorScheme.errorContainer,
+                                RoundedCornerShape(4.dp),
+                            )
+                            .padding(horizontal = 4.dp, vertical = 2.dp),
                 )
             }
         }
@@ -1106,11 +1118,12 @@ private fun ComicCard(
             modifier = Modifier.alpha(contentAlpha),
         )
         Text(
-            text = if (comic.pageCount > 0) {
-                "${comic.lastReadPage + 1} / ${comic.pageCount}"
-            } else {
-                "未读"
-            },
+            text =
+                if (comic.pageCount > 0) {
+                    "${comic.lastReadPage + 1} / ${comic.pageCount}"
+                } else {
+                    "未读"
+                },
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.alpha(contentAlpha),

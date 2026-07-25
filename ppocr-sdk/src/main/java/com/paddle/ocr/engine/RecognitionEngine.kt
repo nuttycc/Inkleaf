@@ -17,9 +17,9 @@ package com.paddle.ocr.engine
 import com.paddle.ocr.model.OCRTextOrientation
 import com.paddle.ocr.postprocess.CTCDecoder
 import com.paddle.ocr.preprocess.RecPreprocessor
+import kotlin.math.ceil
 import org.opencv.core.Core
 import org.opencv.core.Mat
-import kotlin.math.ceil
 
 class RecognitionEngine(
     private val ortManager: ORTSessionManager,
@@ -32,6 +32,7 @@ class RecognitionEngine(
         val acceptedConfidence: Float,
         val rawConfidence: Float,
     )
+
     data class RecognizedCharacter(
         val text: String,
         val confidence: Float,
@@ -63,24 +64,28 @@ class RecognitionEngine(
 
         // Inference
         val infStart = System.currentTimeMillis()
-        val (outputData, outputShape) = ortManager.runRecognition(preResult.tensorData, preResult.shape)
+        val (outputData, outputShape) =
+            ortManager.runRecognition(preResult.tensorData, preResult.shape)
         val inferenceMs = System.currentTimeMillis() - infStart
 
         // Postprocess (CTC decode)
         val postStart = System.currentTimeMillis()
         val outputTimeSteps = outputShape[1].toInt()
         val paddedWidth = preResult.shape[3].toInt().coerceAtLeast(1)
-        val validTimeSteps = IntArray(preResult.resizedWidths.size) { index ->
-            ceil(outputTimeSteps * preResult.resizedWidths[index].toDouble() / paddedWidth)
-                .toInt()
-                .coerceIn(1, outputTimeSteps)
-        }
-        val decoded = CTCDecoder.decode(
-            output = outputData,
-            shape = outputShape,
-            characterList = characterList,
-            validTimeSteps = validTimeSteps,
-        ).map { item -> item.toRecognizedText(OCRTextOrientation.HORIZONTAL) }
+        val validTimeSteps =
+            IntArray(preResult.resizedWidths.size) { index ->
+                ceil(outputTimeSteps * preResult.resizedWidths[index].toDouble() / paddedWidth)
+                    .toInt()
+                    .coerceIn(1, outputTimeSteps)
+            }
+        val decoded =
+            CTCDecoder.decode(
+                    output = outputData,
+                    shape = outputShape,
+                    characterList = characterList,
+                    validTimeSteps = validTimeSteps,
+                )
+                .map { item -> item.toRecognizedText(OCRTextOrientation.HORIZONTAL) }
         val postprocessMs = System.currentTimeMillis() - postStart
 
         val inputShape = preResult.shape.map { it.toInt() }
@@ -98,54 +103,61 @@ class RecognitionEngine(
     fun recognizeVertical(crop: Mat): RecognitionResult {
         val clockwise = Mat()
         Core.rotate(crop, clockwise, Core.ROTATE_90_CLOCKWISE)
-        val clockwiseResult = try {
-            recognize(listOf(clockwise))
-        } finally {
-            clockwise.release()
-        }
+        val clockwiseResult =
+            try {
+                recognize(listOf(clockwise))
+            } finally {
+                clockwise.release()
+            }
 
         val counterClockwise = Mat()
         Core.rotate(crop, counterClockwise, Core.ROTATE_90_COUNTERCLOCKWISE)
-        val counterClockwiseResult = try {
-            recognize(listOf(counterClockwise))
-        } finally {
-            counterClockwise.release()
-        }
+        val counterClockwiseResult =
+            try {
+                recognize(listOf(counterClockwise))
+            } finally {
+                counterClockwise.release()
+            }
 
         val clockwiseScore = clockwiseResult.directionScore()
         val counterClockwiseScore = counterClockwiseResult.directionScore()
-        val chooseClockwise = when {
-            clockwiseScore.acceptedCount != counterClockwiseScore.acceptedCount ->
-                clockwiseScore.acceptedCount > counterClockwiseScore.acceptedCount
-            clockwiseScore.acceptedConfidence != counterClockwiseScore.acceptedConfidence ->
-                clockwiseScore.acceptedConfidence > counterClockwiseScore.acceptedConfidence
-            else -> clockwiseScore.rawConfidence >= counterClockwiseScore.rawConfidence
-        }
-        val chosen = if (chooseClockwise) {
-            clockwiseResult.copy(
-                texts = clockwiseResult.texts.map { text ->
-                    val normalizedCharacters = text.characters
-                        .map { character ->
-                            character.copy(
-                                startFraction = 1f - character.endFraction,
-                                endFraction = 1f - character.startFraction,
+        val chooseClockwise =
+            when {
+                clockwiseScore.acceptedCount != counterClockwiseScore.acceptedCount ->
+                    clockwiseScore.acceptedCount > counterClockwiseScore.acceptedCount
+                clockwiseScore.acceptedConfidence != counterClockwiseScore.acceptedConfidence ->
+                    clockwiseScore.acceptedConfidence > counterClockwiseScore.acceptedConfidence
+                else -> clockwiseScore.rawConfidence >= counterClockwiseScore.rawConfidence
+            }
+        val chosen =
+            if (chooseClockwise) {
+                clockwiseResult.copy(
+                    texts =
+                        clockwiseResult.texts.map { text ->
+                            val normalizedCharacters =
+                                text.characters
+                                    .map { character ->
+                                        character.copy(
+                                            startFraction = 1f - character.endFraction,
+                                            endFraction = 1f - character.startFraction,
+                                        )
+                                    }
+                                    .sortedBy(RecognizedCharacter::startFraction)
+                            text.copy(
+                                text = normalizedCharacters.joinToString("") { it.text },
+                                characters = normalizedCharacters,
+                                orientation = OCRTextOrientation.VERTICAL,
                             )
                         }
-                        .sortedBy(RecognizedCharacter::startFraction)
-                    text.copy(
-                        text = normalizedCharacters.joinToString("") { it.text },
-                        characters = normalizedCharacters,
-                        orientation = OCRTextOrientation.VERTICAL,
-                    )
-                },
-            )
-        } else {
-            counterClockwiseResult.copy(
-                texts = counterClockwiseResult.texts.map { text ->
-                    text.copy(orientation = OCRTextOrientation.VERTICAL)
-                },
-            )
-        }
+                )
+            } else {
+                counterClockwiseResult.copy(
+                    texts =
+                        counterClockwiseResult.texts.map { text ->
+                            text.copy(orientation = OCRTextOrientation.VERTICAL)
+                        }
+                )
+            }
         return chosen.copy(
             preprocessMs = clockwiseResult.preprocessMs + counterClockwiseResult.preprocessMs,
             inferenceMs = clockwiseResult.inferenceMs + counterClockwiseResult.inferenceMs,
@@ -155,35 +167,37 @@ class RecognitionEngine(
     }
 
     private fun RecognitionResult.directionScore(): DirectionScore {
-        val accepted = texts
-            .flatMap(RecognizedText::characters)
-            .filter { character ->
+        val accepted =
+            texts.flatMap(RecognizedText::characters).filter { character ->
                 character.confidence >= characterScoreThreshold && character.text.isNotBlank()
             }
         return DirectionScore(
             acceptedCount = accepted.size,
-            acceptedConfidence = if (accepted.isEmpty()) {
-                0f
-            } else {
-                accepted.map(RecognizedCharacter::confidence).average().toFloat()
-            },
+            acceptedConfidence =
+                if (accepted.isEmpty()) {
+                    0f
+                } else {
+                    accepted.map(RecognizedCharacter::confidence).average().toFloat()
+                },
             rawConfidence = texts.firstOrNull()?.confidence ?: 0f,
         )
     }
 
     private fun CTCDecoder.DecodedText.toRecognizedText(
-        orientation: OCRTextOrientation,
-    ): RecognizedText = RecognizedText(
-        text = text,
-        confidence = confidence,
-        characters = characters.map { character ->
-            RecognizedCharacter(
-                text = character.text,
-                confidence = character.confidence,
-                startFraction = character.startFraction,
-                endFraction = character.endFraction,
-            )
-        },
-        orientation = orientation,
-    )
+        orientation: OCRTextOrientation
+    ): RecognizedText =
+        RecognizedText(
+            text = text,
+            confidence = confidence,
+            characters =
+                characters.map { character ->
+                    RecognizedCharacter(
+                        text = character.text,
+                        confidence = character.confidence,
+                        startFraction = character.startFraction,
+                        endFraction = character.endFraction,
+                    )
+                },
+            orientation = orientation,
+        )
 }

@@ -23,20 +23,17 @@ class FoldersViewModel(app: Application) : AndroidViewModel(app) {
     private val settingsRepo = ShelfSettingsRepository(app)
 
     /**
-     * 目录列表（含每个目录的漫画数）；comics 表一变计数自动更新。
-     * null = 数据库尚未发射首批数据；空列表 = 确实没有目录。
-     * 初始值不能用 emptyList()，否则 sheet 打开瞬间会闪一帧空状态文案
+     * 目录列表（含每个目录的漫画数）；comics 表一变计数自动更新。 null = 数据库尚未发射首批数据；空列表 = 确实没有目录。 初始值不能用 emptyList()，否则
+     * sheet 打开瞬间会闪一帧空状态文案
      *
-     * Eagerly：ViewModel 随设置页一创建就订阅，让 Room 查询在用户点开
-     * sheet 之前就跑完。否则（Lazily）首次订阅发生在打开 sheet 那一刻，
-     * 数据 null→列表 的到达会驱动 Crossfade + animateContentSize 把 sheet
-     * 从 0 高度撑到满列表，与入场滑入动画抢帧 → 第一次打开明显卡顿。
+     * Eagerly：ViewModel 随设置页一创建就订阅，让 Room 查询在用户点开 sheet 之前就跑完。否则（Lazily）首次订阅发生在打开 sheet 那一刻， 数据
+     * null→列表 的到达会驱动 Crossfade + animateContentSize 把 sheet 从 0 高度撑到满列表，与入场滑入动画抢帧 → 第一次打开明显卡顿。
      */
-    val folders: StateFlow<List<FolderWithCount>?> = repo.observeFolders()
-        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    val folders: StateFlow<List<FolderWithCount>?> =
+        repo.observeFolders().stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
-    val lastPickedFolder: StateFlow<String?> = settingsRepo.lastPickedFolder
-        .stateIn(viewModelScope, SharingStarted.Lazily, null)
+    val lastPickedFolder: StateFlow<String?> =
+        settingsRepo.lastPickedFolder.stateIn(viewModelScope, SharingStarted.Lazily, null)
 
     /** 一次性提示消息（Snackbar 展示后调 consumeMessage 清空） */
     var message by mutableStateOf<String?>(null)

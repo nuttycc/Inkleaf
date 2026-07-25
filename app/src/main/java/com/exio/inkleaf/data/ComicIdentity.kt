@@ -11,14 +11,18 @@ import com.exio.inkleaf.data.ComicIdentity.fileKey
 /**
  * Stable identity for a comic file.
  *
- * SAF document IDs are only provider-local. A single local file can be exposed
- * through different providers, so prefer the provider-independent file stat,
- * then fall back to MediaStore and finally the SAF document identity.
+ * SAF document IDs are only provider-local. A single local file can be exposed through different
+ * providers, so prefer the provider-independent file stat, then fall back to MediaStore and finally
+ * the SAF document identity.
  */
 object ComicIdentity {
     fun fileKey(context: Context, uri: Uri): String {
-        fileDescriptorKey(context, uri)?.let { return it }
-        mediaStoreKey(context, uri)?.let { return it }
+        fileDescriptorKey(context, uri)?.let {
+            return it
+        }
+        mediaStoreKey(context, uri)?.let {
+            return it
+        }
         return safKey(uri)
     }
 
@@ -31,15 +35,16 @@ object ComicIdentity {
 
     private fun fileDescriptorKey(context: Context, uri: Uri): String? =
         runCatching {
-            context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                val stat = Os.fstat(pfd.fileDescriptor)
-                if (OsConstants.S_ISREG(stat.st_mode)) {
-                    "stat:${stat.st_dev}:${stat.st_ino}"
-                } else {
-                    null
+                context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                    val stat = Os.fstat(pfd.fileDescriptor)
+                    if (OsConstants.S_ISREG(stat.st_mode)) {
+                        "stat:${stat.st_dev}:${stat.st_ino}"
+                    } else {
+                        null
+                    }
                 }
             }
-        }.getOrNull()
+            .getOrNull()
 
     private fun safKey(uri: Uri): String {
         val documentId = runCatching { DocumentsContract.getDocumentId(uri) }.getOrNull()
@@ -47,16 +52,15 @@ object ComicIdentity {
         return safDocumentKey(uri.authority, documentId)
     }
 
-    /** Cheap descendant identity for SAF enumeration; unlike [fileKey], this never opens the file. */
+    /**
+     * Cheap descendant identity for SAF enumeration; unlike [fileKey], this never opens the file.
+     */
     fun safDocumentKey(authority: String?, documentId: String): String {
         val provider = authority?.takeIf { it.isNotBlank() } ?: "unknown"
         return "saf:$provider:$documentId"
     }
 
-    /**
-     * 目录树 URI 的稳定身份。树 URI 不能直接用 [fileKey]（无法打开文件描述符），
-     * 所以用 documentId 作为标识。
-     */
+    /** 目录树 URI 的稳定身份。树 URI 不能直接用 [fileKey]（无法打开文件描述符）， 所以用 documentId 作为标识。 */
     fun folderKey(treeUri: Uri): String {
         val documentId = runCatching { DocumentsContract.getTreeDocumentId(treeUri) }.getOrNull()
         if (documentId.isNullOrBlank()) return "tree:${treeUri.normalizeScheme()}"

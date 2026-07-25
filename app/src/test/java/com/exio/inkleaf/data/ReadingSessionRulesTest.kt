@@ -17,14 +17,14 @@ class ReadingSessionRulesTest {
                 activeReadingMillis = 30_000L,
                 startPosition = start,
                 latestPosition = start,
-            ),
+            )
         )
         assertFalse(
             ReadingSessionRules.qualifiesAsPermanent(
                 activeReadingMillis = 29_999L,
                 startPosition = start,
                 latestPosition = start,
-            ),
+            )
         )
     }
 
@@ -35,7 +35,7 @@ class ReadingSessionRulesTest {
                 activeReadingMillis = 1_000L,
                 startPosition = start,
                 latestPosition = moved,
-            ),
+            )
         )
     }
 
@@ -47,13 +47,13 @@ class ReadingSessionRulesTest {
             ReadingSessionRules.isWithinInterruptionWindow(
                 pausedAt,
                 pausedAt + ReadingSessionRules.INTERRUPTION_WINDOW_MS - 1,
-            ),
+            )
         )
         assertFalse(
             ReadingSessionRules.isWithinInterruptionWindow(
                 pausedAt,
                 pausedAt + ReadingSessionRules.INTERRUPTION_WINDOW_MS,
-            ),
+            )
         )
     }
 
@@ -72,24 +72,26 @@ class ReadingSessionRulesTest {
     @Test
     fun `resume same comic within window`() {
         val existing = resumable(lastCheckpointAt = 10_000L)
-        val decision = ReadingSessionRules.decideResume(
-            existing = existing,
-            incomingFileKey = existing.comic.fileKey,
-            incomingSourceRevision = existing.checkpointPosition.sourceRevision,
-            nowMillis = 10_000L + ReadingSessionRules.INTERRUPTION_WINDOW_MS - 1,
-        )
+        val decision =
+            ReadingSessionRules.decideResume(
+                existing = existing,
+                incomingFileKey = existing.comic.fileKey,
+                incomingSourceRevision = existing.checkpointPosition.sourceRevision,
+                nowMillis = 10_000L + ReadingSessionRules.INTERRUPTION_WINDOW_MS - 1,
+            )
         assertEquals(ResumeDecision.Resume(existing.id), decision)
     }
 
     @Test
     fun `timeout after interruption window settles and starts new`() {
         val existing = resumable(lastCheckpointAt = 10_000L)
-        val decision = ReadingSessionRules.decideResume(
-            existing = existing,
-            incomingFileKey = existing.comic.fileKey,
-            incomingSourceRevision = existing.checkpointPosition.sourceRevision,
-            nowMillis = 10_000L + ReadingSessionRules.INTERRUPTION_WINDOW_MS,
-        )
+        val decision =
+            ReadingSessionRules.decideResume(
+                existing = existing,
+                incomingFileKey = existing.comic.fileKey,
+                incomingSourceRevision = existing.checkpointPosition.sourceRevision,
+                nowMillis = 10_000L + ReadingSessionRules.INTERRUPTION_WINDOW_MS,
+            )
         assertEquals(
             ResumeDecision.SettleThenStart(
                 sessionId = existing.id,
@@ -102,12 +104,13 @@ class ReadingSessionRulesTest {
     @Test
     fun `source revision change settles old session`() {
         val existing = resumable(lastCheckpointAt = 10_000L)
-        val decision = ReadingSessionRules.decideResume(
-            existing = existing,
-            incomingFileKey = existing.comic.fileKey,
-            incomingSourceRevision = "rev-b",
-            nowMillis = 10_500L,
-        )
+        val decision =
+            ReadingSessionRules.decideResume(
+                existing = existing,
+                incomingFileKey = existing.comic.fileKey,
+                incomingSourceRevision = "rev-b",
+                nowMillis = 10_500L,
+            )
         assertEquals(
             ResumeDecision.SettleThenStart(
                 sessionId = existing.id,
@@ -120,12 +123,13 @@ class ReadingSessionRulesTest {
     @Test
     fun `different comic settles with switched reason`() {
         val existing = resumable(lastCheckpointAt = 10_000L)
-        val decision = ReadingSessionRules.decideResume(
-            existing = existing,
-            incomingFileKey = "other-book",
-            incomingSourceRevision = existing.checkpointPosition.sourceRevision,
-            nowMillis = 10_500L,
-        )
+        val decision =
+            ReadingSessionRules.decideResume(
+                existing = existing,
+                incomingFileKey = "other-book",
+                incomingSourceRevision = existing.checkpointPosition.sourceRevision,
+                nowMillis = 10_500L,
+            )
         assertEquals(
             ResumeDecision.SettleThenStart(
                 sessionId = existing.id,
@@ -172,29 +176,32 @@ class ReadingSessionRulesTest {
         page: Int,
         identity: String?,
         revision: String = "rev-a",
-    ) = ReadingPositionSnapshot(
-        pageIdentity = identity,
-        globalPageIndex = global,
-        chapterIndex = chapter,
-        pageIndex = page,
-        chapterTitle = "Ch ${chapter + 1}",
-        sourceRevision = revision,
-    )
+    ) =
+        ReadingPositionSnapshot(
+            pageIdentity = identity,
+            globalPageIndex = global,
+            chapterIndex = chapter,
+            pageIndex = page,
+            chapterTitle = "Ch ${chapter + 1}",
+            sourceRevision = revision,
+        )
 
-    private fun resumable(lastCheckpointAt: Long) = ResumableSession(
-        id = "session-1",
-        comic = ReadingSessionComicRef(
-            fileKey = "book-a",
-            titleSnapshot = "Book A",
-            sourceType = BookSourceType.EXTERNAL_ARCHIVE,
-        ),
-        status = ReadingSessionStatus.PAUSED,
-        startedAt = (lastCheckpointAt - 60_000L).coerceAtLeast(0L),
-        lastCheckpointAt = lastCheckpointAt,
-        activeReadingMillis = 5_000L,
-        startPosition = start,
-        checkpointPosition = start,
-        timeZoneId = "UTC",
-        isPermanent = false,
-    )
+    private fun resumable(lastCheckpointAt: Long) =
+        ResumableSession(
+            id = "session-1",
+            comic =
+                ReadingSessionComicRef(
+                    fileKey = "book-a",
+                    titleSnapshot = "Book A",
+                    sourceType = BookSourceType.EXTERNAL_ARCHIVE,
+                ),
+            status = ReadingSessionStatus.PAUSED,
+            startedAt = (lastCheckpointAt - 60_000L).coerceAtLeast(0L),
+            lastCheckpointAt = lastCheckpointAt,
+            activeReadingMillis = 5_000L,
+            startPosition = start,
+            checkpointPosition = start,
+            timeZoneId = "UTC",
+            isPermanent = false,
+        )
 }

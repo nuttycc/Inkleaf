@@ -19,8 +19,12 @@ import kotlinx.coroutines.withContext
 class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     private val cacheRepo = CacheSettingsRepository(app)
 
-    val cacheLimit: StateFlow<CacheLimit> = cacheRepo.limit
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CacheLimit.AUTO)
+    val cacheLimit: StateFlow<CacheLimit> =
+        cacheRepo.limit.stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5_000),
+            CacheLimit.AUTO,
+        )
 
     /** 缓存当前占用：设置项的"可验证反馈"，进入设置页和改档位后都会刷新 */
     private val _cacheUsageBytes = MutableStateFlow(0L)
@@ -30,10 +34,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         refreshCacheUsage()
     }
 
-    /**
-     * 改缓存档位：写入后立即按新预算清理，再刷新占用显示。
-     * 懒生效（等下次开书才清）会让"改小了占用却没变"被当成 bug
-     */
+    /** 改缓存档位：写入后立即按新预算清理，再刷新占用显示。 懒生效（等下次开书才清）会让"改小了占用却没变"被当成 bug */
     fun setCacheLimit(limit: CacheLimit) {
         viewModelScope.launch {
             cacheRepo.setLimit(limit)
@@ -44,9 +45,10 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun refreshCacheUsage() {
         viewModelScope.launch {
-            _cacheUsageBytes.value = withContext(Dispatchers.IO) {
-                ReaderCache.usageBytes(getApplication())
-            }
+            _cacheUsageBytes.value =
+                withContext(Dispatchers.IO) {
+                    ReaderCache.usageBytes(getApplication())
+                }
         }
     }
 }

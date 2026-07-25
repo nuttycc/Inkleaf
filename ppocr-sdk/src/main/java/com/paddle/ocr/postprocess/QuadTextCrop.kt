@@ -14,9 +14,11 @@
 
 package com.paddle.ocr.postprocess
 
+import android.graphics.PointF
 import com.paddle.ocr.model.OCRBox
 import com.paddle.ocr.model.OCRTextOrientation
-import android.graphics.PointF
+import kotlin.math.hypot
+import kotlin.math.max
 import org.opencv.core.Core
 import org.opencv.core.CvType
 import org.opencv.core.Mat
@@ -25,8 +27,6 @@ import org.opencv.core.Point
 import org.opencv.core.Size
 import org.opencv.geometry.Geometry
 import org.opencv.imgproc.Imgproc
-import kotlin.math.hypot
-import kotlin.math.max
 
 object QuadTextCrop {
     private const val VERTICAL_CROP_RATIO = 1.5
@@ -39,9 +39,10 @@ object QuadTextCrop {
     fun crop(src: Mat, box: OCRBox): Mat {
         // Align with PaddleX CropByPolys.get_minarea_rect_crop: recompute minAreaRect
         // from the detected quad before perspective transform.
-        val ordered = orderedPoints(box).map { point ->
-            Point(point.x.toDouble(), point.y.toDouble())
-        }
+        val ordered =
+            orderedPoints(box).map { point ->
+                Point(point.x.toDouble(), point.y.toDouble())
+            }
 
         val widthTop = hypot(ordered[0].x - ordered[1].x, ordered[0].y - ordered[1].y)
         val widthBottom = hypot(ordered[2].x - ordered[3].x, ordered[2].y - ordered[3].y)
@@ -131,8 +132,9 @@ object QuadTextCrop {
         }
     }
 
-    private fun lerp(start: PointF, end: PointF, fraction: Float): PointF = PointF(
-        start.x + (end.x - start.x) * fraction,
-        start.y + (end.y - start.y) * fraction,
-    )
+    private fun lerp(start: PointF, end: PointF, fraction: Float): PointF =
+        PointF(
+            start.x + (end.x - start.x) * fraction,
+            start.y + (end.y - start.y) * fraction,
+        )
 }

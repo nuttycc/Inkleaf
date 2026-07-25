@@ -13,17 +13,18 @@ class ReaderPageRenderRequestTest {
                 supportsTargetedPageBitmap = true,
                 viewportSize = IntSize(1080, 1920),
                 zoomed = false,
-            ),
+            )
         )
     }
 
     @Test
     fun zoomedVolumesStillGetTargetedRenderRequest() {
-        val request = targetedPageRenderRequest(
-            supportsTargetedPageBitmap = true,
-            viewportSize = IntSize(1080, 1920),
-            zoomed = true,
-        )
+        val request =
+            targetedPageRenderRequest(
+                supportsTargetedPageBitmap = true,
+                viewportSize = IntSize(1080, 1920),
+                zoomed = true,
+            )
         assertNotNull(request)
     }
 
@@ -34,21 +35,21 @@ class ReaderPageRenderRequestTest {
                 supportsTargetedPageBitmap = false,
                 viewportSize = IntSize(1080, 1920),
                 zoomed = false,
-            ),
+            )
         )
         assertNull(
             targetedPageRenderRequest(
                 supportsTargetedPageBitmap = true,
                 viewportSize = IntSize.Zero,
                 zoomed = false,
-            ),
+            )
         )
         assertNull(
             targetedPageRenderRequest(
                 supportsTargetedPageBitmap = true,
                 viewportSize = IntSize(0, 1920),
                 zoomed = false,
-            ),
+            )
         )
     }
 }

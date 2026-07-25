@@ -2,7 +2,6 @@ package com.exio.inkleaf.ui
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -60,18 +59,15 @@ internal fun ColumnScope.ReaderBookmarksPanelContent(
     val orderedBookmarks = bookmarks.sortedBy { it.globalPage }
 
     ReaderAttachedPanelHeader(
-        title = if (orderedBookmarks.isEmpty()) {
-            ReaderPanel.Bookmarks.title()
-        } else {
-            "${ReaderPanel.Bookmarks.title()} · ${orderedBookmarks.size}"
-        },
+        title =
+            if (orderedBookmarks.isEmpty()) {
+                ReaderPanel.Bookmarks.title()
+            } else {
+                "${ReaderPanel.Bookmarks.title()} · ${orderedBookmarks.size}"
+            }
     )
     ReaderAttachedPanelDivider()
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .weight(1f),
-    ) {
+    Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
         if (orderedBookmarks.isEmpty()) {
             ReaderBookmarksEmptyState()
         } else {
@@ -113,17 +109,14 @@ internal fun ColumnScope.ReaderBookmarksPanelContent(
             onDismissRequest = { pendingStaleSelection = null },
             title = { Text("源内容已变化") },
             text = {
-                Text(
-                    "漫画内容或页面顺序在添加书签后发生了变化。" +
-                            "当前只能打开推测的全书第 ${globalPage + 1} 页，仍要打开吗？"
-                )
+                Text("漫画内容或页面顺序在添加书签后发生了变化。" + "当前只能打开推测的全书第 ${globalPage + 1} 页，仍要打开吗？")
             },
             confirmButton = {
                 TextButton(
                     onClick = {
                         pendingStaleSelection = null
                         onSelect(globalPage)
-                    },
+                    }
                 ) {
                     Text("仍然打开")
                 }
@@ -162,18 +155,16 @@ private fun ReaderBookmarkRow(
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 8.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
         ) {
             // portrait thumbnail container (~3:4)
             Box(
                 contentAlignment = Alignment.Center,
-                modifier = Modifier
-                    .width(48.dp)
-                    .height(66.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                modifier =
+                    Modifier.width(48.dp)
+                        .height(66.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest),
             ) {
                 if (!stale && thumbnail != null) {
                     Image(
@@ -193,15 +184,14 @@ private fun ReaderBookmarkRow(
             }
 
             Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(start = 12.dp, end = 8.dp),
+                modifier = Modifier.weight(1f).padding(start = 12.dp, end = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 Text(
-                    text = bookmark.chapterTitle.ifBlank {
-                        "第 ${bookmark.chapterIndex + 1} 章"
-                    },
+                    text =
+                        bookmark.chapterTitle.ifBlank {
+                            "第 ${bookmark.chapterIndex + 1} 章"
+                        },
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
@@ -246,9 +236,7 @@ private fun ReaderBookmarksEmptyState() {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 32.dp, vertical = 32.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 32.dp),
     ) {
         Icon(
             painter = painterResource(R.drawable.ic_bookmark_border),

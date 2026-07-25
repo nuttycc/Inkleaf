@@ -17,11 +17,13 @@ import kotlinx.coroutines.withContext
 
 sealed interface BookmarkToggleResult {
     data class Added(val bookmark: BookmarkEntity) : BookmarkToggleResult
+
     data class Removed(val bookmark: BookmarkEntity) : BookmarkToggleResult
 }
 
 sealed interface BookmarkResolution {
     data class Ready(val comicId: Long, val globalPage: Int) : BookmarkResolution
+
     data class SourceChanged(
         val comicId: Long,
         val approximateGlobalPage: Int,
@@ -53,26 +55,28 @@ class BookmarkRepository(context: Context) {
         val normalizedGlobalPage = globalPage.coerceIn(0, volume.totalPageCount - 1)
         val location = volume.globalToChapterPage(normalizedGlobalPage)
         val pageIdentity = volume.pageIdentity(normalizedGlobalPage)
-        val targetKey = bookmarkTargetKey(
-            pageIdentity = pageIdentity,
-            sourceRevision = volume.sourceRevision,
-            globalPageIndex = normalizedGlobalPage,
-        )
+        val targetKey =
+            bookmarkTargetKey(
+                pageIdentity = pageIdentity,
+                sourceRevision = volume.sourceRevision,
+                globalPageIndex = normalizedGlobalPage,
+            )
 
         return db.withTransaction {
-            val matches = bookmarkMatchesForCurrentPage(
-                bookmarks = bookmarkDao.getForComic(comic.id),
-                comicId = comic.id,
-                sourceType = comic.sourceType,
-                currentSourceRevision = volume.sourceRevision,
-                currentPageCount = volume.totalPageCount,
-                currentGlobalPage = normalizedGlobalPage,
-                findPageByIdentity = volume::findPageByIdentity,
-            )
+            val matches =
+                bookmarkMatchesForCurrentPage(
+                    bookmarks = bookmarkDao.getForComic(comic.id),
+                    comicId = comic.id,
+                    sourceType = comic.sourceType,
+                    currentSourceRevision = volume.sourceRevision,
+                    currentPageCount = volume.totalPageCount,
+                    currentGlobalPage = normalizedGlobalPage,
+                    findPageByIdentity = volume::findPageByIdentity,
+                )
             if (matches.ready.isNotEmpty()) {
                 bookmarkDao.deleteByIds(matches.ready.map(BookmarkEntity::id))
-                val removed = matches.ready.firstOrNull { it.targetKey == targetKey }
-                    ?: matches.ready.first()
+                val removed =
+                    matches.ready.firstOrNull { it.targetKey == targetKey } ?: matches.ready.first()
                 BookmarkToggleResult.Removed(removed)
             } else {
                 // A stale PDF bookmark can retain the same chapter/page identity after the file
@@ -81,23 +85,25 @@ class BookmarkRepository(context: Context) {
                 bookmarkDao.getByTargetKey(comic.id, targetKey)?.let { staleSameTarget ->
                     bookmarkDao.deleteById(staleSameTarget.id)
                 }
-                val candidate = BookmarkEntity(
-                    comicId = comic.id,
-                    targetKey = targetKey,
-                    pageIdentity = pageIdentity,
-                    sourceRevision = volume.sourceRevision,
-                    globalPageIndex = normalizedGlobalPage,
-                    chapterIndex = location.chapterIndex,
-                    pageIndex = location.pageIndex,
-                    chapterTitle = volume.chapterTitle(location.chapterIndex),
-                    addedAt = System.currentTimeMillis(),
-                )
+                val candidate =
+                    BookmarkEntity(
+                        comicId = comic.id,
+                        targetKey = targetKey,
+                        pageIdentity = pageIdentity,
+                        sourceRevision = volume.sourceRevision,
+                        globalPageIndex = normalizedGlobalPage,
+                        chapterIndex = location.chapterIndex,
+                        pageIndex = location.pageIndex,
+                        chapterTitle = volume.chapterTitle(location.chapterIndex),
+                        addedAt = System.currentTimeMillis(),
+                    )
                 val id = bookmarkDao.insert(candidate)
-                val inserted = if (id != -1L) {
-                    candidate.copy(id = id)
-                } else {
-                    bookmarkDao.getByTargetKey(comic.id, targetKey) ?: candidate
-                }
+                val inserted =
+                    if (id != -1L) {
+                        candidate.copy(id = id)
+                    } else {
+                        bookmarkDao.getByTargetKey(comic.id, targetKey) ?: candidate
+                    }
                 BookmarkToggleResult.Added(inserted)
             }
         }
@@ -126,37 +132,42 @@ class BookmarkRepository(context: Context) {
         withContext(Dispatchers.IO) { resolveOnIo(bookmark) }
 
     private suspend fun loadThumbnailOnIo(bookmark: BookmarkEntity): ImageBitmap? {
-        val comic = comicDao.getById(bookmark.comicId)
-            ?.takeUnless { it.isMissing || it.isDraft }
-            ?: return null
-        val volume = try {
-            comicRepository.openBook(comic)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (_: Exception) {
-            return null
-        }
+        val comic =
+            comicDao.getById(bookmark.comicId)?.takeUnless { it.isMissing || it.isDraft }
+                ?: return null
+        val volume =
+            try {
+                comicRepository.openBook(comic)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                return null
+            }
         return try {
-            val page = resolveBookmarkLocation(
-                comicId = bookmark.comicId,
-                sourceType = comic.sourceType,
-                storedSourceRevision = bookmark.sourceRevision,
-                storedGlobalPage = bookmark.globalPageIndex,
-                pageIdentity = bookmark.pageIdentity,
-                currentSourceRevision = volume.sourceRevision,
-                currentPageCount = volume.totalPageCount,
-                findPageByIdentity = volume::findPageByIdentity,
-            ).thumbnailPageOrNull() ?: return null
+            val page =
+                resolveBookmarkLocation(
+                        comicId = bookmark.comicId,
+                        sourceType = comic.sourceType,
+                        storedSourceRevision = bookmark.sourceRevision,
+                        storedGlobalPage = bookmark.globalPageIndex,
+                        pageIdentity = bookmark.pageIdentity,
+                        currentSourceRevision = volume.sourceRevision,
+                        currentPageCount = volume.totalPageCount,
+                        findPageByIdentity = volume::findPageByIdentity,
+                    )
+                    .thumbnailPageOrNull() ?: return null
             val currentIdentity = volume.pageIdentity(page)
             ReaderCache.readThumbnail(
-                context = appContext,
-                comicId = bookmark.comicId,
-                page = page,
-                pageIdentity = currentIdentity,
-            )?.let { return it.asImageBitmap() }
+                    context = appContext,
+                    comicId = bookmark.comicId,
+                    page = page,
+                    pageIdentity = currentIdentity,
+                )
+                ?.let {
+                    return it.asImageBitmap()
+                }
 
-            val rendered = volume.renderThumbnail(page, BOOKMARK_THUMBNAIL_WIDTH)
-                ?: return null
+            val rendered = volume.renderThumbnail(page, BOOKMARK_THUMBNAIL_WIDTH) ?: return null
             ReaderCache.writeThumbnail(
                 context = appContext,
                 comicId = bookmark.comicId,
@@ -171,8 +182,9 @@ class BookmarkRepository(context: Context) {
     }
 
     private suspend fun resolveOnIo(bookmark: BookmarkEntity): BookmarkResolution {
-        val comic = comicDao.getById(bookmark.comicId)
-            ?: return BookmarkResolution.Unavailable("书签所属漫画已从书架移除")
+        val comic =
+            comicDao.getById(bookmark.comicId)
+                ?: return BookmarkResolution.Unavailable("书签所属漫画已从书架移除")
         if (comic.isMissing) {
             return BookmarkResolution.Unavailable("漫画源文件当前不可用")
         }
@@ -180,13 +192,14 @@ class BookmarkRepository(context: Context) {
             return BookmarkResolution.Unavailable("漫画尚未完成保存")
         }
 
-        val volume = try {
-            comicRepository.openBook(comic)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            return BookmarkResolution.Unavailable(e.message ?: "无法打开漫画")
-        }
+        val volume =
+            try {
+                comicRepository.openBook(comic)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                return BookmarkResolution.Unavailable(e.message ?: "无法打开漫画")
+            }
         return try {
             resolveBookmarkLocation(
                 comicId = comic.id,
@@ -229,16 +242,19 @@ internal fun bookmarkMatchesForCurrentPage(
     val ready = mutableListOf<BookmarkEntity>()
     val sourceChanged = mutableListOf<BookmarkEntity>()
     bookmarks.forEach { bookmark ->
-        when (val resolution = resolveBookmarkLocation(
-            comicId = comicId,
-            sourceType = sourceType,
-            storedSourceRevision = bookmark.sourceRevision,
-            storedGlobalPage = bookmark.globalPageIndex,
-            pageIdentity = bookmark.pageIdentity,
-            currentSourceRevision = currentSourceRevision,
-            currentPageCount = currentPageCount,
-            findPageByIdentity = findPageByIdentity,
-        )) {
+        when (
+            val resolution =
+                resolveBookmarkLocation(
+                    comicId = comicId,
+                    sourceType = sourceType,
+                    storedSourceRevision = bookmark.sourceRevision,
+                    storedGlobalPage = bookmark.globalPageIndex,
+                    pageIdentity = bookmark.pageIdentity,
+                    currentSourceRevision = currentSourceRevision,
+                    currentPageCount = currentPageCount,
+                    findPageByIdentity = findPageByIdentity,
+                )
+        ) {
             is BookmarkResolution.Ready -> {
                 if (resolution.globalPage == currentGlobalPage) ready += bookmark
             }
@@ -266,17 +282,18 @@ internal fun bookmarkTargetKey(
     require(sourceRevision.isNotBlank())
     require(globalPageIndex >= 0)
     val identity = pageIdentity?.takeIf { it.isNotBlank() }
-    val parts = if (identity != null) {
-        listOf("bookmark-page-v1", identity)
-    } else {
-        listOf("bookmark-position-v1", sourceRevision, globalPageIndex.toString())
-    }
+    val parts =
+        if (identity != null) {
+            listOf("bookmark-page-v1", identity)
+        } else {
+            listOf("bookmark-position-v1", sourceRevision, globalPageIndex.toString())
+        }
     return "bookmark:${ReaderPageCacheKey.sourceRevision(parts)}"
 }
 
 /**
- * Bookmark-facing wrapper around [ReadingPositionResolver].
- * Keeps comicId on the resolution so Saved UI can navigate without a second lookup.
+ * Bookmark-facing wrapper around [ReadingPositionResolver]. Keeps comicId on the resolution so
+ * Saved UI can navigate without a second lookup.
  */
 internal fun resolveBookmarkLocation(
     comicId: Long,
@@ -289,15 +306,16 @@ internal fun resolveBookmarkLocation(
     findPageByIdentity: (String) -> Int?,
 ): BookmarkResolution =
     when (
-        val resolution = ReadingPositionResolver.resolve(
-            sourceType = sourceType,
-            storedSourceRevision = storedSourceRevision,
-            storedGlobalPage = storedGlobalPage,
-            pageIdentity = pageIdentity,
-            currentSourceRevision = currentSourceRevision,
-            currentPageCount = currentPageCount,
-            findPageByIdentity = findPageByIdentity,
-        )
+        val resolution =
+            ReadingPositionResolver.resolve(
+                sourceType = sourceType,
+                storedSourceRevision = storedSourceRevision,
+                storedGlobalPage = storedGlobalPage,
+                pageIdentity = pageIdentity,
+                currentSourceRevision = currentSourceRevision,
+                currentPageCount = currentPageCount,
+                findPageByIdentity = findPageByIdentity,
+            )
     ) {
         is ReadingPositionResolution.Ready ->
             BookmarkResolution.Ready(comicId, resolution.globalPage)

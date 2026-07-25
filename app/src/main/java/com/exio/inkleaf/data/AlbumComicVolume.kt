@@ -6,9 +6,9 @@ import android.graphics.BitmapFactory
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import com.exio.inkleaf.data.db.AlbumPageEntity
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.File
 
 /** Reads a user-created album directly from app-private page files. */
 class AlbumComicVolume(
@@ -19,18 +19,19 @@ class AlbumComicVolume(
     private val filesDir = context.applicationContext.filesDir
 
     override val totalPageCount: Int = pages.size
-    override val sourceRevision: String = ReaderPageCacheKey.sourceRevision(
-        buildList {
-            add("album")
-            pages.forEach { page ->
-                val file = resolveAlbumPageFile(filesDir, page.relativePath)
-                add(page.id)
-                add(page.relativePath)
-                add(file.length().toString())
-                add(file.lastModified().toString())
+    override val sourceRevision: String =
+        ReaderPageCacheKey.sourceRevision(
+            buildList {
+                add("album")
+                pages.forEach { page ->
+                    val file = resolveAlbumPageFile(filesDir, page.relativePath)
+                    add(page.id)
+                    add(page.relativePath)
+                    add(file.length().toString())
+                    add(file.lastModified().toString())
+                }
             }
-        }
-    )
+        )
     override val chapterCount: Int = 1
 
     override fun chapterTitle(chapterIndex: Int): String = title
@@ -50,9 +51,10 @@ class AlbumComicVolume(
     override fun findPageByIdentity(pageIdentity: String): Int? =
         pages.indexOfFirst { it.id == pageIdentity }.takeIf { it >= 0 }
 
-    override suspend fun loadPageBytes(globalPage: Int): ByteArray = withContext(Dispatchers.IO) {
-        pageFile(globalPage).readBytes()
-    }
+    override suspend fun loadPageBytes(globalPage: Int): ByteArray =
+        withContext(Dispatchers.IO) {
+            pageFile(globalPage).readBytes()
+        }
 
     override suspend fun loadThumbnailPageBytes(globalPage: Int): ByteArray =
         loadPageBytes(globalPage)
@@ -67,12 +69,13 @@ class AlbumComicVolume(
             var sampleSize = 1
             while (bounds.outWidth / (sampleSize * 2) >= targetWidth) sampleSize *= 2
             BitmapFactory.decodeFile(
-                file.absolutePath,
-                BitmapFactory.Options().apply {
-                    inSampleSize = sampleSize
-                    inPreferredConfig = Bitmap.Config.RGB_565
-                },
-            )?.asImageBitmap()
+                    file.absolutePath,
+                    BitmapFactory.Options().apply {
+                        inSampleSize = sampleSize
+                        inPreferredConfig = Bitmap.Config.RGB_565
+                    },
+                )
+                ?.asImageBitmap()
         }
 
     override fun close() = Unit
