@@ -10,15 +10,14 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -77,11 +76,9 @@ internal fun ColumnScope.ReaderBookmarksPanelContent(
         if (orderedBookmarks.isEmpty()) {
             ReaderBookmarksEmptyState()
         } else {
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+            LazyColumn(
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
                 modifier = Modifier.fillMaxSize(),
             ) {
                 items(
@@ -91,7 +88,7 @@ internal fun ColumnScope.ReaderBookmarksPanelContent(
                     val globalPage = item.globalPage
                     val bookmark = item.bookmark
                     val stale = bookmark.id in staleBookmarkIds
-                    ReaderBookmarkCard(
+                    ReaderBookmarkRow(
                         bookmark = bookmark,
                         globalPage = globalPage,
                         thumbnail = thumbnails[globalPage],
@@ -142,7 +139,7 @@ internal fun ColumnScope.ReaderBookmarksPanelContent(
 }
 
 @Composable
-private fun ReaderBookmarkCard(
+private fun ReaderBookmarkRow(
     bookmark: BookmarkEntity,
     globalPage: Int,
     thumbnail: ImageBitmap?,
@@ -161,20 +158,22 @@ private fun ReaderBookmarkCard(
         enabled = !removalInFlight,
         shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
-        tonalElevation = 2.dp,
+        tonalElevation = 1.dp,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(6.dp),
+                .padding(horizontal = 10.dp, vertical = 8.dp),
         ) {
+            // 3:4 portrait thumbnail container
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(1.25f)
-                    .clip(RoundedCornerShape(10.dp))
+                    .width(48.dp)
+                    .height(66.dp)
+                    .clip(RoundedCornerShape(8.dp))
                     .background(MaterialTheme.colorScheme.surfaceContainerHighest),
             ) {
                 if (!stale && thumbnail != null) {
@@ -189,68 +188,71 @@ private fun ReaderBookmarkCard(
                         painter = painterResource(R.drawable.ic_bookmark_border),
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(28.dp),
+                        modifier = Modifier.size(20.dp),
                     )
                 }
 
-                // Top-right delete bookmark icon
-                IconButton(
-                    onClick = onRemove,
-                    enabled = !removalInFlight,
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(2.dp)
-                        .size(28.dp)
-                        .background(
-                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.75f),
-                            shape = RoundedCornerShape(14.dp),
-                        ),
-                ) {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_bookmark),
-                        contentDescription = "移除书签",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(16.dp),
-                    )
-                }
-
-                // Page badge
+                // Page badge pill on thumbnail
                 Surface(
-                    shape = RoundedCornerShape(6.dp),
+                    shape = RoundedCornerShape(4.dp),
                     color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
                     modifier = Modifier
                         .align(Alignment.BottomStart)
-                        .padding(4.dp),
+                        .padding(2.dp),
                 ) {
                     Text(
-                        text = "P.${globalPage + 1}",
+                        text = "${globalPage + 1}",
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(6.dp))
-
-            Text(
-                text = bookmark.chapterTitle.ifBlank {
-                    "第 ${bookmark.chapterIndex + 1} 章"
-                },
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(horizontal = 4.dp),
-            )
-
-            if (stale) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(start = 12.dp, end = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
                 Text(
-                    text = "源内容已变化",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(horizontal = 4.dp),
+                    text = bookmark.chapterTitle.ifBlank {
+                        "第 ${bookmark.chapterIndex + 1} 章"
+                    },
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+
+                Text(
+                    text = "全书第 ${globalPage + 1} 页 · 章节第 ${bookmark.pageIndex + 1} 页",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+
+                if (stale) {
+                    Text(
+                        text = "源内容已变化，当前页码为近似位置",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                        maxLines = 1,
+                    )
+                }
+            }
+
+            IconButton(
+                onClick = onRemove,
+                enabled = !removalInFlight,
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_bookmark),
+                    contentDescription = "移除书签",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp),
                 )
             }
         }
@@ -287,4 +289,5 @@ private fun ReaderBookmarksEmptyState() {
         )
     }
 }
+
 
