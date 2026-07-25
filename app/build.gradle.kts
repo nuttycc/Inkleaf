@@ -146,8 +146,8 @@ dependencies {
     implementation(libs.androidx.documentfile)
     implementation(libs.ahmer.pdfium)
     implementation(libs.reorderable)
-    // Slim self-built OpenCV AAR (core/imgproc/imgcodecs/java/geometry, arm64-v8a only).
-    // Built via .github/workflows/build-opencv-aar.yml. See scripts/opencv-android-config.py.
+    // Slim self-built OpenCV AAR (core/imgproc/imgcodecs/java/geometry/videoio, arm64-v8a only).
+    // Built via .github/workflows/build-opencv-aar.yml. See .scripts/opencv-android-config.py.
     implementation(files("${rootDir}/libs/opencv-slim.aar"))
 
     testImplementation(libs.junit)

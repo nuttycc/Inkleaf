@@ -55,15 +55,24 @@ jobs:
           echo "ANDROID_NDK_ROOT=$NDK_PATH" >> "$GITHUB_ENV"
           echo "ANDROID_CMAKE_ROOT=$CMAKE_PATH" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "$CMAKE_PATH/bin" >> "$GITHUB_PATH"
           echo "Resolved NDK: $NDK_PATH"
 
       - name: Checkout OpenCV source
         # Tarball avoids git protocol handshake + object unpacking; faster on
         # ephemeral CI runners. --strip-components=1 drops the opencv-<tag>/
         # top-level dir so downstream paths stay /opt/opencv/...
+        env:
+          OPENCV_TAG: ${{ inputs.opencv_tag }}
         run: |
+          set -euo pipefail
+          if [[ ! "$OPENCV_TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "OpenCV tag must be a numeric release such as 5.0.0 (got: $OPENCV_TAG)" >&2
+            exit 1
+          fi
           mkdir -p /opt/opencv
-          curl -sSL "https://github.com/opencv/opencv/archive/refs/tags/${{ inputs.opencv_tag }}.tar.gz" \
+          curl --fail --show-error --location --retry 3 \
+            "https://github.com/opencv/opencv/archive/refs/tags/${OPENCV_TAG}.tar.gz" \
             | tar -xz -C /opt/opencv --strip-components=1
 
       - name: Copy build config
@@ -73,6 +82,7 @@ jobs:
         # Run from platforms/android so build_sdk.py can load the colocated config.
         working-directory: /opt/opencv/platforms/android
         run: |
+          cmake --version
           python3 build_sdk.py \
             --sdk_path "$ANDROID_SDK_ROOT" \
             --ndk_path "$ANDROID_NDK_ROOT" \
