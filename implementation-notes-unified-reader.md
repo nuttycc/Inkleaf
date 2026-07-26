@@ -33,6 +33,9 @@ reading history. It does not add offline-book downloads or cross-source deduplic
   changes.
 - Page favorite paths are repository-relative under app-private `filesDir`; metadata is
   published only after the snapshot file exists.
+- The reader composable now consumes source-neutral presentation state, feature data,
+  and actions. Local reading is adapted at the route boundary without changing its
+  existing persistence behavior.
 
 ## Deviations
 
@@ -48,3 +51,6 @@ reading history. It does not add offline-book downloads or cross-source deduplic
   retention were inspected statically.
 - Focused JVM tests were added but not run. Local Gradle execution remains intentionally
   excluded unless explicitly authorized by the user.
+- `git diff --check` passed for the shared reader presentation extraction.
+- Legacy local-reader model references were checked at the presentation boundary; the
+  shared composable no longer depends on Room bookmark or favorite entities.

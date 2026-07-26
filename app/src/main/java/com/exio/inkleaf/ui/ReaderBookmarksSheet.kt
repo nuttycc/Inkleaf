@@ -41,20 +41,18 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.exio.inkleaf.R
-import com.exio.inkleaf.data.db.BookmarkEntity
 
 @Composable
 internal fun ColumnScope.ReaderBookmarksPanelContent(
-    bookmarks: List<ResolvedReaderBookmark>,
-    staleBookmarkIds: Set<Long>,
+    bookmarks: List<ReaderBookmarkItem>,
     thumbnails: Map<Int, ImageBitmap>,
     onNeedThumbnail: (Int) -> Unit,
     onSelect: (Int) -> Unit,
-    removalsInFlight: Set<Long>,
-    onRemove: (BookmarkEntity) -> Unit,
+    removalsInFlight: Set<String>,
+    onRemove: ((ReaderBookmarkItem) -> Unit)?,
 ) {
     var pendingStaleSelection by remember {
-        mutableStateOf<Pair<Int, BookmarkEntity>?>(null)
+        mutableStateOf<ReaderBookmarkItem?>(null)
     }
     val orderedBookmarks = bookmarks.sortedBy { it.globalPage }
 
@@ -78,33 +76,32 @@ internal fun ColumnScope.ReaderBookmarksPanelContent(
             ) {
                 items(
                     items = orderedBookmarks,
-                    key = { it.bookmark.id },
+                    key = { it.key },
                 ) { item ->
                     val globalPage = item.globalPage
-                    val bookmark = item.bookmark
-                    val stale = bookmark.id in staleBookmarkIds
                     ReaderBookmarkRow(
-                        bookmark = bookmark,
+                        bookmark = item,
                         globalPage = globalPage,
                         thumbnail = thumbnails[globalPage],
-                        stale = stale,
-                        removalInFlight = bookmark.id in removalsInFlight,
+                        stale = item.stale,
+                        removalInFlight = item.key in removalsInFlight,
                         onNeedThumbnail = onNeedThumbnail,
                         onClick = {
-                            if (stale) {
-                                pendingStaleSelection = globalPage to bookmark
+                            if (item.stale) {
+                                pendingStaleSelection = item
                             } else {
                                 onSelect(globalPage)
                             }
                         },
-                        onRemove = { onRemove(bookmark) },
+                        onRemove = onRemove?.let { remove -> { remove(item) } },
                     )
                 }
             }
         }
     }
 
-    pendingStaleSelection?.let { (globalPage, _) ->
+    pendingStaleSelection?.let { bookmark ->
+        val globalPage = bookmark.globalPage
         AlertDialog(
             onDismissRequest = { pendingStaleSelection = null },
             title = { Text("源内容已变化") },
@@ -132,14 +129,14 @@ internal fun ColumnScope.ReaderBookmarksPanelContent(
 
 @Composable
 private fun ReaderBookmarkRow(
-    bookmark: BookmarkEntity,
+    bookmark: ReaderBookmarkItem,
     globalPage: Int,
     thumbnail: ImageBitmap?,
     stale: Boolean,
     removalInFlight: Boolean,
     onNeedThumbnail: (Int) -> Unit,
     onClick: () -> Unit,
-    onRemove: () -> Unit,
+    onRemove: (() -> Unit)?,
 ) {
     if (!stale && thumbnail == null) {
         LaunchedEffect(globalPage) { onNeedThumbnail(globalPage) }
@@ -217,8 +214,8 @@ private fun ReaderBookmarkRow(
             }
 
             IconButton(
-                onClick = onRemove,
-                enabled = !removalInFlight,
+                onClick = { onRemove?.invoke() },
+                enabled = !removalInFlight && onRemove != null,
             ) {
                 Icon(
                     painter = painterResource(R.drawable.ic_bookmark),
