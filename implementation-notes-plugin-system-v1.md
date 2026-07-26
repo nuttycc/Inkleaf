@@ -72,6 +72,8 @@ fixed host DTOs, and no plugin-provided Android UI or native code.
   are validated and available through the runtime/debug diagnostic entry point, but a
   full action/settings screen is deferred to a later slice.
 - Plugin UI is split into a search-focused `DiscoverScreen` and a separate `SourcesScreen` (`SourcesRoute`). `InstalledPlugin` in-memory model populates `manifest: PluginManifest?` from active or newest compatible version manifest. User-initiated file/URL installs explicitly pass `activate = true` while `PluginManager` default `activate = false` remains untouched.
+- `SourcesScreen` keeps installation secondary to lifecycle management: a top-app-bar add action
+  opens a Material bottom sheet containing local ZIP selection and network URL installation.
 - The real-source fixture uses the current upstream default API route directly.
   Its first browse slice exposes recommendation, newest, ranking, and category
   feeds with source-specific filters and explicit load-more pagination. Authentication

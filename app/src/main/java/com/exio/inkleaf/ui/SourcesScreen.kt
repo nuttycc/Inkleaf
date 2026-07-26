@@ -3,7 +3,6 @@ package com.exio.inkleaf.ui
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -22,10 +22,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.ui.res.painterResource
-import com.exio.inkleaf.R
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -39,8 +38,8 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Snackbar
@@ -57,13 +56,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import com.exio.inkleaf.InkleafApplication
+import com.exio.inkleaf.R
 import com.exio.inkleaf.plugin.InstalledPlugin
 import com.exio.inkleaf.plugin.PluginDownloadSource
 import com.exio.inkleaf.plugin.PluginHealth
@@ -92,6 +94,7 @@ fun SourcesScreen(
     var plugins by remember { mutableStateOf<List<InstalledPlugin>>(emptyList()) }
     var url by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
+    var showImportSheet by rememberSaveable { mutableStateOf(false) }
 
     suspend fun refresh() {
         plugins = withContext(Dispatchers.IO) { application.pluginManager.installed() }
@@ -102,6 +105,7 @@ fun SourcesScreen(
         val versionText = result.version?.let { "@$it" } ?: ""
         when (result.status) {
             PluginInstallStatus.INSTALLED, PluginInstallStatus.ALREADY_INSTALLED -> {
+                showImportSheet = false
                 val message = if (result.activatable) {
                     "已成功安装并激活 $pluginName$versionText"
                 } else {
@@ -189,6 +193,14 @@ fun SourcesScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 },
+                actions = {
+                    IconButton(
+                        onClick = { showImportSheet = true },
+                        enabled = !busy,
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = "导入漫画源")
+                    }
+                },
             )
         },
     ) { padding ->
@@ -199,123 +211,13 @@ fun SourcesScreen(
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            // Import section header & progress
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(
-                        text = "导入漫画源",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.primary,
+            if (busy) {
+                item {
+                    LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth().height(4.dp)
                     )
-
-                    AnimatedVisibility(visible = busy) {
-                        LinearProgressIndicator(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(4.dp)
-                        )
-                    }
-
-                    // SAF File Picker Card
-                    OutlinedCard(
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text(
-                                text = "本地文件导入 (SAF)",
-                                style = MaterialTheme.typography.titleSmall,
-                            )
-                            Text(
-                                text = "选择本地存储中的 .zip 或插件安装包导入并自动激活",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Button(
-                                onClick = {
-                                    picker.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
-                                },
-                                enabled = !busy,
-                                modifier = Modifier.align(Alignment.End),
-                            ) {
-                                Icon(
-                                    painter = painterResource(R.drawable.ic_folder),
-                                    contentDescription = null,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Text("选择插件包")
-                            }
-                        }
-                    }
-
-                    // URL Import Card
-                    OutlinedCard(
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Text(
-                                text = "网络 URL 导入",
-                                style = MaterialTheme.typography.titleSmall,
-                            )
-                            Text(
-                                text = "输入插件包的 HTTP/HTTPS 下载链接直接安装并激活",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            OutlinedTextField(
-                                value = url,
-                                onValueChange = { url = it },
-                                label = { Text("插件 URL") },
-                                leadingIcon = {
-                                    Icon(painter = painterResource(R.drawable.ic_file), contentDescription = null)
-                                },
-                                trailingIcon = {
-                                    if (url.isNotEmpty()) {
-                                        IconButton(onClick = { url = "" }) {
-                                            Icon(Icons.Default.Clear, contentDescription = "清除")
-                                        }
-                                    }
-                                },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                            Button(
-                                onClick = {
-                                    launchOperation {
-                                        val result = application.pluginManager.installUrl(
-                                            PluginDownloadSource(url),
-                                            activate = true
-                                        )
-                                        handleInstallResult(result)
-                                    }
-                                },
-                                enabled = !busy && url.isNotBlank(),
-                                modifier = Modifier.align(Alignment.End),
-                            ) {
-                                Icon(
-                                    painter = painterResource(R.drawable.ic_download),
-                                    contentDescription = null,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Text("从 URL 安装")
-                            }
-                        }
-                    }
                 }
             }
-
-            item { HorizontalDivider() }
 
             item {
                 Text(
@@ -373,6 +275,133 @@ fun SourcesScreen(
             }
 
             item { Spacer(Modifier.height(24.dp)) }
+        }
+    }
+
+    if (showImportSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showImportSheet = false },
+            sheetState = rememberExpandOnlySheetState(),
+        ) {
+            ImportSourceSheetContent(
+                url = url,
+                busy = busy,
+                onUrlChange = { url = it },
+                onPickFile = {
+                    picker.launch(
+                        arrayOf("application/zip", "application/octet-stream", "*/*")
+                    )
+                },
+                onInstallUrl = {
+                    launchOperation {
+                        val result =
+                            application.pluginManager.installUrl(
+                                PluginDownloadSource(url),
+                                activate = true,
+                            )
+                        handleInstallResult(result)
+                    }
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ImportSourceSheetContent(
+    url: String,
+    busy: Boolean,
+    onUrlChange: (String) -> Unit,
+    onPickFile: () -> Unit,
+    onInstallUrl: () -> Unit,
+) {
+    SheetColumn(
+        modifier =
+            Modifier
+                .imePadding()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+        scrollable = true,
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Text(
+                text = "导入漫画源",
+                style = MaterialTheme.typography.titleLarge,
+            )
+
+            if (busy) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(4.dp))
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "本地文件",
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Text(
+                    text = "选择 .zip 插件包，安装后自动激活。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedButton(
+                    onClick = onPickFile,
+                    enabled = !busy,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_folder),
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("选择插件包")
+                }
+            }
+
+            HorizontalDivider()
+
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = "网络 URL",
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                OutlinedTextField(
+                    value = url,
+                    onValueChange = onUrlChange,
+                    label = { Text("插件包 URL") },
+                    leadingIcon = {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_file),
+                            contentDescription = null,
+                        )
+                    },
+                    trailingIcon = {
+                        if (url.isNotEmpty()) {
+                            IconButton(onClick = { onUrlChange("") }) {
+                                Icon(Icons.Default.Clear, contentDescription = "清除")
+                            }
+                        }
+                    },
+                    supportingText = { Text("支持 HTTP 和 HTTPS 下载链接") },
+                    singleLine = true,
+                    enabled = !busy,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Button(
+                    onClick = onInstallUrl,
+                    enabled = !busy && url.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_download),
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("下载并安装")
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
         }
     }
 }
@@ -587,4 +616,3 @@ private fun SourceManagementItem(
         )
     }
 }
-
