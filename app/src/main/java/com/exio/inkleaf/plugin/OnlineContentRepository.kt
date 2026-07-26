@@ -1,17 +1,21 @@
 package com.exio.inkleaf.plugin
 
+import com.exio.inkleaf.data.OnlineChapterIdentity
+import com.exio.inkleaf.data.OnlineContentIdentity
+import com.exio.inkleaf.data.OnlinePageIdentity
+import com.exio.inkleaf.data.OnlinePageLocation
 import java.io.File
 import java.io.IOException
 import java.nio.charset.StandardCharsets
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
+import java.security.MessageDigest
 import java.util.UUID
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
-@Serializable
-data class OnlineContentKey(val pluginId: String, val sourceId: String)
+typealias OnlineContentKey = OnlineContentIdentity
 
 @Serializable
 enum class OnlineAvailability {
@@ -28,7 +32,9 @@ enum class OnlineAvailability {
 enum class OnlineUserReference {
     FAVORITE,
     HISTORY,
+    /** Legacy name for the comic-level follow used by the current online detail screen. */
     BOOKMARK,
+    /** Legacy summary flag. New page favorites are stored as explicit snapshot records. */
     PAGE_FAVORITE,
 }
 
@@ -41,6 +47,63 @@ data class OnlineReadingPosition(
     val updatedAtMs: Long,
 )
 
+/** A lightweight location record. It never contains image bytes or remote image URLs. */
+@Serializable
+data class OnlinePageBookmark(
+    val location: OnlinePageLocation,
+    val chapterTitleSnapshot: String? = null,
+    val addedAtMs: Long,
+)
+
+@Serializable
+data class OnlinePageSnapshotMetadata(
+    val relativePath: String,
+    val mimeType: String,
+    val byteCount: Long,
+    val width: Int,
+    val height: Int,
+    val writtenAtMs: Long,
+) {
+    init {
+        require(relativePath.isNotBlank()) { "relativePath must not be blank" }
+        require(mimeType.isNotBlank()) { "mimeType must not be blank" }
+        require(byteCount >= 0) { "byteCount must be non-negative" }
+        require(width > 0) { "width must be positive" }
+        require(height > 0) { "height must be positive" }
+    }
+}
+
+@Serializable
+data class OnlinePageFavorite(
+    val location: OnlinePageLocation,
+    val chapterTitleSnapshot: String? = null,
+    val snapshot: OnlinePageSnapshotMetadata,
+    val addedAtMs: Long,
+)
+
+/** A completed online reading session retained as history independently of plugin availability. */
+@Serializable
+data class OnlineReadingSessionRecord(
+    val sessionId: String,
+    val content: OnlineContentIdentity,
+    val titleSnapshot: String,
+    val startedAtMs: Long,
+    val endedAtMs: Long,
+    val activeReadingMillis: Long,
+    val timeZoneId: String,
+    val start: OnlinePageLocation,
+    val end: OnlinePageLocation,
+) {
+    init {
+        require(sessionId.isNotBlank()) { "sessionId must not be blank" }
+        require(endedAtMs >= startedAtMs) { "endedAtMs must not precede startedAtMs" }
+        require(activeReadingMillis >= 0) { "activeReadingMillis must be non-negative" }
+        require(timeZoneId.isNotBlank()) { "timeZoneId must not be blank" }
+        require(start.identity.chapter.content == content) { "Start location must match content" }
+        require(end.identity.chapter.content == content) { "End location must match content" }
+    }
+}
+
 @Serializable
 data class OnlineComicRecord(
     val key: OnlineContentKey,
@@ -51,6 +114,9 @@ data class OnlineComicRecord(
     val availability: OnlineAvailability = OnlineAvailability.AVAILABLE,
     val references: Set<OnlineUserReference> = emptySet(),
     val lastSeenAtMs: Long = 0L,
+    val pageBookmarks: List<OnlinePageBookmark> = emptyList(),
+    val pageFavorites: List<OnlinePageFavorite> = emptyList(),
+    val readingSessions: List<OnlineReadingSessionRecord> = emptyList(),
 )
 
 @Serializable
@@ -66,6 +132,7 @@ class OnlineContentRepository(
     private val json: Json = defaultJson,
 ) {
     private val lock = Any()
+    private val snapshotDirectory = file.resolveSibling("page-favorites")
 
     init {
         require(file.isAbsolute) { "Online content state path must be absolute" }
@@ -76,6 +143,127 @@ class OnlineContentRepository(
     }
 
     fun list(): List<OnlineComicRecord> = synchronized(lock) { read().records }
+
+    fun listPageBookmarks(): List<OnlinePageBookmark> = synchronized(lock) {
+        read().records.flatMap { it.pageBookmarks }.sortedByDescending { it.addedAtMs }
+    }
+
+    fun addPageBookmark(
+        location: OnlinePageLocation,
+        chapterTitleSnapshot: String? = null,
+    ): OnlinePageBookmark = synchronized(lock) {
+        val contentKey = key(location.identity.chapter.content)
+        val bookmark = OnlinePageBookmark(
+            location = location,
+            chapterTitleSnapshot = chapterTitleSnapshot,
+            addedAtMs = clockMs(),
+        )
+        update(contentKey) { current ->
+            current.copy(
+                pageBookmarks = (current.pageBookmarks.filterNot {
+                    it.location.identity == location.identity
+                } + bookmark).sortedByDescending { it.addedAtMs },
+            )
+        }
+        bookmark
+    }
+
+    fun removePageBookmark(identity: OnlinePageIdentity): Boolean = synchronized(lock) {
+        removeUserRecord(key(identity.chapter.content)) { current ->
+            val next = current.pageBookmarks.filterNot { it.location.identity == identity }
+            current.copy(pageBookmarks = next) to (next.size != current.pageBookmarks.size)
+        }
+    }
+
+    fun listPageFavorites(): List<OnlinePageFavorite> = synchronized(lock) {
+        read().records.flatMap { it.pageFavorites }.sortedByDescending { it.addedAtMs }
+    }
+
+    /**
+     * Returns a deterministic file under the repository's app-private directory. The caller must
+     * write the snapshot atomically before calling [recordPageFavoriteSnapshot].
+     */
+    fun pageFavoriteSnapshotFile(identity: OnlinePageIdentity, extension: String): File {
+        val normalizedExtension = extension.lowercase()
+        require(FILE_EXTENSION.matches(normalizedExtension)) { "Invalid snapshot file extension" }
+        ensureDirectory(snapshotDirectory)
+        return snapshotDirectory.resolve("${snapshotStorageKey(identity)}.$normalizedExtension")
+    }
+
+    /** Atomically publishes snapshot metadata after the durable snapshot file exists. */
+    fun recordPageFavoriteSnapshot(
+        location: OnlinePageLocation,
+        snapshotFile: File,
+        mimeType: String,
+        width: Int,
+        height: Int,
+        chapterTitleSnapshot: String? = null,
+    ): OnlinePageFavorite = synchronized(lock) {
+        val relativePath = requireStoredSnapshot(snapshotFile)
+        val now = clockMs()
+        val favorite = OnlinePageFavorite(
+            location = location,
+            chapterTitleSnapshot = chapterTitleSnapshot,
+            snapshot = OnlinePageSnapshotMetadata(
+                relativePath = relativePath,
+                mimeType = mimeType,
+                byteCount = snapshotFile.length(),
+                width = width,
+                height = height,
+                writtenAtMs = now,
+            ),
+            addedAtMs = now,
+        )
+        update(key(location.identity.chapter.content)) { current ->
+            val previous = current.pageFavorites.firstOrNull {
+                it.location.identity == location.identity
+            }
+            val stored = if (previous == null) favorite else favorite.copy(addedAtMs = previous.addedAtMs)
+            current.copy(
+                pageFavorites = (current.pageFavorites.filterNot {
+                    it.location.identity == location.identity
+                } + stored).sortedByDescending { it.addedAtMs },
+            )
+        }.pageFavorites.first { it.location.identity == location.identity }
+    }
+
+    fun resolvePageFavoriteSnapshot(favorite: OnlinePageFavorite): File =
+        resolveStoredSnapshot(favorite.snapshot.relativePath)
+
+    fun removePageFavorite(identity: OnlinePageIdentity): Boolean = synchronized(lock) {
+        removeUserRecord(key(identity.chapter.content)) { current ->
+            val next = current.pageFavorites.filterNot { it.location.identity == identity }
+            current.copy(pageFavorites = next) to (next.size != current.pageFavorites.size)
+        }
+    }
+
+    fun listReadingSessions(): List<OnlineReadingSessionRecord> = synchronized(lock) {
+        read().records.flatMap { it.readingSessions }
+            .sortedWith(compareByDescending<OnlineReadingSessionRecord> { it.endedAtMs }.thenByDescending { it.sessionId })
+    }
+
+    fun recordReadingSession(session: OnlineReadingSessionRecord): OnlineReadingSessionRecord = synchronized(lock) {
+        update(key(session.content)) { current ->
+            current.copy(
+                readingSessions = (current.readingSessions.filterNot {
+                    it.sessionId == session.sessionId
+                } + session).sortedWith(
+                    compareByDescending<OnlineReadingSessionRecord> { it.endedAtMs }
+                        .thenByDescending { it.sessionId }
+                ),
+                references = current.references + OnlineUserReference.HISTORY,
+            )
+        }
+        session
+    }
+
+    fun removeReadingSession(content: OnlineContentIdentity, sessionId: String): Boolean = synchronized(lock) {
+        require(sessionId.isNotBlank()) { "sessionId must not be blank" }
+        removeUserRecord(key(content)) { current ->
+            val next = current.readingSessions.filterNot { it.sessionId == sessionId }
+            current.copy(readingSessions = next) to (next.size != current.readingSessions.size)
+        }
+    }
 
     fun recordDetail(pluginId: String, detail: ComicDetail): OnlineComicRecord = synchronized(lock) {
         val key = key(pluginId, detail.sourceId)
@@ -108,8 +296,13 @@ class OnlineContentRepository(
         pageIndex: Int,
         chapterRevision: String?,
     ): OnlineComicRecord = synchronized(lock) {
-        require(pageIndex >= 0) { "pageIndex must be non-negative" }
         val key = key(pluginId, sourceId)
+        OnlinePageLocation.create(
+            chapter = OnlineChapterIdentity(key, chapterId),
+            pageId = pageId,
+            pageIndex = pageIndex,
+            chapterRevision = chapterRevision,
+        )
         update(key) { current ->
             current.copy(
                 position = OnlineReadingPosition(
@@ -145,6 +338,10 @@ class OnlineContentRepository(
         write(next)
     }
 
+    /** Comic-level follow state. This never adds or removes a page bookmark. */
+    fun setComicFollow(pluginId: String, sourceId: String, present: Boolean): OnlineComicRecord =
+        setReference(pluginId, sourceId, OnlineUserReference.BOOKMARK, present)
+
     fun setReference(
         pluginId: String,
         sourceId: String,
@@ -171,10 +368,74 @@ class OnlineContentRepository(
         return updated
     }
 
+    private fun removeUserRecord(
+        key: OnlineContentKey,
+        transform: (OnlineComicRecord) -> Pair<OnlineComicRecord, Boolean>,
+    ): Boolean {
+        val state = read()
+        val current = state.records.firstOrNull { it.key == key } ?: return false
+        val (updated, changed) = transform(current)
+        if (!changed) return false
+        val records = state.records.filterNot { it.key == key } + updated
+        write(OnlineContentState(records.sortedWith(compareBy({ it.key.pluginId }, { it.key.sourceId }))))
+        return true
+    }
+
+    private fun key(identity: OnlineContentIdentity): OnlineContentKey =
+        key(identity.pluginId, identity.sourceId)
+
     private fun key(pluginId: String, sourceId: String): OnlineContentKey {
         require(PluginIds.isValid(pluginId)) { "Invalid plugin id" }
         require(sourceId.isNotBlank() && sourceId.length <= 512) { "Invalid source id" }
         return OnlineContentKey(pluginId, sourceId)
+    }
+
+    private fun requireStoredSnapshot(snapshotFile: File): String {
+        val canonicalDirectory = snapshotDirectory.canonicalFile
+        val canonicalSnapshot = snapshotFile.canonicalFile
+        require(canonicalSnapshot.isFile) { "Snapshot file must exist before metadata is recorded" }
+        require(canonicalSnapshot.toPath().startsWith(canonicalDirectory.toPath())) {
+            "Snapshot file must be inside the page favorite directory"
+        }
+        val contentDirectory = requireNotNull(file.parentFile).canonicalFile
+        return contentDirectory.toPath()
+            .relativize(canonicalSnapshot.toPath())
+            .toString()
+            .replace(File.separatorChar, '/')
+    }
+
+    private fun resolveStoredSnapshot(relativePath: String): File {
+        val contentDirectory = requireNotNull(file.parentFile).canonicalFile
+        val snapshot = contentDirectory.resolve(relativePath.replace('/', File.separatorChar)).canonicalFile
+        require(snapshot.toPath().startsWith(snapshotDirectory.canonicalFile.toPath())) {
+            "Snapshot metadata escapes the page favorite directory"
+        }
+        return snapshot
+    }
+
+    private fun snapshotStorageKey(identity: OnlinePageIdentity): String {
+        val fallback = identity.fallback
+        val parts = listOf(
+            identity.chapter.content.pluginId,
+            identity.chapter.content.sourceId,
+            identity.chapter.chapterId,
+            if (identity.pageId != null) "id" else "revision-index",
+            identity.pageId.orEmpty(),
+            fallback?.chapterRevision.orEmpty(),
+            fallback?.pageIndex?.toString().orEmpty(),
+        )
+        val digest = MessageDigest.getInstance("SHA-256")
+        parts.forEach { part ->
+            val bytes = part.toByteArray(StandardCharsets.UTF_8)
+            digest.update((bytes.size ushr 24).toByte())
+            digest.update((bytes.size ushr 16).toByte())
+            digest.update((bytes.size ushr 8).toByte())
+            digest.update(bytes.size.toByte())
+            digest.update(bytes)
+        }
+        return digest.digest().joinToString(separator = "") { byte ->
+            "%02x".format(byte.toInt() and 0xff)
+        }
     }
 
     private fun read(): OnlineContentState {
@@ -185,9 +446,7 @@ class OnlineContentRepository(
     }
 
     private fun write(state: OnlineContentState) {
-        file.parentFile?.let { parent ->
-            if (!parent.mkdirs() && !parent.isDirectory) throw IOException("Unable to create online content directory")
-        }
+        file.parentFile?.let(::ensureDirectory)
         val temp = file.resolveSibling("${file.name}.tmp-${UUID.randomUUID()}")
         try {
             temp.writeText(json.encodeToString(OnlineContentState.serializer(), state), StandardCharsets.UTF_8)
@@ -207,6 +466,14 @@ class OnlineContentRepository(
     }
 
     private companion object {
+        val FILE_EXTENSION = Regex("[a-z0-9]{1,8}")
+
+        fun ensureDirectory(directory: File) {
+            if (!directory.mkdirs() && !directory.isDirectory) {
+                throw IOException("Unable to create online content directory")
+            }
+        }
+
         val defaultJson = Json {
             encodeDefaults = true
             explicitNulls = false
