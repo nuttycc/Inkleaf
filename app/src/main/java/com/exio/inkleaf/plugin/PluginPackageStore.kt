@@ -41,15 +41,18 @@ class PluginPackageStore(
         requireValidVersion(version)
         return synchronized(lock) {
             val directory = pluginDirectory(pluginId)
-            val state = readState(directory) ?: throw PluginInstallException(
-                PluginInstallErrorCode.STORAGE_FAILURE,
-                "Plugin state does not exist: $pluginId",
-            )
-            val record = state.versions.firstOrNull { it.version == version }
-                ?: throw PluginInstallException(
-                    PluginInstallErrorCode.STORAGE_FAILURE,
-                    "Plugin version is not installed: $pluginId@$version",
-                )
+            val state =
+                readState(directory)
+                    ?: throw PluginInstallException(
+                        PluginInstallErrorCode.STORAGE_FAILURE,
+                        "Plugin state does not exist: $pluginId",
+                    )
+            val record =
+                state.versions.firstOrNull { it.version == version }
+                    ?: throw PluginInstallException(
+                        PluginInstallErrorCode.STORAGE_FAILURE,
+                        "Plugin version is not installed: $pluginId@$version",
+                    )
             if (!record.compatible) {
                 throw PluginInstallException(
                     PluginInstallErrorCode.INCOMPATIBLE_VERSION,
@@ -58,14 +61,16 @@ class PluginPackageStore(
             }
             val versionDirectory = versionDirectory(directory, version)
             requireInstalledVersion(versionDirectory)
-            val nextState = state.copy(
-                activeVersion = version,
-                previousVersion = state.activeVersion?.takeIf { it != version } ?: state.previousVersion,
-                disabled = false,
-                health = PluginHealth.HEALTHY,
-                fatalFailureTimesMs = emptyList(),
-                updatedAtMs = clockMs(),
-            )
+            val nextState =
+                state.copy(
+                    activeVersion = version,
+                    previousVersion =
+                        state.activeVersion?.takeIf { it != version } ?: state.previousVersion,
+                    disabled = false,
+                    health = PluginHealth.HEALTHY,
+                    fatalFailureTimesMs = emptyList(),
+                    updatedAtMs = clockMs(),
+                )
             writeStateAtomically(directory, nextState)
             val prunedState = pruneVersions(directory, nextState)
             installedPlugin(directory, prunedState)
@@ -78,19 +83,20 @@ class PluginPackageStore(
             val directory = pluginDirectory(pluginId)
             val state = readState(directory) ?: return@synchronized null
             val previous = state.previousVersion ?: return@synchronized null
-            val previousRecord = state.versions.firstOrNull { it.version == previous }
-                ?: return@synchronized null
+            val previousRecord =
+                state.versions.firstOrNull { it.version == previous } ?: return@synchronized null
             if (!previousRecord.compatible) return@synchronized null
             val previousDirectory = versionDirectory(directory, previous)
             if (!previousDirectory.isDirectory) return@synchronized null
-            val nextState = state.copy(
-                activeVersion = previous,
-                previousVersion = state.activeVersion?.takeIf { it != previous },
-                disabled = false,
-                health = PluginHealth.HEALTHY,
-                fatalFailureTimesMs = emptyList(),
-                updatedAtMs = clockMs(),
-            )
+            val nextState =
+                state.copy(
+                    activeVersion = previous,
+                    previousVersion = state.activeVersion?.takeIf { it != previous },
+                    disabled = false,
+                    health = PluginHealth.HEALTHY,
+                    fatalFailureTimesMs = emptyList(),
+                    updatedAtMs = clockMs(),
+                )
             writeStateAtomically(directory, nextState)
             installedPlugin(directory, nextState)
         }
@@ -101,12 +107,14 @@ class PluginPackageStore(
         return synchronized(lock) {
             val directory = pluginDirectory(pluginId)
             val state = readState(directory) ?: return@synchronized null
-            if (expectedVersion != null && state.activeVersion != expectedVersion) return@synchronized installedPlugin(directory, state)
-            val nextState = state.copy(
-                activeVersion = null,
-                previousVersion = state.previousVersion?.takeIf { it != expectedVersion },
-                updatedAtMs = clockMs(),
-            )
+            if (expectedVersion != null && state.activeVersion != expectedVersion)
+                return@synchronized installedPlugin(directory, state)
+            val nextState =
+                state.copy(
+                    activeVersion = null,
+                    previousVersion = state.previousVersion?.takeIf { it != expectedVersion },
+                    updatedAtMs = clockMs(),
+                )
             writeStateAtomically(directory, nextState)
             installedPlugin(directory, nextState)
         }
@@ -117,10 +125,11 @@ class PluginPackageStore(
         return synchronized(lock) {
             val directory = pluginDirectory(pluginId)
             val state = readState(directory) ?: return@synchronized null
-            val nextState = state.copy(
-                disabled = !enabled,
-                updatedAtMs = clockMs(),
-            )
+            val nextState =
+                state.copy(
+                    disabled = !enabled,
+                    updatedAtMs = clockMs(),
+                )
             writeStateAtomically(directory, nextState)
             installedPlugin(directory, nextState)
         }
@@ -132,15 +141,17 @@ class PluginPackageStore(
             val directory = pluginDirectory(pluginId)
             val state = readState(directory) ?: return@synchronized null
             val recent = state.fatalFailureTimesMs.filter { nowMs - it < HEALTH_WINDOW_MS } + nowMs
-            val nextState = state.copy(
-                health = if (recent.size >= MAX_FATAL_FAILURES) {
-                    PluginHealth.RUNTIME_UNHEALTHY
-                } else {
-                    state.health
-                },
-                fatalFailureTimesMs = recent.takeLast(MAX_FATAL_FAILURES),
-                updatedAtMs = nowMs,
-            )
+            val nextState =
+                state.copy(
+                    health =
+                        if (recent.size >= MAX_FATAL_FAILURES) {
+                            PluginHealth.RUNTIME_UNHEALTHY
+                        } else {
+                            state.health
+                        },
+                    fatalFailureTimesMs = recent.takeLast(MAX_FATAL_FAILURES),
+                    updatedAtMs = nowMs,
+                )
             writeStateAtomically(directory, nextState)
             installedPlugin(directory, nextState)
         }
@@ -151,11 +162,12 @@ class PluginPackageStore(
         return synchronized(lock) {
             val directory = pluginDirectory(pluginId)
             val state = readState(directory) ?: return@synchronized null
-            val nextState = state.copy(
-                health = PluginHealth.HEALTHY,
-                fatalFailureTimesMs = emptyList(),
-                updatedAtMs = clockMs(),
-            )
+            val nextState =
+                state.copy(
+                    health = PluginHealth.HEALTHY,
+                    fatalFailureTimesMs = emptyList(),
+                    updatedAtMs = clockMs(),
+                )
             writeStateAtomically(directory, nextState)
             installedPlugin(directory, nextState)
         }
@@ -169,14 +181,18 @@ class PluginPackageStore(
         }
     }
 
-    fun list(): List<InstalledPlugin> = synchronized(lock) {
-        if (!pluginsRoot.isDirectory) return@synchronized emptyList()
-        pluginsRoot.listFiles()
-            .orEmpty()
-            .filter { it.isDirectory && PluginIds.isValid(it.name) }
-            .mapNotNull { directory -> readState(directory)?.let { installedPlugin(directory, it) } }
-            .sortedBy { it.state.pluginId }
-    }
+    fun list(): List<InstalledPlugin> =
+        synchronized(lock) {
+            if (!pluginsRoot.isDirectory) return@synchronized emptyList()
+            pluginsRoot
+                .listFiles()
+                .orEmpty()
+                .filter { it.isDirectory && PluginIds.isValid(it.name) }
+                .mapNotNull { directory ->
+                    readState(directory)?.let { installedPlugin(directory, it) }
+                }
+                .sortedBy { it.state.pluginId }
+        }
 
     fun uninstall(pluginId: String): Boolean {
         requireValidPluginId(pluginId)
@@ -187,13 +203,17 @@ class PluginPackageStore(
         }
     }
 
-    fun activeEntryFile(pluginId: String): File? = synchronized(lock) {
-        get(pluginId)?.activeDirectory?.resolve(PluginContract.ENTRY_PATH)?.takeIf { it.isFile }
-    }
+    fun activeEntryFile(pluginId: String): File? =
+        synchronized(lock) {
+            get(pluginId)?.activeDirectory?.resolve(PluginContract.ENTRY_PATH)?.takeIf { it.isFile }
+        }
 
     private fun installLocked(packageFile: File, activate: Boolean): PluginInstallResult {
         if (!packageFile.isFile) {
-            return rejected(PluginInstallErrorCode.NOT_A_FILE, "Plugin package is not a regular file")
+            return rejected(
+                PluginInstallErrorCode.NOT_A_FILE,
+                "Plugin package is not a regular file",
+            )
         }
         if (packageFile.length() > PluginStorageLimits.MAX_PACKAGE_BYTES) {
             return rejected(
@@ -228,7 +248,8 @@ class PluginPackageStore(
                     activatable = validation.activatable,
                     validation = validation,
                     errorCode = PluginInstallErrorCode.VERSION_CONFLICT,
-                    errorMessage = "The same plugin version is already installed with a different SHA-256",
+                    errorMessage =
+                        "The same plugin version is already installed with a different SHA-256",
                 )
             }
             if (activate && validation.activatable) activate(manifest.id, manifest.version)
@@ -267,19 +288,24 @@ class PluginPackageStore(
             moveAtomically(staging, target)
             installedTarget = target
 
-            val record = PluginVersionRecord(
-                version = manifest.version,
-                sha256 = digest,
-                compatible = validation.activatable,
-                installedAtMs = clockMs(),
-            )
-            val nextState = state.copy(
-                versions = (state.versions + record).sortedWith(
-                    compareByDescending<PluginVersionRecord> { requireNotNull(SemVer.parse(it.version)) }
-                        .thenByDescending { it.installedAtMs }
-                ),
-                updatedAtMs = clockMs(),
-            )
+            val record =
+                PluginVersionRecord(
+                    version = manifest.version,
+                    sha256 = digest,
+                    compatible = validation.activatable,
+                    installedAtMs = clockMs(),
+                )
+            val nextState =
+                state.copy(
+                    versions =
+                        (state.versions + record).sortedWith(
+                            compareByDescending<PluginVersionRecord> {
+                                    requireNotNull(SemVer.parse(it.version))
+                                }
+                                .thenByDescending { it.installedAtMs }
+                        ),
+                    updatedAtMs = clockMs(),
+                )
             writeStateAtomically(directory, nextState)
             installedTarget = null
 
@@ -338,9 +364,10 @@ class PluginPackageStore(
                         "Unsafe archive entry: ${entry.name}",
                     )
                 }
-                if (!entry.name.equals(PluginContract.MANIFEST_PATH) &&
-                    !entry.name.equals(PluginContract.ENTRY_PATH) &&
-                    !entry.name.startsWith(PluginContract.ASSET_PREFIX)
+                if (
+                    !entry.name.equals(PluginContract.MANIFEST_PATH) &&
+                        !entry.name.equals(PluginContract.ENTRY_PATH) &&
+                        !entry.name.startsWith(PluginContract.ASSET_PREFIX)
                 ) {
                     throw PluginInstallException(
                         PluginInstallErrorCode.VALIDATION_FAILED,
@@ -350,11 +377,12 @@ class PluginPackageStore(
                 val target = staging.resolve(entry.name)
                 ensureChildPath(staging, target)
                 target.parentFile?.mkdirs()
-                val entryLimit = if (entry.name.startsWith(PluginContract.ASSET_PREFIX)) {
-                    PluginStorageLimits.MAX_ASSET_BYTES
-                } else {
-                    Long.MAX_VALUE
-                }
+                val entryLimit =
+                    if (entry.name.startsWith(PluginContract.ASSET_PREFIX)) {
+                        PluginStorageLimits.MAX_ASSET_BYTES
+                    } else {
+                        Long.MAX_VALUE
+                    }
                 zip.getInputStream(entry).use { input ->
                     FileOutputStream(target).use { output ->
                         val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
@@ -369,7 +397,8 @@ class PluginPackageStore(
                                     "Archive entry exceeds its size limit: ${entry.name}",
                                 )
                             }
-                            if (entry.name.startsWith(PluginContract.ASSET_PREFIX)) assetTotal += count
+                            if (entry.name.startsWith(PluginContract.ASSET_PREFIX))
+                                assetTotal += count
                             if (assetTotal > PluginStorageLimits.MAX_ASSET_TOTAL_BYTES) {
                                 throw PluginInstallException(
                                     PluginInstallErrorCode.PACKAGE_TOO_LARGE,
@@ -390,7 +419,9 @@ class PluginPackageStore(
         state.previousVersion?.let(keep::add)
         state.versions
             .sortedWith(
-                compareByDescending<PluginVersionRecord> { requireNotNull(SemVer.parse(it.version)) }
+                compareByDescending<PluginVersionRecord> {
+                        requireNotNull(SemVer.parse(it.version))
+                    }
                     .thenByDescending { it.installedAtMs }
             )
             .forEach { version ->
@@ -399,26 +430,39 @@ class PluginPackageStore(
         val toRemove = state.versions.map { it.version }.filter { it !in keep }
         toRemove.forEach { versionDirectory(directory, it).deleteRecursively() }
         if (toRemove.isEmpty()) return state
-        val pruned = state.copy(
-            versions = state.versions.filter { it.version !in toRemove },
-            updatedAtMs = clockMs(),
-        )
+        val pruned =
+            state.copy(
+                versions = state.versions.filter { it.version !in toRemove },
+                updatedAtMs = clockMs(),
+            )
         writeStateAtomically(directory, pruned)
         return pruned
     }
 
     private fun installedPlugin(directory: File, state: PluginState): InstalledPlugin {
         val activeDir = state.activeVersion?.let { versionDirectory(directory, it) }
-        val targetDir = activeDir ?: run {
-            val newestCompatible = state.versions
-                .filter { it.compatible }
-                .maxByOrNull { it.installedAtMs }
-                ?.version
-            newestCompatible?.let { versionDirectory(directory, it) }
-        }
-        val manifest = targetDir?.resolve(PluginContract.MANIFEST_PATH)?.takeIf { it.isFile }?.let { file ->
-            runCatching { json.decodeFromString<PluginManifest>(file.readText(StandardCharsets.UTF_8)) }.getOrNull()
-        }
+        val targetDir =
+            activeDir
+                ?: run {
+                    val newestCompatible =
+                        state.versions
+                            .filter { it.compatible }
+                            .maxByOrNull { it.installedAtMs }
+                            ?.version
+                    newestCompatible?.let { versionDirectory(directory, it) }
+                }
+        val manifest =
+            targetDir
+                ?.resolve(PluginContract.MANIFEST_PATH)
+                ?.takeIf { it.isFile }
+                ?.let { file ->
+                    runCatching {
+                            json.decodeFromString<PluginManifest>(
+                                file.readText(StandardCharsets.UTF_8)
+                            )
+                        }
+                        .getOrNull()
+                }
         return InstalledPlugin(
             state = state,
             directory = directory,
@@ -430,15 +474,27 @@ class PluginPackageStore(
     private fun readState(directory: File): PluginState? {
         val file = directory.resolve(STATE_FILE)
         if (!file.isFile) return null
-        return runCatching { json.decodeFromString<PluginState>(file.readText(StandardCharsets.UTF_8)) }
-            .getOrElse { throw PluginInstallException(PluginInstallErrorCode.STORAGE_FAILURE, "Invalid plugin state: ${file.path}", it) }
+        return runCatching {
+                json.decodeFromString<PluginState>(file.readText(StandardCharsets.UTF_8))
+            }
+            .getOrElse {
+                throw PluginInstallException(
+                    PluginInstallErrorCode.STORAGE_FAILURE,
+                    "Invalid plugin state: ${file.path}",
+                    it,
+                )
+            }
     }
 
     private fun writeStateAtomically(directory: File, state: PluginState) {
-        if (!directory.mkdirs() && !directory.isDirectory) throw IOException("Unable to create ${directory.path}")
+        if (!directory.mkdirs() && !directory.isDirectory)
+            throw IOException("Unable to create ${directory.path}")
         val temp = directory.resolve("$STATE_FILE.tmp-${UUID.randomUUID()}")
         try {
-            temp.writeText(json.encodeToString(PluginState.serializer(), state), StandardCharsets.UTF_8)
+            temp.writeText(
+                json.encodeToString(PluginState.serializer(), state),
+                StandardCharsets.UTF_8,
+            )
             moveAtomically(temp, directory.resolve(STATE_FILE))
         } finally {
             if (temp.exists()) temp.delete()
@@ -457,8 +513,10 @@ class PluginPackageStore(
         pluginDirectory.resolve("staging").resolve("$version-${UUID.randomUUID()}")
 
     private fun requireInstalledVersion(directory: File) {
-        if (!directory.isDirectory || !directory.resolve(PluginContract.ENTRY_PATH).isFile ||
-            !directory.resolve(PluginContract.MANIFEST_PATH).isFile
+        if (
+            !directory.isDirectory ||
+                !directory.resolve(PluginContract.ENTRY_PATH).isFile ||
+                !directory.resolve(PluginContract.MANIFEST_PATH).isFile
         ) {
             throw PluginInstallException(
                 PluginInstallErrorCode.STORAGE_FAILURE,
@@ -480,7 +538,8 @@ class PluginPackageStore(
 
     private fun moveAtomically(source: File, target: File) {
         target.parentFile?.let { parent ->
-            if (!parent.mkdirs() && !parent.isDirectory) throw IOException("Unable to create ${parent.path}")
+            if (!parent.mkdirs() && !parent.isDirectory)
+                throw IOException("Unable to create ${parent.path}")
         }
         try {
             try {
@@ -547,7 +606,8 @@ object PluginIds {
 
 internal object PluginPaths {
     fun isSafeArchivePath(value: String): Boolean {
-        if (value.isEmpty() || value.startsWith('/') || value.contains('\\') || value.contains(':')) return false
+        if (value.isEmpty() || value.startsWith('/') || value.contains('\\') || value.contains(':'))
+            return false
         val path = value.removeSuffix("/")
         if (path.isEmpty()) return false
         return path.split('/').none { it.isEmpty() || it == "." || it == ".." }

@@ -1,18 +1,18 @@
 package com.exio.inkleaf.plugin
 
 import java.nio.charset.StandardCharsets
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.encodeToJsonElement
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.withContext
 
 @Serializable
 data class PluginDescribeResponse(
@@ -47,8 +47,7 @@ data class PluginFilterDescriptor(
     val options: List<PluginFilterOption> = emptyList(),
 )
 
-@Serializable
-data class PluginFilterOption(val id: String, val title: String)
+@Serializable data class PluginFilterOption(val id: String, val title: String)
 
 @Serializable
 data class PluginSettingDescriptor(
@@ -193,7 +192,8 @@ object PluginContentCodec {
             is PluginChapterRequest -> json.encodeToJsonElement(value)
             is PluginPagesRequest -> json.encodeToJsonElement(value)
             is PluginActionRequest -> json.encodeToJsonElement(value)
-            else -> throw IllegalArgumentException("Unsupported plugin DTO: ${value::class.java.name}")
+            else ->
+                throw IllegalArgumentException("Unsupported plugin DTO: ${value::class.java.name}")
         }
 
     fun describe(value: JsonElement): PluginDescribeResponse =
@@ -258,18 +258,23 @@ object PluginContentCodec {
         }
 
     fun actionResult(value: JsonElement): JsonElement {
-        if (value.toString().toByteArray(StandardCharsets.UTF_8).size > PluginContentLimits.MAX_ACTION_RESULT_BYTES) {
+        if (
+            value.toString().toByteArray(StandardCharsets.UTF_8).size >
+                PluginContentLimits.MAX_ACTION_RESULT_BYTES
+        ) {
             throw PluginContentValidationException("Action result exceeds the host limit")
         }
         return value
     }
 
     private fun normalizeDescribe(value: PluginDescribeResponse): PluginDescribeResponse {
-        if (value.schemaVersion != 1) throw PluginContentValidationException("Unsupported descriptor schema")
-        if (value.actions.size > PluginContentLimits.MAX_DESCRIPTORS ||
-            value.feeds.size > PluginContentLimits.MAX_DESCRIPTORS ||
-            value.filters.size > PluginContentLimits.MAX_DESCRIPTORS ||
-            value.settings.size > PluginContentLimits.MAX_DESCRIPTORS
+        if (value.schemaVersion != 1)
+            throw PluginContentValidationException("Unsupported descriptor schema")
+        if (
+            value.actions.size > PluginContentLimits.MAX_DESCRIPTORS ||
+                value.feeds.size > PluginContentLimits.MAX_DESCRIPTORS ||
+                value.filters.size > PluginContentLimits.MAX_DESCRIPTORS ||
+                value.settings.size > PluginContentLimits.MAX_DESCRIPTORS
         ) {
             throw PluginContentValidationException("Descriptor contains too many entries")
         }
@@ -288,7 +293,9 @@ object PluginContentCodec {
                 .filter { it.type == "select" }
                 .forEach { filter ->
                     if (filter.options.isEmpty()) {
-                        throw PluginContentValidationException("Select feed filters require options")
+                        throw PluginContentValidationException(
+                            "Select feed filters require options"
+                        )
                     }
                 }
         }
@@ -302,9 +309,12 @@ object PluginContentCodec {
             validateText(setting.title, "setting.title", 256)
         }
         return value.copy(
-            feeds = value.feeds.map { feed ->
-                feed.copy(filters = feed.filters.filter { it.type in SUPPORTED_FEED_FILTER_TYPES })
-            },
+            feeds =
+                value.feeds.map { feed ->
+                    feed.copy(
+                        filters = feed.filters.filter { it.type in SUPPORTED_FEED_FILTER_TYPES }
+                    )
+                },
             actions = value.actions.filter { it.kind in SUPPORTED_ACTION_KINDS },
             filters = value.filters.filter { it.type in SUPPORTED_FILTER_TYPES },
             settings = value.settings.filter { it.type in SUPPORTED_SETTING_TYPES },
@@ -354,7 +364,8 @@ object PluginContentCodec {
     }
 
     private fun validatePluginId(pluginId: String) {
-        if (!PluginIds.isValid(pluginId)) throw PluginContentValidationException("Invalid plugin id")
+        if (!PluginIds.isValid(pluginId))
+            throw PluginContentValidationException("Invalid plugin id")
     }
 
     private fun validateId(value: String, field: String) {
@@ -383,22 +394,31 @@ object PluginContentCodec {
     }
 
     private fun validateHeaders(headers: Map<String, String>, field: String) {
-        if (headers.size > 64 || headers.keys.any { it.isBlank() || it.length > 256 } ||
-            headers.values.any { it.length > 16 * 1024 } ||
-            headers.keys.any { !HEADER_NAME_PATTERN.matches(it) } ||
-            headers.values.any { value -> value.any { it != '\t' && it !in '\u0020'..'\u007e' } }
+        if (
+            headers.size > 64 ||
+                headers.keys.any { it.isBlank() || it.length > 256 } ||
+                headers.values.any { it.length > 16 * 1024 } ||
+                headers.keys.any { !HEADER_NAME_PATTERN.matches(it) } ||
+                headers.values.any { value ->
+                    value.any { it != '\t' && it !in '\u0020'..'\u007e' }
+                }
         ) {
             throw PluginContentValidationException("$field exceeds the host limit")
         }
     }
 
     private fun validateOpaque(value: JsonElement?) {
-        if (value != null && value.toString().toByteArray(StandardCharsets.UTF_8).size > PluginContentLimits.MAX_OPAQUE_BYTES) {
+        if (
+            value != null &&
+                value.toString().toByteArray(StandardCharsets.UTF_8).size >
+                    PluginContentLimits.MAX_OPAQUE_BYTES
+        ) {
             throw PluginContentValidationException("Opaque context is too large")
         }
     }
 
-    private val SUPPORTED_ACTION_KINDS = setOf("action", "login", "logout", "clearSession", "verifyCredentials")
+    private val SUPPORTED_ACTION_KINDS =
+        setOf("action", "login", "logout", "clearSession", "verifyCredentials")
     private val SUPPORTED_FEED_FILTER_TYPES = setOf("select")
     private val SUPPORTED_FILTER_TYPES = setOf("text", "select", "multiSelect", "boolean")
     private val SUPPORTED_SETTING_TYPES = setOf("text", "secret", "boolean", "select")
@@ -415,9 +435,7 @@ object PluginContentLimits {
 }
 
 /** Small source-aware facade used by discovery/search UI and manual diagnostics. */
-class PluginCatalog(
-    private val runtimeManager: PluginRuntimeManager,
-) {
+class PluginCatalog(private val runtimeManager: PluginRuntimeManager) {
     suspend fun describe(pluginId: String): PluginDescribeResponse {
         val result = runtimeManager.describe(pluginId)
         return withContext(Dispatchers.Default) { PluginContentCodec.describe(result) }
@@ -429,55 +447,89 @@ class PluginCatalog(
     ): List<PluginSearchResult> = request.run {
         require(query.length <= 512) { "Search query is too long" }
         val boundedLimit = limit.coerceIn(1, PluginContentLimits.MAX_SEARCH_ITEMS)
-        val selectedPluginIds = pluginIds ?: withContext(Dispatchers.IO) {
-            runtimeManager.installedPlugins()
-                .filter { !it.state.disabled && it.state.health == PluginHealth.HEALTHY && it.state.activeVersion != null }
-                .map { it.state.pluginId }
-        }
+        val selectedPluginIds =
+            pluginIds
+                ?: withContext(Dispatchers.IO) {
+                    runtimeManager
+                        .installedPlugins()
+                        .filter {
+                            !it.state.disabled &&
+                                it.state.health == PluginHealth.HEALTHY &&
+                                it.state.activeVersion != null
+                        }
+                        .map { it.state.pluginId }
+                }
         coroutineScope {
-            selectedPluginIds.distinct().map { pluginId ->
-                async {
-                    try {
-                        val params = copy(limit = boundedLimit)
-                        val result = runtimeManager.invoke(pluginId, "search", PluginContentCodec.encode(params))
-                        PluginSearchResult(
-                            pluginId,
-                            withContext(Dispatchers.Default) { PluginContentCodec.searchPage(result, pluginId) },
-                        )
-                    } catch (error: CancellationException) {
-                        throw error
-                    } catch (error: Throwable) {
-                        val rpcError = if (error is PluginRpcException) error.error else PluginRpcError(
-                            PluginErrorCode.PLUGIN_PROTOCOL,
-                            error.message ?: "Search failed",
-                        )
-                        PluginSearchResult(pluginId, error = rpcError)
+            selectedPluginIds
+                .distinct()
+                .map { pluginId ->
+                    async {
+                        try {
+                            val params = copy(limit = boundedLimit)
+                            val result =
+                                runtimeManager.invoke(
+                                    pluginId,
+                                    "search",
+                                    PluginContentCodec.encode(params),
+                                )
+                            PluginSearchResult(
+                                pluginId,
+                                withContext(Dispatchers.Default) {
+                                    PluginContentCodec.searchPage(result, pluginId)
+                                },
+                            )
+                        } catch (error: CancellationException) {
+                            throw error
+                        } catch (error: Throwable) {
+                            val rpcError =
+                                if (error is PluginRpcException) error.error
+                                else
+                                    PluginRpcError(
+                                        PluginErrorCode.PLUGIN_PROTOCOL,
+                                        error.message ?: "Search failed",
+                                    )
+                            PluginSearchResult(pluginId, error = rpcError)
+                        }
                     }
                 }
-            }.awaitAll()
+                .awaitAll()
         }
     }
 
-    suspend fun browse(pluginId: String, request: PluginBrowseRequest): PluginSearchPage = request.run {
-        require(feedId.isNotBlank() && feedId.length <= 512 && feedId.none(Char::isISOControl)) {
-            "Invalid feed id"
+    suspend fun browse(pluginId: String, request: PluginBrowseRequest): PluginSearchPage =
+        request.run {
+            require(
+                feedId.isNotBlank() && feedId.length <= 512 && feedId.none(Char::isISOControl)
+            ) {
+                "Invalid feed id"
+            }
+            require(cursor == null || cursor.length <= 4096 && cursor.none(Char::isISOControl)) {
+                "Invalid browse cursor"
+            }
+            require(filters.size <= PluginContentLimits.MAX_DESCRIPTORS) {
+                "Too many browse filters"
+            }
+            require(
+                filters.all { (key, value) ->
+                    key.isNotBlank() &&
+                        key.length <= 512 &&
+                        key.none(Char::isISOControl) &&
+                        value.length <= 4096 &&
+                        value.none(Char::isISOControl)
+                }
+            ) {
+                "Invalid browse filters"
+            }
+            val params = copy(limit = limit.coerceIn(1, PluginContentLimits.MAX_SEARCH_ITEMS))
+            val result =
+                runtimeManager.invoke(pluginId, "browse", PluginContentCodec.encode(params))
+            withContext(Dispatchers.Default) { PluginContentCodec.browsePage(result, pluginId) }
         }
-        require(cursor == null || cursor.length <= 4096 && cursor.none(Char::isISOControl)) {
-            "Invalid browse cursor"
-        }
-        require(filters.size <= PluginContentLimits.MAX_DESCRIPTORS) { "Too many browse filters" }
-        require(filters.all { (key, value) ->
-            key.isNotBlank() && key.length <= 512 && key.none(Char::isISOControl) &&
-                value.length <= 4096 && value.none(Char::isISOControl)
-        }) { "Invalid browse filters" }
-        val params = copy(limit = limit.coerceIn(1, PluginContentLimits.MAX_SEARCH_ITEMS))
-        val result = runtimeManager.invoke(pluginId, "browse", PluginContentCodec.encode(params))
-        withContext(Dispatchers.Default) { PluginContentCodec.browsePage(result, pluginId) }
-    }
 
     suspend fun detail(pluginId: String, request: PluginDetailRequest): ComicDetail {
         val result = runtimeManager.invoke(pluginId, "detail", PluginContentCodec.encode(request))
-        val detail = withContext(Dispatchers.Default) { PluginContentCodec.detail(result, pluginId) }
+        val detail =
+            withContext(Dispatchers.Default) { PluginContentCodec.detail(result, pluginId) }
         if (detail.sourceId != request.sourceId) {
             throw PluginContentValidationException("Detail sourceId does not match the request")
         }
@@ -486,7 +538,8 @@ class PluginCatalog(
 
     suspend fun chapters(pluginId: String, request: PluginChapterRequest): PluginChaptersResponse {
         val result = runtimeManager.invoke(pluginId, "chapters", PluginContentCodec.encode(request))
-        val chapters = withContext(Dispatchers.Default) { PluginContentCodec.chapters(result, pluginId) }
+        val chapters =
+            withContext(Dispatchers.Default) { PluginContentCodec.chapters(result, pluginId) }
         if (chapters.sourceId != request.sourceId) {
             throw PluginContentValidationException("Chapters sourceId does not match the request")
         }

@@ -12,13 +12,26 @@ data class SemVer(
 ) : Comparable<SemVer> {
     sealed interface Identifier {
         data class Numeric(val value: BigInteger) : Identifier
+
         data class Text(val value: String) : Identifier
     }
 
     override fun compareTo(other: SemVer): Int {
-        compareValues(major, other.major).takeIf { it != 0 }?.let { return it }
-        compareValues(minor, other.minor).takeIf { it != 0 }?.let { return it }
-        compareValues(patch, other.patch).takeIf { it != 0 }?.let { return it }
+        compareValues(major, other.major)
+            .takeIf { it != 0 }
+            ?.let {
+                return it
+            }
+        compareValues(minor, other.minor)
+            .takeIf { it != 0 }
+            ?.let {
+                return it
+            }
+        compareValues(patch, other.patch)
+            .takeIf { it != 0 }
+            ?.let {
+                return it
+            }
 
         if (prerelease.isEmpty() && other.prerelease.isEmpty()) return 0
         if (prerelease.isEmpty()) return 1
@@ -57,11 +70,7 @@ data class SemVer(
             val minor = match.groupValues[2].toBigIntegerOrNull() ?: return null
             val patch = match.groupValues[3].toBigIntegerOrNull() ?: return null
             val prerelease = parseIdentifiers(match.groupValues[4]) ?: return null
-            val build =
-                match.groupValues[5]
-                    .takeIf { it.isNotEmpty() }
-                    ?.split('.')
-                    ?: emptyList()
+            val build = match.groupValues[5].takeIf { it.isNotEmpty() }?.split('.') ?: emptyList()
             return SemVer(major, minor, patch, prerelease, build)
         }
 
@@ -83,7 +92,8 @@ data class SemVer(
                     left.value.compareTo(right.value)
                 left is Identifier.Numeric && right is Identifier.Text -> -1
                 left is Identifier.Text && right is Identifier.Numeric -> 1
-                left is Identifier.Text && right is Identifier.Text -> left.value.compareTo(right.value)
+                left is Identifier.Text && right is Identifier.Text ->
+                    left.value.compareTo(right.value)
                 else -> 0
             }
 

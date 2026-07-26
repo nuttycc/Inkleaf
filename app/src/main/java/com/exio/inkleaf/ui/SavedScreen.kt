@@ -59,8 +59,8 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.LifecycleResumeEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
@@ -496,7 +496,8 @@ private fun OnlineBookmarkThumbnail(
     Box(
         contentAlignment = Alignment.Center,
         modifier =
-            modifier.clip(RoundedCornerShape(4.dp))
+            modifier
+                .clip(RoundedCornerShape(4.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant),
     ) {
         if (request != null) {

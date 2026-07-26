@@ -28,11 +28,14 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Navigation-scoped state holder for the comic discovery surface.
- * Retains browse and search state across SourcesScreen and bottom-tab navigation.
+ * Navigation-scoped state holder for the comic discovery surface. Retains browse and search state
+ * across SourcesScreen and bottom-tab navigation.
  */
 class DiscoverViewModel : ViewModel() {
-    enum class Mode { BROWSE, SEARCH }
+    enum class Mode {
+        BROWSE,
+        SEARCH,
+    }
 
     data class Feed(
         val pluginId: String,
@@ -55,7 +58,10 @@ class DiscoverViewModel : ViewModel() {
         val error: String? = null,
     )
 
-    private enum class BrowseFailure { FIRST_PAGE, NEXT_PAGE }
+    private enum class BrowseFailure {
+        FIRST_PAGE,
+        NEXT_PAGE,
+    }
 
     private val _mode = MutableStateFlow(Mode.BROWSE)
     val mode: StateFlow<Mode> = _mode.asStateFlow()
@@ -105,16 +111,18 @@ class DiscoverViewModel : ViewModel() {
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
-    private val browseSessions = object : LinkedHashMap<PluginBrowseCacheKey, BrowseSessionSnapshot>(16, 0.75f, true) {
-        override fun removeEldestEntry(
-            eldest: MutableMap.MutableEntry<PluginBrowseCacheKey, BrowseSessionSnapshot>?,
-        ): Boolean = size > MAX_BROWSE_SESSIONS
-    }
-    private val browseFiltersByFeed = object : LinkedHashMap<String, Map<String, String>>(16, 0.75f, true) {
-        override fun removeEldestEntry(
-            eldest: MutableMap.MutableEntry<String, Map<String, String>>?,
-        ): Boolean = size > MAX_BROWSE_SESSIONS
-    }
+    private val browseSessions =
+        object : LinkedHashMap<PluginBrowseCacheKey, BrowseSessionSnapshot>(16, 0.75f, true) {
+            override fun removeEldestEntry(
+                eldest: MutableMap.MutableEntry<PluginBrowseCacheKey, BrowseSessionSnapshot>?
+            ): Boolean = size > MAX_BROWSE_SESSIONS
+        }
+    private val browseFiltersByFeed =
+        object : LinkedHashMap<String, Map<String, String>>(16, 0.75f, true) {
+            override fun removeEldestEntry(
+                eldest: MutableMap.MutableEntry<String, Map<String, String>>?
+            ): Boolean = size > MAX_BROWSE_SESSIONS
+        }
     private var currentBrowseKey: PluginBrowseCacheKey? = null
     private var loadedFeedSignature: List<String>? = null
     private var browseFailure: BrowseFailure? = null
@@ -153,10 +161,11 @@ class DiscoverViewModel : ViewModel() {
         availablePlugins: List<InstalledPlugin>,
         force: Boolean = false,
     ) {
-        val signature = availablePlugins
-            .filter { PluginCapabilities.BROWSE in it.manifest?.capabilities.orEmpty() }
-            .map { "${it.state.pluginId}:${it.state.activeVersion}" }
-            .sorted()
+        val signature =
+            availablePlugins
+                .filter { PluginCapabilities.BROWSE in it.manifest?.capabilities.orEmpty() }
+                .map { "${it.state.pluginId}:${it.state.activeVersion}" }
+                .sorted()
         if (!force && loadedFeedSignature == signature) {
             if (_mode.value == Mode.BROWSE) ensureCurrentBrowseFresh(browseRepository)
             return
@@ -176,38 +185,50 @@ class DiscoverViewModel : ViewModel() {
                             async {
                                 try {
                                     FeedLoadResult(
-                                        feeds = catalog.describe(plugin.state.pluginId).feeds.map { descriptor ->
-                                            Feed(
-                                                pluginId = plugin.state.pluginId,
-                                                pluginName = plugin.manifest?.name ?: plugin.state.pluginId,
-                                                pluginVersion = plugin.state.activeVersion.orEmpty(),
-                                                descriptor = descriptor,
-                                            )
-                                        },
+                                        feeds =
+                                            catalog.describe(plugin.state.pluginId).feeds.map {
+                                                descriptor ->
+                                                Feed(
+                                                    pluginId = plugin.state.pluginId,
+                                                    pluginName =
+                                                        plugin.manifest?.name
+                                                            ?: plugin.state.pluginId,
+                                                    pluginVersion =
+                                                        plugin.state.activeVersion.orEmpty(),
+                                                    descriptor = descriptor,
+                                                )
+                                            }
                                     )
                                 } catch (error: CancellationException) {
                                     throw error
                                 } catch (error: Throwable) {
                                     FeedLoadResult(
                                         feeds = emptyList(),
-                                        error = "${plugin.manifest?.name ?: plugin.state.pluginId}: " +
-                                            (error.message ?: "无法读取内容流"),
+                                        error =
+                                            "${plugin.manifest?.name ?: plugin.state.pluginId}: " +
+                                                (error.message ?: "无法读取内容流"),
                                     )
                                 }
                             }
-                        }.awaitAll()
+                        }
+                        .awaitAll()
                 }
                 if (generation == feedLoadGeneration) {
                     val discoveredFeeds = loadResults.flatMap { it.feeds }
                     loadedFeedSignature = signature
-                    _feedLoadError.value = loadResults.mapNotNull { it.error }.takeIf { it.isNotEmpty() }
-                        ?.joinToString("\n")
+                    _feedLoadError.value =
+                        loadResults
+                            .mapNotNull { it.error }
+                            .takeIf { it.isNotEmpty() }
+                            ?.joinToString("\n")
                     _feeds.value = discoveredFeeds
-                    val selected = discoveredFeeds.firstOrNull { it.key == _selectedFeedKey.value }
-                        ?: discoveredFeeds.firstOrNull()
-                    if (selected?.key != _selectedFeedKey.value ||
-                        selected?.pluginVersion != previousSelected?.pluginVersion ||
-                        selected?.descriptor != previousSelected?.descriptor
+                    val selected =
+                        discoveredFeeds.firstOrNull { it.key == _selectedFeedKey.value }
+                            ?: discoveredFeeds.firstOrNull()
+                    if (
+                        selected?.key != _selectedFeedKey.value ||
+                            selected?.pluginVersion != previousSelected?.pluginVersion ||
+                            selected?.descriptor != previousSelected?.descriptor
                     ) {
                         selectFeed(browseRepository, selected?.key)
                     }
@@ -269,7 +290,8 @@ class DiscoverViewModel : ViewModel() {
 
     fun togglePluginSelection(pluginId: String, availablePluginIds: List<String>) {
         val current = _selectedPluginIds.value ?: availablePluginIds.toSet()
-        _selectedPluginIds.value = if (pluginId in current) current - pluginId else current + pluginId
+        _selectedPluginIds.value =
+            if (pluginId in current) current - pluginId else current + pluginId
     }
 
     fun selectAllPlugins(availablePluginIds: List<String>) {
@@ -280,13 +302,18 @@ class DiscoverViewModel : ViewModel() {
         val currentQuery = _query.value.trim()
         if (currentQuery.isBlank()) return
 
-        val activeHealthyIds = availablePlugins
-            .filter { !it.state.disabled && it.state.health == PluginHealth.HEALTHY && it.state.activeVersion != null }
-            .map { it.state.pluginId }
+        val activeHealthyIds =
+            availablePlugins
+                .filter {
+                    !it.state.disabled &&
+                        it.state.health == PluginHealth.HEALTHY &&
+                        it.state.activeVersion != null
+                }
+                .map { it.state.pluginId }
         if (activeHealthyIds.isEmpty()) return
 
-        val targetIds = (_selectedPluginIds.value ?: activeHealthyIds.toSet())
-            .filter { it in activeHealthyIds }
+        val targetIds =
+            (_selectedPluginIds.value ?: activeHealthyIds.toSet()).filter { it in activeHealthyIds }
         if (targetIds.isEmpty()) {
             searchJob?.cancel()
             _results.value = emptyList()
@@ -301,10 +328,11 @@ class DiscoverViewModel : ViewModel() {
             _isSearching.value = true
             _errorMessage.value = null
             try {
-                val result = catalog.search(
-                    PluginSearchRequest(query = currentQuery),
-                    pluginIds = targetIds,
-                )
+                val result =
+                    catalog.search(
+                        PluginSearchRequest(query = currentQuery),
+                        pluginIds = targetIds,
+                    )
                 if (generation == searchGeneration && _query.value.trim() == currentQuery) {
                     _results.value = result
                 }
@@ -339,9 +367,10 @@ class DiscoverViewModel : ViewModel() {
         val session = key?.let(browseSessions::get)
         _browseItems.value = session?.items.orEmpty()
         _browseNextCursor.value = session?.nextCursor
-        if (_mode.value == Mode.BROWSE &&
-            key != null &&
-            (session == null || !repository.isFresh(session.firstPageFetchedAtMs))
+        if (
+            _mode.value == Mode.BROWSE &&
+                key != null &&
+                (session == null || !repository.isFresh(session.firstPageFetchedAtMs))
         ) {
             loadBrowseFirstPage(repository, force = false)
         }
@@ -375,12 +404,14 @@ class DiscoverViewModel : ViewModel() {
                 }
                 if (!force && cached != null && repository.isFresh(cached)) return@launch
 
-                val refreshed = repository.refreshFirstPage(
-                    key = key,
-                    request = PluginBrowseRequest(feedId = feed.descriptor.id, filters = filters),
-                    expectedRevision = cached?.revision,
-                    force = force,
-                )
+                val refreshed =
+                    repository.refreshFirstPage(
+                        key = key,
+                        request =
+                            PluginBrowseRequest(feedId = feed.descriptor.id, filters = filters),
+                        expectedRevision = cached?.revision,
+                        force = force,
+                    )
                 if (generation == browseGeneration && key == currentBrowseKey) {
                     publishFirstPage(key, refreshed)
                 }
@@ -411,25 +442,28 @@ class DiscoverViewModel : ViewModel() {
             _browseError.value = null
             browseFailure = null
             try {
-                val page = repository.loadPage(
-                    feed.pluginId,
-                    PluginBrowseRequest(
-                        feedId = feed.descriptor.id,
-                        cursor = cursor,
-                        filters = filters,
-                    ),
-                )
+                val page =
+                    repository.loadPage(
+                        feed.pluginId,
+                        PluginBrowseRequest(
+                            feedId = feed.descriptor.id,
+                            cursor = cursor,
+                            filters = filters,
+                        ),
+                    )
                 if (generation == browseGeneration && key == currentBrowseKey) {
-                    _browseItems.value = (_browseItems.value + page.items).distinctBy { it.sourceId }
+                    _browseItems.value =
+                        (_browseItems.value + page.items).distinctBy { it.sourceId }
                     _browseNextCursor.value = page.nextCursor
                     val firstPageFetchedAt = browseSessions[key]?.firstPageFetchedAtMs ?: 0L
                     val firstPageRevision = browseSessions[key]?.firstPageRevision.orEmpty()
-                    browseSessions[key] = BrowseSessionSnapshot(
-                        items = _browseItems.value,
-                        nextCursor = page.nextCursor,
-                        firstPageFetchedAtMs = firstPageFetchedAt,
-                        firstPageRevision = firstPageRevision,
-                    )
+                    browseSessions[key] =
+                        BrowseSessionSnapshot(
+                            items = _browseItems.value,
+                            nextCursor = page.nextCursor,
+                            firstPageFetchedAtMs = firstPageFetchedAt,
+                            firstPageRevision = firstPageRevision,
+                        )
                 }
             } catch (error: CancellationException) {
                 throw error
@@ -449,34 +483,41 @@ class DiscoverViewModel : ViewModel() {
     private fun publishFirstPage(key: PluginBrowseCacheKey, snapshot: PluginBrowseCacheSnapshot) {
         _browseItems.value = snapshot.page.items
         _browseNextCursor.value = snapshot.page.nextCursor
-        browseSessions[key] = BrowseSessionSnapshot(
-            items = snapshot.page.items,
-            nextCursor = snapshot.page.nextCursor,
-            firstPageFetchedAtMs = snapshot.fetchedAtMs,
-            firstPageRevision = snapshot.revision,
-        )
+        browseSessions[key] =
+            BrowseSessionSnapshot(
+                items = snapshot.page.items,
+                nextCursor = snapshot.page.nextCursor,
+                firstPageFetchedAtMs = snapshot.fetchedAtMs,
+                firstPageRevision = snapshot.revision,
+            )
     }
 
-    private fun selectedFeed(): Feed? = _feeds.value.firstOrNull { it.key == _selectedFeedKey.value }
+    private fun selectedFeed(): Feed? =
+        _feeds.value.firstOrNull { it.key == _selectedFeedKey.value }
 
-    private fun Feed.cacheKey(filters: Map<String, String>) = PluginBrowseCacheKey(
-        pluginId = pluginId,
-        pluginVersion = pluginVersion,
-        feedId = descriptor.id,
-        filters = filters,
-    )
+    private fun Feed.cacheKey(filters: Map<String, String>) =
+        PluginBrowseCacheKey(
+            pluginId = pluginId,
+            pluginVersion = pluginVersion,
+            feedId = descriptor.id,
+            filters = filters,
+        )
 
     private val Feed.sessionKey: String
         get() = "$pluginId\n$pluginVersion\n${descriptor.id}"
 
     private fun Feed.selectedFilters(): Map<String, String> {
         val remembered = browseFiltersByFeed[sessionKey].orEmpty()
-        return descriptor.filters.mapNotNull { filter ->
-            val optionId = remembered[filter.id]
-                ?.takeIf { candidate -> filter.options.any { it.id == candidate } }
-                ?: filter.options.firstOrNull()?.id
-            optionId?.let { filter.id to it }
-        }.toMap().also { browseFiltersByFeed[sessionKey] = it }
+        return descriptor.filters
+            .mapNotNull { filter ->
+                val optionId =
+                    remembered[filter.id]?.takeIf { candidate ->
+                        filter.options.any { it.id == candidate }
+                    } ?: filter.options.firstOrNull()?.id
+                optionId?.let { filter.id to it }
+            }
+            .toMap()
+            .also { browseFiltersByFeed[sessionKey] = it }
     }
 
     private companion object {

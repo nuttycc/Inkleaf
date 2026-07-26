@@ -123,15 +123,14 @@ internal class OnlineChapterVolume(
 
                     override fun onResponse(call: Call, response: Response) {
                         calls -= call
-                        val result =
-                            runCatching {
-                                response.use {
-                                    if (!it.isSuccessful) {
-                                        throw ComicOpenException("页面请求失败（HTTP ${it.code}）")
-                                    }
-                                    it.body?.bytes() ?: throw ComicOpenException("页面响应为空")
+                        val result = runCatching {
+                            response.use {
+                                if (!it.isSuccessful) {
+                                    throw ComicOpenException("页面请求失败（HTTP ${it.code}）")
                                 }
+                                it.body?.bytes() ?: throw ComicOpenException("页面响应为空")
                             }
+                        }
                         result.fold(
                             onSuccess = { bytes ->
                                 continuation.resume(bytes) { _, _, _ -> }
@@ -152,8 +151,12 @@ internal fun resolveOnlineChapterRevision(
     requestedRevision: String?,
     response: PluginPagesResponse,
 ): String {
-    response.revision?.takeIf(String::isNotBlank)?.let { return it }
-    requestedRevision?.takeIf(String::isNotBlank)?.let { return it }
+    response.revision?.takeIf(String::isNotBlank)?.let {
+        return it
+    }
+    requestedRevision?.takeIf(String::isNotBlank)?.let {
+        return it
+    }
     val pageIds = response.pages.map { it.pageId?.takeIf(String::isNotBlank) }
     if (pageIds.any { it == null }) {
         throw ComicOpenException("插件页面缺少稳定 ID，且未提供章节版本")
@@ -167,6 +170,7 @@ internal fun resolveOnlineChapterRevision(
     return "page-ids:${digest.digest().toLowerHex()}"
 }
 
-private fun ByteArray.toLowerHex(): String = joinToString(separator = "") { byte ->
-    "%02x".format(byte.toInt() and 0xff)
-}
+private fun ByteArray.toLowerHex(): String =
+    joinToString(separator = "") { byte ->
+        "%02x".format(byte.toInt() and 0xff)
+    }

@@ -23,24 +23,24 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
-import kotlinx.coroutines.CoroutineScope
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.decodeFromString
-import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
 
 interface PluginRuntime : AutoCloseable {
     val pluginId: String
@@ -75,73 +75,93 @@ class AndroidJavaScriptPluginRuntime(
     suspend fun start() {
         check(!closed.get()) { "Plugin runtime is closed" }
         ensureFeatureGate(sandbox)
-        val startup = IsolateStartupParameters().apply {
-            setMaxHeapSizeBytes(PluginRuntimePolicy.JS_HEAP_BYTES)
-            setMaxEvaluationReturnSizeBytes(PluginRuntimePolicy.MAX_EVALUATION_RETURN_BYTES)
-        }
+        val startup =
+            IsolateStartupParameters().apply {
+                setMaxHeapSizeBytes(PluginRuntimePolicy.JS_HEAP_BYTES)
+                setMaxEvaluationReturnSizeBytes(PluginRuntimePolicy.MAX_EVALUATION_RETURN_BYTES)
+            }
         val createdIsolate = sandbox.createIsolate(startup)
         isolate = createdIsolate
-        val callback = Consumer<TerminationInfo> { info ->
-            rpc?.failAll(
-                PluginRpcException(
-                    PluginRpcError(
-                        PluginErrorCode.RUNTIME_TERMINATED,
-                        "Plugin isolate terminated: ${info.statusString}",
+        val callback =
+            Consumer<TerminationInfo> { info ->
+                rpc?.failAll(
+                    PluginRpcException(
+                        PluginRpcError(
+                            PluginErrorCode.RUNTIME_TERMINATED,
+                            "Plugin isolate terminated: ${info.statusString}",
+                        )
                     )
                 )
-            )
-            onTerminated(info)
-        }
+                onTerminated(info)
+            }
         terminationCallback = callback
         createdIsolate.addOnTerminatedCallback(callbackExecutor, callback)
 
         val portName = "inkleaf-${pluginId.hashCode().toUInt().toString(16)}-${UUID.randomUUID()}"
-        val createdPort = createdIsolate.createMessageChannel(
-            portName,
-            callbackExecutor,
-            object : MessagePortClient {
-                override fun onMessage(message: Message) {
-                    val client = rpc ?: return
-                    if (message.type != Message.TYPE_STRING) {
-                        client.failAll(
-                            PluginRpcException(
-                                PluginRpcError(PluginErrorCode.PLUGIN_PROTOCOL, "Only string RPC messages are supported")
+        val createdPort =
+            createdIsolate.createMessageChannel(
+                portName,
+                callbackExecutor,
+                object : MessagePortClient {
+                    override fun onMessage(message: Message) {
+                        val client = rpc ?: return
+                        if (message.type != Message.TYPE_STRING) {
+                            client.failAll(
+                                PluginRpcException(
+                                    PluginRpcError(
+                                        PluginErrorCode.PLUGIN_PROTOCOL,
+                                        "Only string RPC messages are supported",
+                                    )
+                                )
                             )
-                        )
-                        return
+                            return
+                        }
+                        client.onMessage(message.string)
                     }
-                    client.onMessage(message.string)
-                }
-            },
-        )
+                },
+            )
         port = createdPort
         val transport = PluginRpcTransport { encoded ->
             createdPort.postMessage(Message.createStringMessage(encoded))
         }
-        val client = PluginRpcClient(
-            transport = transport,
-            hostHandler = hostSession,
-            scope = runtimeScope,
-        )
+        val client =
+            PluginRpcClient(
+                transport = transport,
+                hostHandler = hostSession,
+                scope = runtimeScope,
+            )
         rpc = client
         try {
-            val (script, manifest) = withContext(Dispatchers.IO) {
-                val loadedScript = versionDirectory.resolve(PluginContract.ENTRY_PATH).readText(StandardCharsets.UTF_8)
-                val loadedManifest = runtimeJson.decodeFromString<PluginManifest>(
-                    versionDirectory.resolve(PluginContract.MANIFEST_PATH).readText(StandardCharsets.UTF_8)
-                )
-                loadedScript to loadedManifest
-            }
+            val (script, manifest) =
+                withContext(Dispatchers.IO) {
+                    val loadedScript =
+                        versionDirectory
+                            .resolve(PluginContract.ENTRY_PATH)
+                            .readText(StandardCharsets.UTF_8)
+                    val loadedManifest =
+                        runtimeJson.decodeFromString<PluginManifest>(
+                            versionDirectory
+                                .resolve(PluginContract.MANIFEST_PATH)
+                                .readText(StandardCharsets.UTF_8)
+                        )
+                    loadedScript to loadedManifest
+                }
             val requiredMethods = buildSet {
                 add("describe")
                 addAll(manifest.capabilities.filter { it in PluginCapabilities.declaredMethods })
             }
-            val bootstrapResult = createdIsolate.evaluateJavaScriptAsync(
-                PluginBootstrap.script(script, portName, requiredMethods)
-            ).awaitJavaScript()
+            val bootstrapResult =
+                createdIsolate
+                    .evaluateJavaScriptAsync(
+                        PluginBootstrap.script(script, portName, requiredMethods)
+                    )
+                    .awaitJavaScript()
             if (bootstrapResult != "BOOTSTRAPPED") {
                 throw PluginRpcException(
-                    PluginRpcError(PluginErrorCode.PLUGIN_PROTOCOL, "Plugin bootstrap returned an unexpected value")
+                    PluginRpcError(
+                        PluginErrorCode.PLUGIN_PROTOCOL,
+                        "Plugin bootstrap returned an unexpected value",
+                    )
                 )
             }
             client.awaitReady()
@@ -156,11 +176,20 @@ class AndroidJavaScriptPluginRuntime(
         params: JsonElement,
         timeoutMs: Long,
     ): JsonElement {
-        val client = rpc ?: throw PluginRpcException(
-            PluginRpcError(PluginErrorCode.RUNTIME_TERMINATED, "Plugin runtime has not started")
-        )
+        val client =
+            rpc
+                ?: throw PluginRpcException(
+                    PluginRpcError(
+                        PluginErrorCode.RUNTIME_TERMINATED,
+                        "Plugin runtime has not started",
+                    )
+                )
         return try {
-            client.call(method, params, timeoutMs.coerceIn(1L, PluginRuntimePolicy.HARD_DEADLINE_MS))
+            client.call(
+                method,
+                params,
+                timeoutMs.coerceIn(1L, PluginRuntimePolicy.HARD_DEADLINE_MS),
+            )
         } catch (error: PluginRpcException) {
             if (error.error.code == PluginErrorCode.TIMEOUT) {
                 // A timed-out JS invocation may still be executing. Closing the isolate is the only
@@ -196,7 +225,9 @@ class AndroidJavaScriptPluginRuntime(
         }
         val missing = REQUIRED_FEATURES.filterNot(sandbox::isFeatureSupported)
         if (missing.isNotEmpty()) {
-            throw PluginRuntimeUnavailableException("Missing JavaScriptEngine features: ${missing.joinToString()}")
+            throw PluginRuntimeUnavailableException(
+                "Missing JavaScriptEngine features: ${missing.joinToString()}"
+            )
         }
     }
 
@@ -205,13 +236,20 @@ class AndroidJavaScriptPluginRuntime(
         if (root is PluginRpcException) return root
         if (root is IsolateTerminatedException) {
             return PluginRpcException(
-                PluginRpcError(PluginErrorCode.RUNTIME_TERMINATED, "Plugin isolate terminated", retryable = true),
+                PluginRpcError(
+                    PluginErrorCode.RUNTIME_TERMINATED,
+                    "Plugin isolate terminated",
+                    retryable = true,
+                ),
                 root,
             )
         }
         if (root is JavaScriptException) {
             return PluginRpcException(
-                PluginRpcError(PluginErrorCode.PLUGIN_ERROR, root.message ?: "Plugin JavaScript error"),
+                PluginRpcError(
+                    PluginErrorCode.PLUGIN_ERROR,
+                    root.message ?: "Plugin JavaScript error",
+                ),
                 root,
             )
         }
@@ -256,22 +294,35 @@ class PluginRuntimeManager(
         params: JsonElement = JsonObject(emptyMap()),
         timeoutMs: Long = PluginRuntimePolicy.NORMAL_DEADLINE_MS,
     ): JsonElement {
-        val plugin = withContext(Dispatchers.IO) { store.get(pluginId) }
-            ?: throw PluginRpcException(PluginRpcError(PluginErrorCode.NOT_FOUND, "Plugin is not installed"))
+        val plugin =
+            withContext(Dispatchers.IO) { store.get(pluginId) }
+                ?: throw PluginRpcException(
+                    PluginRpcError(PluginErrorCode.NOT_FOUND, "Plugin is not installed")
+                )
         if (plugin.state.disabled) {
-            throw PluginRpcException(PluginRpcError(PluginErrorCode.PLUGIN_DISABLED, "Plugin is disabled"))
+            throw PluginRpcException(
+                PluginRpcError(PluginErrorCode.PLUGIN_DISABLED, "Plugin is disabled")
+            )
         }
         if (plugin.state.health == PluginHealth.RUNTIME_UNHEALTHY) {
-            throw PluginRpcException(PluginRpcError(PluginErrorCode.RUNTIME_UNHEALTHY, "Plugin requires explicit recovery"))
+            throw PluginRpcException(
+                PluginRpcError(
+                    PluginErrorCode.RUNTIME_UNHEALTHY,
+                    "Plugin requires explicit recovery",
+                )
+            )
         }
         if (plugin.state.activeVersion == null || plugin.activeDirectory == null) {
-            throw PluginRpcException(PluginRpcError(PluginErrorCode.NOT_FOUND, "Plugin has no active version"))
+            throw PluginRpcException(
+                PluginRpcError(PluginErrorCode.NOT_FOUND, "Plugin has no active version")
+            )
         }
         var runtimeUsed: AndroidJavaScriptPluginRuntime? = null
         return try {
-            val pluginSemaphore = pluginSemaphores.computeIfAbsent(pluginId) {
-                Semaphore(PluginRuntimePolicy.MAX_PLUGIN_CONCURRENCY)
-            }
+            val pluginSemaphore =
+                pluginSemaphores.computeIfAbsent(pluginId) {
+                    Semaphore(PluginRuntimePolicy.MAX_PLUGIN_CONCURRENCY)
+                }
             globalSemaphore.withPermit {
                 pluginSemaphore.withPermit {
                     val active = activeInvocations.computeIfAbsent(pluginId) { AtomicInteger(0) }
@@ -290,10 +341,13 @@ class PluginRuntimeManager(
         } catch (error: CancellationException) {
             throw error
         } catch (error: PluginRpcException) {
-            if (error.error.code == PluginErrorCode.RUNTIME_TERMINATED ||
-                error.error.code == PluginErrorCode.TIMEOUT
+            if (
+                error.error.code == PluginErrorCode.RUNTIME_TERMINATED ||
+                    error.error.code == PluginErrorCode.TIMEOUT
             ) {
-                runtimeUsed?.let { runtime -> withContext(Dispatchers.IO) { handleFatal(pluginId, runtime) } }
+                runtimeUsed?.let { runtime ->
+                    withContext(Dispatchers.IO) { handleFatal(pluginId, runtime) }
+                }
             }
             throw error
         }
@@ -311,7 +365,8 @@ class PluginRuntimeManager(
     }
 
     suspend fun activate(pluginId: String, version: String): InstalledPlugin {
-        val previousVersion = withContext(Dispatchers.IO) { store.get(pluginId)?.state?.activeVersion }
+        val previousVersion =
+            withContext(Dispatchers.IO) { store.get(pluginId)?.state?.activeVersion }
         val activated = withContext(Dispatchers.IO) { store.activate(pluginId, version) }
         closeRuntime(pluginId)
         return try {
@@ -328,7 +383,8 @@ class PluginRuntimeManager(
     }
 
     suspend fun rollback(pluginId: String): InstalledPlugin? {
-        val previousActive = withContext(Dispatchers.IO) { store.get(pluginId)?.state?.activeVersion }
+        val previousActive =
+            withContext(Dispatchers.IO) { store.get(pluginId)?.state?.activeVersion }
         val rolledBack = withContext(Dispatchers.IO) { store.rollback(pluginId) } ?: return null
         closeRuntime(pluginId)
         return try {
@@ -336,7 +392,8 @@ class PluginRuntimeManager(
             rolledBack
         } catch (error: Throwable) {
             closeRuntime(pluginId)
-            if (previousActive != null) withContext(Dispatchers.IO) { store.activate(pluginId, previousActive) }
+            if (previousActive != null)
+                withContext(Dispatchers.IO) { store.activate(pluginId, previousActive) }
             throw error
         }
     }
@@ -354,7 +411,8 @@ class PluginRuntimeManager(
     }
 
     suspend fun uninstall(pluginId: String): Boolean {
-        if (withContext(Dispatchers.IO) { store.setEnabled(pluginId, enabled = false) } == null) return false
+        if (withContext(Dispatchers.IO) { store.setEnabled(pluginId, enabled = false) } == null)
+            return false
         closeRuntime(pluginId)
         return withContext(Dispatchers.IO) { store.uninstall(pluginId) }
     }
@@ -382,10 +440,11 @@ class PluginRuntimeManager(
     private suspend fun runtimeFor(plugin: InstalledPlugin): AndroidJavaScriptPluginRuntime {
         return lock.withLock {
             check(!closed.get()) { "Plugin runtime manager is closed" }
-            val currentPlugin = withContext(Dispatchers.IO) { store.get(plugin.state.pluginId) }
-                ?: throw PluginRpcException(
-                    PluginRpcError(PluginErrorCode.NOT_FOUND, "Plugin is not installed")
-                )
+            val currentPlugin =
+                withContext(Dispatchers.IO) { store.get(plugin.state.pluginId) }
+                    ?: throw PluginRpcException(
+                        PluginRpcError(PluginErrorCode.NOT_FOUND, "Plugin is not installed")
+                    )
             if (currentPlugin.state.disabled) {
                 throw PluginRpcException(
                     PluginRpcError(PluginErrorCode.PLUGIN_DISABLED, "Plugin is disabled")
@@ -393,7 +452,10 @@ class PluginRuntimeManager(
             }
             if (currentPlugin.state.health == PluginHealth.RUNTIME_UNHEALTHY) {
                 throw PluginRpcException(
-                    PluginRpcError(PluginErrorCode.RUNTIME_UNHEALTHY, "Plugin requires explicit recovery")
+                    PluginRpcError(
+                        PluginErrorCode.RUNTIME_UNHEALTHY,
+                        "Plugin requires explicit recovery",
+                    )
                 )
             }
             if (currentPlugin.state.activeVersion != plugin.state.activeVersion) {
@@ -416,33 +478,38 @@ class PluginRuntimeManager(
             }
             evictIdleRuntimeLocked(plugin.state.pluginId)
             val currentSandbox = ensureSandboxLocked()
-            val activeDirectory = plugin.activeDirectory
-                ?: throw PluginRpcException(PluginRpcError(PluginErrorCode.NOT_FOUND, "Plugin has no active version"))
-            val hostSession = PluginHostSession(
-                plugin.state.pluginId,
-                plugin.directory,
-                globalHttpSemaphore = globalHttpSemaphore,
-            )
+            val activeDirectory =
+                plugin.activeDirectory
+                    ?: throw PluginRpcException(
+                        PluginRpcError(PluginErrorCode.NOT_FOUND, "Plugin has no active version")
+                    )
+            val hostSession =
+                PluginHostSession(
+                    plugin.state.pluginId,
+                    plugin.directory,
+                    globalHttpSemaphore = globalHttpSemaphore,
+                )
             lateinit var runtime: AndroidJavaScriptPluginRuntime
-            runtime = AndroidJavaScriptPluginRuntime(
-                pluginId = plugin.state.pluginId,
-                version = plugin.state.activeVersion!!,
-                versionDirectory = activeDirectory,
-                sandbox = currentSandbox,
-                callbackExecutor = callbackExecutor,
-                hostSession = hostSession,
-                onTerminated = { info ->
-                    callbackExecutor.execute {
-                        runBlocking {
-                            if (info?.status == TerminationInfo.STATUS_SANDBOX_DEAD) {
-                                handleSandboxDeath()
-                            } else {
-                                handleFatal(plugin.state.pluginId, runtime)
+            runtime =
+                AndroidJavaScriptPluginRuntime(
+                    pluginId = plugin.state.pluginId,
+                    version = plugin.state.activeVersion!!,
+                    versionDirectory = activeDirectory,
+                    sandbox = currentSandbox,
+                    callbackExecutor = callbackExecutor,
+                    hostSession = hostSession,
+                    onTerminated = { info ->
+                        callbackExecutor.execute {
+                            runBlocking {
+                                if (info?.status == TerminationInfo.STATUS_SANDBOX_DEAD) {
+                                    handleSandboxDeath()
+                                } else {
+                                    handleFatal(plugin.state.pluginId, runtime)
+                                }
                             }
                         }
-                    }
-                },
-            )
+                    },
+                )
             try {
                 runtime.start()
             } catch (error: Throwable) {
@@ -477,7 +544,9 @@ class PluginRuntimeManager(
     }
 
     private suspend fun ensureSandboxLocked(): JavaScriptSandbox {
-        sandbox?.let { return it }
+        sandbox?.let {
+            return it
+        }
         if (!JavaScriptSandbox.isSupported()) {
             throw PluginRuntimeUnavailableException("WebView does not support JavaScriptSandbox")
         }
@@ -485,7 +554,9 @@ class PluginRuntimeManager(
         val missing = REQUIRED_FEATURES.filterNot(connected::isFeatureSupported)
         if (missing.isNotEmpty()) {
             connected.close()
-            throw PluginRuntimeUnavailableException("Missing JavaScriptEngine features: ${missing.joinToString()}")
+            throw PluginRuntimeUnavailableException(
+                "Missing JavaScriptEngine features: ${missing.joinToString()}"
+            )
         }
         sandbox = connected
         return connected
@@ -494,14 +565,18 @@ class PluginRuntimeManager(
     private suspend fun createConnectedSandbox(): JavaScriptSandbox =
         JavaScriptSandbox.createConnectedInstanceAsync(context).awaitJavaScript()
 
-    private suspend fun handleFatal(pluginId: String, expectedRuntime: AndroidJavaScriptPluginRuntime? = null) {
-        val runtime: AndroidJavaScriptPluginRuntime = lock.withLock {
-            when {
-                expectedRuntime == null -> runtimes.remove(pluginId) ?: return@withLock null
-                runtimes.remove(pluginId, expectedRuntime) -> expectedRuntime
-                else -> return@withLock null
-            }.also { runtimeLastUsed.remove(pluginId) }
-        } ?: return
+    private suspend fun handleFatal(
+        pluginId: String,
+        expectedRuntime: AndroidJavaScriptPluginRuntime? = null,
+    ) {
+        val runtime: AndroidJavaScriptPluginRuntime =
+            lock.withLock {
+                when {
+                    expectedRuntime == null -> runtimes.remove(pluginId) ?: return@withLock null
+                    runtimes.remove(pluginId, expectedRuntime) -> expectedRuntime
+                    else -> return@withLock null
+                }.also { runtimeLastUsed.remove(pluginId) }
+            } ?: return
         runtime.close()
         runCatching { store.recordFatalFailure(pluginId) }
     }

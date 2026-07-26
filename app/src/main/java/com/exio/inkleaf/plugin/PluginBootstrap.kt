@@ -1,7 +1,7 @@
 package com.exio.inkleaf.plugin
 
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.builtins.serializer
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 /** Builds the single bootstrap evaluation used before all business RPC calls. */
@@ -193,6 +193,7 @@ object PluginBootstrap {
               send({ kind: "ready" });
               return "BOOTSTRAPPED";
             })()
-        """.trimIndent()
+        """
+            .trimIndent()
     }
 }

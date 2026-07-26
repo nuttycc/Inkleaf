@@ -8,10 +8,10 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
@@ -26,27 +26,38 @@ class PluginRpcTest {
         val request = PluginRpcMessage.Request("h-1", "search", JsonPrimitive("query"))
         assertEquals(request, codec.decode(codec.encode(request)))
 
-        val response = PluginRpcMessage.Response(
-            requestId = "h-1",
-            error = PluginRpcError(PluginErrorCode.AUTH_REQUIRED, "Login required", retryable = true),
-        )
+        val response =
+            PluginRpcMessage.Response(
+                requestId = "h-1",
+                error =
+                    PluginRpcError(
+                        PluginErrorCode.AUTH_REQUIRED,
+                        "Login required",
+                        retryable = true,
+                    ),
+            )
         assertEquals(response, codec.decode(codec.encode(response)))
     }
 
     @Test
     fun `pending request completes exactly once and late response is ignored`() = runBlocking {
         val transport = QueueTransport()
-        val client = PluginRpcClient(
-            transport = transport,
-            scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
-        )
+        val client =
+            PluginRpcClient(
+                transport = transport,
+                scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+            )
         try {
             val result = async(Dispatchers.Default) { client.call("describe", timeoutMs = 1_000L) }
             val request = codec.decode(transport.receive()) as PluginRpcMessage.Request
-            client.onMessage(codec.encode(PluginRpcMessage.Response(request.requestId, JsonPrimitive("ok"))))
+            client.onMessage(
+                codec.encode(PluginRpcMessage.Response(request.requestId, JsonPrimitive("ok")))
+            )
             assertEquals(JsonPrimitive("ok"), result.await())
 
-            client.onMessage(codec.encode(PluginRpcMessage.Response(request.requestId, JsonPrimitive("late"))))
+            client.onMessage(
+                codec.encode(PluginRpcMessage.Response(request.requestId, JsonPrimitive("late")))
+            )
             assertTrue(true)
         } finally {
             client.close()
@@ -56,11 +67,13 @@ class PluginRpcTest {
     @Test
     fun `host request is dispatched and receives host response`() = runBlocking {
         val transport = QueueTransport()
-        val client = PluginRpcClient(
-            transport = transport,
-            hostHandler = PluginRpcHostHandler { method, _ -> JsonPrimitive("handled:$method") },
-            scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
-        )
+        val client =
+            PluginRpcClient(
+                transport = transport,
+                hostHandler =
+                    PluginRpcHostHandler { method, _ -> JsonPrimitive("handled:$method") },
+                scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+            )
         try {
             client.onMessage(codec.encode(PluginRpcMessage.HostRequest("p-1", "clock.now")))
             val response = codec.decode(transport.receive()) as PluginRpcMessage.Response
@@ -74,10 +87,11 @@ class PluginRpcTest {
     @Test
     fun `timeout clears request and sends cancel without retry`() = runBlocking {
         val transport = QueueTransport()
-        val client = PluginRpcClient(
-            transport = transport,
-            scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
-        )
+        val client =
+            PluginRpcClient(
+                transport = transport,
+                scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+            )
         try {
             val result = runCatching { client.call("search", timeoutMs = 25L) }
             val error = result.exceptionOrNull() as PluginRpcException
@@ -86,7 +100,10 @@ class PluginRpcTest {
             assertTrue(first is PluginRpcMessage.Request)
             val cancel = codec.decode(transport.receive())
             assertTrue(cancel is PluginRpcMessage.Cancel)
-            assertEquals((first as PluginRpcMessage.Request).requestId, (cancel as PluginRpcMessage.Cancel).requestId)
+            assertEquals(
+                (first as PluginRpcMessage.Request).requestId,
+                (cancel as PluginRpcMessage.Cancel).requestId,
+            )
             delay(20L)
             assertEquals(
                 1,
@@ -100,18 +117,26 @@ class PluginRpcTest {
     @Test
     fun `caller cancellation sends one matching cancel and ignores late response`() = runBlocking {
         val transport = QueueTransport()
-        val client = PluginRpcClient(
-            transport = transport,
-            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
-        )
+        val client =
+            PluginRpcClient(
+                transport = transport,
+                scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+            )
         try {
             val call = launch { client.call("pages", timeoutMs = 1_000L) }
             val request = codec.decode(transport.receive()) as PluginRpcMessage.Request
             call.cancelAndJoin()
             val cancel = codec.decode(transport.receive()) as PluginRpcMessage.Cancel
             assertEquals(request.requestId, cancel.requestId)
-            assertTrue(transport.values.none { codec.decode(it) is PluginRpcMessage.Cancel && (codec.decode(it) as PluginRpcMessage.Cancel).requestId != request.requestId })
-            client.onMessage(codec.encode(PluginRpcMessage.Response(request.requestId, JsonPrimitive("late"))))
+            assertTrue(
+                transport.values.none {
+                    codec.decode(it) is PluginRpcMessage.Cancel &&
+                        (codec.decode(it) as PluginRpcMessage.Cancel).requestId != request.requestId
+                }
+            )
+            client.onMessage(
+                codec.encode(PluginRpcMessage.Response(request.requestId, JsonPrimitive("late")))
+            )
         } finally {
             client.close()
         }
@@ -121,14 +146,16 @@ class PluginRpcTest {
     fun `host cancellation cancels handler and returns one cancelled envelope`() = runBlocking {
         val transport = QueueTransport()
         val started = CompletableDeferred<Unit>()
-        val client = PluginRpcClient(
-            transport = transport,
-            hostHandler = PluginRpcHostHandler { _, _ ->
-                started.complete(Unit)
-                awaitCancellation()
-            },
-            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
-        )
+        val client =
+            PluginRpcClient(
+                transport = transport,
+                hostHandler =
+                    PluginRpcHostHandler { _, _ ->
+                        started.complete(Unit)
+                        awaitCancellation()
+                    },
+                scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+            )
         try {
             client.onMessage(codec.encode(PluginRpcMessage.HostRequest("p-cancel", "clock.sleep")))
             started.await()
@@ -137,7 +164,10 @@ class PluginRpcTest {
             assertTrue(response.hostResponse)
             assertEquals(PluginErrorCode.CANCELLED, response.error?.code)
             delay(20L)
-            assertEquals(1, transport.values.count { codec.decode(it) is PluginRpcMessage.Response })
+            assertEquals(
+                1,
+                transport.values.count { codec.decode(it) is PluginRpcMessage.Response },
+            )
         } finally {
             client.close()
         }
@@ -153,7 +183,8 @@ class PluginRpcTest {
 
     @Test
     fun `transport failure closes client with retryable runtime error`() = runBlocking {
-        val client = PluginRpcClient(PluginRpcTransport { throw IllegalStateException("port closed") })
+        val client =
+            PluginRpcClient(PluginRpcTransport { throw IllegalStateException("port closed") })
 
         val first = runCatching { client.call("describe") }.exceptionOrNull() as PluginRpcException
         assertEquals(PluginErrorCode.RUNTIME_TERMINATED, first.error.code)
@@ -167,7 +198,9 @@ class PluginRpcTest {
     fun `oversized message fails with quota error`() {
         val smallCodec = PluginRpcCodec(maxMessageBytes = 64)
         val result = runCatching {
-            smallCodec.encode(PluginRpcMessage.Request("h-1", "search", JsonPrimitive("x".repeat(128))))
+            smallCodec.encode(
+                PluginRpcMessage.Request("h-1", "search", JsonPrimitive("x".repeat(128)))
+            )
         }
         val error = result.exceptionOrNull() as PluginRpcException
         assertEquals(PluginErrorCode.QUOTA_EXCEEDED, error.error.code)
@@ -176,7 +209,8 @@ class PluginRpcTest {
     private class QueueTransport : PluginRpcTransport {
         private val messages = Channel<String>(Channel.UNLIMITED)
         private val sent = CopyOnWriteArrayList<String>()
-        val values: List<String> get() = sent.toList()
+        val values: List<String>
+            get() = sent.toList()
 
         override fun send(message: String) {
             sent += message

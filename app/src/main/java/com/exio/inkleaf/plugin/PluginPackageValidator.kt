@@ -3,7 +3,6 @@ package com.exio.inkleaf.plugin
 import java.io.File
 import java.io.IOException
 import java.nio.ByteBuffer
-import java.nio.CharBuffer
 import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
@@ -64,9 +63,7 @@ data class PluginValidationResult(
         get() = issues.none { it.kind == PluginIssueKind.ERROR }
 
     val activatable: Boolean
-        get() =
-            installable &&
-                issues.none { it.kind == PluginIssueKind.INCOMPATIBLE }
+        get() = installable && issues.none { it.kind == PluginIssueKind.INCOMPATIBLE }
 
     val errors: List<PluginValidationIssue>
         get() = issues.filter { it.kind == PluginIssueKind.ERROR }
@@ -85,12 +82,11 @@ class PluginPackageValidator(
     private val maxManifestBytes: Long = 256 * 1024,
     private val maxMainScriptBytes: Long = 8 * 1024 * 1024,
 ) {
-    private val json =
-        Json {
-            ignoreUnknownKeys = true
-            isLenient = false
-            explicitNulls = false
-        }
+    private val json = Json {
+        ignoreUnknownKeys = true
+        isLenient = false
+        explicitNulls = false
+    }
 
     fun validate(file: File): PluginValidationResult {
         if (!file.isFile) {
@@ -135,31 +131,34 @@ class PluginPackageValidator(
             val entry = enumeration.nextElement()
             val name = entry.name
             if (!entries.add(name)) {
-                issues += issue(
-                    PluginIssueKind.ERROR,
-                    PluginIssueCode.DUPLICATE_ENTRY,
-                    "Archive contains duplicate entry: $name",
-                    name,
-                )
+                issues +=
+                    issue(
+                        PluginIssueKind.ERROR,
+                        PluginIssueCode.DUPLICATE_ENTRY,
+                        "Archive contains duplicate entry: $name",
+                        name,
+                    )
                 continue
             }
             if (!PluginPaths.isSafeArchivePath(name)) {
-                issues += issue(
-                    PluginIssueKind.ERROR,
-                    PluginIssueCode.UNSAFE_ENTRY_PATH,
-                    "Archive entry has an unsafe path",
-                    name,
-                )
+                issues +=
+                    issue(
+                        PluginIssueKind.ERROR,
+                        PluginIssueCode.UNSAFE_ENTRY_PATH,
+                        "Archive entry has an unsafe path",
+                        name,
+                    )
                 continue
             }
             if (entry.isDirectory) {
                 if (name != "assets/" && !name.startsWith(PluginContract.ASSET_PREFIX)) {
-                    issues += issue(
-                        PluginIssueKind.ERROR,
-                        PluginIssueCode.UNEXPECTED_ENTRY,
-                        "Only assets directories may be present",
-                        name,
-                    )
+                    issues +=
+                        issue(
+                            PluginIssueKind.ERROR,
+                            PluginIssueCode.UNEXPECTED_ENTRY,
+                            "Only assets directories may be present",
+                            name,
+                        )
                 }
                 continue
             }
@@ -171,33 +170,38 @@ class PluginPackageValidator(
                     mainBytes = readEntry(zip, entry, maxMainScriptBytes, issues)
                 name.startsWith(PluginContract.ASSET_PREFIX) -> Unit
                 else ->
-                    issues += issue(
-                        PluginIssueKind.ERROR,
-                        PluginIssueCode.UNEXPECTED_ENTRY,
-                        "Only manifest.json, main.js and assets are allowed",
-                        name,
-                    )
+                    issues +=
+                        issue(
+                            PluginIssueKind.ERROR,
+                            PluginIssueCode.UNEXPECTED_ENTRY,
+                            "Only manifest.json, main.js and assets are allowed",
+                            name,
+                        )
             }
         }
 
         if (!entries.contains(PluginContract.MANIFEST_PATH)) {
-            issues += issue(
-                PluginIssueKind.ERROR,
-                PluginIssueCode.MISSING_MANIFEST,
-                "Archive is missing manifest.json",
-                PluginContract.MANIFEST_PATH,
-            )
+            issues +=
+                issue(
+                    PluginIssueKind.ERROR,
+                    PluginIssueCode.MISSING_MANIFEST,
+                    "Archive is missing manifest.json",
+                    PluginContract.MANIFEST_PATH,
+                )
         }
         if (!entries.contains(PluginContract.ENTRY_PATH)) {
-            issues += issue(
-                PluginIssueKind.ERROR,
-                PluginIssueCode.MISSING_ENTRY,
-                "Archive is missing main.js",
-                PluginContract.ENTRY_PATH,
-            )
+            issues +=
+                issue(
+                    PluginIssueKind.ERROR,
+                    PluginIssueCode.MISSING_ENTRY,
+                    "Archive is missing main.js",
+                    PluginContract.ENTRY_PATH,
+                )
         }
 
-        val manifestText = manifestBytes?.let { decodeUtf8(it, issues, PluginContract.MANIFEST_PATH) }
+        val manifestText = manifestBytes?.let {
+            decodeUtf8(it, issues, PluginContract.MANIFEST_PATH)
+        }
         val mainScript = mainBytes?.let { decodeUtf8(it, issues, PluginContract.ENTRY_PATH) }
         val manifest = manifestText?.let { decodeManifest(it, issues) }
         if (manifest != null) validateManifest(manifest, entries, issues)
@@ -218,12 +222,13 @@ class PluginPackageValidator(
         try {
             json.decodeFromString<PluginManifest>(text)
         } catch (error: SerializationException) {
-            issues += issue(
-                PluginIssueKind.ERROR,
-                PluginIssueCode.INVALID_MANIFEST,
-                "manifest.json is not a valid plugin manifest: ${error.message ?: "parse error"}",
-                PluginContract.MANIFEST_PATH,
-            )
+            issues +=
+                issue(
+                    PluginIssueKind.ERROR,
+                    PluginIssueCode.INVALID_MANIFEST,
+                    "manifest.json is not a valid plugin manifest: ${error.message ?: "parse error"}",
+                    PluginContract.MANIFEST_PATH,
+                )
             null
         }
 
@@ -233,108 +238,126 @@ class PluginPackageValidator(
         issues: MutableList<PluginValidationIssue>,
     ) {
         if (manifest.manifestVersion != supportedManifestVersion) {
-            issues += issue(
-                PluginIssueKind.ERROR,
-                PluginIssueCode.UNSUPPORTED_MANIFEST_VERSION,
-                "Unsupported manifestVersion: ${manifest.manifestVersion}",
-            )
+            issues +=
+                issue(
+                    PluginIssueKind.ERROR,
+                    PluginIssueCode.UNSUPPORTED_MANIFEST_VERSION,
+                    "Unsupported manifestVersion: ${manifest.manifestVersion}",
+                )
         }
         if (!PluginIds.isValid(manifest.id)) {
-            issues += issue(
-                PluginIssueKind.ERROR,
-                PluginIssueCode.INVALID_ID,
-                "Plugin id must be a lowercase reverse-domain identifier",
-            )
+            issues +=
+                issue(
+                    PluginIssueKind.ERROR,
+                    PluginIssueCode.INVALID_ID,
+                    "Plugin id must be a lowercase reverse-domain identifier",
+                )
         }
         if (manifest.name.trim().isEmpty() || manifest.name.length > 128) {
-            issues += issue(
-                PluginIssueKind.ERROR,
-                PluginIssueCode.INVALID_NAME,
-                "Plugin name must contain 1..128 characters",
-            )
+            issues +=
+                issue(
+                    PluginIssueKind.ERROR,
+                    PluginIssueCode.INVALID_NAME,
+                    "Plugin name must contain 1..128 characters",
+                )
         }
         if (SemVer.parse(manifest.version) == null) {
-            issues += issue(
-                PluginIssueKind.ERROR,
-                PluginIssueCode.INVALID_VERSION,
-                "Plugin version must be strict SemVer",
-            )
+            issues +=
+                issue(
+                    PluginIssueKind.ERROR,
+                    PluginIssueCode.INVALID_VERSION,
+                    "Plugin version must be strict SemVer",
+                )
         }
 
         val apiVersion = ApiVersion.parse(manifest.apiVersion)
         if (apiVersion == null) {
-            issues += issue(
-                PluginIssueKind.ERROR,
-                PluginIssueCode.INVALID_API_VERSION,
-                "apiVersion must use major.minor format",
-            )
+            issues +=
+                issue(
+                    PluginIssueKind.ERROR,
+                    PluginIssueCode.INVALID_API_VERSION,
+                    "apiVersion must use major.minor format",
+                )
         } else {
             when (apiVersion.compatibilityWith(hostApiVersion)) {
                 PluginCompatibility.COMPATIBLE -> Unit
                 PluginCompatibility.API_MAJOR_MISMATCH ->
-                    issues += issue(
-                        PluginIssueKind.INCOMPATIBLE,
-                        PluginIssueCode.API_MAJOR_MISMATCH,
-                        "Plugin API ${apiVersion} is incompatible with host API $hostApiVersion",
-                    )
+                    issues +=
+                        issue(
+                            PluginIssueKind.INCOMPATIBLE,
+                            PluginIssueCode.API_MAJOR_MISMATCH,
+                            "Plugin API ${apiVersion} is incompatible with host API $hostApiVersion",
+                        )
                 PluginCompatibility.API_MINOR_TOO_NEW ->
-                    issues += issue(
-                        PluginIssueKind.INCOMPATIBLE,
-                        PluginIssueCode.API_MINOR_TOO_NEW,
-                        "Plugin API ${apiVersion} is newer than host API $hostApiVersion",
-                    )
+                    issues +=
+                        issue(
+                            PluginIssueKind.INCOMPATIBLE,
+                            PluginIssueCode.API_MINOR_TOO_NEW,
+                            "Plugin API ${apiVersion} is newer than host API $hostApiVersion",
+                        )
             }
         }
 
         val capabilitySet = manifest.capabilities.toSet()
         if (capabilitySet.size != manifest.capabilities.size) {
-            issues += issue(
-                PluginIssueKind.ERROR,
-                PluginIssueCode.DUPLICATE_CAPABILITY,
-                "Manifest capabilities must not contain duplicates",
-            )
+            issues +=
+                issue(
+                    PluginIssueKind.ERROR,
+                    PluginIssueCode.DUPLICATE_CAPABILITY,
+                    "Manifest capabilities must not contain duplicates",
+                )
         }
         if (manifest.capabilities.any { it.isBlank() || !it.matches(CAPABILITY_PATTERN) }) {
-            issues += issue(
-                PluginIssueKind.ERROR,
-                PluginIssueCode.INVALID_CAPABILITY,
-                "Capability names must be non-empty ASCII identifiers",
-            )
+            issues +=
+                issue(
+                    PluginIssueKind.ERROR,
+                    PluginIssueCode.INVALID_CAPABILITY,
+                    "Capability names must be non-empty ASCII identifiers",
+                )
         }
         val missingRequired = PluginCapabilities.required - capabilitySet
         if (missingRequired.isNotEmpty()) {
-            issues += issue(
-                PluginIssueKind.INCOMPATIBLE,
-                PluginIssueCode.MISSING_REQUIRED_CAPABILITY,
-                "Missing required capabilities: ${missingRequired.sorted().joinToString(", ")}",
-            )
+            issues +=
+                issue(
+                    PluginIssueKind.INCOMPATIBLE,
+                    PluginIssueCode.MISSING_REQUIRED_CAPABILITY,
+                    "Missing required capabilities: ${missingRequired.sorted().joinToString(", ")}",
+                )
         }
         manifest.capabilities
-            .filter { it !in PluginCapabilities.required && it !in PluginCapabilities.knownOptional }
+            .filter {
+                it !in PluginCapabilities.required && it !in PluginCapabilities.knownOptional
+            }
             .distinct()
             .forEach { capability ->
-                issues += issue(
-                    PluginIssueKind.WARNING,
-                    PluginIssueCode.UNKNOWN_OPTIONAL_CAPABILITY,
-                    "Unknown optional capability will be hidden: $capability",
-                )
+                issues +=
+                    issue(
+                        PluginIssueKind.WARNING,
+                        PluginIssueCode.UNKNOWN_OPTIONAL_CAPABILITY,
+                        "Unknown optional capability will be hidden: $capability",
+                    )
             }
 
         manifest.icon?.let { icon ->
             if (icon !in entries) {
-                issues += issue(
-                    PluginIssueKind.WARNING,
-                    PluginIssueCode.MISSING_ICON,
-                    "Declared icon is not present in the archive",
-                    icon,
-                )
-            } else if (!icon.startsWith(PluginContract.ASSET_PREFIX) || !PluginPaths.isSafeArchivePath(icon)) {
-                issues += issue(
-                    PluginIssueKind.ERROR,
-                    PluginIssueCode.UNSAFE_ENTRY_PATH,
-                    "Manifest icon must point to a safe assets path",
-                    icon,
-                )
+                issues +=
+                    issue(
+                        PluginIssueKind.WARNING,
+                        PluginIssueCode.MISSING_ICON,
+                        "Declared icon is not present in the archive",
+                        icon,
+                    )
+            } else if (
+                !icon.startsWith(PluginContract.ASSET_PREFIX) ||
+                    !PluginPaths.isSafeArchivePath(icon)
+            ) {
+                issues +=
+                    issue(
+                        PluginIssueKind.ERROR,
+                        PluginIssueCode.UNSAFE_ENTRY_PATH,
+                        "Manifest icon must point to a safe assets path",
+                        icon,
+                    )
             }
         }
     }
@@ -346,12 +369,13 @@ class PluginPackageValidator(
         issues: MutableList<PluginValidationIssue>,
     ): ByteArray? {
         if (entry.size > maxBytes) {
-            issues += issue(
-                PluginIssueKind.ERROR,
-                PluginIssueCode.ENTRY_TOO_LARGE,
-                "Archive entry exceeds the allowed size of $maxBytes bytes",
-                entry.name,
-            )
+            issues +=
+                issue(
+                    PluginIssueKind.ERROR,
+                    PluginIssueCode.ENTRY_TOO_LARGE,
+                    "Archive entry exceeds the allowed size of $maxBytes bytes",
+                    entry.name,
+                )
             return null
         }
         return try {
@@ -364,12 +388,13 @@ class PluginPackageValidator(
                     if (read < 0) break
                     total += read
                     if (total > maxBytes) {
-                        issues += issue(
-                            PluginIssueKind.ERROR,
-                            PluginIssueCode.ENTRY_TOO_LARGE,
-                            "Archive entry exceeds the allowed size of $maxBytes bytes",
-                            entry.name,
-                        )
+                        issues +=
+                            issue(
+                                PluginIssueKind.ERROR,
+                                PluginIssueCode.ENTRY_TOO_LARGE,
+                                "Archive entry exceeds the allowed size of $maxBytes bytes",
+                                entry.name,
+                            )
                         return null
                     }
                     output.write(buffer, 0, read)
@@ -377,12 +402,13 @@ class PluginPackageValidator(
                 output.toByteArray()
             }
         } catch (error: IOException) {
-            issues += issue(
-                PluginIssueKind.ERROR,
-                PluginIssueCode.INVALID_ARCHIVE,
-                "Unable to read archive entry: ${error.message ?: error::class.java.simpleName}",
-                entry.name,
-            )
+            issues +=
+                issue(
+                    PluginIssueKind.ERROR,
+                    PluginIssueCode.INVALID_ARCHIVE,
+                    "Unable to read archive entry: ${error.message ?: error::class.java.simpleName}",
+                    entry.name,
+                )
             null
         }
     }
@@ -399,12 +425,13 @@ class PluginPackageValidator(
                     .onUnmappableCharacter(CodingErrorAction.REPORT)
             decoder.decode(ByteBuffer.wrap(bytes)).toString()
         } catch (_: CharacterCodingException) {
-            issues += issue(
-                PluginIssueKind.ERROR,
-                PluginIssueCode.INVALID_UTF8,
-                "Archive entry is not valid UTF-8",
-                path,
-            )
+            issues +=
+                issue(
+                    PluginIssueKind.ERROR,
+                    PluginIssueCode.INVALID_UTF8,
+                    "Archive entry is not valid UTF-8",
+                    path,
+                )
             null
         }
 

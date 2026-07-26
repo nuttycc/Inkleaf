@@ -6,8 +6,8 @@ import com.exio.inkleaf.data.OnlinePageLocation
 import java.nio.file.Files
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -101,17 +101,21 @@ class OnlineContentRepositoryTest {
             assertTrue(firstFile.isFile)
 
             replacementFile.writeBytes(byteArrayOf(4, 5, 6, 7))
-            val replacement = repository.recordPageFavoriteSnapshot(
-                page,
-                replacementFile,
-                mimeType = "image/webp",
-                width = 1200,
-                height = 1800,
-            )
+            val replacement =
+                repository.recordPageFavoriteSnapshot(
+                    page,
+                    replacementFile,
+                    mimeType = "image/webp",
+                    width = 1200,
+                    height = 1800,
+                )
 
             assertFalse(firstFile.exists())
             assertTrue(replacementFile.isFile)
-            assertEquals(replacementFile.canonicalFile, repository.resolvePageFavoriteSnapshot(replacement))
+            assertEquals(
+                replacementFile.canonicalFile,
+                repository.resolvePageFavoriteSnapshot(replacement),
+            )
             assertEquals(4L, replacement.snapshot.byteCount)
         } finally {
             root.deleteRecursively()
@@ -250,7 +254,8 @@ class OnlineContentRepositoryTest {
                     "references": ["HISTORY"]
                   }]
                 }
-                """.trimIndent()
+                """
+                    .trimIndent()
             )
 
             val record = requireNotNull(OnlineContentRepository(file).get(PLUGIN_ID, SOURCE_ID))

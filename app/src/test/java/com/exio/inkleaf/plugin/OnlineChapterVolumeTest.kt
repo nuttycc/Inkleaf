@@ -11,7 +11,8 @@ class OnlineChapterVolumeTest {
     @Test
     fun `ordered page ids provide a URL independent revision fallback`() {
         val first = response(pageIds = listOf("page-1", "page-2"))
-        val sameIdsDifferentUrls = response(pageIds = listOf("page-1", "page-2"), urlSuffix = "-new")
+        val sameIdsDifferentUrls =
+            response(pageIds = listOf("page-1", "page-2"), urlSuffix = "-new")
         val reordered = response(pageIds = listOf("page-2", "page-1"))
 
         val revision = resolveOnlineChapterRevision(CHAPTER_ID, null, first)

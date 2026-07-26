@@ -20,21 +20,25 @@ class PluginHostSessionTest {
             PluginHostSession("io.example.one", root.resolve("one")).use { first ->
                 first.handle(
                     "kv.set",
-                    PluginContentCodec.json.encodeToJsonElement(PluginKvSet("token", JsonPrimitive("one"))),
+                    PluginContentCodec.json.encodeToJsonElement(
+                        PluginKvSet("token", JsonPrimitive("one"))
+                    ),
                 )
             }
             PluginHostSession("io.example.one", root.resolve("one")).use { first ->
-                val value = first.handle(
-                    "kv.get",
-                    PluginContentCodec.json.encodeToJsonElement(PluginKvGet("token")),
-                )
+                val value =
+                    first.handle(
+                        "kv.get",
+                        PluginContentCodec.json.encodeToJsonElement(PluginKvGet("token")),
+                    )
                 assertEquals("one", value.jsonPrimitive.content)
             }
             PluginHostSession("io.example.two", root.resolve("two")).use { second ->
-                val value = second.handle(
-                    "kv.get",
-                    PluginContentCodec.json.encodeToJsonElement(PluginKvGet("token")),
-                )
+                val value =
+                    second.handle(
+                        "kv.get",
+                        PluginContentCodec.json.encodeToJsonElement(PluginKvGet("token")),
+                    )
                 assertEquals("null", value.toString())
             }
         } finally {
@@ -51,7 +55,12 @@ class PluginHostSessionTest {
                     session.handle(
                         "kv.set",
                         PluginContentCodec.json.encodeToJsonElement(
-                            PluginKvSet("large", JsonPrimitive("x".repeat(PluginRuntimePolicy.MAX_KV_VALUE_BYTES + 1)))
+                            PluginKvSet(
+                                "large",
+                                JsonPrimitive(
+                                    "x".repeat(PluginRuntimePolicy.MAX_KV_VALUE_BYTES + 1)
+                                ),
+                            )
                         ),
                     )
                 }
@@ -71,7 +80,11 @@ class PluginHostSessionTest {
                 session.handle(
                     "log",
                     PluginContentCodec.json.encodeToJsonElement(
-                        PluginLogEntry("info", "login", mapOf("token" to "secret-value", "site" to "example"))
+                        PluginLogEntry(
+                            "info",
+                            "login",
+                            mapOf("token" to "secret-value", "site" to "example"),
+                        )
                     ),
                 )
             }

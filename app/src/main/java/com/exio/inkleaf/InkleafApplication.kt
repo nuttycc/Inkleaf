@@ -6,10 +6,10 @@ import com.exio.inkleaf.data.AlbumExporter
 import com.exio.inkleaf.data.AlbumRepository
 import com.exio.inkleaf.data.ComicRepository
 import com.exio.inkleaf.data.ReaderCache
+import com.exio.inkleaf.plugin.OnlineContentRepository
 import com.exio.inkleaf.plugin.PluginBrowseRepository
 import com.exio.inkleaf.plugin.PluginCatalog
 import com.exio.inkleaf.plugin.PluginManager
-import com.exio.inkleaf.plugin.OnlineContentRepository
 import com.exio.inkleaf.plugin.PluginPackageStore
 import com.exio.inkleaf.plugin.PluginRuntimeManager
 import java.io.File

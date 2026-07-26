@@ -169,31 +169,29 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
 
     fun refreshOnlineSessions() {
         onlineRefreshJob?.cancel()
-        onlineRefreshJob =
-            viewModelScope.launch {
-                try {
-                    onlineSessions =
-                        withContext(Dispatchers.IO) {
-                            onlineRepository.list()
-                                .flatMap(OnlineComicRecord::toOnlineHistorySessions)
-                                .sortedWith(
-                                    compareByDescending<OnlineHistorySessionUi> {
-                                            it.stored.endedAtMs
-                                        }.thenByDescending { it.key }
-                                )
-                        }
-                } catch (error: CancellationException) {
-                    throw error
-                } catch (error: Exception) {
-                    onlineSessions = emptyList()
-                    eventChannel.send(
-                        HistoryEvent.Message(
-                            error.message?.let { "加载在线阅读历史失败：$it" }
-                                ?: "加载在线阅读历史失败"
-                        )
-                    )
-                }
+        onlineRefreshJob = viewModelScope.launch {
+            try {
+                onlineSessions =
+                    withContext(Dispatchers.IO) {
+                        onlineRepository
+                            .list()
+                            .flatMap(OnlineComicRecord::toOnlineHistorySessions)
+                            .sortedWith(
+                                compareByDescending<OnlineHistorySessionUi> {
+                                        it.stored.endedAtMs
+                                    }
+                                    .thenByDescending { it.key }
+                            )
+                    }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                onlineSessions = emptyList()
+                eventChannel.send(
+                    HistoryEvent.Message(error.message?.let { "加载在线阅读历史失败：$it" } ?: "加载在线阅读历史失败")
+                )
             }
+        }
     }
 
     fun continueReading(session: HistorySessionUi) {
@@ -396,8 +394,7 @@ private fun OnlineComicRecord.toOnlineHistorySessions(): List<OnlineHistorySessi
     readingSessions.map { session ->
         val end = session.end
         OnlineHistorySessionUi(
-            key =
-                "online:${key.pluginId}:${key.sourceId}:${session.sessionId}",
+            key = "online:${key.pluginId}:${key.sourceId}:${session.sessionId}",
             title = session.titleSnapshot.ifBlank { titleSnapshot() },
             endLocationLabel = "${chapterTitle(end)} · 第 ${end.pageIndex + 1} 页",
             timeRangeLabel =

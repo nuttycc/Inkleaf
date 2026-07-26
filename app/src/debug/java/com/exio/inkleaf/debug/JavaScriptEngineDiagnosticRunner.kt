@@ -7,8 +7,8 @@ import android.webkit.WebView
 import androidx.core.util.Consumer
 import androidx.javascriptengine.IsolateStartupParameters
 import androidx.javascriptengine.IsolateTerminatedException
-import androidx.javascriptengine.JavaScriptIsolate
 import androidx.javascriptengine.JavaScriptException
+import androidx.javascriptengine.JavaScriptIsolate
 import androidx.javascriptengine.JavaScriptSandbox
 import androidx.javascriptengine.Message
 import androidx.javascriptengine.MessagePort
@@ -23,9 +23,9 @@ import java.util.concurrent.TimeoutException
 /**
  * Runs a small, bounded probe against the real WebView-provided JavaScript sandbox.
  *
- * This stays in the debug source set so the diagnostic dependency and entry point cannot leak
- * into release builds. The safe probe is suitable for every run; the heap probe is deliberately
- * separate because AndroidX documents that a heap exhaustion can kill the whole sandbox.
+ * This stays in the debug source set so the diagnostic dependency and entry point cannot leak into
+ * release builds. The safe probe is suitable for every run; the heap probe is deliberately separate
+ * because AndroidX documents that a heap exhaustion can kill the whole sandbox.
  */
 class JavaScriptEngineDiagnosticRunner(
     private val context: Context,
@@ -57,300 +57,333 @@ class JavaScriptEngineDiagnosticRunner(
     @Volatile private var activeSandbox: JavaScriptSandbox? = null
     @Volatile private var activeIsolate: JavaScriptIsolate? = null
 
-    fun runSafeProbe(): List<String> = runProbe("safe") { lines ->
-        appendDeviceInfo(lines)
+    fun runSafeProbe(): List<String> =
+        runProbe("safe") { lines ->
+            appendDeviceInfo(lines)
 
-        val supported = JavaScriptSandbox.isSupported()
-        record(lines, "sandbox.isSupported", supported.toString())
-        if (!supported) {
-            record(lines, "safe.result", "FAIL: WebView does not meet JavaScriptSandbox version floor")
-            return@runProbe
-        }
-
-        var sandbox: JavaScriptSandbox? = null
-        var isolate: JavaScriptIsolate? = null
-        var safePass = true
-        try {
-            val connectedSandbox =
-                await(JavaScriptSandbox.createConnectedInstanceAsync(context), "sandbox.connect")
-            sandbox = connectedSandbox
-            activeSandbox = connectedSandbox
-            record(lines, "sandbox.connect", "PASS")
-
-            val featureValues = requiredFeatures.associate { feature ->
-                val value = connectedSandbox.isFeatureSupported(feature.key)
-                record(lines, feature.name, value.toString())
-                feature.name to value
-            }
-            if (!featureValues.values.all { it }) {
-                record(lines, "safe.featureGate", "FAIL: required feature missing")
-                safePass = false
+            val supported = JavaScriptSandbox.isSupported()
+            record(lines, "sandbox.isSupported", supported.toString())
+            if (!supported) {
+                record(
+                    lines,
+                    "safe.result",
+                    "FAIL: WebView does not meet JavaScriptSandbox version floor",
+                )
+                return@runProbe
             }
 
-            val connectedIsolate = connectedSandbox.createIsolate()
-            isolate = connectedIsolate
-            activeIsolate = connectedIsolate
-            record(lines, "isolate.create", "PASS")
+            var sandbox: JavaScriptSandbox? = null
+            var isolate: JavaScriptIsolate? = null
+            var safePass = true
+            try {
+                val connectedSandbox =
+                    await(
+                        JavaScriptSandbox.createConnectedInstanceAsync(context),
+                        "sandbox.connect",
+                    )
+                sandbox = connectedSandbox
+                activeSandbox = connectedSandbox
+                record(lines, "sandbox.connect", "PASS")
 
-            safePass =
-                recordEvaluation(lines, "basic.evaluate", connectedIsolate, "'BASIC_OK'", "BASIC_OK") &&
-                    safePass
-            safePass =
-                recordEvaluation(
-                    lines,
-                    "persistent.evaluate.1",
-                    connectedIsolate,
-                    "globalThis.__inkleafDiag = (globalThis.__inkleafDiag || 0) + 1; String(globalThis.__inkleafDiag)",
-                    "1",
-                ) && safePass
-            safePass =
-                recordEvaluation(
-                    lines,
-                    "persistent.evaluate.2",
-                    connectedIsolate,
-                    "globalThis.__inkleafDiag = (globalThis.__inkleafDiag || 0) + 1; String(globalThis.__inkleafDiag)",
-                    "2",
-                ) && safePass
-            safePass =
-                recordExpectedJavaScriptFailure(lines, "syntax.error", connectedIsolate, "(") && safePass
-            safePass =
-                recordExpectedJavaScriptFailure(
-                    lines,
-                    "throw.error",
-                    connectedIsolate,
-                    "throw new Error('DIAG_THROW')",
-                ) && safePass
+                val featureValues = requiredFeatures.associate { feature ->
+                    val value = connectedSandbox.isFeatureSupported(feature.key)
+                    record(lines, feature.name, value.toString())
+                    feature.name to value
+                }
+                if (!featureValues.values.all { it }) {
+                    record(lines, "safe.featureGate", "FAIL: required feature missing")
+                    safePass = false
+                }
 
-            if (featureValues.getValue("JS_FEATURE_PROMISE_RETURN")) {
+                val connectedIsolate = connectedSandbox.createIsolate()
+                isolate = connectedIsolate
+                activeIsolate = connectedIsolate
+                record(lines, "isolate.create", "PASS")
+
                 safePass =
                     recordEvaluation(
                         lines,
-                        "promise.evaluate",
+                        "basic.evaluate",
                         connectedIsolate,
-                        "Promise.resolve('PROMISE_OK')",
-                        "PROMISE_OK",
+                        "'BASIC_OK'",
+                        "BASIC_OK",
                     ) && safePass
+                safePass =
+                    recordEvaluation(
+                        lines,
+                        "persistent.evaluate.1",
+                        connectedIsolate,
+                        "globalThis.__inkleafDiag = (globalThis.__inkleafDiag || 0) + 1; String(globalThis.__inkleafDiag)",
+                        "1",
+                    ) && safePass
+                safePass =
+                    recordEvaluation(
+                        lines,
+                        "persistent.evaluate.2",
+                        connectedIsolate,
+                        "globalThis.__inkleafDiag = (globalThis.__inkleafDiag || 0) + 1; String(globalThis.__inkleafDiag)",
+                        "2",
+                    ) && safePass
+                safePass =
+                    recordExpectedJavaScriptFailure(lines, "syntax.error", connectedIsolate, "(") &&
+                        safePass
                 safePass =
                     recordExpectedJavaScriptFailure(
                         lines,
-                        "promise.reject",
+                        "throw.error",
                         connectedIsolate,
-                        "Promise.reject(new Error('DIAG_REJECT'))",
+                        "throw new Error('DIAG_THROW')",
                     ) && safePass
-            } else {
-                record(lines, "promise.evaluate", "SKIP: feature unavailable")
-            }
 
-            safePass = recordIsolateParallelProbe(lines, connectedSandbox) && safePass
-
-            if (featureValues.getValue("JS_FEATURE_MESSAGE_PORTS")) {
-                safePass = recordMessagePortProbe(lines, connectedIsolate) && safePass
-            } else {
-                record(lines, "messagePort.probe", "SKIP: feature unavailable")
-            }
-
-            record(lines, "safe.result", if (safePass) "PASS" else "FAIL")
-        } catch (error: Throwable) {
-            safePass = false
-            record(lines, "safe.result", "FAIL: ${describe(error)}")
-        } finally {
-            closeQuietly(isolate)
-            closeQuietly(sandbox)
-            activeIsolate = null
-            activeSandbox = null
-        }
-    }
-
-    fun runTerminationProbe(): List<String> = runProbe("termination") { lines ->
-        appendDeviceInfo(lines)
-        if (!JavaScriptSandbox.isSupported()) {
-            record(lines, "termination.result", "SKIP: sandbox unsupported")
-            return@runProbe
-        }
-
-        var sandbox: JavaScriptSandbox? = null
-        var isolate: JavaScriptIsolate? = null
-        var terminationPass = false
-        try {
-            val connectedSandbox =
-                await(JavaScriptSandbox.createConnectedInstanceAsync(context), "sandbox.connect")
-            sandbox = connectedSandbox
-            activeSandbox = connectedSandbox
-            val supported =
-                connectedSandbox.isFeatureSupported(JavaScriptSandbox.JS_FEATURE_ISOLATE_TERMINATION)
-            record(lines, "JS_FEATURE_ISOLATE_TERMINATION", supported.toString())
-            if (!supported) {
-                record(lines, "termination.result", "SKIP: feature unavailable")
-                return@runProbe
-            }
-
-            val runningIsolate = connectedSandbox.createIsolate()
-            isolate = runningIsolate
-            activeIsolate = runningIsolate
-            val future = runningIsolate.evaluateJavaScriptAsync("while (true) {}")
-            Thread.sleep(TERMINATION_WAIT_MILLIS)
-            closeQuietly(runningIsolate)
-            isolate = null
-            activeIsolate = null
-
-            try {
-                await(future, "termination.evaluation")
-                record(lines, "termination.evaluation", "FAIL: infinite loop returned")
-            } catch (error: Throwable) {
-                val cause = rootCause(error)
-                terminationPass = cause is IsolateTerminatedException
-                record(
-                    lines,
-                    "termination.evaluation",
-                    if (terminationPass) {
-                        "PASS: ${describe(error)}"
-                    } else {
-                        "FAIL: ${describe(error)}"
-                    },
-                )
-            }
-
-            val recoveryIsolate = connectedSandbox.createIsolate()
-            try {
-                terminationPass =
-                    recordEvaluation(
-                        lines,
-                        "termination.recovery",
-                        recoveryIsolate,
-                        "'RECOVERY_OK'",
-                        "RECOVERY_OK",
-                    ) && terminationPass
-            } finally {
-                closeQuietly(recoveryIsolate)
-            }
-            record(lines, "termination.result", if (terminationPass) "PASS" else "FAIL")
-        } catch (error: Throwable) {
-            terminationPass = false
-            record(lines, "termination.result", "FAIL: ${describe(error)}")
-        } finally {
-            closeQuietly(isolate)
-            closeQuietly(sandbox)
-            activeIsolate = null
-            activeSandbox = null
-        }
-    }
-
-    fun runHeapProbe(): List<String> = runProbe("heap") { lines ->
-        appendDeviceInfo(lines)
-        if (!JavaScriptSandbox.isSupported()) {
-            record(lines, "heap.result", "SKIP: sandbox unsupported")
-            return@runProbe
-        }
-
-        var sandbox: JavaScriptSandbox? = null
-        var isolate: JavaScriptIsolate? = null
-        var terminationInfo: TerminationInfo? = null
-        var heapEvaluationFailed = false
-        var recoveryPass = false
-        try {
-            val connectedSandbox =
-                await(JavaScriptSandbox.createConnectedInstanceAsync(context), "sandbox.connect")
-            sandbox = connectedSandbox
-            activeSandbox = connectedSandbox
-            val supported =
-                connectedSandbox.isFeatureSupported(JavaScriptSandbox.JS_FEATURE_ISOLATE_MAX_HEAP_SIZE)
-            record(lines, "JS_FEATURE_ISOLATE_MAX_HEAP_SIZE", supported.toString())
-            if (!supported) {
-                record(lines, "heap.result", "SKIP: feature unavailable")
-                return@runProbe
-            }
-
-            val settings = IsolateStartupParameters().apply {
-                setMaxHeapSizeBytes(HEAP_LIMIT_BYTES)
-            }
-            val heapIsolate = connectedSandbox.createIsolate(settings)
-            isolate = heapIsolate
-            activeIsolate = heapIsolate
-            val callbackLatch = CountDownLatch(1)
-            val callbackRef = arrayOfNulls<TerminationInfo>(1)
-            val callback = Consumer<TerminationInfo> { info ->
-                callbackRef[0] = info
-                callbackLatch.countDown()
-            }
-            heapIsolate.addOnTerminatedCallback(callbackExecutor, callback)
-
-            val future = heapIsolate.evaluateJavaScriptAsync(
-                """
-                (() => {
-                    const chunks = [];
-                    while (true) chunks.push(new Array(262144).fill("inkleaf"));
-                })()
-                """.trimIndent()
-            )
-            try {
-                await(future, "heap.evaluation")
-                record(lines, "heap.evaluation", "FAIL: allocation loop returned")
-            } catch (error: Throwable) {
-                heapEvaluationFailed = rootCause(error) is IsolateTerminatedException
-                record(
-                    lines,
-                    "heap.evaluation",
-                    if (heapEvaluationFailed) {
-                        "PASS: ${describe(error)}"
-                    } else {
-                        "FAIL: ${describe(error)}"
-                    },
-                )
-            }
-
-            callbackLatch.await(FUTURE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-            terminationInfo = callbackRef[0]
-            record(lines, "heap.termination", terminationInfo?.toString() ?: "NO_CALLBACK")
-
-            closeQuietly(heapIsolate)
-            isolate = null
-            activeIsolate = null
-            closeQuietly(connectedSandbox)
-            sandbox = null
-            activeSandbox = null
-
-            var recoverySandbox: JavaScriptSandbox? = null
-            var recoveryIsolate: JavaScriptIsolate? = null
-            try {
-                recoverySandbox =
-                    await(JavaScriptSandbox.createConnectedInstanceAsync(context), "sandbox.recovery.connect")
-                recoveryIsolate = recoverySandbox.createIsolate()
-                recoveryPass =
-                    recordEvaluation(
-                        lines,
-                        "heap.recovery",
-                        recoveryIsolate,
-                        "'RECOVERY_OK'",
-                        "RECOVERY_OK",
-                    )
-            } catch (error: Throwable) {
-                record(lines, "heap.recovery", "FAIL: ${describe(error)}")
-            } finally {
-                closeQuietly(recoveryIsolate)
-                closeQuietly(recoverySandbox)
-            }
-
-            val terminationPass =
-                terminationInfo?.getStatus() == TerminationInfo.STATUS_MEMORY_LIMIT_EXCEEDED ||
-                    terminationInfo?.getStatus() == TerminationInfo.STATUS_SANDBOX_DEAD
-            record(
-                lines,
-                "heap.result",
-                if (heapEvaluationFailed && terminationPass && recoveryPass) {
-                    "PASS"
+                if (featureValues.getValue("JS_FEATURE_PROMISE_RETURN")) {
+                    safePass =
+                        recordEvaluation(
+                            lines,
+                            "promise.evaluate",
+                            connectedIsolate,
+                            "Promise.resolve('PROMISE_OK')",
+                            "PROMISE_OK",
+                        ) && safePass
+                    safePass =
+                        recordExpectedJavaScriptFailure(
+                            lines,
+                            "promise.reject",
+                            connectedIsolate,
+                            "Promise.reject(new Error('DIAG_REJECT'))",
+                        ) && safePass
                 } else {
-                    "FAIL"
-                },
-            )
-        } catch (error: Throwable) {
-            record(lines, "heap.result", "FAIL: ${describe(error)}")
-        } finally {
-            closeQuietly(isolate)
-            closeQuietly(sandbox)
-            activeIsolate = null
-            activeSandbox = null
+                    record(lines, "promise.evaluate", "SKIP: feature unavailable")
+                }
+
+                safePass = recordIsolateParallelProbe(lines, connectedSandbox) && safePass
+
+                if (featureValues.getValue("JS_FEATURE_MESSAGE_PORTS")) {
+                    safePass = recordMessagePortProbe(lines, connectedIsolate) && safePass
+                } else {
+                    record(lines, "messagePort.probe", "SKIP: feature unavailable")
+                }
+
+                record(lines, "safe.result", if (safePass) "PASS" else "FAIL")
+            } catch (error: Throwable) {
+                safePass = false
+                record(lines, "safe.result", "FAIL: ${describe(error)}")
+            } finally {
+                closeQuietly(isolate)
+                closeQuietly(sandbox)
+                activeIsolate = null
+                activeSandbox = null
+            }
         }
-    }
+
+    fun runTerminationProbe(): List<String> =
+        runProbe("termination") { lines ->
+            appendDeviceInfo(lines)
+            if (!JavaScriptSandbox.isSupported()) {
+                record(lines, "termination.result", "SKIP: sandbox unsupported")
+                return@runProbe
+            }
+
+            var sandbox: JavaScriptSandbox? = null
+            var isolate: JavaScriptIsolate? = null
+            var terminationPass = false
+            try {
+                val connectedSandbox =
+                    await(
+                        JavaScriptSandbox.createConnectedInstanceAsync(context),
+                        "sandbox.connect",
+                    )
+                sandbox = connectedSandbox
+                activeSandbox = connectedSandbox
+                val supported =
+                    connectedSandbox.isFeatureSupported(
+                        JavaScriptSandbox.JS_FEATURE_ISOLATE_TERMINATION
+                    )
+                record(lines, "JS_FEATURE_ISOLATE_TERMINATION", supported.toString())
+                if (!supported) {
+                    record(lines, "termination.result", "SKIP: feature unavailable")
+                    return@runProbe
+                }
+
+                val runningIsolate = connectedSandbox.createIsolate()
+                isolate = runningIsolate
+                activeIsolate = runningIsolate
+                val future = runningIsolate.evaluateJavaScriptAsync("while (true) {}")
+                Thread.sleep(TERMINATION_WAIT_MILLIS)
+                closeQuietly(runningIsolate)
+                isolate = null
+                activeIsolate = null
+
+                try {
+                    await(future, "termination.evaluation")
+                    record(lines, "termination.evaluation", "FAIL: infinite loop returned")
+                } catch (error: Throwable) {
+                    val cause = rootCause(error)
+                    terminationPass = cause is IsolateTerminatedException
+                    record(
+                        lines,
+                        "termination.evaluation",
+                        if (terminationPass) {
+                            "PASS: ${describe(error)}"
+                        } else {
+                            "FAIL: ${describe(error)}"
+                        },
+                    )
+                }
+
+                val recoveryIsolate = connectedSandbox.createIsolate()
+                try {
+                    terminationPass =
+                        recordEvaluation(
+                            lines,
+                            "termination.recovery",
+                            recoveryIsolate,
+                            "'RECOVERY_OK'",
+                            "RECOVERY_OK",
+                        ) && terminationPass
+                } finally {
+                    closeQuietly(recoveryIsolate)
+                }
+                record(lines, "termination.result", if (terminationPass) "PASS" else "FAIL")
+            } catch (error: Throwable) {
+                terminationPass = false
+                record(lines, "termination.result", "FAIL: ${describe(error)}")
+            } finally {
+                closeQuietly(isolate)
+                closeQuietly(sandbox)
+                activeIsolate = null
+                activeSandbox = null
+            }
+        }
+
+    fun runHeapProbe(): List<String> =
+        runProbe("heap") { lines ->
+            appendDeviceInfo(lines)
+            if (!JavaScriptSandbox.isSupported()) {
+                record(lines, "heap.result", "SKIP: sandbox unsupported")
+                return@runProbe
+            }
+
+            var sandbox: JavaScriptSandbox? = null
+            var isolate: JavaScriptIsolate? = null
+            var terminationInfo: TerminationInfo? = null
+            var heapEvaluationFailed = false
+            var recoveryPass = false
+            try {
+                val connectedSandbox =
+                    await(
+                        JavaScriptSandbox.createConnectedInstanceAsync(context),
+                        "sandbox.connect",
+                    )
+                sandbox = connectedSandbox
+                activeSandbox = connectedSandbox
+                val supported =
+                    connectedSandbox.isFeatureSupported(
+                        JavaScriptSandbox.JS_FEATURE_ISOLATE_MAX_HEAP_SIZE
+                    )
+                record(lines, "JS_FEATURE_ISOLATE_MAX_HEAP_SIZE", supported.toString())
+                if (!supported) {
+                    record(lines, "heap.result", "SKIP: feature unavailable")
+                    return@runProbe
+                }
+
+                val settings =
+                    IsolateStartupParameters().apply {
+                        setMaxHeapSizeBytes(HEAP_LIMIT_BYTES)
+                    }
+                val heapIsolate = connectedSandbox.createIsolate(settings)
+                isolate = heapIsolate
+                activeIsolate = heapIsolate
+                val callbackLatch = CountDownLatch(1)
+                val callbackRef = arrayOfNulls<TerminationInfo>(1)
+                val callback =
+                    Consumer<TerminationInfo> { info ->
+                        callbackRef[0] = info
+                        callbackLatch.countDown()
+                    }
+                heapIsolate.addOnTerminatedCallback(callbackExecutor, callback)
+
+                val future =
+                    heapIsolate.evaluateJavaScriptAsync(
+                        """
+                        (() => {
+                            const chunks = [];
+                            while (true) chunks.push(new Array(262144).fill("inkleaf"));
+                        })()
+                        """
+                            .trimIndent()
+                    )
+                try {
+                    await(future, "heap.evaluation")
+                    record(lines, "heap.evaluation", "FAIL: allocation loop returned")
+                } catch (error: Throwable) {
+                    heapEvaluationFailed = rootCause(error) is IsolateTerminatedException
+                    record(
+                        lines,
+                        "heap.evaluation",
+                        if (heapEvaluationFailed) {
+                            "PASS: ${describe(error)}"
+                        } else {
+                            "FAIL: ${describe(error)}"
+                        },
+                    )
+                }
+
+                callbackLatch.await(FUTURE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                terminationInfo = callbackRef[0]
+                record(lines, "heap.termination", terminationInfo?.toString() ?: "NO_CALLBACK")
+
+                closeQuietly(heapIsolate)
+                isolate = null
+                activeIsolate = null
+                closeQuietly(connectedSandbox)
+                sandbox = null
+                activeSandbox = null
+
+                var recoverySandbox: JavaScriptSandbox? = null
+                var recoveryIsolate: JavaScriptIsolate? = null
+                try {
+                    recoverySandbox =
+                        await(
+                            JavaScriptSandbox.createConnectedInstanceAsync(context),
+                            "sandbox.recovery.connect",
+                        )
+                    recoveryIsolate = recoverySandbox.createIsolate()
+                    recoveryPass =
+                        recordEvaluation(
+                            lines,
+                            "heap.recovery",
+                            recoveryIsolate,
+                            "'RECOVERY_OK'",
+                            "RECOVERY_OK",
+                        )
+                } catch (error: Throwable) {
+                    record(lines, "heap.recovery", "FAIL: ${describe(error)}")
+                } finally {
+                    closeQuietly(recoveryIsolate)
+                    closeQuietly(recoverySandbox)
+                }
+
+                val terminationPass =
+                    terminationInfo?.getStatus() == TerminationInfo.STATUS_MEMORY_LIMIT_EXCEEDED ||
+                        terminationInfo?.getStatus() == TerminationInfo.STATUS_SANDBOX_DEAD
+                record(
+                    lines,
+                    "heap.result",
+                    if (heapEvaluationFailed && terminationPass && recoveryPass) {
+                        "PASS"
+                    } else {
+                        "FAIL"
+                    },
+                )
+            } catch (error: Throwable) {
+                record(lines, "heap.result", "FAIL: ${describe(error)}")
+            } finally {
+                closeQuietly(isolate)
+                closeQuietly(sandbox)
+                activeIsolate = null
+                activeSandbox = null
+            }
+        }
 
     fun close() {
         closeQuietly(activeIsolate)
@@ -435,36 +468,42 @@ class JavaScriptEngineDiagnosticRunner(
         }
     }
 
-    private fun recordMessagePortProbe(lines: MutableList<String>, isolate: JavaScriptIsolate): Boolean {
+    private fun recordMessagePortProbe(
+        lines: MutableList<String>,
+        isolate: JavaScriptIsolate,
+    ): Boolean {
         val ready = CountDownLatch(1)
         val echoed = CountDownLatch(1)
         var received = ""
-        val client = object : MessagePortClient {
-            override fun onMessage(message: Message) {
-                if (message.type != Message.TYPE_STRING) return
-                received = message.string
-                when (received) {
-                    "READY" -> ready.countDown()
-                    "ECHO:PING" -> echoed.countDown()
+        val client =
+            object : MessagePortClient {
+                override fun onMessage(message: Message) {
+                    if (message.type != Message.TYPE_STRING) return
+                    received = message.string
+                    when (received) {
+                        "READY" -> ready.countDown()
+                        "ECHO:PING" -> echoed.countDown()
+                    }
                 }
             }
-        }
         var port: MessagePort? = null
         try {
             port = isolate.createMessageChannel("inkleafDiagnosticPort", callbackExecutor, client)
-            val init = await(
-                isolate.evaluateJavaScriptAsync(
-                    """
-                    (async () => {
-                        const port = await android.getNamedPort("inkleafDiagnosticPort");
-                        port.onmessage = event => port.postMessage("ECHO:" + event.data);
-                        port.postMessage("READY");
-                        return "PORT_INIT_OK";
-                    })()
-                    """.trimIndent()
-                ),
-                "messagePort.init",
-            )
+            val init =
+                await(
+                    isolate.evaluateJavaScriptAsync(
+                        """
+                        (async () => {
+                            const port = await android.getNamedPort("inkleafDiagnosticPort");
+                            port.onmessage = event => port.postMessage("ECHO:" + event.data);
+                            port.postMessage("READY");
+                            return "PORT_INIT_OK";
+                        })()
+                        """
+                            .trimIndent()
+                    ),
+                    "messagePort.init",
+                )
             if (init != "PORT_INIT_OK" || !ready.await(FUTURE_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
                 record(lines, "messagePort.probe", "FAIL: init=$init received=$received")
                 return false
@@ -500,16 +539,20 @@ class JavaScriptEngineDiagnosticRunner(
             val secondFuture = secondIsolate.evaluateJavaScriptAsync("'ISO_TWO'")
             val firstResult = await(firstFuture, "isolate.parallel.one")
             val secondResult = await(secondFuture, "isolate.parallel.two")
-            val firstState = await(
-                firstIsolate.evaluateJavaScriptAsync(
-                    "globalThis.__inkleafOnly = 'ONE'; String(globalThis.__inkleafOnly)"
-                ),
-                "isolate.state.one",
-            )
-            val secondState = await(
-                secondIsolate.evaluateJavaScriptAsync("String(typeof globalThis.__inkleafOnly)"),
-                "isolate.state.two",
-            )
+            val firstState =
+                await(
+                    firstIsolate.evaluateJavaScriptAsync(
+                        "globalThis.__inkleafOnly = 'ONE'; String(globalThis.__inkleafOnly)"
+                    ),
+                    "isolate.state.one",
+                )
+            val secondState =
+                await(
+                    secondIsolate.evaluateJavaScriptAsync(
+                        "String(typeof globalThis.__inkleafOnly)"
+                    ),
+                    "isolate.state.two",
+                )
             val pass =
                 firstResult == "ISO_ONE" &&
                     secondResult == "ISO_TWO" &&
@@ -554,9 +597,9 @@ class JavaScriptEngineDiagnosticRunner(
 
     private fun rootCause(error: Throwable): Throwable {
         var current = error
-        while ((current is java.util.concurrent.ExecutionException ||
-                current is java.util.concurrent.CompletionException) &&
-            current.cause != null
+        while (
+            (current is java.util.concurrent.ExecutionException ||
+                current is java.util.concurrent.CompletionException) && current.cause != null
         ) {
             current = current.cause!!
         }

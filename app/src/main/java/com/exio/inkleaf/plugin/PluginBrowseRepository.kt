@@ -43,8 +43,8 @@ data class PluginBrowseCacheSnapshot(
 /**
  * Disposable first-page cache for plugin browse feeds.
  *
- * Memory entries make tab/feed switching immediate. Disk entries survive process recreation,
- * while later pages remain owned by the screen-scoped ViewModel.
+ * Memory entries make tab/feed switching immediate. Disk entries survive process recreation, while
+ * later pages remain owned by the screen-scoped ViewModel.
  */
 class PluginBrowseRepository(
     private val cacheDirectory: File,
@@ -57,11 +57,12 @@ class PluginBrowseRepository(
     private val json = Json { ignoreUnknownKeys = true }
     private val entryLocks = Array(LOCK_STRIPE_COUNT) { Mutex() }
     private val memoryLock = Any()
-    private val memory = object : LinkedHashMap<PluginBrowseCacheKey, PluginBrowseCacheSnapshot>(16, 0.75f, true) {
-        override fun removeEldestEntry(
-            eldest: MutableMap.MutableEntry<PluginBrowseCacheKey, PluginBrowseCacheSnapshot>?,
-        ): Boolean = size > maxMemoryEntries
-    }
+    private val memory =
+        object : LinkedHashMap<PluginBrowseCacheKey, PluginBrowseCacheSnapshot>(16, 0.75f, true) {
+            override fun removeEldestEntry(
+                eldest: MutableMap.MutableEntry<PluginBrowseCacheKey, PluginBrowseCacheSnapshot>?
+            ): Boolean = size > maxMemoryEntries
+        }
 
     suspend fun readFirstPage(key: PluginBrowseCacheKey): PluginBrowseCacheSnapshot? =
         withContext(Dispatchers.IO) { readInternal(key) }
@@ -70,9 +71,7 @@ class PluginBrowseRepository(
 
     fun isFresh(fetchedAtMs: Long): Boolean = clockMs() - fetchedAtMs in 0 until ttlMs
 
-    /**
-     * Refreshes a first page once for all callers that observed the same cache generation.
-     */
+    /** Refreshes a first page once for all callers that observed the same cache generation. */
     suspend fun refreshFirstPage(
         key: PluginBrowseCacheKey,
         request: PluginBrowseRequest,
@@ -90,11 +89,12 @@ class PluginBrowseRepository(
             if (current != null && current.revision != expectedRevision) return current
             if (!force && current != null && isFresh(current)) return current
 
-            val refreshed = PluginBrowseCacheSnapshot(
-                page = remoteBrowse(key.pluginId, request),
-                fetchedAtMs = clockMs(),
-                revision = UUID.randomUUID().toString(),
-            )
+            val refreshed =
+                PluginBrowseCacheSnapshot(
+                    page = remoteBrowse(key.pluginId, request),
+                    fetchedAtMs = clockMs(),
+                    revision = UUID.randomUUID().toString(),
+                )
             withContext(Dispatchers.IO) { writeInternal(key, refreshed) }
             return refreshed
         } finally {
@@ -106,19 +106,32 @@ class PluginBrowseRepository(
         remoteBrowse(pluginId, request)
 
     private fun readInternal(key: PluginBrowseCacheKey): PluginBrowseCacheSnapshot? {
-        synchronized(memoryLock) { memory[key] }?.let { return it }
+        synchronized(memoryLock) { memory[key] }
+            ?.let {
+                return it
+            }
         val file = fileFor(key)
         if (!file.isFile) return null
 
-        val envelope = runCatching {
-            json.decodeFromString(BrowseCacheEnvelope.serializer(), file.readText(StandardCharsets.UTF_8))
-        }.getOrNull()
-        if (envelope == null || envelope.schemaVersion != CACHE_SCHEMA_VERSION || !envelope.matches(key)) {
+        val envelope =
+            runCatching {
+                    json.decodeFromString(
+                        BrowseCacheEnvelope.serializer(),
+                        file.readText(StandardCharsets.UTF_8),
+                    )
+                }
+                .getOrNull()
+        if (
+            envelope == null ||
+                envelope.schemaVersion != CACHE_SCHEMA_VERSION ||
+                !envelope.matches(key)
+        ) {
             file.delete()
             return null
         }
 
-        val snapshot = PluginBrowseCacheSnapshot(envelope.page, envelope.fetchedAtMs, envelope.revision)
+        val snapshot =
+            PluginBrowseCacheSnapshot(envelope.page, envelope.fetchedAtMs, envelope.revision)
         synchronized(memoryLock) { memory[key] = snapshot }
         return snapshot
     }
@@ -129,15 +142,16 @@ class PluginBrowseRepository(
             if (!cacheDirectory.mkdirs() && !cacheDirectory.isDirectory) {
                 throw IOException("Unable to create plugin browse cache directory")
             }
-            val envelope = BrowseCacheEnvelope(
-                pluginId = key.pluginId,
-                pluginVersion = key.pluginVersion,
-                feedId = key.feedId,
-                filters = key.filters.toSortedMap(),
-                fetchedAtMs = snapshot.fetchedAtMs,
-                revision = snapshot.revision,
-                page = snapshot.page,
-            )
+            val envelope =
+                BrowseCacheEnvelope(
+                    pluginId = key.pluginId,
+                    pluginVersion = key.pluginVersion,
+                    feedId = key.feedId,
+                    filters = key.filters.toSortedMap(),
+                    fetchedAtMs = snapshot.fetchedAtMs,
+                    revision = snapshot.revision,
+                    page = snapshot.page,
+                )
             writeAtomically(
                 fileFor(key),
                 json.encodeToString(BrowseCacheEnvelope.serializer(), envelope),
@@ -147,14 +161,16 @@ class PluginBrowseRepository(
     }
 
     private fun fileFor(key: PluginBrowseCacheKey): File {
-        val digest = MessageDigest.getInstance("SHA-256")
-            .digest(key.stableValue().toByteArray(StandardCharsets.UTF_8))
-            .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
+        val digest =
+            MessageDigest.getInstance("SHA-256")
+                .digest(key.stableValue().toByteArray(StandardCharsets.UTF_8))
+                .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
         return cacheDirectory.resolve("$digest.json")
     }
 
     private fun pruneDiskCache() {
-        cacheDirectory.listFiles { file -> file.isFile && file.extension == "json" }
+        cacheDirectory
+            .listFiles { file -> file.isFile && file.extension == "json" }
             ?.sortedByDescending(File::lastModified)
             ?.drop(maxDiskEntries)
             ?.forEach(File::delete)

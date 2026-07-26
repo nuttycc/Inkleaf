@@ -25,8 +25,6 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Warning
-import androidx.compose.ui.res.painterResource
-import com.exio.inkleaf.R
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -36,9 +34,9 @@ import androidx.compose.material3.DockedSearchBar
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -62,6 +60,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -69,6 +68,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.exio.inkleaf.InkleafApplication
+import com.exio.inkleaf.R
 import com.exio.inkleaf.plugin.ComicSummary
 import com.exio.inkleaf.plugin.PluginFilterDescriptor
 import com.exio.inkleaf.plugin.PluginHealth
@@ -106,14 +106,18 @@ fun PluginDiscoverScreen(
         viewModel.loadInstalledPlugins(application.pluginManager)
     }
 
-    val activeHealthyPlugins = remember(installedPlugins) {
-        installedPlugins.filter {
-            !it.state.disabled && it.state.health == PluginHealth.HEALTHY && it.state.activeVersion != null
+    val activeHealthyPlugins =
+        remember(installedPlugins) {
+            installedPlugins.filter {
+                !it.state.disabled &&
+                    it.state.health == PluginHealth.HEALTHY &&
+                    it.state.activeVersion != null
+            }
         }
-    }
-    val activePluginSignature = remember(activeHealthyPlugins) {
-        activeHealthyPlugins.map { "${it.state.pluginId}:${it.state.activeVersion}" }
-    }
+    val activePluginSignature =
+        remember(activeHealthyPlugins) {
+            activeHealthyPlugins.map { "${it.state.pluginId}:${it.state.activeVersion}" }
+        }
     LaunchedEffect(activePluginSignature) {
         viewModel.loadFeeds(
             application.pluginCatalog,
@@ -122,17 +126,22 @@ fun PluginDiscoverScreen(
         )
     }
 
-    val currentSelectedIds = selectedPluginIds ?: remember(activeHealthyPlugins) {
-        activeHealthyPlugins.map { it.state.pluginId }.toSet()
-    }
-    val visibleResults = remember(results, currentSelectedIds) {
-        results.filter { it.pluginId in currentSelectedIds }
-    }
-    val hasNoResults = remember(visibleResults) {
-        visibleResults.isEmpty() || visibleResults.all { result ->
-            result.error == null && result.page?.items.orEmpty().isEmpty()
+    val currentSelectedIds =
+        selectedPluginIds
+            ?: remember(activeHealthyPlugins) {
+                activeHealthyPlugins.map { it.state.pluginId }.toSet()
+            }
+    val visibleResults =
+        remember(results, currentSelectedIds) {
+            results.filter { it.pluginId in currentSelectedIds }
         }
-    }
+    val hasNoResults =
+        remember(visibleResults) {
+            visibleResults.isEmpty() ||
+                visibleResults.all { result ->
+                    result.error == null && result.page?.items.orEmpty().isEmpty()
+                }
+        }
     val selectedFeed = feeds.firstOrNull { it.key == selectedFeedKey }
 
     Scaffold(
@@ -143,7 +152,9 @@ fun PluginDiscoverScreen(
                 actions = {
                     if (mode == DiscoverViewModel.Mode.BROWSE && selectedFeed != null) {
                         IconButton(
-                            onClick = { viewModel.refreshBrowse(application.pluginBrowseRepository) },
+                            onClick = {
+                                viewModel.refreshBrowse(application.pluginBrowseRepository)
+                            },
                             enabled = !isBrowsing,
                         ) {
                             Icon(Icons.Default.Refresh, contentDescription = "刷新当前内容流")
@@ -158,16 +169,16 @@ fun PluginDiscoverScreen(
     ) { padding ->
         LazyVerticalGrid(
             columns = GridCells.Adaptive(minSize = 120.dp),
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding),
+            modifier = Modifier.fillMaxSize().padding(padding),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             // Mode Tabs (Browse vs Search)
             item(span = { GridItemSpan(maxLineSpan) }) {
-                PrimaryTabRow(selectedTabIndex = if (mode == DiscoverViewModel.Mode.BROWSE) 0 else 1) {
+                PrimaryTabRow(
+                    selectedTabIndex = if (mode == DiscoverViewModel.Mode.BROWSE) 0 else 1
+                ) {
                     Tab(
                         selected = mode == DiscoverViewModel.Mode.BROWSE,
                         onClick = {
@@ -251,45 +262,54 @@ fun PluginDiscoverScreen(
                                 FilterChip(
                                     selected = isSelected,
                                     onClick = {
-                                        viewModel.selectFeed(application.pluginBrowseRepository, feed.key)
+                                        viewModel.selectFeed(
+                                            application.pluginBrowseRepository,
+                                            feed.key,
+                                        )
                                     },
                                     label = { Text(feed.descriptor.title) },
-                                    leadingIcon = if (isSelected) {
-                                        {
-                                            Icon(
-                                                Icons.Default.Check,
-                                                contentDescription = null,
-                                                modifier = Modifier.size(FilterChipDefaults.IconSize),
-                                            )
-                                        }
-                                    } else null,
+                                    leadingIcon =
+                                        if (isSelected) {
+                                            {
+                                                Icon(
+                                                    Icons.Default.Check,
+                                                    contentDescription = null,
+                                                    modifier =
+                                                        Modifier.size(FilterChipDefaults.IconSize),
+                                                )
+                                            }
+                                        } else null,
                                 )
                             }
                         }
                     }
 
-                    selectedFeed?.descriptor?.filters?.takeIf { it.isNotEmpty() }?.let { filters ->
-                        item(span = { GridItemSpan(maxLineSpan) }) {
-                            LazyRow(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                items(filters, key = { it.id }) { filter ->
-                                    BrowseFilterMenu(
-                                        filter = filter,
-                                        selectedOptionId = browseFilters[filter.id],
-                                        onSelected = { optionId ->
-                                            viewModel.selectBrowseFilter(
-                                                application.pluginBrowseRepository,
-                                                filter.id,
-                                                optionId,
-                                            )
-                                        },
-                                    )
+                    selectedFeed
+                        ?.descriptor
+                        ?.filters
+                        ?.takeIf { it.isNotEmpty() }
+                        ?.let { filters ->
+                            item(span = { GridItemSpan(maxLineSpan) }) {
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    items(filters, key = { it.id }) { filter ->
+                                        BrowseFilterMenu(
+                                            filter = filter,
+                                            selectedOptionId = browseFilters[filter.id],
+                                            onSelected = { optionId ->
+                                                viewModel.selectBrowseFilter(
+                                                    application.pluginBrowseRepository,
+                                                    filter.id,
+                                                    optionId,
+                                                )
+                                            },
+                                        )
+                                    }
                                 }
                             }
                         }
-                    }
 
                     selectedFeed?.let { feed ->
                         item(span = { GridItemSpan(maxLineSpan) }) {
@@ -337,7 +357,9 @@ fun PluginDiscoverScreen(
 
                         if (isBrowsing && browseItems.isNotEmpty()) {
                             item(span = { GridItemSpan(maxLineSpan) }) {
-                                LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp))
+                                LinearProgressIndicator(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                                )
                             }
                         } else if (browseNextCursor != null) {
                             item(span = { GridItemSpan(maxLineSpan) }) {
@@ -346,7 +368,9 @@ fun PluginDiscoverScreen(
                                     horizontalArrangement = Arrangement.Center,
                                 ) {
                                     OutlinedButton(
-                                        onClick = { viewModel.loadMore(application.pluginBrowseRepository) },
+                                        onClick = {
+                                            viewModel.loadMore(application.pluginBrowseRepository)
+                                        }
                                     ) {
                                         Text("加载更多")
                                     }
@@ -366,7 +390,10 @@ fun PluginDiscoverScreen(
                                 onQueryChange = viewModel::updateQuery,
                                 onSearch = {
                                     searchActive = false
-                                    viewModel.performSearch(application.pluginCatalog, activeHealthyPlugins)
+                                    viewModel.performSearch(
+                                        application.pluginCatalog,
+                                        activeHealthyPlugins,
+                                    )
                                 },
                                 expanded = searchActive,
                                 onExpandedChange = { searchActive = it },
@@ -400,21 +427,28 @@ fun PluginDiscoverScreen(
                             FilterChip(
                                 selected = isAllSelected,
                                 onClick = {
-                                    viewModel.selectAllPlugins(activeHealthyPlugins.map { it.state.pluginId })
+                                    viewModel.selectAllPlugins(
+                                        activeHealthyPlugins.map { it.state.pluginId }
+                                    )
                                     if (query.isNotBlank()) {
-                                        viewModel.performSearch(application.pluginCatalog, activeHealthyPlugins)
+                                        viewModel.performSearch(
+                                            application.pluginCatalog,
+                                            activeHealthyPlugins,
+                                        )
                                     }
                                 },
                                 label = { Text("全部") },
-                                leadingIcon = if (isAllSelected) {
-                                    {
-                                        Icon(
-                                            Icons.Default.Check,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(FilterChipDefaults.IconSize),
-                                        )
-                                    }
-                                } else null,
+                                leadingIcon =
+                                    if (isAllSelected) {
+                                        {
+                                            Icon(
+                                                Icons.Default.Check,
+                                                contentDescription = null,
+                                                modifier =
+                                                    Modifier.size(FilterChipDefaults.IconSize),
+                                            )
+                                        }
+                                    } else null,
                             )
                         }
                         items(activeHealthyPlugins, key = { it.state.pluginId }) { plugin ->
@@ -427,19 +461,24 @@ fun PluginDiscoverScreen(
                                         activeHealthyPlugins.map { it.state.pluginId },
                                     )
                                     if (query.isNotBlank()) {
-                                        viewModel.performSearch(application.pluginCatalog, activeHealthyPlugins)
+                                        viewModel.performSearch(
+                                            application.pluginCatalog,
+                                            activeHealthyPlugins,
+                                        )
                                     }
                                 },
                                 label = { Text(plugin.manifest?.name ?: plugin.state.pluginId) },
-                                leadingIcon = if (isSelected) {
-                                    {
-                                        Icon(
-                                            Icons.Default.Check,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(FilterChipDefaults.IconSize),
-                                        )
-                                    }
-                                } else null,
+                                leadingIcon =
+                                    if (isSelected) {
+                                        {
+                                            Icon(
+                                                Icons.Default.Check,
+                                                contentDescription = null,
+                                                modifier =
+                                                    Modifier.size(FilterChipDefaults.IconSize),
+                                            )
+                                        }
+                                    } else null,
                             )
                         }
                     }
@@ -447,7 +486,9 @@ fun PluginDiscoverScreen(
 
                 if (isSearching) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
-                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp))
+                        LinearProgressIndicator(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                        )
                     }
                 }
 
@@ -456,7 +497,10 @@ fun PluginDiscoverScreen(
                         M3ErrorBanner(
                             message = error,
                             onRetry = {
-                                viewModel.retrySearch(application.pluginCatalog, activeHealthyPlugins)
+                                viewModel.retrySearch(
+                                    application.pluginCatalog,
+                                    activeHealthyPlugins,
+                                )
                             },
                         )
                     }
@@ -468,10 +512,15 @@ fun PluginDiscoverScreen(
                     }
                 } else {
                     visibleResults.forEach { result ->
-                        val sourcePlugin = installedPlugins.firstOrNull { it.state.pluginId == result.pluginId }
+                        val sourcePlugin = installedPlugins.firstOrNull {
+                            it.state.pluginId == result.pluginId
+                        }
                         val sourceName = sourcePlugin?.manifest?.name ?: result.pluginId
 
-                        item(span = { GridItemSpan(maxLineSpan) }, key = "header_${result.pluginId}") {
+                        item(
+                            span = { GridItemSpan(maxLineSpan) },
+                            key = "header_${result.pluginId}",
+                        ) {
                             Text(
                                 text = sourceName,
                                 style = MaterialTheme.typography.titleMedium,
@@ -481,35 +530,46 @@ fun PluginDiscoverScreen(
                         }
 
                         result.error?.let { error ->
-                            item(span = { GridItemSpan(maxLineSpan) }, key = "error_${result.pluginId}") {
+                            item(
+                                span = { GridItemSpan(maxLineSpan) },
+                                key = "error_${result.pluginId}",
+                            ) {
                                 M3ErrorBanner(
                                     message = "加载失败: ${error.message}",
                                     onRetry = {
-                                        viewModel.retrySearch(application.pluginCatalog, activeHealthyPlugins)
+                                        viewModel.retrySearch(
+                                            application.pluginCatalog,
+                                            activeHealthyPlugins,
+                                        )
                                     },
                                 )
                             }
-                        } ?: run {
-                            val comics = result.page?.items.orEmpty()
-                            if (comics.isEmpty()) {
-                                item(span = { GridItemSpan(maxLineSpan) }, key = "empty_${result.pluginId}") {
-                                    Text(
-                                        "无搜索结果",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(bottom = 8.dp),
-                                    )
-                                }
-                            } else {
-                                items(comics, key = { "${result.pluginId}_${it.sourceId}" }) { comic ->
-                                    DiscoverComicCard(
-                                        comic = comic,
-                                        sourceName = sourceName,
-                                        onClick = { onOpenComic(result.pluginId, comic) },
-                                    )
+                        }
+                            ?: run {
+                                val comics = result.page?.items.orEmpty()
+                                if (comics.isEmpty()) {
+                                    item(
+                                        span = { GridItemSpan(maxLineSpan) },
+                                        key = "empty_${result.pluginId}",
+                                    ) {
+                                        Text(
+                                            "无搜索结果",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.padding(bottom = 8.dp),
+                                        )
+                                    }
+                                } else {
+                                    items(comics, key = { "${result.pluginId}_${it.sourceId}" }) {
+                                        comic ->
+                                        DiscoverComicCard(
+                                            comic = comic,
+                                            sourceName = sourceName,
+                                            onClick = { onOpenComic(result.pluginId, comic) },
+                                        )
+                                    }
                                 }
                             }
-                        }
                     }
                 }
             }
@@ -518,13 +578,9 @@ fun PluginDiscoverScreen(
 }
 
 @Composable
-private fun SearchEmptyState(
-    modifier: Modifier = Modifier,
-) {
+private fun SearchEmptyState(modifier: Modifier = Modifier) {
     Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(vertical = 32.dp, horizontal = 16.dp),
+        modifier = modifier.fillMaxWidth().padding(vertical = 32.dp, horizontal = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -554,9 +610,10 @@ private fun BrowseFilterMenu(
     onSelected: (String) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val selectedTitle = filter.options.firstOrNull { it.id == selectedOptionId }?.title
-        ?: filter.options.firstOrNull()?.title
-        ?: "选择"
+    val selectedTitle =
+        filter.options.firstOrNull { it.id == selectedOptionId }?.title
+            ?: filter.options.firstOrNull()?.title
+            ?: "选择"
     Box {
         OutlinedButton(onClick = { expanded = true }) {
             Text("${filter.title}: $selectedTitle")
@@ -615,10 +672,11 @@ private fun M3ErrorBanner(
     modifier: Modifier = Modifier,
 ) {
     Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.errorContainer,
-            contentColor = MaterialTheme.colorScheme.onErrorContainer,
-        ),
+        colors =
+            CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.errorContainer,
+                contentColor = MaterialTheme.colorScheme.onErrorContainer,
+            ),
         shape = RoundedCornerShape(12.dp),
         modifier = modifier.fillMaxWidth(),
     ) {
@@ -639,10 +697,11 @@ private fun M3ErrorBanner(
             )
             FilledTonalButton(
                 onClick = onRetry,
-                colors = ButtonDefaults.filledTonalButtonColors(
-                    containerColor = MaterialTheme.colorScheme.error,
-                    contentColor = MaterialTheme.colorScheme.onError,
-                ),
+                colors =
+                    ButtonDefaults.filledTonalButtonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError,
+                    ),
             ) {
                 Text("重试")
             }
@@ -662,29 +721,31 @@ private fun DiscoverComicCard(
         onClick = onClick,
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        ),
+        colors =
+            CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
         Column {
             Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(0.72f)
-                    .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)),
+                modifier =
+                    Modifier.fillMaxWidth()
+                        .aspectRatio(0.72f)
+                        .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp))
             ) {
                 val cover = comic.cover
                 if (cover != null) {
-                    val imageRequest = remember(cover) {
-                        ImageRequest.Builder(context)
-                            .data(cover.url)
-                            .apply {
-                                cover.headers.forEach { (name, value) -> setHeader(name, value) }
-                                cover.referer?.let { setHeader("Referer", it) }
-                            }
-                            .crossfade(150)
-                            .build()
-                    }
+                    val imageRequest =
+                        remember(cover) {
+                            ImageRequest.Builder(context)
+                                .data(cover.url)
+                                .apply {
+                                    cover.headers.forEach { (name, value) ->
+                                        setHeader(name, value)
+                                    }
+                                    cover.referer?.let { setHeader("Referer", it) }
+                                }
+                                .crossfade(150)
+                                .build()
+                        }
                     AsyncImage(
                         model = imageRequest,
                         contentDescription = comic.title,
@@ -693,9 +754,9 @@ private fun DiscoverComicCard(
                     )
                 } else {
                     Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(MaterialTheme.colorScheme.surfaceVariant),
+                        modifier =
+                            Modifier.fillMaxSize()
+                                .background(MaterialTheme.colorScheme.surfaceVariant),
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(

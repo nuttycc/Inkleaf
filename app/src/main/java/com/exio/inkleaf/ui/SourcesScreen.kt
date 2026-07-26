@@ -104,13 +104,15 @@ fun SourcesScreen(
         val pluginName = result.pluginId ?: "未知插件"
         val versionText = result.version?.let { "@$it" } ?: ""
         when (result.status) {
-            PluginInstallStatus.INSTALLED, PluginInstallStatus.ALREADY_INSTALLED -> {
+            PluginInstallStatus.INSTALLED,
+            PluginInstallStatus.ALREADY_INSTALLED -> {
                 showImportSheet = false
-                val message = if (result.activatable) {
-                    "已成功安装并激活 $pluginName$versionText"
-                } else {
-                    "已安装 $pluginName$versionText，但当前版本不兼容，未激活"
-                }
+                val message =
+                    if (result.activatable) {
+                        "已成功安装并激活 $pluginName$versionText"
+                    } else {
+                        "已安装 $pluginName$versionText，但当前版本不兼容，未激活"
+                    }
                 scope.launch {
                     snackbarHostState.showSnackbar(message)
                 }
@@ -147,14 +149,15 @@ fun SourcesScreen(
         }
     }
 
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-        if (uri != null) {
-            launchOperation {
-                val result = application.pluginManager.installUri(uri, activate = true)
-                handleInstallResult(result)
+    val picker =
+        rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+            if (uri != null) {
+                launchOperation {
+                    val result = application.pluginManager.installUri(uri, activate = true)
+                    handleInstallResult(result)
+                }
             }
         }
-    }
 
     LaunchedEffect(Unit) { refresh() }
 
@@ -162,7 +165,8 @@ fun SourcesScreen(
         modifier = modifier,
         snackbarHost = {
             SnackbarHost(snackbarHostState) { data ->
-                val isError = data.visuals.message.startsWith("安装失败") ||
+                val isError =
+                    data.visuals.message.startsWith("安装失败") ||
                         data.visuals.message.startsWith("操作失败") ||
                         data.visuals.message.contains("失败") ||
                         data.visuals.message.contains("拒绝") ||
@@ -205,17 +209,13 @@ fun SourcesScreen(
         },
     ) { padding ->
         LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding),
+            modifier = Modifier.fillMaxSize().padding(padding),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             if (busy) {
                 item {
-                    LinearProgressIndicator(
-                        modifier = Modifier.fillMaxWidth().height(4.dp)
-                    )
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(4.dp))
                 }
             }
 
@@ -255,7 +255,7 @@ fun SourcesScreen(
                             launchOperation {
                                 application.pluginManager.setEnabled(
                                     plugin.state.pluginId,
-                                    plugin.state.disabled
+                                    plugin.state.disabled,
                                 )
                             }
                         },
@@ -265,10 +265,14 @@ fun SourcesScreen(
                             }
                         },
                         onRollback = {
-                            launchOperation { application.pluginManager.rollback(plugin.state.pluginId) }
+                            launchOperation {
+                                application.pluginManager.rollback(plugin.state.pluginId)
+                            }
                         },
                         onUninstall = {
-                            launchOperation { application.pluginManager.uninstall(plugin.state.pluginId) }
+                            launchOperation {
+                                application.pluginManager.uninstall(plugin.state.pluginId)
+                            }
                         },
                     )
                 }
@@ -288,9 +292,7 @@ fun SourcesScreen(
                 busy = busy,
                 onUrlChange = { url = it },
                 onPickFile = {
-                    picker.launch(
-                        arrayOf("application/zip", "application/octet-stream", "*/*")
-                    )
+                    picker.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
                 },
                 onInstallUrl = {
                     launchOperation {
@@ -316,10 +318,7 @@ private fun ImportSourceSheetContent(
     onInstallUrl: () -> Unit,
 ) {
     SheetColumn(
-        modifier =
-            Modifier
-                .imePadding()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+        modifier = Modifier.imePadding().padding(horizontal = 16.dp, vertical = 8.dp),
         scrollable = true,
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -411,38 +410,45 @@ private fun HealthStatusBadge(
     pluginState: PluginState,
     modifier: Modifier = Modifier,
 ) {
-    val (label, containerColor, contentColor) = when {
-        pluginState.disabled -> Triple(
-            "已禁用",
-            MaterialTheme.colorScheme.surfaceVariant,
-            MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        pluginState.health == PluginHealth.HEALTHY -> Triple(
-            "HEALTHY",
-            MaterialTheme.colorScheme.primaryContainer,
-            MaterialTheme.colorScheme.onPrimaryContainer
-        )
-        pluginState.health == PluginHealth.RUNTIME_UNHEALTHY -> Triple(
-            "BROKEN (运行异常)",
-            MaterialTheme.colorScheme.errorContainer,
-            MaterialTheme.colorScheme.onErrorContainer
-        )
-        pluginState.health.name.contains("DEGRADED", ignoreCase = true) -> Triple(
-            "DEGRADED (降级)",
-            MaterialTheme.colorScheme.tertiaryContainer,
-            MaterialTheme.colorScheme.onTertiaryContainer
-        )
-        pluginState.health.name.contains("BROKEN", ignoreCase = true) -> Triple(
-            "BROKEN",
-            MaterialTheme.colorScheme.errorContainer,
-            MaterialTheme.colorScheme.onErrorContainer
-        )
-        else -> Triple(
-            pluginState.health.name,
-            MaterialTheme.colorScheme.secondaryContainer,
-            MaterialTheme.colorScheme.onSecondaryContainer
-        )
-    }
+    val (label, containerColor, contentColor) =
+        when {
+            pluginState.disabled ->
+                Triple(
+                    "已禁用",
+                    MaterialTheme.colorScheme.surfaceVariant,
+                    MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            pluginState.health == PluginHealth.HEALTHY ->
+                Triple(
+                    "HEALTHY",
+                    MaterialTheme.colorScheme.primaryContainer,
+                    MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+            pluginState.health == PluginHealth.RUNTIME_UNHEALTHY ->
+                Triple(
+                    "BROKEN (运行异常)",
+                    MaterialTheme.colorScheme.errorContainer,
+                    MaterialTheme.colorScheme.onErrorContainer,
+                )
+            pluginState.health.name.contains("DEGRADED", ignoreCase = true) ->
+                Triple(
+                    "DEGRADED (降级)",
+                    MaterialTheme.colorScheme.tertiaryContainer,
+                    MaterialTheme.colorScheme.onTertiaryContainer,
+                )
+            pluginState.health.name.contains("BROKEN", ignoreCase = true) ->
+                Triple(
+                    "BROKEN",
+                    MaterialTheme.colorScheme.errorContainer,
+                    MaterialTheme.colorScheme.onErrorContainer,
+                )
+            else ->
+                Triple(
+                    pluginState.health.name,
+                    MaterialTheme.colorScheme.secondaryContainer,
+                    MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+        }
 
     Surface(
         modifier = modifier,
@@ -453,16 +459,12 @@ private fun HealthStatusBadge(
         Row(
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Box(
-                modifier = Modifier
-                    .size(6.dp)
-                    .background(contentColor, shape = CircleShape)
-            )
+            Box(modifier = Modifier.size(6.dp).background(contentColor, shape = CircleShape))
             Text(
                 text = label,
-                style = MaterialTheme.typography.labelSmall
+                style = MaterialTheme.typography.labelSmall,
             )
         }
     }
@@ -484,9 +486,7 @@ private fun SourceManagementItem(
         modifier = Modifier.fillMaxWidth(),
         elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
     ) {
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-        ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
             ListItem(
                 headlineContent = {
                     Text(
@@ -497,10 +497,11 @@ private fun SourceManagementItem(
                 supportingContent = {
                     Column(
                         modifier = Modifier.padding(top = 4.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         Text(
-                            text = "id: ${plugin.state.pluginId} · v${plugin.state.activeVersion ?: "未启用"}",
+                            text =
+                                "id: ${plugin.state.pluginId} · v${plugin.state.activeVersion ?: "未启用"}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -529,30 +530,28 @@ private fun SourceManagementItem(
                         enabled = !busy && plugin.state.activeVersion != null,
                     )
                 },
-                colors = ListItemDefaults.colors(containerColor = Color.Transparent)
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
             )
 
             HorizontalDivider(
                 modifier = Modifier.padding(horizontal = 16.dp),
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
             )
 
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (plugin.state.previousVersion != null) {
                     OutlinedButton(
                         onClick = onRollback,
-                        enabled = !busy
+                        enabled = !busy,
                     ) {
                         Icon(
                             painter = painterResource(R.drawable.ic_history),
                             contentDescription = null,
-                            modifier = Modifier.size(16.dp)
+                            modifier = Modifier.size(16.dp),
                         )
                         Spacer(Modifier.width(4.dp))
                         Text("回滚")
@@ -573,14 +572,15 @@ private fun SourceManagementItem(
                 OutlinedButton(
                     onClick = { showUninstallConfirm = true },
                     enabled = !busy,
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = MaterialTheme.colorScheme.error
-                    )
+                    colors =
+                        ButtonDefaults.outlinedButtonColors(
+                            contentColor = MaterialTheme.colorScheme.error
+                        ),
                 ) {
                     Icon(
                         imageVector = Icons.Default.Delete,
                         contentDescription = null,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(16.dp),
                     )
                     Spacer(Modifier.width(4.dp))
                     Text("卸载")
@@ -600,10 +600,11 @@ private fun SourceManagementItem(
                         showUninstallConfirm = false
                         onUninstall()
                     },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.error,
-                        contentColor = MaterialTheme.colorScheme.onError
-                    )
+                    colors =
+                        ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.error,
+                            contentColor = MaterialTheme.colorScheme.onError,
+                        ),
                 ) {
                     Text("确认卸载")
                 }

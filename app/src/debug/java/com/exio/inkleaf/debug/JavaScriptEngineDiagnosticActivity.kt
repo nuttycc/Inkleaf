@@ -43,46 +43,53 @@ class JavaScriptEngineDiagnosticActivity : AppCompatActivity() {
     }
 
     private fun createContent(): LinearLayout {
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(24, 24, 24, 24)
-        }
-        val description = TextView(this).apply {
-            text =
-                "#50 诊断入口\n安全探针会自动运行。终止探针和 heap 探针会主动结束 JS 或 sandbox，只在需要时点击。"
-        }
+        val root =
+            LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(24, 24, 24, 24)
+            }
+        val description =
+            TextView(this).apply {
+                text = "#50 诊断入口\n安全探针会自动运行。终止探针和 heap 探针会主动结束 JS 或 sandbox，只在需要时点击。"
+            }
         root.addView(description, matchWrap())
 
-        val actions = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-        }
-        safeButton = Button(this).apply {
-            text = "重新运行安全探针"
-            setOnClickListener { runSafeProbe() }
-        }
-        terminationButton = Button(this).apply {
-            text = "运行终止与恢复探针"
-            setOnClickListener { runTerminationProbe() }
-        }
-        heapButton = Button(this).apply {
-            text = "运行 heap / sandbox 探针"
-            setOnClickListener { confirmHeapProbe() }
-        }
-        copyButton = Button(this).apply {
-            text = "复制报告"
-            setOnClickListener { copyReport() }
-        }
+        val actions =
+            LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+            }
+        safeButton =
+            Button(this).apply {
+                text = "重新运行安全探针"
+                setOnClickListener { runSafeProbe() }
+            }
+        terminationButton =
+            Button(this).apply {
+                text = "运行终止与恢复探针"
+                setOnClickListener { runTerminationProbe() }
+            }
+        heapButton =
+            Button(this).apply {
+                text = "运行 heap / sandbox 探针"
+                setOnClickListener { confirmHeapProbe() }
+            }
+        copyButton =
+            Button(this).apply {
+                text = "复制报告"
+                setOnClickListener { copyReport() }
+            }
         actions.addView(safeButton, matchWrap())
         actions.addView(terminationButton, matchWrap())
         actions.addView(heapButton, matchWrap())
         actions.addView(copyButton, matchWrap())
         root.addView(actions, matchWrap())
 
-        reportView = TextView(this).apply {
-            setTextIsSelectable(true)
-            setPadding(12, 12, 12, 12)
-            text = "等待安全探针..."
-        }
+        reportView =
+            TextView(this).apply {
+                setTextIsSelectable(true)
+                setPadding(12, 12, 12, 12)
+                text = "等待安全探针..."
+            }
         val scroll = ScrollView(this).apply { addView(reportView) }
         root.addView(
             scroll,
@@ -116,11 +123,12 @@ class JavaScriptEngineDiagnosticActivity : AppCompatActivity() {
         if (!running.compareAndSet(false, true)) return
         setButtonsEnabled(false)
         worker.execute {
-            val section = try {
-                operation().joinToString("\n")
-            } catch (error: Throwable) {
-                "probe=$name\nunhandled=${error::class.java.simpleName}: ${error.message}"
-            }
+            val section =
+                try {
+                    operation().joinToString("\n")
+                } catch (error: Throwable) {
+                    "probe=$name\nunhandled=${error::class.java.simpleName}: ${error.message}"
+                }
             runOnUiThread {
                 reportSections += section
                 reportView.text = reportSections.joinToString("\n\n")
@@ -139,7 +147,9 @@ class JavaScriptEngineDiagnosticActivity : AppCompatActivity() {
 
     private fun copyReport() {
         val clipboard = getSystemService(ClipboardManager::class.java)
-        clipboard.setPrimaryClip(ClipData.newPlainText("JavaScriptEngine diagnostics", reportView.text))
+        clipboard.setPrimaryClip(
+            ClipData.newPlainText("JavaScriptEngine diagnostics", reportView.text)
+        )
         Toast.makeText(this, "报告已复制", Toast.LENGTH_SHORT).show()
     }
 

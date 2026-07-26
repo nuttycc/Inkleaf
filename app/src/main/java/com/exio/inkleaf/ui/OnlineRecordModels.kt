@@ -88,7 +88,7 @@ internal fun OnlineComicRecord.titleSnapshot(): String =
     detail?.title?.takeIf(String::isNotBlank) ?: key.sourceId
 
 internal fun OnlineComicRecord.chapterTitle(location: OnlinePageLocation): String =
-    chapters.firstOrNull { it.chapterId == location.identity.chapter.chapterId }
+    chapters
+        .firstOrNull { it.chapterId == location.identity.chapter.chapterId }
         ?.title
-        ?.takeIf(String::isNotBlank)
-        ?: location.identity.chapter.chapterId
+        ?.takeIf(String::isNotBlank) ?: location.identity.chapter.chapterId

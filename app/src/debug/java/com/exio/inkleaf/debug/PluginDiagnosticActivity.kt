@@ -28,9 +28,10 @@ class PluginDiagnosticActivity : AppCompatActivity() {
     private lateinit var urlField: EditText
     private var selectedPluginId: String? = null
 
-    private val openPackage = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-        if (uri != null) installUri(uri)
-    }
+    private val openPackage =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+            if (uri != null) installUri(uri)
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -40,80 +41,116 @@ class PluginDiagnosticActivity : AppCompatActivity() {
     }
 
     private fun createContent(): LinearLayout {
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(24, 24, 24, 24)
-        }
-        root.addView(TextView(this).apply {
-            text = "安装、启用和调用真实插件 ZIP。运行时能力缺失时会 fail-closed。"
-        }, matchWrap())
-        root.addView(Button(this).apply {
-            text = "选择本地插件包"
-            setOnClickListener { openPackage.launch(arrayOf("application/zip", "application/octet-stream", "*/*")) }
-        }, matchWrap())
-        urlField = EditText(this).apply {
-            hint = "插件 URL（HTTP/HTTPS）"
-            isSingleLine = true
-        }
+        val root =
+            LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(24, 24, 24, 24)
+            }
+        root.addView(
+            TextView(this).apply {
+                text = "安装、启用和调用真实插件 ZIP。运行时能力缺失时会 fail-closed。"
+            },
+            matchWrap(),
+        )
+        root.addView(
+            Button(this).apply {
+                text = "选择本地插件包"
+                setOnClickListener {
+                    openPackage.launch(
+                        arrayOf("application/zip", "application/octet-stream", "*/*")
+                    )
+                }
+            },
+            matchWrap(),
+        )
+        urlField =
+            EditText(this).apply {
+                hint = "插件 URL（HTTP/HTTPS）"
+                isSingleLine = true
+            }
         root.addView(urlField, matchWrap())
-        root.addView(Button(this).apply {
-            text = "从 URL 安装并启用"
-            setOnClickListener { installUrl(urlField.text.toString()) }
-        }, matchWrap())
-        root.addView(Button(this).apply {
-            text = "刷新插件状态"
-            setOnClickListener { refresh() }
-        }, matchWrap())
-        root.addView(Button(this).apply {
-            text = "恢复选中插件运行时"
-            setOnClickListener { recoverSelected() }
-        }, matchWrap())
-        root.addView(Button(this).apply {
-            text = "调用选中插件 describe"
-            setOnClickListener { describeSelected() }
-        }, matchWrap())
-        root.addView(Button(this).apply {
-            text = "调用选中插件 search fixture"
-            setOnClickListener { searchSelected() }
-        }, matchWrap())
-        root.addView(Button(this).apply {
-            text = "调用选中插件 host-smoke action"
-            setOnClickListener { hostSmokeSelected() }
-        }, matchWrap())
-        report = TextView(this).apply {
-            setTextIsSelectable(true)
-            setPadding(12, 12, 12, 12)
-        }
-        root.addView(ScrollView(this).apply { addView(report) }, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            0,
-            1f,
-        ))
+        root.addView(
+            Button(this).apply {
+                text = "从 URL 安装并启用"
+                setOnClickListener { installUrl(urlField.text.toString()) }
+            },
+            matchWrap(),
+        )
+        root.addView(
+            Button(this).apply {
+                text = "刷新插件状态"
+                setOnClickListener { refresh() }
+            },
+            matchWrap(),
+        )
+        root.addView(
+            Button(this).apply {
+                text = "恢复选中插件运行时"
+                setOnClickListener { recoverSelected() }
+            },
+            matchWrap(),
+        )
+        root.addView(
+            Button(this).apply {
+                text = "调用选中插件 describe"
+                setOnClickListener { describeSelected() }
+            },
+            matchWrap(),
+        )
+        root.addView(
+            Button(this).apply {
+                text = "调用选中插件 search fixture"
+                setOnClickListener { searchSelected() }
+            },
+            matchWrap(),
+        )
+        root.addView(
+            Button(this).apply {
+                text = "调用选中插件 host-smoke action"
+                setOnClickListener { hostSmokeSelected() }
+            },
+            matchWrap(),
+        )
+        report =
+            TextView(this).apply {
+                setTextIsSelectable(true)
+                setPadding(12, 12, 12, 12)
+            }
+        root.addView(
+            ScrollView(this).apply { addView(report) },
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                0,
+                1f,
+            ),
+        )
         return root
     }
 
     private fun refresh() {
         lifecycleScope.launch {
-            val plugins = try {
-                withContext(Dispatchers.IO) { app().pluginManager.installed() }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Exception) {
-                toast(error.message ?: "读取插件状态失败")
-                return@launch
-            }
-            selectedPluginId = plugins.firstOrNull()?.state?.pluginId
-            report.text = if (plugins.isEmpty()) {
-                "没有已安装插件。"
-            } else {
-                plugins.joinToString("\n\n") { plugin ->
-                    "${plugin.state.pluginId}\n" +
-                        "active=${plugin.state.activeVersion}\n" +
-                        "disabled=${plugin.state.disabled}\n" +
-                        "health=${plugin.state.health}\n" +
-                        "versions=${plugin.state.versions.joinToString { it.version }}"
+            val plugins =
+                try {
+                    withContext(Dispatchers.IO) { app().pluginManager.installed() }
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    toast(error.message ?: "读取插件状态失败")
+                    return@launch
                 }
-            }
+            selectedPluginId = plugins.firstOrNull()?.state?.pluginId
+            report.text =
+                if (plugins.isEmpty()) {
+                    "没有已安装插件。"
+                } else {
+                    plugins.joinToString("\n\n") { plugin ->
+                        "${plugin.state.pluginId}\n" +
+                            "active=${plugin.state.activeVersion}\n" +
+                            "disabled=${plugin.state.disabled}\n" +
+                            "health=${plugin.state.health}\n" +
+                            "versions=${plugin.state.versions.joinToString { it.version }}"
+                    }
+                }
         }
     }
 
@@ -121,7 +158,9 @@ class PluginDiagnosticActivity : AppCompatActivity() {
         lifecycleScope.launch {
             runCatching { app().pluginManager.installUri(uri, activate = true) }
                 .onSuccess { result ->
-                    toast("${result.status}: ${result.pluginId ?: "unknown"}@${result.version ?: "unknown"}")
+                    toast(
+                        "${result.status}: ${result.pluginId ?: "unknown"}@${result.version ?: "unknown"}"
+                    )
                     refresh()
                 }
                 .onFailure { error ->
@@ -138,25 +177,38 @@ class PluginDiagnosticActivity : AppCompatActivity() {
         }
         lifecycleScope.launch {
             runCatching {
-                app().pluginManager.installUrl(
-                    com.exio.inkleaf.plugin.PluginDownloadSource(url),
-                    activate = true,
-                )
-            }.onSuccess { result ->
-                toast("${result.status}: ${result.pluginId ?: "unknown"}@${result.version ?: "unknown"}")
-                refresh()
-            }.onFailure { error ->
-                error.rethrowCancellation()
-                toast(error.message ?: "下载失败")
-            }
+                    app()
+                        .pluginManager
+                        .installUrl(
+                            com.exio.inkleaf.plugin.PluginDownloadSource(url),
+                            activate = true,
+                        )
+                }
+                .onSuccess { result ->
+                    toast(
+                        "${result.status}: ${result.pluginId ?: "unknown"}@${result.version ?: "unknown"}"
+                    )
+                    refresh()
+                }
+                .onFailure { error ->
+                    error.rethrowCancellation()
+                    toast(error.message ?: "下载失败")
+                }
         }
     }
 
     private fun describeSelected() {
-        val pluginId = selectedPluginId ?: run { toast("没有选中插件"); return }
+        val pluginId =
+            selectedPluginId
+                ?: run {
+                    toast("没有选中插件")
+                    return
+                }
         lifecycleScope.launch {
             runCatching { app().pluginCatalog.describe(pluginId) }
-                .onSuccess { descriptor -> report.text = PluginContentCodec.json.encodeToString(descriptor) }
+                .onSuccess { descriptor ->
+                    report.text = PluginContentCodec.json.encodeToString(descriptor)
+                }
                 .onFailure { error ->
                     error.rethrowCancellation()
                     report.text = "error=${error.message ?: error::class.java.simpleName}"
@@ -166,7 +218,12 @@ class PluginDiagnosticActivity : AppCompatActivity() {
     }
 
     private fun recoverSelected() {
-        val pluginId = selectedPluginId ?: run { toast("没有选中插件"); return }
+        val pluginId =
+            selectedPluginId
+                ?: run {
+                    toast("没有选中插件")
+                    return
+                }
         lifecycleScope.launch {
             runCatching { app().pluginRuntimeManager.recover(pluginId) }
                 .onSuccess { refresh() }
@@ -179,37 +236,57 @@ class PluginDiagnosticActivity : AppCompatActivity() {
     }
 
     private fun searchSelected() {
-        val pluginId = selectedPluginId ?: run { toast("没有选中插件"); return }
+        val pluginId =
+            selectedPluginId
+                ?: run {
+                    toast("没有选中插件")
+                    return
+                }
         lifecycleScope.launch {
             runCatching {
-                app().pluginCatalog.search(
-                    PluginSearchRequest(query = "fixture", limit = 20),
-                    listOf(pluginId),
-                ).single()
-            }.onSuccess { result ->
-                report.text = result.page?.let { PluginContentCodec.json.encodeToString(it) }
-                    ?: "error=${result.error}"
-            }.onFailure { error ->
-                error.rethrowCancellation()
-                toast(error.message ?: "search 失败")
-            }
+                    app()
+                        .pluginCatalog
+                        .search(
+                            PluginSearchRequest(query = "fixture", limit = 20),
+                            listOf(pluginId),
+                        )
+                        .single()
+                }
+                .onSuccess { result ->
+                    report.text =
+                        result.page?.let { PluginContentCodec.json.encodeToString(it) }
+                            ?: "error=${result.error}"
+                }
+                .onFailure { error ->
+                    error.rethrowCancellation()
+                    toast(error.message ?: "search 失败")
+                }
         }
     }
 
     private fun hostSmokeSelected() {
-        val pluginId = selectedPluginId ?: run { toast("没有选中插件"); return }
+        val pluginId =
+            selectedPluginId
+                ?: run {
+                    toast("没有选中插件")
+                    return
+                }
         lifecycleScope.launch {
             runCatching {
-                app().pluginCatalog.invokeAction(
-                    pluginId,
-                    PluginActionRequest("host-smoke"),
-                )
-            }.onSuccess { result ->
-                report.text = result.toString()
-            }.onFailure { error ->
-                error.rethrowCancellation()
-                toast(error.message ?: "host-smoke 失败")
-            }
+                    app()
+                        .pluginCatalog
+                        .invokeAction(
+                            pluginId,
+                            PluginActionRequest("host-smoke"),
+                        )
+                }
+                .onSuccess { result ->
+                    report.text = result.toString()
+                }
+                .onFailure { error ->
+                    error.rethrowCancellation()
+                    toast(error.message ?: "host-smoke 失败")
+                }
         }
     }
 
@@ -221,8 +298,9 @@ class PluginDiagnosticActivity : AppCompatActivity() {
         if (this is CancellationException) throw this
     }
 
-    private fun matchWrap() = LinearLayout.LayoutParams(
-        ViewGroup.LayoutParams.MATCH_PARENT,
-        ViewGroup.LayoutParams.WRAP_CONTENT,
-    )
+    private fun matchWrap() =
+        LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+        )
 }

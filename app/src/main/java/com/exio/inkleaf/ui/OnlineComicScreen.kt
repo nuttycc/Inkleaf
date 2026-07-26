@@ -24,8 +24,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Warning
-import androidx.compose.ui.res.painterResource
-import com.exio.inkleaf.R
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.ButtonDefaults
@@ -56,12 +54,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.exio.inkleaf.InkleafApplication
+import com.exio.inkleaf.R
 import com.exio.inkleaf.plugin.ChapterSummary
 import com.exio.inkleaf.plugin.ComicDetail
 import com.exio.inkleaf.plugin.OnlineAvailability
@@ -87,9 +87,15 @@ fun OnlineComicScreen(
 ) {
     val application = LocalContext.current.applicationContext as InkleafApplication
     val coroutineScope = rememberCoroutineScope()
-    val opaqueContext = remember(opaqueContextJson) {
-        opaqueContextJson?.let { runCatching { com.exio.inkleaf.plugin.PluginContentCodec.json.parseToJsonElement(it) }.getOrNull() }
-    }
+    val opaqueContext =
+        remember(opaqueContextJson) {
+            opaqueContextJson?.let {
+                runCatching {
+                        com.exio.inkleaf.plugin.PluginContentCodec.json.parseToJsonElement(it)
+                    }
+                    .getOrNull()
+            }
+        }
     var detail by remember { mutableStateOf<ComicDetail?>(null) }
     var chapters by remember { mutableStateOf<List<ChapterSummary>>(emptyList()) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
@@ -105,30 +111,35 @@ fun OnlineComicScreen(
         chapters = emptyList()
         withContext(Dispatchers.IO) {
             val installed = application.pluginManager.installed()
-            sourceName = installed.firstOrNull { it.state.pluginId == pluginId }?.manifest?.name ?: pluginId
+            sourceName =
+                installed.firstOrNull { it.state.pluginId == pluginId }?.manifest?.name ?: pluginId
             val initialRecord = application.onlineContentRepository.get(pluginId, sourceId)
             isBookmarked = initialRecord?.references?.contains(OnlineUserReference.BOOKMARK) == true
         }
         try {
-            val loadedDetail = application.pluginCatalog.detail(
-                pluginId,
-                PluginDetailRequest(sourceId, opaqueContext),
-            )
+            val loadedDetail =
+                application.pluginCatalog.detail(
+                    pluginId,
+                    PluginDetailRequest(sourceId, opaqueContext),
+                )
             detail = loadedDetail
             try {
                 withContext(Dispatchers.IO) {
-                    val record = application.onlineContentRepository.recordDetail(pluginId, loadedDetail)
+                    val record =
+                        application.onlineContentRepository.recordDetail(pluginId, loadedDetail)
                     isBookmarked = record.references.contains(OnlineUserReference.BOOKMARK)
                 }
             } catch (storageError: CancellationException) {
                 throw storageError
             } catch (_: Exception) {
-                // Online content remains usable when its optional metadata snapshot cannot be written.
+                // Online content remains usable when its optional metadata snapshot cannot be
+                // written.
             }
-            val loadedChapters = application.pluginCatalog.chapters(
-                pluginId,
-                PluginChapterRequest(sourceId, loadedDetail.opaqueContext ?: opaqueContext),
-            )
+            val loadedChapters =
+                application.pluginCatalog.chapters(
+                    pluginId,
+                    PluginChapterRequest(sourceId, loadedDetail.opaqueContext ?: opaqueContext),
+                )
             chapters = loadedChapters.chapters
             try {
                 withContext(Dispatchers.IO) {
@@ -137,26 +148,28 @@ fun OnlineComicScreen(
             } catch (storageError: CancellationException) {
                 throw storageError
             } catch (_: Exception) {
-                // Keep the successfully loaded chapter list visible when snapshot persistence fails.
+                // Keep the successfully loaded chapter list visible when snapshot persistence
+                // fails.
             }
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
             errorMessage = error.message ?: "加载漫画详情失败"
-            val snapshot = try {
-                withContext(Dispatchers.IO) {
-                    application.onlineContentRepository.setAvailability(
-                        pluginId,
-                        sourceId,
-                        error.toOnlineAvailability(),
-                    )
-                    application.onlineContentRepository.get(pluginId, sourceId)
+            val snapshot =
+                try {
+                    withContext(Dispatchers.IO) {
+                        application.onlineContentRepository.setAvailability(
+                            pluginId,
+                            sourceId,
+                            error.toOnlineAvailability(),
+                        )
+                        application.onlineContentRepository.get(pluginId, sourceId)
+                    }
+                } catch (storageError: CancellationException) {
+                    throw storageError
+                } catch (_: Exception) {
+                    null
                 }
-            } catch (storageError: CancellationException) {
-                throw storageError
-            } catch (_: Exception) {
-                null
-            }
             detail = snapshot?.detail
             chapters = snapshot?.chapters.orEmpty()
             if (snapshot != null) {
@@ -225,46 +238,58 @@ fun OnlineComicScreen(
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     Card(
                         shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                        ),
+                        colors =
+                            CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+                            ),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Column {
                             comic.cover?.let { cover ->
-                                val request = remember(cover) {
-                                    ImageRequest.Builder(application)
-                                        .data(cover.url)
-                                        .apply {
-                                            cover.headers.forEach { (name, value) -> setHeader(name, value) }
-                                            cover.referer?.let { setHeader("Referer", it) }
-                                        }
-                                        .crossfade(150)
-                                        .build()
-                                }
+                                val request =
+                                    remember(cover) {
+                                        ImageRequest.Builder(application)
+                                            .data(cover.url)
+                                            .apply {
+                                                cover.headers.forEach { (name, value) ->
+                                                    setHeader(name, value)
+                                                }
+                                                cover.referer?.let { setHeader("Referer", it) }
+                                            }
+                                            .crossfade(150)
+                                            .build()
+                                    }
                                 AsyncImage(
                                     model = request,
                                     contentDescription = comic.title,
                                     contentScale = ContentScale.Crop,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(280.dp)
-                                        .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)),
-                                )
-                            } ?: Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(200.dp)
-                                    .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Icon(
-                                    painter = painterResource(R.drawable.ic_file),
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                    modifier = Modifier.size(48.dp),
+                                    modifier =
+                                        Modifier.fillMaxWidth()
+                                            .height(280.dp)
+                                            .clip(
+                                                RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+                                            ),
                                 )
                             }
+                                ?: Box(
+                                    modifier =
+                                        Modifier.fillMaxWidth()
+                                            .height(200.dp)
+                                            .clip(
+                                                RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+                                            ),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(
+                                        painter = painterResource(R.drawable.ic_file),
+                                        contentDescription = null,
+                                        tint =
+                                            MaterialTheme.colorScheme.onSurfaceVariant.copy(
+                                                alpha = 0.5f
+                                            ),
+                                        modifier = Modifier.size(48.dp),
+                                    )
+                                }
 
                             Column(
                                 modifier = Modifier.padding(16.dp),
@@ -285,24 +310,32 @@ fun OnlineComicScreen(
                                         modifier = Modifier.weight(1f).padding(end = 8.dp),
                                         verticalArrangement = Arrangement.spacedBy(4.dp),
                                     ) {
-                                        comic.subtitle?.takeIf { it.isNotBlank() }?.let { author ->
-                                            Text(
-                                                text = author,
-                                                style = MaterialTheme.typography.titleMedium,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
-                                        }
+                                        comic.subtitle
+                                            ?.takeIf { it.isNotBlank() }
+                                            ?.let { author ->
+                                                Text(
+                                                    text = author,
+                                                    style = MaterialTheme.typography.titleMedium,
+                                                    color =
+                                                        MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                )
+                                            }
                                         Surface(
                                             color = MaterialTheme.colorScheme.primaryContainer,
-                                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            contentColor =
+                                                MaterialTheme.colorScheme.onPrimaryContainer,
                                             shape = RoundedCornerShape(6.dp),
                                         ) {
                                             Text(
                                                 text = sourceName,
                                                 style = MaterialTheme.typography.labelMedium,
-                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                                modifier =
+                                                    Modifier.padding(
+                                                        horizontal = 8.dp,
+                                                        vertical = 4.dp,
+                                                    ),
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis,
                                             )
@@ -313,7 +346,8 @@ fun OnlineComicScreen(
                                     if (isBookmarked) {
                                         FilledTonalButton(
                                             onClick = toggleBookmark,
-                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                                            contentPadding =
+                                                PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                                         ) {
                                             Icon(
                                                 painter = painterResource(R.drawable.ic_bookmark),
@@ -326,10 +360,12 @@ fun OnlineComicScreen(
                                     } else {
                                         OutlinedButton(
                                             onClick = toggleBookmark,
-                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                                            contentPadding =
+                                                PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                                         ) {
                                             Icon(
-                                                painter = painterResource(R.drawable.ic_bookmark_border),
+                                                painter =
+                                                    painterResource(R.drawable.ic_bookmark_border),
                                                 contentDescription = "追漫",
                                                 modifier = Modifier.size(18.dp),
                                             )
@@ -351,21 +387,24 @@ fun OnlineComicScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxWidth(),
                         ) {
-                            comic.status?.takeIf { it.isNotBlank() }?.let { status ->
-                                item {
-                                    AssistChip(
-                                        onClick = {},
-                                        label = { Text(status) },
-                                        leadingIcon = {
-                                            Icon(
-                                                imageVector = Icons.Default.Check,
-                                                contentDescription = null,
-                                                modifier = Modifier.size(AssistChipDefaults.IconSize),
-                                            )
-                                        },
-                                    )
+                            comic.status
+                                ?.takeIf { it.isNotBlank() }
+                                ?.let { status ->
+                                    item {
+                                        AssistChip(
+                                            onClick = {},
+                                            label = { Text(status) },
+                                            leadingIcon = {
+                                                Icon(
+                                                    imageVector = Icons.Default.Check,
+                                                    contentDescription = null,
+                                                    modifier =
+                                                        Modifier.size(AssistChipDefaults.IconSize),
+                                                )
+                                            },
+                                        )
+                                    }
                                 }
-                            }
                             items(validTags) { tag ->
                                 SuggestionChip(
                                     onClick = {},
@@ -377,26 +416,29 @@ fun OnlineComicScreen(
                 }
 
                 // Description
-                comic.description?.takeIf { it.isNotBlank() }?.let { desc ->
-                    item(span = { GridItemSpan(maxLineSpan) }) {
-                        Text(
-                            text = desc,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(vertical = 4.dp),
-                        )
+                comic.description
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { desc ->
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            Text(
+                                text = desc,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(vertical = 4.dp),
+                            )
+                        }
                     }
-                }
             }
 
             // M3 Error Card
             errorMessage?.let { message ->
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     Card(
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.errorContainer,
-                            contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                        ),
+                        colors =
+                            CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.errorContainer,
+                                contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                            ),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
@@ -417,10 +459,11 @@ fun OnlineComicScreen(
                             )
                             FilledTonalButton(
                                 onClick = { reload++ },
-                                colors = ButtonDefaults.filledTonalButtonColors(
-                                    containerColor = MaterialTheme.colorScheme.error,
-                                    contentColor = MaterialTheme.colorScheme.onError,
-                                ),
+                                colors =
+                                    ButtonDefaults.filledTonalButtonColors(
+                                        containerColor = MaterialTheme.colorScheme.error,
+                                        contentColor = MaterialTheme.colorScheme.onError,
+                                    ),
                             ) {
                                 Text("重试")
                             }
@@ -440,10 +483,15 @@ fun OnlineComicScreen(
                     )
                 }
 
-                itemsIndexed(chapters, key = { index, chapter -> "${chapter.chapterId}_$index" }) { _, chapter ->
+                itemsIndexed(chapters, key = { index, chapter -> "${chapter.chapterId}_$index" }) {
+                    _,
+                    chapter ->
                     OutlinedButton(
                         onClick = {
-                            onOpenChapter(chapter, chapter.opaqueContext ?: detail?.opaqueContext ?: opaqueContext)
+                            onOpenChapter(
+                                chapter,
+                                chapter.opaqueContext ?: detail?.opaqueContext ?: opaqueContext,
+                            )
                         },
                         enabled = !loading && chapter.available && errorMessage == null,
                         shape = RoundedCornerShape(8.dp),
@@ -467,9 +515,9 @@ internal fun Throwable.toOnlineAvailability(): OnlineAvailability {
     val code = (this as? PluginRpcException)?.error?.code
     return when (code) {
         com.exio.inkleaf.plugin.PluginErrorCode.AUTH_REQUIRED -> OnlineAvailability.AUTH_REQUIRED
-        com.exio.inkleaf.plugin.PluginErrorCode.PLUGIN_DISABLED -> OnlineAvailability.PLUGIN_DISABLED
+        com.exio.inkleaf.plugin.PluginErrorCode.PLUGIN_DISABLED ->
+            OnlineAvailability.PLUGIN_DISABLED
         com.exio.inkleaf.plugin.PluginErrorCode.NOT_FOUND -> OnlineAvailability.CONTENT_MISSING
         else -> OnlineAvailability.TEMPORARY_ERROR
     }
 }
-

@@ -14,29 +14,33 @@ import org.junit.Test
 
 class PluginBrowseRepositoryTest {
     @Test
-    fun `fresh cache avoids another remote request and survives repository recreation`() = runBlocking {
-        withCacheDirectory { directory ->
-            val calls = AtomicInteger()
-            val remote: suspend (String, PluginBrowseRequest) -> PluginSearchPage = { _, _ ->
-                calls.incrementAndGet()
-                page("comic-${calls.get()}")
+    fun `fresh cache avoids another remote request and survives repository recreation`() =
+        runBlocking {
+            withCacheDirectory { directory ->
+                val calls = AtomicInteger()
+                val remote: suspend (String, PluginBrowseRequest) -> PluginSearchPage = { _, _ ->
+                    calls.incrementAndGet()
+                    page("comic-${calls.get()}")
+                }
+                val first =
+                    PluginBrowseRepository(directory, remote, clockMs = { 100L })
+                        .refreshFirstPage(KEY, REQUEST, expectedRevision = null)
+
+                val restoredRepository =
+                    PluginBrowseRepository(directory, remote, clockMs = { 200L })
+                val restored = requireNotNull(restoredRepository.readFirstPage(KEY))
+                val reused =
+                    restoredRepository.refreshFirstPage(
+                        KEY,
+                        REQUEST,
+                        expectedRevision = restored.revision,
+                    )
+
+                assertEquals(first, restored)
+                assertEquals(restored, reused)
+                assertEquals(1, calls.get())
             }
-            val first = PluginBrowseRepository(directory, remote, clockMs = { 100L })
-                .refreshFirstPage(KEY, REQUEST, expectedRevision = null)
-
-            val restoredRepository = PluginBrowseRepository(directory, remote, clockMs = { 200L })
-            val restored = requireNotNull(restoredRepository.readFirstPage(KEY))
-            val reused = restoredRepository.refreshFirstPage(
-                KEY,
-                REQUEST,
-                expectedRevision = restored.revision,
-            )
-
-            assertEquals(first, restored)
-            assertEquals(restored, reused)
-            assertEquals(1, calls.get())
         }
-    }
 
     @Test
     fun `plugin version and filters select different cache entries`() = runBlocking {
@@ -53,16 +57,21 @@ class PluginBrowseRepositoryTest {
     fun `manual refresh replaces a fresh entry`() = runBlocking {
         withCacheDirectory { directory ->
             val calls = AtomicInteger()
-            val repository = PluginBrowseRepository(directory, { _, _ ->
-                page("comic-${calls.incrementAndGet()}")
-            })
+            val repository =
+                PluginBrowseRepository(
+                    directory,
+                    { _, _ ->
+                        page("comic-${calls.incrementAndGet()}")
+                    },
+                )
             val cached = repository.refreshFirstPage(KEY, REQUEST, expectedRevision = null)
-            val refreshed = repository.refreshFirstPage(
-                KEY,
-                REQUEST,
-                expectedRevision = cached.revision,
-                force = true,
-            )
+            val refreshed =
+                repository.refreshFirstPage(
+                    KEY,
+                    REQUEST,
+                    expectedRevision = cached.revision,
+                    force = true,
+                )
 
             assertEquals("comic-2", refreshed.page.items.single().sourceId)
             assertEquals(2, calls.get())
@@ -88,15 +97,16 @@ class PluginBrowseRepositoryTest {
         withCacheDirectory { directory ->
             var now = 0L
             var fail = false
-            val repository = PluginBrowseRepository(
-                cacheDirectory = directory,
-                remoteBrowse = { _, _ ->
-                    if (fail) error("network unavailable")
-                    page("cached")
-                },
-                ttlMs = 10L,
-                clockMs = { now },
-            )
+            val repository =
+                PluginBrowseRepository(
+                    cacheDirectory = directory,
+                    remoteBrowse = { _, _ ->
+                        if (fail) error("network unavailable")
+                        page("cached")
+                    },
+                    ttlMs = 10L,
+                    clockMs = { now },
+                )
             val cached = repository.refreshFirstPage(KEY, REQUEST, expectedRevision = null)
             now = 11L
             fail = true
@@ -126,16 +136,26 @@ class PluginBrowseRepositoryTest {
     fun `concurrent cache misses share one remote request`() = runBlocking {
         withCacheDirectory { directory ->
             val calls = AtomicInteger()
-            val repository = PluginBrowseRepository(directory, { _, _ ->
-                calls.incrementAndGet()
-                delay(25)
-                page("comic-1")
-            })
+            val repository =
+                PluginBrowseRepository(
+                    directory,
+                    { _, _ ->
+                        calls.incrementAndGet()
+                        delay(25)
+                        page("comic-1")
+                    },
+                )
 
-            val results = listOf(
-                async { repository.refreshFirstPage(KEY, REQUEST, expectedRevision = null) },
-                async { repository.refreshFirstPage(KEY, REQUEST, expectedRevision = null) },
-            ).awaitAll()
+            val results =
+                listOf(
+                        async {
+                            repository.refreshFirstPage(KEY, REQUEST, expectedRevision = null)
+                        },
+                        async {
+                            repository.refreshFirstPage(KEY, REQUEST, expectedRevision = null)
+                        },
+                    )
+                    .awaitAll()
 
             assertEquals(results[0], results[1])
             assertEquals(1, calls.get())
@@ -146,21 +166,27 @@ class PluginBrowseRepositoryTest {
     fun `concurrent forced refreshes share one new revision`() = runBlocking {
         withCacheDirectory { directory ->
             val calls = AtomicInteger()
-            val repository = PluginBrowseRepository(directory, { _, _ ->
-                calls.incrementAndGet()
-                delay(25)
-                page("comic-${calls.get()}")
-            })
+            val repository =
+                PluginBrowseRepository(
+                    directory,
+                    { _, _ ->
+                        calls.incrementAndGet()
+                        delay(25)
+                        page("comic-${calls.get()}")
+                    },
+                )
             val cached = repository.refreshFirstPage(KEY, REQUEST, expectedRevision = null)
 
-            val results = listOf(
-                async {
-                    repository.refreshFirstPage(KEY, REQUEST, cached.revision, force = true)
-                },
-                async {
-                    repository.refreshFirstPage(KEY, REQUEST, cached.revision, force = true)
-                },
-            ).awaitAll()
+            val results =
+                listOf(
+                        async {
+                            repository.refreshFirstPage(KEY, REQUEST, cached.revision, force = true)
+                        },
+                        async {
+                            repository.refreshFirstPage(KEY, REQUEST, cached.revision, force = true)
+                        },
+                    )
+                    .awaitAll()
 
             assertEquals(results[0].revision, results[1].revision)
             assertEquals(2, calls.get())
@@ -177,20 +203,23 @@ class PluginBrowseRepositoryTest {
     }
 
     private companion object {
-        val KEY = PluginBrowseCacheKey(
-            pluginId = "io.example.source",
-            pluginVersion = "1.0.0",
-            feedId = "recommended",
-            filters = mapOf("region" to "all"),
-        )
-        val REQUEST = PluginBrowseRequest(
-            feedId = "recommended",
-            filters = mapOf("region" to "all"),
-        )
+        val KEY =
+            PluginBrowseCacheKey(
+                pluginId = "io.example.source",
+                pluginVersion = "1.0.0",
+                feedId = "recommended",
+                filters = mapOf("region" to "all"),
+            )
+        val REQUEST =
+            PluginBrowseRequest(
+                feedId = "recommended",
+                filters = mapOf("region" to "all"),
+            )
 
-        fun page(sourceId: String) = PluginSearchPage(
-            items = listOf(ComicSummary(sourceId = sourceId, title = sourceId)),
-            nextCursor = "next",
-        )
+        fun page(sourceId: String) =
+            PluginSearchPage(
+                items = listOf(ComicSummary(sourceId = sourceId, title = sourceId)),
+                nextCursor = "next",
+            )
     }
 }

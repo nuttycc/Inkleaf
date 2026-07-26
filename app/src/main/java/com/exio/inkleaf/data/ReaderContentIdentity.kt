@@ -6,9 +6,7 @@ import kotlinx.serialization.Serializable
 sealed interface ReaderContentIdentity
 
 @Serializable
-data class LocalContentIdentity(
-    val fileKey: String,
-) : ReaderContentIdentity {
+data class LocalContentIdentity(val fileKey: String) : ReaderContentIdentity {
     init {
         require(fileKey.isNotBlank()) { "fileKey must not be blank" }
     }
@@ -51,7 +49,8 @@ data class RevisionPageIndex(
  * revision-bound so an index cannot silently identify different content after a source update.
  */
 @Serializable
-data class OnlinePageIdentity private constructor(
+data class OnlinePageIdentity
+private constructor(
     val chapter: OnlineChapterIdentity,
     val pageId: String? = null,
     val fallback: RevisionPageIndex? = null,
@@ -77,12 +76,14 @@ data class OnlinePageIdentity private constructor(
             } else {
                 OnlinePageIdentity(
                     chapter = chapter,
-                    fallback = RevisionPageIndex(
-                        chapterRevision = requireNotNull(chapterRevision?.takeIf { it.isNotBlank() }) {
-                            "chapterRevision is required when pageId is absent"
-                        },
-                        pageIndex = pageIndex,
-                    ),
+                    fallback =
+                        RevisionPageIndex(
+                            chapterRevision =
+                                requireNotNull(chapterRevision?.takeIf { it.isNotBlank() }) {
+                                    "chapterRevision is required when pageId is absent"
+                                },
+                            pageIndex = pageIndex,
+                        ),
                 )
             }
         }

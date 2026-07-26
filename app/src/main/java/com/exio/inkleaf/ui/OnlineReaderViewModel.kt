@@ -71,10 +71,9 @@ internal class OnlineReaderViewModel(
     private val applicationScope = application.applicationScope
     private val contentIdentity = OnlineContentIdentity(pluginId, sourceId)
     private val initialChapterId = chapterId
-    private val routeOpaqueContext =
-        opaqueContextJson?.let {
-            runCatching { PluginContentCodec.json.parseToJsonElement(it) }.getOrNull()
-        }
+    private val routeOpaqueContext = opaqueContextJson?.let {
+        runCatching { PluginContentCodec.json.parseToJsonElement(it) }.getOrNull()
+    }
 
     private var activeChapterId: String = chapterId
     private var activeRequestedRevision: String? = requestedRevision
@@ -86,14 +85,17 @@ internal class OnlineReaderViewModel(
 
     var state by mutableStateOf<ReaderPresentationState>(ReaderPresentationState.Loading)
         private set
+
     val thumbnails = mutableStateMapOf<Int, ImageBitmap>()
     val bookmarkPages = mutableStateMapOf<Int, Unit>()
     val bookmarks = mutableStateListOf<ReaderBookmarkItem>()
     val favoritePages = mutableStateMapOf<Int, Unit>()
     var readerChapters by mutableStateOf<List<ReaderChapterItem>?>(null)
         private set
+
     var currentChapterIndex by mutableIntStateOf(-1)
         private set
+
     var readerMessage by mutableStateOf<String?>(null)
         private set
 
@@ -144,13 +146,13 @@ internal class OnlineReaderViewModel(
     }
 
     fun selectChapter(index: Int) {
-        val chapter = selectableOnlineChapter(chapterSummaries, currentChapterIndex, index) ?: return
+        val chapter =
+            selectableOnlineChapter(chapterSummaries, currentChapterIndex, index) ?: return
         if (chapterLoadJob?.isActive == true) return
-        chapterLoadJob =
-            viewModelScope.launch {
-                prepareChapterSwitch(chapter, index)
-                loadActiveChapter()
-            }
+        chapterLoadJob = viewModelScope.launch {
+            prepareChapterSwitch(chapter, index)
+            loadActiveChapter()
+        }
     }
 
     fun requestThumbnail(page: Int) {
@@ -165,24 +167,23 @@ internal class OnlineReaderViewModel(
         sessionLatestLocation = locationFor(page)
         pendingProgressPage = page
         if (progressWriteJob?.isActive == true) return
-        progressWriteJob =
-            viewModelScope.launch {
-                try {
-                    while (true) {
-                        delay(PROGRESS_WRITE_INTERVAL_MS.milliseconds)
-                        val latest = pendingProgressPage ?: break
+        progressWriteJob = viewModelScope.launch {
+            try {
+                while (true) {
+                    delay(PROGRESS_WRITE_INTERVAL_MS.milliseconds)
+                    val latest = pendingProgressPage ?: break
+                    pendingProgressPage = null
+                    persistPosition(latest)
+                }
+            } finally {
+                withContext(NonCancellable + Dispatchers.IO) {
+                    pendingProgressPage?.let { latest ->
                         pendingProgressPage = null
-                        persistPosition(latest)
-                    }
-                } finally {
-                    withContext(NonCancellable + Dispatchers.IO) {
-                        pendingProgressPage?.let { latest ->
-                            pendingProgressPage = null
-                            persistPositionOnIo(latest)
-                        }
+                        persistPositionOnIo(latest)
                     }
                 }
             }
+        }
     }
 
     fun toggleBookmark(page: Int) {
@@ -193,9 +194,10 @@ internal class OnlineReaderViewModel(
                 var added = false
                 bookmarkMutationMutex.withLock {
                     withContext(Dispatchers.IO) {
-                        val existing = repository.get(pluginId, sourceId)
-                            ?.pageBookmarks
-                            ?.firstOrNull { it.location.identity == location.identity }
+                        val existing =
+                            repository.get(pluginId, sourceId)?.pageBookmarks?.firstOrNull {
+                                it.location.identity == location.identity
+                            }
                         if (existing == null) {
                             repository.addPageBookmark(location, chapterTitle)
                             added = true
@@ -251,9 +253,9 @@ internal class OnlineReaderViewModel(
                 favoriteMutationMutex.withLock {
                     val existing =
                         withContext(Dispatchers.IO) {
-                            repository.get(pluginId, sourceId)
-                                ?.pageFavorites
-                                ?.firstOrNull { it.location.identity == location.identity }
+                            repository.get(pluginId, sourceId)?.pageFavorites?.firstOrNull {
+                                it.location.identity == location.identity
+                            }
                         }
                     if (existing != null) {
                         withContext(Dispatchers.IO) {
@@ -365,9 +367,7 @@ internal class OnlineReaderViewModel(
         }
     }
 
-    private fun updateChapterNavigation(
-        snapshot: com.exio.inkleaf.plugin.OnlineComicRecord?,
-    ) {
+    private fun updateChapterNavigation(snapshot: com.exio.inkleaf.plugin.OnlineComicRecord?) {
         currentTitle = snapshot?.detail?.title?.takeIf(String::isNotBlank) ?: currentTitle
         contentOpaqueContext = snapshot?.detail?.opaqueContext ?: contentOpaqueContext
         if (snapshot != null && snapshot.chapters.isNotEmpty()) {
@@ -449,13 +449,17 @@ internal class OnlineReaderViewModel(
             ?.let { pageId ->
                 val exact = opened.pages.indexOfFirst { it.pageId == pageId }
                 if (exact >= 0) return RestoredOnlinePage(exact, stale = false)
-                initialPageIndex?.takeIf { it in opened.pages.indices }?.let {
-                    return RestoredOnlinePage(it, stale = true)
-                }
+                initialPageIndex
+                    ?.takeIf { it in opened.pages.indices }
+                    ?.let {
+                        return RestoredOnlinePage(it, stale = true)
+                    }
             }
         initialPageIndex
             ?.takeIf {
-                sessionId == null && activeChapterId == initialChapterId && it in opened.pages.indices
+                sessionId == null &&
+                    activeChapterId == initialChapterId &&
+                    it in opened.pages.indices
             }
             ?.let { page ->
                 return RestoredOnlinePage(
@@ -465,13 +469,17 @@ internal class OnlineReaderViewModel(
             }
         if (saved == null || saved.chapterId != activeChapterId) return RestoredOnlinePage(0, false)
         saved.pageId?.let { pageId ->
-            opened.pages.indexOfFirst { it.pageId == pageId }.takeIf { it >= 0 }?.let {
-                return RestoredOnlinePage(it, stale = false)
-            }
+            opened.pages
+                .indexOfFirst { it.pageId == pageId }
+                .takeIf { it >= 0 }
+                ?.let {
+                    return RestoredOnlinePage(it, stale = false)
+                }
         }
-        val restored = saved.pageIndex.takeIf {
-            saved.chapterRevision == currentRevision && it in opened.pages.indices
-        } ?: 0
+        val restored =
+            saved.pageIndex.takeIf {
+                saved.chapterRevision == currentRevision && it in opened.pages.indices
+            } ?: 0
         return RestoredOnlinePage(restored, stale = false)
     }
 
@@ -482,26 +490,26 @@ internal class OnlineReaderViewModel(
             record?.pageBookmarks.orEmpty().filter {
                 it.location.identity.chapter == chapterIdentity
             }
-        val resolvedBookmarks =
-            chapterBookmarks.map { bookmark ->
-                val resolution = resolvePage(bookmark.location, opened)
-                val key = bookmarkKey(bookmark.location.identity)
-                key to
-                    ReaderBookmarkItem(
-                        key = key,
-                        globalPage = resolution.page,
-                        chapterIndex = currentChapterIndex.coerceAtLeast(0),
-                        pageIndex = bookmark.location.pageIndex,
-                        chapterTitle = bookmark.chapterTitleSnapshot ?: currentChapterTitle,
-                        stale = resolution.stale,
-                    )
-            }
-        bookmarkEntriesByKey =
-            chapterBookmarks.associateBy { bookmarkKey(it.location.identity) }
+        val resolvedBookmarks = chapterBookmarks.map { bookmark ->
+            val resolution = resolvePage(bookmark.location, opened)
+            val key = bookmarkKey(bookmark.location.identity)
+            key to
+                ReaderBookmarkItem(
+                    key = key,
+                    globalPage = resolution.page,
+                    chapterIndex = currentChapterIndex.coerceAtLeast(0),
+                    pageIndex = bookmark.location.pageIndex,
+                    chapterTitle = bookmark.chapterTitleSnapshot ?: currentChapterTitle,
+                    stale = resolution.stale,
+                )
+        }
+        bookmarkEntriesByKey = chapterBookmarks.associateBy { bookmarkKey(it.location.identity) }
         bookmarks.clear()
         bookmarks.addAll(resolvedBookmarks.map { it.second }.sortedBy { it.globalPage })
         bookmarkPages.clear()
-        resolvedBookmarks.filterNot { it.second.stale }.forEach { bookmarkPages[it.second.globalPage] = Unit }
+        resolvedBookmarks
+            .filterNot { it.second.stale }
+            .forEach { bookmarkPages[it.second.globalPage] = Unit }
 
         val chapterFavorites =
             record?.pageFavorites.orEmpty().filter {
@@ -527,7 +535,8 @@ internal class OnlineReaderViewModel(
             fallback != null &&
                 fallback.chapterRevision == currentRevision &&
                 fallback.pageIndex in opened.pages.indices
-        if (exactFallback) return ResolvedOnlinePage(requireNotNull(fallback).pageIndex, stale = false)
+        if (exactFallback)
+            return ResolvedOnlinePage(requireNotNull(fallback).pageIndex, stale = false)
         return ResolvedOnlinePage(
             page = location.pageIndex.coerceIn(0, opened.totalPageCount - 1),
             stale = true,
@@ -553,7 +562,8 @@ internal class OnlineReaderViewModel(
                     location.identity,
                     snapshotExtension(mimeType),
                 )
-            val temporary = destination.resolveSibling("${destination.name}.tmp-${UUID.randomUUID()}")
+            val temporary =
+                destination.resolveSibling("${destination.name}.tmp-${UUID.randomUUID()}")
             var published = false
             try {
                 FileOutputStream(temporary).use { output ->
@@ -585,8 +595,9 @@ internal class OnlineReaderViewModel(
         }
         try {
             withContext(Dispatchers.IO) {
-                opened.renderThumbnail(page, THUMB_TARGET_WIDTH)
-            }?.let { thumbnails[page] = it }
+                    opened.renderThumbnail(page, THUMB_TARGET_WIDTH)
+                }
+                ?.let { thumbnails[page] = it }
         } catch (error: CancellationException) {
             throw error
         } catch (_: Exception) {
@@ -720,7 +731,8 @@ internal class OnlineReaderViewModel(
                 id != null &&
                     start != null &&
                     end != null &&
-                    (activeReadingMillis >= ReadingSessionRules.MIN_ACTIVE_READING_MS || start != end)
+                    (activeReadingMillis >= ReadingSessionRules.MIN_ACTIVE_READING_MS ||
+                        start != end)
             ) {
                 runCatching {
                     repository.recordReadingSession(
@@ -744,7 +756,8 @@ internal class OnlineReaderViewModel(
     private fun cacheKeyPrefix(revision: String): String {
         val value = "$pluginId\u0000$sourceId\u0000$activeChapterId\u0000$revision"
         val digest = MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
-        val key = digest.take(12).joinToString(separator = "") { "%02x".format(it.toInt() and 0xff) }
+        val key =
+            digest.take(12).joinToString(separator = "") { "%02x".format(it.toInt() and 0xff) }
         return "online-$key"
     }
 
@@ -796,22 +809,21 @@ internal class OnlineReaderViewModel(
 }
 
 internal fun buildOnlineReaderChapterItems(
-    chapters: List<ChapterSummary>,
-): List<ReaderChapterItem> =
-    chapters.mapIndexed { index, chapter ->
-        ReaderChapterItem(
-            index = index,
-            title = chapter.title.ifBlank { "第 ${index + 1} 章" },
-            pageCount = null,
-            isReadable = chapter.available,
-        )
-    }
+    chapters: List<ChapterSummary>
+): List<ReaderChapterItem> = chapters.mapIndexed { index, chapter ->
+    ReaderChapterItem(
+        index = index,
+        title = chapter.title.ifBlank { "第 ${index + 1} 章" },
+        pageCount = null,
+        isReadable = chapter.available,
+    )
+}
 
 internal fun selectableOnlineChapter(
     chapters: List<ChapterSummary>,
     currentChapterIndex: Int,
     targetChapterIndex: Int,
 ): ChapterSummary? =
-    chapters
-        .getOrNull(targetChapterIndex)
-        ?.takeIf { targetChapterIndex != currentChapterIndex && it.available }
+    chapters.getOrNull(targetChapterIndex)?.takeIf {
+        targetChapterIndex != currentChapterIndex && it.available
+    }

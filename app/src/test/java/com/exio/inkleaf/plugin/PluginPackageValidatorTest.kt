@@ -8,7 +8,6 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -65,7 +64,10 @@ class PluginPackageValidatorTest {
 
     @Test
     fun `unknown optional capability only warns`() {
-        val file = packageFile(validManifest().copy(capabilities = validManifest().capabilities + "futureFeature"))
+        val file =
+            packageFile(
+                validManifest().copy(capabilities = validManifest().capabilities + "futureFeature")
+            )
         try {
             val result = validator.validate(file)
             assertTrue(result.installable)
@@ -100,10 +102,11 @@ class PluginPackageValidatorTest {
     fun `invalid id and version reject installation`() {
         val file =
             packageFile(
-                validManifest().copy(
-                    id = "Example.Source",
-                    version = "1.0",
-                )
+                validManifest()
+                    .copy(
+                        id = "Example.Source",
+                        version = "1.0",
+                    )
             )
         try {
             val result = validator.validate(file)
@@ -117,7 +120,11 @@ class PluginPackageValidatorTest {
 
     @Test
     fun `path traversal and unexpected root entry reject package`() {
-        val file = packageFile(validManifest(), extraEntries = mapOf("../escape.txt" to "x", "notes.txt" to "x"))
+        val file =
+            packageFile(
+                validManifest(),
+                extraEntries = mapOf("../escape.txt" to "x", "notes.txt" to "x"),
+            )
         try {
             val result = validator.validate(file)
             assertFalse(result.installable)
@@ -130,8 +137,13 @@ class PluginPackageValidatorTest {
 
     @Test
     fun `semver follows prerelease ordering`() {
-        assertTrue(requireNotNull(SemVer.parse("1.0.0-alpha")) < requireNotNull(SemVer.parse("1.0.0")))
-        assertTrue(requireNotNull(SemVer.parse("1.0.0-alpha.1")) < requireNotNull(SemVer.parse("1.0.0-alpha.beta")))
+        assertTrue(
+            requireNotNull(SemVer.parse("1.0.0-alpha")) < requireNotNull(SemVer.parse("1.0.0"))
+        )
+        assertTrue(
+            requireNotNull(SemVer.parse("1.0.0-alpha.1")) <
+                requireNotNull(SemVer.parse("1.0.0-alpha.beta"))
+        )
         assertEquals(
             0,
             requireNotNull(SemVer.parse("1.2.3+build.1"))

@@ -25,8 +25,6 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
-import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
 
 enum class PluginRpcMessageKind {
     REQUEST,
@@ -73,9 +71,7 @@ sealed interface PluginRpcMessage {
         override val kind: PluginRpcMessageKind = PluginRpcMessageKind.HOST_REQUEST
     }
 
-    data class Cancel(
-        val requestId: String,
-    ) : PluginRpcMessage {
+    data class Cancel(val requestId: String) : PluginRpcMessage {
         override val kind: PluginRpcMessageKind = PluginRpcMessageKind.CANCEL
     }
 
@@ -148,7 +144,9 @@ class PluginRpcCodec(
             try {
                 json.parseToJsonElement(encoded).jsonObject
             } catch (error: Throwable) {
-                throw PluginRpcProtocolException("RPC message is not a JSON object: ${error.message}")
+                throw PluginRpcProtocolException(
+                    "RPC message is not a JSON object: ${error.message}"
+                )
             }
         val kind = objectValue.requiredString("kind")
         return when (kind) {
@@ -187,16 +185,20 @@ class PluginRpcCodec(
 
     private fun JsonObject.response(hostResponse: Boolean): PluginRpcMessage.Response {
         val result = this["result"]
-        val error = this["error"]?.let { value ->
-            val errorObject = value.jsonObject
-            PluginRpcError(
-                code = errorObject.requiredString("code"),
-                message = errorObject.requiredString("message"),
-                retryable = errorObject["retryable"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull()
-                    ?: false,
-                details = errorObject["details"] ?: JsonObject(emptyMap()),
-            )
-        }
+        val error =
+            this["error"]?.let { value ->
+                val errorObject = value.jsonObject
+                PluginRpcError(
+                    code = errorObject.requiredString("code"),
+                    message = errorObject.requiredString("message"),
+                    retryable =
+                        errorObject["retryable"]
+                            ?.jsonPrimitive
+                            ?.contentOrNull
+                            ?.toBooleanStrictOrNull() ?: false,
+                    details = errorObject["details"] ?: JsonObject(emptyMap()),
+                )
+            }
         if (result == null && error == null) {
             throw PluginRpcProtocolException("RPC response must contain result or error")
         }
@@ -274,7 +276,11 @@ class PluginRpcClient(
             withTimeout(timeoutMs) { ready.await() }
         } catch (error: TimeoutCancellationException) {
             throw PluginRpcException(
-                PluginRpcError(PluginErrorCode.TIMEOUT, "Plugin bootstrap timed out", retryable = true),
+                PluginRpcError(
+                    PluginErrorCode.TIMEOUT,
+                    "Plugin bootstrap timed out",
+                    retryable = true,
+                ),
                 error,
             )
         }
@@ -312,7 +318,11 @@ class PluginRpcClient(
                 runCatching { send(PluginRpcMessage.Cancel(requestId)) }
                 deferred.completeExceptionally(
                     PluginRpcException(
-                        PluginRpcError(PluginErrorCode.TIMEOUT, "Plugin call exceeded its deadline", retryable = true)
+                        PluginRpcError(
+                            PluginErrorCode.TIMEOUT,
+                            "Plugin call exceeded its deadline",
+                            retryable = true,
+                        )
                     )
                 )
             }
@@ -333,17 +343,21 @@ class PluginRpcClient(
 
     fun onMessage(encoded: String) {
         if (closed.get()) return
-        val message = try {
-            codec.decode(encoded)
-        } catch (error: Throwable) {
-            failAll(
-                PluginRpcException(
-                    PluginRpcError(PluginErrorCode.PLUGIN_PROTOCOL, "Malformed message from plugin"),
-                    error,
+        val message =
+            try {
+                codec.decode(encoded)
+            } catch (error: Throwable) {
+                failAll(
+                    PluginRpcException(
+                        PluginRpcError(
+                            PluginErrorCode.PLUGIN_PROTOCOL,
+                            "Malformed message from plugin",
+                        ),
+                        error,
+                    )
                 )
-            )
-            return
-        }
+                return
+            }
         when (message) {
             PluginRpcMessage.Ready -> if (!closed.get()) ready.complete(Unit)
             is PluginRpcMessage.Response -> {
@@ -359,7 +373,10 @@ class PluginRpcClient(
             is PluginRpcMessage.Request -> {
                 failAll(
                     PluginRpcException(
-                        PluginRpcError(PluginErrorCode.PLUGIN_PROTOCOL, "Unexpected request direction")
+                        PluginRpcError(
+                            PluginErrorCode.PLUGIN_PROTOCOL,
+                            "Unexpected request direction",
+                        )
                     )
                 )
             }
@@ -388,7 +405,7 @@ class PluginRpcClient(
     override fun close() {
         failAll(
             PluginRpcException(
-                PluginRpcError(PluginErrorCode.RUNTIME_TERMINATED, "Plugin runtime was closed"),
+                PluginRpcError(PluginErrorCode.RUNTIME_TERMINATED, "Plugin runtime was closed")
             )
         )
         scope.cancel()
@@ -397,34 +414,55 @@ class PluginRpcClient(
     private fun handleHostRequest(message: PluginRpcMessage.HostRequest) {
         val handler = hostHandler
         if (handler == null) {
-            sendHostError(message.requestId, PluginRpcError(PluginErrorCode.HOST_UNAVAILABLE, "Host bridge is unavailable"))
+            sendHostError(
+                message.requestId,
+                PluginRpcError(PluginErrorCode.HOST_UNAVAILABLE, "Host bridge is unavailable"),
+            )
             return
         }
-        val job = scope.launch(start = CoroutineStart.LAZY) {
-            try {
-                val result = handler.handle(message.method, message.params)
-                send(PluginRpcMessage.Response(message.requestId, result, hostResponse = true))
-            } catch (error: PluginRpcException) {
-                if (!closed.get()) sendHostError(message.requestId, error.error)
-            } catch (error: CancellationException) {
-                sendHostError(message.requestId, PluginRpcError(PluginErrorCode.CANCELLED, "Host call cancelled", true))
-            } catch (error: Throwable) {
-                sendHostError(
-                    message.requestId,
-                    PluginRpcError(PluginErrorCode.HOST_UNAVAILABLE, error.message ?: "Host call failed", true),
-                )
-            } finally {
-                synchronized(stateLock) { hostRequests.remove(message.requestId) }
+        val job =
+            scope.launch(start = CoroutineStart.LAZY) {
+                try {
+                    val result = handler.handle(message.method, message.params)
+                    send(PluginRpcMessage.Response(message.requestId, result, hostResponse = true))
+                } catch (error: PluginRpcException) {
+                    if (!closed.get()) sendHostError(message.requestId, error.error)
+                } catch (error: CancellationException) {
+                    sendHostError(
+                        message.requestId,
+                        PluginRpcError(PluginErrorCode.CANCELLED, "Host call cancelled", true),
+                    )
+                } catch (error: Throwable) {
+                    sendHostError(
+                        message.requestId,
+                        PluginRpcError(
+                            PluginErrorCode.HOST_UNAVAILABLE,
+                            error.message ?: "Host call failed",
+                            true,
+                        ),
+                    )
+                } finally {
+                    synchronized(stateLock) { hostRequests.remove(message.requestId) }
+                }
             }
-        }
         var rejection: PluginRpcError? = null
         synchronized(stateLock) {
             when {
-                closed.get() -> rejection = PluginRpcError(PluginErrorCode.RUNTIME_TERMINATED, "Plugin runtime was closed")
+                closed.get() ->
+                    rejection =
+                        PluginRpcError(
+                            PluginErrorCode.RUNTIME_TERMINATED,
+                            "Plugin runtime was closed",
+                        )
                 hostRequests.size >= maxPending ->
-                    rejection = PluginRpcError(PluginErrorCode.QUOTA_EXCEEDED, "Plugin pending host RPC limit reached")
+                    rejection =
+                        PluginRpcError(
+                            PluginErrorCode.QUOTA_EXCEEDED,
+                            "Plugin pending host RPC limit reached",
+                        )
                 hostRequests.containsKey(message.requestId) ->
-                    rejection = PluginRpcError(PluginErrorCode.PLUGIN_PROTOCOL, "Duplicate host request id")
+                    rejection =
+                        PluginRpcError(PluginErrorCode.PLUGIN_PROTOCOL, "Duplicate host request id")
                 else -> hostRequests[message.requestId] = job
             }
         }
@@ -438,8 +476,13 @@ class PluginRpcClient(
 
     private fun sendHostError(requestId: String, error: PluginRpcError) {
         runCatching {
-            transport.send(codec.encode(PluginRpcMessage.Response(requestId, error = error, hostResponse = true)))
-        }.onFailure { sendFailure -> failAll(mapTransportError(sendFailure)) }
+                transport.send(
+                    codec.encode(
+                        PluginRpcMessage.Response(requestId, error = error, hostResponse = true)
+                    )
+                )
+            }
+            .onFailure { sendFailure -> failAll(mapTransportError(sendFailure)) }
     }
 
     private fun send(message: PluginRpcMessage) {

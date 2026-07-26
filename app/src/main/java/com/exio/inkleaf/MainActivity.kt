@@ -67,11 +67,11 @@ import com.exio.inkleaf.ui.OnlineComicScreen
 import com.exio.inkleaf.ui.OnlineReaderScreen
 import com.exio.inkleaf.ui.OnlineReaderTarget
 import com.exio.inkleaf.ui.PluginDiscoverScreen
-import com.exio.inkleaf.ui.SourcesScreen
 import com.exio.inkleaf.ui.ReaderScreen
 import com.exio.inkleaf.ui.SavedScreen
 import com.exio.inkleaf.ui.SettingsScreen
 import com.exio.inkleaf.ui.ShelfScreen
+import com.exio.inkleaf.ui.SourcesScreen
 import com.exio.inkleaf.ui.ThemeSettingsScreen
 import com.exio.inkleaf.ui.theme.InkleafTheme
 import kotlin.time.Duration.Companion.milliseconds
@@ -561,7 +561,8 @@ class MainActivity : AppCompatActivity() {
                                                     OnlineComicRoute(
                                                         pluginId = pluginId,
                                                         sourceId = comic.sourceId,
-                                                        opaqueContextJson = comic.opaqueContext?.toString(),
+                                                        opaqueContextJson =
+                                                            comic.opaqueContext?.toString(),
                                                     )
                                                 )
                                             },

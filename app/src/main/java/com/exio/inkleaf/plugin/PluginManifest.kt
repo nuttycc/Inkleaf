@@ -38,8 +38,7 @@ object PluginCapabilities {
     const val COMMENTS = "comments"
     const val DEEP_LINK = "deepLink"
 
-    val required: Set<String> =
-        setOf(SEARCH, DETAIL, CHAPTERS, PAGES)
+    val required: Set<String> = setOf(SEARCH, DETAIL, CHAPTERS, PAGES)
 
     val knownOptional: Set<String> =
         setOf(BROWSE, HOME, FILTERS, LOGIN, SETTINGS, COMMENTS, DEEP_LINK)

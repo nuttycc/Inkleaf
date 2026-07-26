@@ -52,9 +52,10 @@ class PluginManager(
         return activated
     }
 
-    suspend fun rollback(pluginId: String): InstalledPlugin? = runtimeManager.rollback(pluginId).also { result ->
-        if (result != null) markAvailable(pluginId)
-    }
+    suspend fun rollback(pluginId: String): InstalledPlugin? =
+        runtimeManager.rollback(pluginId).also { result ->
+            if (result != null) markAvailable(pluginId)
+        }
 
     suspend fun setEnabled(pluginId: String, enabled: Boolean): InstalledPlugin? {
         val updated = runtimeManager.setEnabled(pluginId, enabled)
@@ -62,22 +63,27 @@ class PluginManager(
             withContext(Dispatchers.IO) {
                 onlineContentRepository?.setPluginAvailability(
                     pluginId,
-                    if (enabled) OnlineAvailability.AVAILABLE else OnlineAvailability.PLUGIN_DISABLED,
+                    if (enabled) OnlineAvailability.AVAILABLE
+                    else OnlineAvailability.PLUGIN_DISABLED,
                 )
             }
         }
         return updated
     }
 
-    suspend fun recover(pluginId: String): InstalledPlugin? = runtimeManager.recover(pluginId).also { result ->
-        if (result != null) markAvailable(pluginId)
-    }
+    suspend fun recover(pluginId: String): InstalledPlugin? =
+        runtimeManager.recover(pluginId).also { result ->
+            if (result != null) markAvailable(pluginId)
+        }
 
     suspend fun uninstall(pluginId: String): Boolean {
         val removed = runtimeManager.uninstall(pluginId)
         if (removed) {
             withContext(Dispatchers.IO) {
-                onlineContentRepository?.setPluginAvailability(pluginId, OnlineAvailability.PLUGIN_UNINSTALLED)
+                onlineContentRepository?.setPluginAvailability(
+                    pluginId,
+                    OnlineAvailability.PLUGIN_UNINSTALLED,
+                )
             }
         }
         return removed
@@ -91,30 +97,32 @@ class PluginManager(
         }
     }
 
-    private suspend fun copyUriToCache(uri: Uri): File = withContext(Dispatchers.IO) {
-        val cache = File(context.cacheDir, "plugin-imports")
-        if (!cache.mkdirs() && !cache.isDirectory) throw IOException("Unable to create plugin import cache")
-        val target = File(cache, "${System.nanoTime()}.zip")
-        val resolver = context.contentResolver
-        val sourceLength = resolver.openAssetFileDescriptor(uri, "r")?.use { it.length }
-        if (sourceLength != null && sourceLength > PluginStorageLimits.MAX_PACKAGE_BYTES) {
-            throw IOException("Plugin package exceeds the size limit")
-        }
-        resolver.openInputStream(uri)?.use { input ->
-            target.outputStream().buffered().use { output ->
-                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                var total = 0L
-                while (true) {
-                    val count = input.read(buffer)
-                    if (count < 0) break
-                    total += count
-                    if (total > PluginStorageLimits.MAX_PACKAGE_BYTES) {
-                        throw IOException("Plugin package exceeds the size limit")
-                    }
-                    output.write(buffer, 0, count)
-                }
+    private suspend fun copyUriToCache(uri: Uri): File =
+        withContext(Dispatchers.IO) {
+            val cache = File(context.cacheDir, "plugin-imports")
+            if (!cache.mkdirs() && !cache.isDirectory)
+                throw IOException("Unable to create plugin import cache")
+            val target = File(cache, "${System.nanoTime()}.zip")
+            val resolver = context.contentResolver
+            val sourceLength = resolver.openAssetFileDescriptor(uri, "r")?.use { it.length }
+            if (sourceLength != null && sourceLength > PluginStorageLimits.MAX_PACKAGE_BYTES) {
+                throw IOException("Plugin package exceeds the size limit")
             }
-        } ?: throw IOException("Unable to open plugin package URI")
-        target
-    }
+            resolver.openInputStream(uri)?.use { input ->
+                target.outputStream().buffered().use { output ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    var total = 0L
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        total += count
+                        if (total > PluginStorageLimits.MAX_PACKAGE_BYTES) {
+                            throw IOException("Plugin package exceeds the size limit")
+                        }
+                        output.write(buffer, 0, count)
+                    }
+                }
+            } ?: throw IOException("Unable to open plugin package URI")
+            target
+        }
 }

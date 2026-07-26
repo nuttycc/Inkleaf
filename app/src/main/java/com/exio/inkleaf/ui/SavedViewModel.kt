@@ -62,6 +62,7 @@ class SavedViewModel(app: Application) : AndroidViewModel(app) {
 
     internal var onlineBookmarks by mutableStateOf<List<OnlineSavedBookmarkUi>?>(null)
         private set
+
     internal var onlineFavorites by mutableStateOf<List<OnlineSavedFavoriteUi>?>(null)
         private set
 
@@ -159,14 +160,14 @@ class SavedViewModel(app: Application) : AndroidViewModel(app) {
 
     fun refreshOnlineRecords() {
         onlineRefreshJob?.cancel()
-        onlineRefreshJob =
-            viewModelScope.launch {
-                try {
-                    val (bookmarks, favorites) =
-                        withContext(Dispatchers.IO) {
-                            val records = onlineRepository.list()
-                            val bookmarkItems =
-                                records.flatMap { record ->
+        onlineRefreshJob = viewModelScope.launch {
+            try {
+                val (bookmarks, favorites) =
+                    withContext(Dispatchers.IO) {
+                        val records = onlineRepository.list()
+                        val bookmarkItems =
+                            records
+                                .flatMap { record ->
                                     record.pageBookmarks.map { bookmark ->
                                         val location = bookmark.location
                                         OnlineSavedBookmarkUi(
@@ -189,8 +190,9 @@ class SavedViewModel(app: Application) : AndroidViewModel(app) {
                                     }
                                 }
                                 .sortedByDescending { it.addedAtMs }
-                            val favoriteItems =
-                                records.flatMap { record ->
+                        val favoriteItems =
+                            records
+                                .flatMap { record ->
                                     record.pageFavorites.map { favorite ->
                                         val location = favorite.location
                                         OnlineSavedFavoriteUi(
@@ -207,10 +209,11 @@ class SavedViewModel(app: Application) : AndroidViewModel(app) {
                                             addedAtMs = favorite.addedAtMs,
                                             snapshotFile =
                                                 runCatching {
-                                                    onlineRepository.resolvePageFavoriteSnapshot(
-                                                        favorite
-                                                    )
-                                                }.getOrNull()?.takeIf { it.isFile },
+                                                        onlineRepository
+                                                            .resolvePageFavoriteSnapshot(favorite)
+                                                    }
+                                                    .getOrNull()
+                                                    ?.takeIf { it.isFile },
                                             availability = record.availability,
                                             target = record.readerTarget(location),
                                             stored = favorite,
@@ -218,23 +221,20 @@ class SavedViewModel(app: Application) : AndroidViewModel(app) {
                                     }
                                 }
                                 .sortedByDescending { it.addedAtMs }
-                            bookmarkItems to favoriteItems
-                        }
-                    onlineBookmarks = bookmarks
-                    onlineFavorites = favorites
-                } catch (error: CancellationException) {
-                    throw error
-                } catch (error: Exception) {
-                    onlineBookmarks = emptyList()
-                    onlineFavorites = emptyList()
-                    eventChannel.send(
-                        SavedEvent.Message(
-                            error.message?.let { "加载在线保存记录失败：$it" }
-                                ?: "加载在线保存记录失败"
-                        )
-                    )
-                }
+                        bookmarkItems to favoriteItems
+                    }
+                onlineBookmarks = bookmarks
+                onlineFavorites = favorites
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                onlineBookmarks = emptyList()
+                onlineFavorites = emptyList()
+                eventChannel.send(
+                    SavedEvent.Message(error.message?.let { "加载在线保存记录失败：$it" } ?: "加载在线保存记录失败")
+                )
             }
+        }
     }
 
     internal fun removeOnlineBookmark(item: OnlineSavedBookmarkUi) {

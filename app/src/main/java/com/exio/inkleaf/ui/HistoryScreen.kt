@@ -132,8 +132,7 @@ fun HistoryScreen(
     val refresh = items.loadState.refresh
     val onlineSessions = viewModel.onlineSessions
     val hasItems = items.itemCount > 0 || onlineSessions.orEmpty().isNotEmpty()
-    val showEmpty =
-        refresh is LoadState.NotLoading && !hasItems && onlineSessions != null
+    val showEmpty = refresh is LoadState.NotLoading && !hasItems && onlineSessions != null
     val showInitialSkeleton =
         refresh is LoadState.Loading && items.itemCount == 0 && onlineSessions.isNullOrEmpty()
 
