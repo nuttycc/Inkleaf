@@ -65,6 +65,10 @@ class PluginDiagnosticActivity : AppCompatActivity() {
             setOnClickListener { refresh() }
         }, matchWrap())
         root.addView(Button(this).apply {
+            text = "恢复选中插件运行时"
+            setOnClickListener { recoverSelected() }
+        }, matchWrap())
+        root.addView(Button(this).apply {
             text = "调用选中插件 describe"
             setOnClickListener { describeSelected() }
         }, matchWrap())
@@ -155,7 +159,21 @@ class PluginDiagnosticActivity : AppCompatActivity() {
                 .onSuccess { descriptor -> report.text = PluginContentCodec.json.encodeToString(descriptor) }
                 .onFailure { error ->
                     error.rethrowCancellation()
+                    report.text = "error=${error.message ?: error::class.java.simpleName}"
                     toast(error.message ?: "describe 失败")
+                }
+        }
+    }
+
+    private fun recoverSelected() {
+        val pluginId = selectedPluginId ?: run { toast("没有选中插件"); return }
+        lifecycleScope.launch {
+            runCatching { app().pluginRuntimeManager.recover(pluginId) }
+                .onSuccess { refresh() }
+                .onFailure { error ->
+                    error.rethrowCancellation()
+                    report.text = "error=${error.message ?: error::class.java.simpleName}"
+                    toast(error.message ?: "恢复失败")
                 }
         }
     }

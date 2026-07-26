@@ -36,6 +36,34 @@ object PluginBootstrap {
                 };
               }
 
+              function createAbortController() {
+                if (typeof AbortController === "function") return new AbortController();
+                let aborted = false;
+                const listeners = new Set();
+                const signal = Object.freeze({
+                  get aborted() { return aborted; },
+                  addEventListener: function(type, listener) {
+                    if (type === "abort" && typeof listener === "function") listeners.add(listener);
+                  },
+                  removeEventListener: function(type, listener) {
+                    if (type === "abort") listeners.delete(listener);
+                  }
+                });
+                return Object.freeze({
+                  signal: signal,
+                  abort: function() {
+                    if (aborted) return;
+                    aborted = true;
+                    const event = Object.freeze({ type: "abort", target: signal });
+                    const callbacks = Array.from(listeners);
+                    listeners.clear();
+                    for (const listener of callbacks) {
+                      try { listener.call(signal, event); } catch (_) {}
+                    }
+                  }
+                });
+              }
+
               function hostCall(method, params, signal) {
                 const requestId = "p-" + (++nextId);
                 return new Promise(function(resolve, reject) {
@@ -135,7 +163,7 @@ object PluginBootstrap {
                   return;
                 }
                 if (message.kind !== "request") return;
-                const controller = new AbortController();
+                const controller = createAbortController();
                 invocations.set(message.requestId, controller);
                 Promise.resolve().then(function() {
                   if (!registration || typeof registration[message.method] !== "function") {

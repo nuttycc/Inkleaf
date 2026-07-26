@@ -45,6 +45,10 @@ fixed host DTOs, and no plugin-provided Android UI or native code.
 - Normal caller cancellation uses the MessagePort cancel envelope and the plugin's
   AbortSignal. Only a deadline or runtime termination force-closes the shared isolate,
   so routine Compose navigation cannot abort unrelated calls or count as a fatal crash.
+- AndroidX JavaScriptEngine isolates do not guarantee browser DOM APIs such as
+  `AbortController`. The bootstrap uses the native implementation when present and a
+  small cooperative fallback otherwise, preserving cancellation without depending on
+  a browser global.
 - Image loading cannot automatically share the plugin HTTP client's OkHttp CookieJar.
   A plugin must provide any required Cookie/Referer values explicitly in PageImage or
   PageDescriptor headers.
@@ -61,6 +65,8 @@ fixed host DTOs, and no plugin-provided Android UI or native code.
   constraint. GitHub Actions `Android Check (full)` run `30174930927` for
   commit `ff65862` passed in 4m29s, including compilation, JVM tests,
   androidTest compilation, lint, and debug APK packaging/upload.
-- The remaining verification is phone acceptance of the debug APK through the
-  plugin runtime diagnostic entry point and the bundled fixture; no emulator or
-  real-device test was run by the agent.
+- Post-fix device acceptance on the same OnePlus passed `describe`, `search fixture`,
+  and `host-smoke`. The run covered JS RPC responses plus clock, KV, Cookie, HTTP,
+  cancellation-signal propagation, and structured logging. The debug APK was built
+  and installed with `install-debug.ps1` using the existing Gradle configuration
+  cache; no remote CI was run for this follow-up at the user's request.
