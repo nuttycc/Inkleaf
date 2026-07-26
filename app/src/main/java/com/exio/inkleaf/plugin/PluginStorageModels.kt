@@ -64,6 +64,7 @@ data class InstalledPlugin(
     val state: PluginState,
     val directory: java.io.File,
     val activeDirectory: java.io.File?,
+    val manifest: PluginManifest? = null,
 )
 
 internal object PluginStorageLimits {

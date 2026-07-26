@@ -21,7 +21,7 @@ fixed host DTOs, and no plugin-provided Android UI or native code.
 5. Cover pure protocol, storage, quota, and state-machine behavior with JVM
    tests. Android/WebView behavior remains a user-installed phone check.
 6. Add an independently implemented CopyComic-compatible plugin fixture to
-   validate the real search, detail, chapter, and page-image path.
+   validate search, browse feeds, detail, chapter, and page-image paths.
 
 ## Decisions applied
 
@@ -37,6 +37,13 @@ fixed host DTOs, and no plugin-provided Android UI or native code.
   call.
 - UI details use the existing Material 3 Expressive host patterns and do not
   change the runtime or storage architecture.
+- Host API 1.1 adds the optional `browse` capability. Plugins declare named
+  feeds and per-feed filters through `describe`; API 1.0 plugins remain compatible.
+- Browse requests use an opaque cursor and return the existing `ComicSummary`
+  page shape. Search and browse remain separate protocol operations.
+- API 1.1 feed filters intentionally expose only single-select descriptors in
+  the first UI slice. Other existing filter descriptor types remain available
+  to older top-level descriptor consumers but are not advertised as browse UI support.
 
 ## Deviations
 
@@ -59,15 +66,26 @@ fixed host DTOs, and no plugin-provided Android UI or native code.
 - The v1 host UI exposes discovery and reading only. Declared plugin actions/settings
   are validated and available through the runtime/debug diagnostic entry point, but a
   full action/settings screen is deferred to a later slice.
-- The real-source fixture uses the current upstream default API route and platform
-  value directly. Endpoint selection, authentication settings, rankings, downloads,
-  and background rate limiting remain outside the first online-reading slice.
+- Plugin UI is split into a search-focused `DiscoverScreen` and a separate `SourcesScreen` (`SourcesRoute`). `InstalledPlugin` in-memory model populates `manifest: PluginManifest?` from active or newest compatible version manifest. User-initiated file/URL installs explicitly pass `activate = true` while `PluginManager` default `activate = false` remains untouched.
+- The real-source fixture uses the current upstream default API route directly.
+  Its first browse slice exposes recommendation, newest, ranking, and category
+  feeds with source-specific filters and explicit load-more pagination. Authentication
+  settings, downloads, and background rate limiting remain deferred.
+- Category browsing intentionally ships a compact useful theme list rather than
+  mirroring every upstream theme. The protocol and plugin can add options later
+  without changing persisted application data.
 - The reference CopyComic plugin repository has no declared license. The Inkleaf
   fixture is an independent implementation based on observed public API behavior;
   no source code is copied from that repository.
 
 ## Verification log
 
+- The first plugin-management UI review repaired the unavailable extended icon reference,
+  filtered persisted search results against currently active healthy sources, moved plugin
+  metadata reads off the main thread, distinguished installed-only packages from activated
+  packages, and rejected duplicate search result IDs at the protocol boundary. The authorized
+  `:app:compileDebugKotlin` check passed with the existing configuration cache. The new duplicate
+  search ID unit test was added but not run because only the compile task was authorized.
 - Device feature probe completed before implementation: OnePlus PJF110,
   Android 16 / SDK 36, Google WebView 150.0.7871.124; all required features and
   recovery probes passed.
@@ -82,9 +100,15 @@ fixed host DTOs, and no plugin-provided Android UI or native code.
   cache; no remote CI was run for this follow-up at the user's request.
 - The dependency-free CopyComic fixture unit test passes under Node. It covers
   inline and chunked host HTTP bodies, handle closure, content DTO mapping,
-  chapter listing, page ordering, and the `chapter` to `chapter2` 404 fallback.
+  all four browse feeds, filters, cursor advancement, de-duplication, newest-route
+  fallback, chapter listing, page ordering, and the `chapter` to `chapter2` 404 fallback.
   Real API and image loading remain pending user-installed phone verification.
 - The first real-device search exposed an API boundary mismatch: Inkleaf requests
   40 items by default while the CopyComic endpoint rejects limits above 30. The
   source now caps search pages at the reference implementation's stable size of
   21, with a regression test that exercises a host request of 40 items.
+- Feed/Browse implementation verification: `node plugin-fixtures/copycomic/main.test.js`
+  passed, and the authorized `:app:compileDebugKotlin` task passed with the existing
+  configuration cache. JVM unit tests were added for descriptor compatibility,
+  feed/filter validation, browse page identity, and request encoding, but were not
+  executed because no Gradle test task was authorized.

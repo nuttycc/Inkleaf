@@ -61,12 +61,16 @@ vm.runInThisContext(fs.readFileSync(sourcePath, "utf8"), { filename: sourcePath 
 
 async function run() {
   assert.ok(registration, "plugin must register itself");
-  assert.deepEqual(await registration.describe(), {
-    schemaVersion: 1,
-    actions: [],
-    filters: [],
-    settings: []
-  });
+  const descriptor = await registration.describe();
+  assert.equal(descriptor.schemaVersion, 1);
+  assert.deepEqual(descriptor.feeds.map(function (feed) { return feed.id; }), [
+    "recommend", "newest", "rank", "discover"
+  ]);
+  assert.deepEqual(
+    descriptor.feeds.find(function (feed) { return feed.id === "rank"; }).filters
+      .map(function (filter) { return filter.id; }),
+    ["audience", "period", "kind"]
+  );
 
   router = function (request) {
     assert.equal(request.headers.version, "2025.02.12");
@@ -94,6 +98,95 @@ async function run() {
   assert.deepEqual(search.items[0].tags, ["冒险"]);
   assert.equal(search.nextCursor, "1");
   assert.equal(closedHandles, 1, "chunked response must be closed");
+
+  router = function (request) {
+    assert.match(request.url, /\/recs\?/);
+    assert.match(request.url, /(?:\?|&)pos=3200102(?:&|$)/);
+    assert.match(request.url, /(?:\?|&)offset=21(?:&|$)/);
+    assert.match(request.url, /(?:\?|&)platform=3(?:&|$)/);
+    return response({
+      code: 200,
+      results: {
+        total: 50,
+        list: [
+          { comic: { path_word: "recommended", name: "推荐漫画" } },
+          { comic: { path_word: "recommended", name: "重复漫画" } },
+          { comic: { name: "缺少 ID" } }
+        ]
+      }
+    });
+  };
+  const recommend = await registration.browse({
+    feedId: "recommend",
+    cursor: "21",
+    limit: 40,
+    filters: {}
+  }, {});
+  assert.equal(recommend.items.length, 1, "browse results must remove duplicate source IDs");
+  assert.equal(recommend.items[0].title, "推荐漫画");
+  assert.equal(recommend.nextCursor, "24", "cursor must advance by raw rows");
+
+  router = function (request) {
+    assert.match(request.url, /\/ranks\?/);
+    assert.match(request.url, /(?:\?|&)type=5(?:&|$)/);
+    assert.match(request.url, /(?:\?|&)date_type=month(?:&|$)/);
+    assert.match(request.url, /(?:\?|&)audience_type=female(?:&|$)/);
+    return response({
+      code: 200,
+      results: {
+        total: 1,
+        list: [{ book: { path_word: "rank-book", name: "轻小说榜首" } }]
+      }
+    });
+  };
+  const rank = await registration.browse({
+    feedId: "rank",
+    filters: { audience: "female", period: "month", kind: "5" }
+  }, {});
+  assert.equal(rank.items[0].sourceId, "rank-book");
+
+  router = function (request) {
+    assert.match(request.url, /\/comics\?/);
+    assert.match(request.url, /(?:\?|&)free_type=1(?:&|$)/);
+    assert.match(request.url, /(?:\?|&)ordering=-popular(?:&|$)/);
+    assert.match(request.url, /(?:\?|&)theme=maoxian(?:&|$)/);
+    assert.match(request.url, /(?:\?|&)top=japan(?:&|$)/);
+    return response({
+      code: 200,
+      results: { total: 1, list: [{ path_word: "discover-comic", name: "分类漫画" }] }
+    });
+  };
+  const discover = await registration.browse({
+    feedId: "discover",
+    filters: { theme: "maoxian", top: "japan", ordering: "-popular" }
+  }, {});
+  assert.equal(discover.items[0].sourceId, "discover-comic");
+
+  let newestRequests = 0;
+  router = function (request) {
+    newestRequests += 1;
+    if (newestRequests === 1) {
+      assert.match(request.url, /\/comics\?/);
+      assert.match(request.url, /(?:\?|&)ordering=-datetime_updated(?:&|$)/);
+      return response("not found", 404);
+    }
+    assert.match(request.url, /\/update\/newest\?/);
+    return response({
+      code: 200,
+      results: {
+        total: 1,
+        list: [{ comic: { path_word: "newest-comic", name: "最新漫画" } }]
+      }
+    });
+  };
+  const newest = await registration.browse({ feedId: "newest", filters: {} }, {});
+  assert.equal(newestRequests, 2, "newest must use its fallback after a 404");
+  assert.equal(newest.items[0].sourceId, "newest-comic");
+
+  await assert.rejects(
+    registration.browse({ feedId: "recommend", cursor: "invalid", filters: {} }, {}),
+    function (error) { return error && error.code === "INVALID_ARGUMENT"; }
+  );
 
   router = function (request) {
     assert.match(request.url, /\/comic2\/fixture-comic\?/);

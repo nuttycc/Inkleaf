@@ -17,9 +17,17 @@ import kotlinx.coroutines.withContext
 @Serializable
 data class PluginDescribeResponse(
     val schemaVersion: Int = 1,
+    val feeds: List<PluginFeedDescriptor> = emptyList(),
     val actions: List<PluginActionDescriptor> = emptyList(),
     val filters: List<PluginFilterDescriptor> = emptyList(),
     val settings: List<PluginSettingDescriptor> = emptyList(),
+)
+
+@Serializable
+data class PluginFeedDescriptor(
+    val id: String,
+    val title: String,
+    val filters: List<PluginFilterDescriptor> = emptyList(),
 )
 
 @Serializable
@@ -55,6 +63,14 @@ data class PluginSettingDescriptor(
 @Serializable
 data class PluginSearchRequest(
     val query: String,
+    val cursor: String? = null,
+    val limit: Int = 40,
+    val filters: Map<String, String> = emptyMap(),
+)
+
+@Serializable
+data class PluginBrowseRequest(
+    val feedId: String,
     val cursor: String? = null,
     val limit: Int = 40,
     val filters: Map<String, String> = emptyMap(),
@@ -172,6 +188,7 @@ object PluginContentCodec {
         when (value) {
             is PluginDescribeResponse -> json.encodeToJsonElement(value)
             is PluginSearchRequest -> json.encodeToJsonElement(value)
+            is PluginBrowseRequest -> json.encodeToJsonElement(value)
             is PluginDetailRequest -> json.encodeToJsonElement(value)
             is PluginChapterRequest -> json.encodeToJsonElement(value)
             is PluginPagesRequest -> json.encodeToJsonElement(value)
@@ -184,7 +201,12 @@ object PluginContentCodec {
 
     fun searchPage(value: JsonElement, pluginId: String): PluginSearchPage =
         json.decodeFromJsonElement<PluginSearchPage>(value).also { page ->
-            validateSearchPage(page, pluginId)
+            validateContentPage(page, pluginId, "search")
+        }
+
+    fun browsePage(value: JsonElement, pluginId: String): PluginSearchPage =
+        json.decodeFromJsonElement<PluginSearchPage>(value).also { page ->
+            validateContentPage(page, pluginId, "browse")
         }
 
     fun detail(value: JsonElement, pluginId: String): ComicDetail =
@@ -245,46 +267,90 @@ object PluginContentCodec {
     private fun normalizeDescribe(value: PluginDescribeResponse): PluginDescribeResponse {
         if (value.schemaVersion != 1) throw PluginContentValidationException("Unsupported descriptor schema")
         if (value.actions.size > PluginContentLimits.MAX_DESCRIPTORS ||
+            value.feeds.size > PluginContentLimits.MAX_DESCRIPTORS ||
             value.filters.size > PluginContentLimits.MAX_DESCRIPTORS ||
             value.settings.size > PluginContentLimits.MAX_DESCRIPTORS
         ) {
             throw PluginContentValidationException("Descriptor contains too many entries")
         }
+        val feedIds = HashSet<String>(value.feeds.size)
+        value.feeds.forEach { feed ->
+            validateId(feed.id, "feed.id")
+            if (!feedIds.add(feed.id)) {
+                throw PluginContentValidationException("Feed ids must be unique")
+            }
+            validateText(feed.title, "feed.title", 256)
+            if (feed.filters.size > PluginContentLimits.MAX_DESCRIPTORS) {
+                throw PluginContentValidationException("Feed contains too many filters")
+            }
+            validateFilters(feed.filters, "feed.filter")
+            feed.filters
+                .filter { it.type == "select" }
+                .forEach { filter ->
+                    if (filter.options.isEmpty()) {
+                        throw PluginContentValidationException("Select feed filters require options")
+                    }
+                }
+        }
         value.actions.forEach { action ->
             validateId(action.id, "action.id")
             validateText(action.title, "action.title", 256)
         }
-        value.filters.forEach { filter ->
-            validateId(filter.id, "filter.id")
-            validateText(filter.title, "filter.title", 256)
-            filter.options.forEach { option ->
-                validateId(option.id, "filter.option.id")
-                validateText(option.title, "filter.option.title", 256)
-            }
-        }
+        validateFilters(value.filters, "filter")
         value.settings.forEach { setting ->
             validateId(setting.id, "setting.id")
             validateText(setting.title, "setting.title", 256)
         }
         return value.copy(
+            feeds = value.feeds.map { feed ->
+                feed.copy(filters = feed.filters.filter { it.type in SUPPORTED_FEED_FILTER_TYPES })
+            },
             actions = value.actions.filter { it.kind in SUPPORTED_ACTION_KINDS },
             filters = value.filters.filter { it.type in SUPPORTED_FILTER_TYPES },
             settings = value.settings.filter { it.type in SUPPORTED_SETTING_TYPES },
         )
     }
 
-    private fun validateSearchPage(page: PluginSearchPage, pluginId: String) {
+    private fun validateFilters(filters: List<PluginFilterDescriptor>, field: String) {
+        val filterIds = HashSet<String>(filters.size)
+        filters.forEach { filter ->
+            validateId(filter.id, "$field.id")
+            if (!filterIds.add(filter.id)) {
+                throw PluginContentValidationException("Filter ids must be unique")
+            }
+            validateText(filter.title, "$field.title", 256)
+            if (filter.options.size > PluginContentLimits.MAX_DESCRIPTORS) {
+                throw PluginContentValidationException("Filter contains too many options")
+            }
+            val optionIds = HashSet<String>(filter.options.size)
+            filter.options.forEach { option ->
+                validateId(option.id, "$field.option.id")
+                if (!optionIds.add(option.id)) {
+                    throw PluginContentValidationException("Filter option ids must be unique")
+                }
+                validateText(option.title, "$field.option.title", 256)
+            }
+        }
+    }
+
+    private fun validateContentPage(page: PluginSearchPage, pluginId: String, field: String) {
         validatePluginId(pluginId)
         if (page.items.size > PluginContentLimits.MAX_SEARCH_ITEMS) {
-            throw PluginContentValidationException("Plugin returned too many search items")
+            throw PluginContentValidationException("Plugin returned too many $field items")
         }
+        val sourceIds = HashSet<String>(page.items.size)
         page.items.forEach { item ->
-            validateId(item.sourceId, "search.item.sourceId")
-            validateText(item.title, "search.item.title", 512)
+            validateId(item.sourceId, "$field.item.sourceId")
+            if (!sourceIds.add(item.sourceId)) {
+                throw PluginContentValidationException(
+                    "Plugin returned duplicate $field item sourceId: ${item.sourceId}"
+                )
+            }
+            validateText(item.title, "$field.item.title", 512)
             item.cover?.let { image -> validateImage(image, "cover") }
             validateOpaque(item.opaqueContext)
         }
-        page.nextCursor?.let { validateText(it, "search.nextCursor", 4096) }
+        page.nextCursor?.let { validateText(it, "$field.nextCursor", 4096) }
     }
 
     private fun validatePluginId(pluginId: String) {
@@ -333,6 +399,7 @@ object PluginContentCodec {
     }
 
     private val SUPPORTED_ACTION_KINDS = setOf("action", "login", "logout", "clearSession", "verifyCredentials")
+    private val SUPPORTED_FEED_FILTER_TYPES = setOf("select")
     private val SUPPORTED_FILTER_TYPES = setOf("text", "select", "multiSelect", "boolean")
     private val SUPPORTED_SETTING_TYPES = setOf("text", "secret", "boolean", "select")
     private val HEADER_NAME_PATTERN = Regex("^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
@@ -389,6 +456,23 @@ class PluginCatalog(
                 }
             }.awaitAll()
         }
+    }
+
+    suspend fun browse(pluginId: String, request: PluginBrowseRequest): PluginSearchPage = request.run {
+        require(feedId.isNotBlank() && feedId.length <= 512 && feedId.none(Char::isISOControl)) {
+            "Invalid feed id"
+        }
+        require(cursor == null || cursor.length <= 4096 && cursor.none(Char::isISOControl)) {
+            "Invalid browse cursor"
+        }
+        require(filters.size <= PluginContentLimits.MAX_DESCRIPTORS) { "Too many browse filters" }
+        require(filters.all { (key, value) ->
+            key.isNotBlank() && key.length <= 512 && key.none(Char::isISOControl) &&
+                value.length <= 4096 && value.none(Char::isISOControl)
+        }) { "Invalid browse filters" }
+        val params = copy(limit = limit.coerceIn(1, PluginContentLimits.MAX_SEARCH_ITEMS))
+        val result = runtimeManager.invoke(pluginId, "browse", PluginContentCodec.encode(params))
+        withContext(Dispatchers.Default) { PluginContentCodec.browsePage(result, pluginId) }
     }
 
     suspend fun detail(pluginId: String, request: PluginDetailRequest): ComicDetail {

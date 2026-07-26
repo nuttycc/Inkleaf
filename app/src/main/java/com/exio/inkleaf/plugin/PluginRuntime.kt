@@ -134,7 +134,7 @@ class AndroidJavaScriptPluginRuntime(
             }
             val requiredMethods = buildSet {
                 add("describe")
-                addAll(manifest.capabilities.filter { it in PluginCapabilities.required })
+                addAll(manifest.capabilities.filter { it in PluginCapabilities.declaredMethods })
             }
             val bootstrapResult = createdIsolate.evaluateJavaScriptAsync(
                 PluginBootstrap.script(script, portName, requiredMethods)

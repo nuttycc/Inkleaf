@@ -30,6 +30,7 @@ object PluginCapabilities {
     const val DETAIL = "detail"
     const val CHAPTERS = "chapters"
     const val PAGES = "pages"
+    const val BROWSE = "browse"
     const val HOME = "home"
     const val FILTERS = "filters"
     const val LOGIN = "login"
@@ -41,12 +42,14 @@ object PluginCapabilities {
         setOf(SEARCH, DETAIL, CHAPTERS, PAGES)
 
     val knownOptional: Set<String> =
-        setOf(HOME, FILTERS, LOGIN, SETTINGS, COMMENTS, DEEP_LINK)
+        setOf(BROWSE, HOME, FILTERS, LOGIN, SETTINGS, COMMENTS, DEEP_LINK)
+
+    val declaredMethods: Set<String> = required + BROWSE
 }
 
 object PluginContract {
     const val SUPPORTED_MANIFEST_VERSION = 1
-    val HOST_API_VERSION = ApiVersion(major = 1, minor = 0)
+    val HOST_API_VERSION = ApiVersion(major = 1, minor = 1)
     const val MANIFEST_PATH = "manifest.json"
     const val ENTRY_PATH = "main.js"
     const val ASSET_PREFIX = "assets/"

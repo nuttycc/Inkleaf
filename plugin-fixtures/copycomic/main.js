@@ -3,6 +3,7 @@
 
   const API_BASE = "https://api.manga2025.com/api/v3";
   const PLATFORM = "1";
+  const BROWSE_PLATFORM = "3";
   const MAX_SEARCH_LIMIT = 21;
   const CHAPTER_PAGE_LIMIT = 500;
 
@@ -196,6 +197,142 @@
     return text(status.display) || text(status.value);
   }
 
+  function mapComicSummary(value) {
+    const comic = asObject(value);
+    const sourceId = text(comic.path_word);
+    if (!sourceId) return null;
+    const authors = relationNames(comic.author);
+    const status = statusText(comic.status);
+    const latest = text(comic.last_chapter_name);
+    return {
+      sourceId: sourceId,
+      title: text(comic.name) || sourceId,
+      subtitle: [authors.join(" / "), status, latest].filter(Boolean).join(" · ") || null,
+      cover: text(comic.cover) ? { url: text(comic.cover) } : null,
+      tags: relationNames(comic.theme),
+      opaqueContext: { comicId: sourceId }
+    };
+  }
+
+  function uniqueSummaries(rows, unwrap) {
+    const sourceIds = new Set();
+    return rows.map(function (row) {
+      return mapComicSummary(unwrap(row));
+    }).filter(function (item) {
+      if (!item || sourceIds.has(item.sourceId)) return false;
+      sourceIds.add(item.sourceId);
+      return true;
+    });
+  }
+
+  function browsePage(results, offset, unwrap) {
+    const rows = Array.isArray(results.list) ? results.list : [];
+    const items = uniqueSummaries(rows, unwrap);
+    const total = Math.max(rows.length, finiteNumber(results.total, rows.length));
+    const nextOffset = offset + rows.length;
+    return {
+      items: items,
+      nextCursor: rows.length > 0 && nextOffset < total ? String(nextOffset) : null
+    };
+  }
+
+  function browseOffset(value) {
+    if (value === null || value === undefined || value === "") return 0;
+    const offset = Number(value);
+    if (!Number.isInteger(offset) || offset < 0) {
+      throw pluginError("INVALID_ARGUMENT", "Browse cursor must be a non-negative integer", false);
+    }
+    return offset;
+  }
+
+  function feedDescriptors() {
+    return [
+      { id: "recommend", title: "推荐" },
+      { id: "newest", title: "最新" },
+      {
+        id: "rank",
+        title: "排行榜",
+        filters: [
+          {
+            id: "audience",
+            title: "受众",
+            type: "select",
+            options: [
+              { id: "male", title: "男频" },
+              { id: "female", title: "女频" }
+            ]
+          },
+          {
+            id: "period",
+            title: "周期",
+            type: "select",
+            options: [
+              { id: "day", title: "日榜" },
+              { id: "week", title: "周榜" },
+              { id: "month", title: "月榜" },
+              { id: "total", title: "总榜" }
+            ]
+          },
+          {
+            id: "kind",
+            title: "类型",
+            type: "select",
+            options: [
+              { id: "1", title: "全部" },
+              { id: "5", title: "轻小说" }
+            ]
+          }
+        ]
+      },
+      {
+        id: "discover",
+        title: "分类",
+        filters: [
+          {
+            id: "theme",
+            title: "题材",
+            type: "select",
+            options: [
+              { id: "all", title: "全部" },
+              { id: "aiqing", title: "爱情" },
+              { id: "huanlexiang", title: "欢乐向" },
+              { id: "maoxian", title: "冒险" },
+              { id: "qihuan", title: "奇幻" },
+              { id: "baihe", title: "百合" },
+              { id: "xiaoyuan", title: "校园" },
+              { id: "kehuan", title: "科幻" },
+              { id: "rexue", title: "热血" },
+              { id: "yishijie", title: "异世界" }
+            ]
+          },
+          {
+            id: "top",
+            title: "地区/状态",
+            type: "select",
+            options: [
+              { id: "all", title: "全部" },
+              { id: "japan", title: "日本" },
+              { id: "korea", title: "韩漫" },
+              { id: "west", title: "美漫" },
+              { id: "finish", title: "完结" }
+            ]
+          },
+          {
+            id: "ordering",
+            title: "排序",
+            type: "select",
+            options: [
+              { id: "-datetime_updated", title: "最新" },
+              { id: "datetime_updated", title: "最旧" },
+              { id: "-popular", title: "热度最高" },
+              { id: "popular", title: "热度最低" }
+            ]
+          }
+        ]
+      }
+    ];
+  }
+
   function normalizeGroups(value) {
     const rows = Array.isArray(value) ? value : Object.keys(asObject(value)).map(function (key) {
       return value[key];
@@ -268,7 +405,7 @@
 
   inkleaf.register({
     describe: async function () {
-      return { schemaVersion: 1, actions: [], filters: [], settings: [] };
+      return { schemaVersion: 1, feeds: feedDescriptors(), actions: [], filters: [], settings: [] };
     },
 
     search: async function (request, context) {
@@ -284,28 +421,92 @@
         platform: PLATFORM
       }, context && context.signal);
       const rows = Array.isArray(results.list) ? results.list : [];
-      const items = rows.map(function (item) {
-        const comic = asObject(item);
-        const sourceId = text(comic.path_word);
-        if (!sourceId) return null;
-        const authors = relationNames(comic.author);
-        const status = statusText(comic.status);
-        const latest = text(comic.last_chapter_name);
-        return {
-          sourceId: sourceId,
-          title: text(comic.name) || sourceId,
-          subtitle: [authors.join(" / "), status, latest].filter(Boolean).join(" · ") || null,
-          cover: text(comic.cover) ? { url: text(comic.cover) } : null,
-          tags: relationNames(comic.theme),
-          opaqueContext: { comicId: sourceId }
-        };
-      }).filter(Boolean);
+      const items = uniqueSummaries(rows, function (item) { return item; });
       const total = Math.max(items.length, finiteNumber(results.total, items.length));
       const nextOffset = offset + rows.length;
       return {
         items: items,
         nextCursor: rows.length > 0 && nextOffset < total ? String(nextOffset) : null
       };
+    },
+
+    browse: async function (request, context) {
+      const feedId = text(request.feedId);
+      const limit = Math.floor(Math.max(1, Math.min(MAX_SEARCH_LIMIT, finiteNumber(request.limit, 21))));
+      const offset = browseOffset(request.cursor);
+      const filters = asObject(request.filters);
+      const signal = context && context.signal;
+
+      if (feedId === "recommend") {
+        const results = await apiGet("/recs", {
+          pos: "3200102",
+          limit: limit,
+          offset: offset,
+          platform: BROWSE_PLATFORM
+        }, signal);
+        return browsePage(results, offset, function (row) { return asObject(row).comic; });
+      }
+
+      if (feedId === "newest") {
+        let results;
+        try {
+          results = await apiGet("/comics", {
+            limit: limit,
+            offset: offset,
+            ordering: "-datetime_updated",
+            platform: BROWSE_PLATFORM
+          }, signal);
+          return browsePage(results, offset, function (row) {
+            const record = asObject(row);
+            return text(asObject(record.comic).path_word) ? record.comic : record;
+          });
+        } catch (error) {
+          if (!error || error.statusCode !== 404) throw error;
+          results = await apiGet("/update/newest", {
+            limit: limit,
+            offset: offset,
+            platform: BROWSE_PLATFORM
+          }, signal);
+          return browsePage(results, offset, function (row) { return asObject(row).comic; });
+        }
+      }
+
+      if (feedId === "rank") {
+        const audience = filters.audience === "female" ? "female" : "male";
+        const period = ["day", "week", "month", "total"].indexOf(filters.period) >= 0
+          ? filters.period
+          : "day";
+        const kind = filters.kind === "5" ? "5" : "1";
+        const results = await apiGet("/ranks", {
+          type: kind,
+          date_type: period,
+          limit: limit,
+          offset: offset,
+          audience_type: audience,
+          platform: BROWSE_PLATFORM
+        }, signal);
+        return browsePage(results, offset, function (row) {
+          const record = asObject(row);
+          return text(asObject(record.comic).path_word) ? record.comic : record.book;
+        });
+      }
+
+      if (feedId === "discover") {
+        const ordering = ["-datetime_updated", "datetime_updated", "-popular", "popular"]
+          .indexOf(filters.ordering) >= 0 ? filters.ordering : "-datetime_updated";
+        const results = await apiGet("/comics", {
+          limit: limit,
+          offset: offset,
+          free_type: "1",
+          ordering: ordering,
+          theme: filters.theme === "all" ? "" : text(filters.theme),
+          top: filters.top === "all" ? "" : text(filters.top),
+          platform: BROWSE_PLATFORM
+        }, signal);
+        return browsePage(results, offset, function (row) { return row; });
+      }
+
+      throw pluginError("INVALID_ARGUMENT", "Unknown feed: " + feedId, false);
     },
 
     detail: async function (request, context) {

@@ -407,12 +407,25 @@ class PluginPackageStore(
         return pruned
     }
 
-    private fun installedPlugin(directory: File, state: PluginState): InstalledPlugin =
-        InstalledPlugin(
+    private fun installedPlugin(directory: File, state: PluginState): InstalledPlugin {
+        val activeDir = state.activeVersion?.let { versionDirectory(directory, it) }
+        val targetDir = activeDir ?: run {
+            val newestCompatible = state.versions
+                .filter { it.compatible }
+                .maxByOrNull { it.installedAtMs }
+                ?.version
+            newestCompatible?.let { versionDirectory(directory, it) }
+        }
+        val manifest = targetDir?.resolve(PluginContract.MANIFEST_PATH)?.takeIf { it.isFile }?.let { file ->
+            runCatching { json.decodeFromString<PluginManifest>(file.readText(StandardCharsets.UTF_8)) }.getOrNull()
+        }
+        return InstalledPlugin(
             state = state,
             directory = directory,
-            activeDirectory = state.activeVersion?.let { versionDirectory(directory, it) },
+            activeDirectory = activeDir,
+            manifest = manifest,
         )
+    }
 
     private fun readState(directory: File): PluginState? {
         val file = directory.resolve(STATE_FILE)
