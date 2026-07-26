@@ -7,6 +7,7 @@ import java.nio.file.Files
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -49,6 +50,69 @@ class OnlineContentRepositoryTest {
             val record = requireNotNull(repository.get(PLUGIN_ID, SOURCE_ID))
             assertEquals(OnlineAvailability.PLUGIN_UNINSTALLED, record.availability)
             assertNotNull(record.detail)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `favorite snapshot publication rejects a file allocated for another page`() {
+        val root = Files.createTempDirectory("inkleaf-online-snapshot-identity").toFile()
+        try {
+            val repository = OnlineContentRepository(root.resolve("state.json"))
+            val firstPage = location(pageId = "page-1", pageIndex = 0, revision = "revision-1")
+            val secondPage = location(pageId = "page-2", pageIndex = 1, revision = "revision-1")
+            val firstPageFile = repository.pageFavoriteSnapshotFile(firstPage.identity, "webp")
+            firstPageFile.writeBytes(byteArrayOf(1, 2, 3))
+
+            assertThrows(IllegalArgumentException::class.java) {
+                repository.recordPageFavoriteSnapshot(
+                    secondPage,
+                    firstPageFile,
+                    mimeType = "image/webp",
+                    width = 1200,
+                    height = 1800,
+                )
+            }
+            assertTrue(repository.listPageFavorites().isEmpty())
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `favorite replacement publishes a unique file before removing the prior snapshot`() {
+        val root = Files.createTempDirectory("inkleaf-online-snapshot-replace").toFile()
+        try {
+            val repository = OnlineContentRepository(root.resolve("state.json"), clockMs = { 100L })
+            val page = location(pageId = "page-1", pageIndex = 0, revision = "revision-1")
+            val firstFile = repository.pageFavoriteSnapshotFile(page.identity, "webp")
+            val replacementFile = repository.pageFavoriteSnapshotFile(page.identity, "webp")
+            assertNotEquals(firstFile, replacementFile)
+
+            firstFile.writeBytes(byteArrayOf(1, 2, 3))
+            repository.recordPageFavoriteSnapshot(
+                page,
+                firstFile,
+                mimeType = "image/webp",
+                width = 1200,
+                height = 1800,
+            )
+            assertTrue(firstFile.isFile)
+
+            replacementFile.writeBytes(byteArrayOf(4, 5, 6, 7))
+            val replacement = repository.recordPageFavoriteSnapshot(
+                page,
+                replacementFile,
+                mimeType = "image/webp",
+                width = 1200,
+                height = 1800,
+            )
+
+            assertFalse(firstFile.exists())
+            assertTrue(replacementFile.isFile)
+            assertEquals(replacementFile.canonicalFile, repository.resolvePageFavoriteSnapshot(replacement))
+            assertEquals(4L, replacement.snapshot.byteCount)
         } finally {
             root.deleteRecursively()
         }

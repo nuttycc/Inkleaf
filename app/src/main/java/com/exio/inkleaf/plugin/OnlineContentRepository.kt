@@ -180,14 +180,20 @@ class OnlineContentRepository(
     }
 
     /**
-     * Returns a deterministic file under the repository's app-private directory. The caller must
+     * Allocates a unique final file under the repository's app-private directory. The caller must
      * write the snapshot atomically before calling [recordPageFavoriteSnapshot].
      */
     fun pageFavoriteSnapshotFile(identity: OnlinePageIdentity, extension: String): File {
         val normalizedExtension = extension.lowercase()
         require(FILE_EXTENSION.matches(normalizedExtension)) { "Invalid snapshot file extension" }
         ensureDirectory(snapshotDirectory)
-        return snapshotDirectory.resolve("${snapshotStorageKey(identity)}.$normalizedExtension")
+        val identityKey = snapshotStorageKey(identity)
+        while (true) {
+            val candidate = snapshotDirectory.resolve(
+                "$identityKey-${UUID.randomUUID()}.$normalizedExtension"
+            )
+            if (!candidate.exists()) return candidate
+        }
     }
 
     /** Atomically publishes snapshot metadata after the durable snapshot file exists. */
@@ -199,7 +205,7 @@ class OnlineContentRepository(
         height: Int,
         chapterTitleSnapshot: String? = null,
     ): OnlinePageFavorite = synchronized(lock) {
-        val relativePath = requireStoredSnapshot(snapshotFile)
+        val relativePath = requireStoredSnapshot(snapshotFile, location.identity)
         val now = clockMs()
         val favorite = OnlinePageFavorite(
             location = location,
@@ -214,9 +220,14 @@ class OnlineContentRepository(
             ),
             addedAtMs = now,
         )
-        update(key(location.identity.chapter.content)) { current ->
+        var previousSnapshotPath: String? = null
+        val published = update(key(location.identity.chapter.content)) { current ->
             val previous = current.pageFavorites.firstOrNull {
                 it.location.identity == location.identity
+            }
+            previousSnapshotPath = previous?.snapshot?.relativePath
+            require(previousSnapshotPath != relativePath) {
+                "Page favorite replacement requires a newly allocated snapshot file"
             }
             val stored = if (previous == null) favorite else favorite.copy(addedAtMs = previous.addedAtMs)
             current.copy(
@@ -225,6 +236,10 @@ class OnlineContentRepository(
                 } + stored).sortedByDescending { it.addedAtMs },
             )
         }.pageFavorites.first { it.location.identity == location.identity }
+        previousSnapshotPath
+            ?.takeIf { it != published.snapshot.relativePath }
+            ?.let { oldPath -> runCatching { resolveStoredSnapshot(oldPath).delete() } }
+        published
     }
 
     fun resolvePageFavoriteSnapshot(favorite: OnlinePageFavorite): File =
@@ -390,12 +405,19 @@ class OnlineContentRepository(
         return OnlineContentKey(pluginId, sourceId)
     }
 
-    private fun requireStoredSnapshot(snapshotFile: File): String {
+    private fun requireStoredSnapshot(
+        snapshotFile: File,
+        identity: OnlinePageIdentity,
+    ): String {
         val canonicalDirectory = snapshotDirectory.canonicalFile
         val canonicalSnapshot = snapshotFile.canonicalFile
         require(canonicalSnapshot.isFile) { "Snapshot file must exist before metadata is recorded" }
-        require(canonicalSnapshot.toPath().startsWith(canonicalDirectory.toPath())) {
+        require(canonicalSnapshot.parentFile == canonicalDirectory) {
             "Snapshot file must be inside the page favorite directory"
+        }
+        val fileMatch = ALLOCATED_SNAPSHOT_FILE.matchEntire(canonicalSnapshot.name)
+        require(fileMatch?.groupValues?.get(1) == snapshotStorageKey(identity)) {
+            "Snapshot file was not allocated for this page identity"
         }
         val contentDirectory = requireNotNull(file.parentFile).canonicalFile
         return contentDirectory.toPath()
@@ -467,6 +489,9 @@ class OnlineContentRepository(
 
     private companion object {
         val FILE_EXTENSION = Regex("[a-z0-9]{1,8}")
+        val ALLOCATED_SNAPSHOT_FILE = Regex(
+            "([0-9a-f]{64})-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.([a-z0-9]{1,8})"
+        )
 
         fun ensureDirectory(directory: File) {
             if (!directory.mkdirs() && !directory.isDirectory) {
