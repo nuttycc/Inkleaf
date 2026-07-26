@@ -246,10 +246,19 @@ class OnlineContentRepository(
         resolveStoredSnapshot(favorite.snapshot.relativePath)
 
     fun removePageFavorite(identity: OnlinePageIdentity): Boolean = synchronized(lock) {
-        removeUserRecord(key(identity.chapter.content)) { current ->
-            val next = current.pageFavorites.filterNot { it.location.identity == identity }
-            current.copy(pageFavorites = next) to (next.size != current.pageFavorites.size)
-        }
+        val contentKey = key(identity.chapter.content)
+        val state = read()
+        val current = state.records.firstOrNull { it.key == contentKey } ?: return false
+        val removed = current.pageFavorites.firstOrNull { it.location.identity == identity }
+            ?: return false
+        val updated = current.copy(
+            pageFavorites = current.pageFavorites.filterNot { it.location.identity == identity }
+        )
+        val records = state.records.filterNot { it.key == contentKey } + updated
+        write(OnlineContentState(records.sortedWith(compareBy({ it.key.pluginId }, { it.key.sourceId }))))
+        // Metadata is removed first. A crash can leave an orphan file, but never a broken favorite.
+        runCatching { resolveStoredSnapshot(removed.snapshot.relativePath).delete() }
+        true
     }
 
     fun listReadingSessions(): List<OnlineReadingSessionRecord> = synchronized(lock) {

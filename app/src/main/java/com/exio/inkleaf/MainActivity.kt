@@ -648,6 +648,9 @@ class MainActivity : AppCompatActivity() {
                                 chapterRevision = route.chapterRevision,
                                 opaqueContextJson = route.opaqueContextJson,
                                 onBack = { outerNavController.popBackStack() },
+                                onNavigateToModelDownload = {
+                                    outerNavController.navigate(OcrModelDownloadRoute)
+                                },
                             )
                         }
                     }

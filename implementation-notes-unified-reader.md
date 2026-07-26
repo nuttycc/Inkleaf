@@ -36,13 +36,20 @@ reading history. It does not add offline-book downloads or cross-source deduplic
 - The reader composable now consumes source-neutral presentation state, feature data,
   and actions. Local reading is adapted at the route boundary without changing its
   existing persistence behavior.
+- Plugin chapters are adapted one chapter at a time to `ComicVolume`; full pages,
+  thumbnails, OCR, and favorite snapshots all use the descriptor's headers and referer.
+- Online reader progress, page bookmarks, durable page favorites, and qualifying reading
+  sessions are written by a route-scoped ViewModel and survive plugin unavailability.
 
 ## Deviations
 
 - Task 1 allocates and validates the durable page-favorite path but leaves atomic image
-  byte writing to the later online source adapter before metadata publication.
+  byte writing to the later online source adapter before metadata publication. The adapter now
+  performs that write with a synced temporary file and atomic rename.
 - Online records remain in the existing atomic JSON snapshot store for this first
   integration instead of adding a second Room schema and migration.
+- A plugin chapter with any missing `pageId` must provide a non-blank chapter revision.
+  The first version rejects an unstable chapter instead of using a remote image URL as identity.
 
 ## Verification log
 
@@ -54,3 +61,7 @@ reading history. It does not add offline-book downloads or cross-source deduplic
 - `git diff --check` passed for the shared reader presentation extraction.
 - Legacy local-reader model references were checked at the presentation boundary; the
   shared composable no longer depends on Room bookmark or favorite entities.
+- The resolved coroutines 1.11.0 `CancellableContinuation` source was checked before using
+  the stable cancellation-aware resume API for OkHttp page delivery.
+- `git diff --check` passed for the online volume, reader adapter, snapshot removal, and
+  focused unit-test additions. Tests were not run.

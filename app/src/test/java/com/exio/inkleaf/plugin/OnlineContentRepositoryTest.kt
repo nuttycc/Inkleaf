@@ -119,6 +119,31 @@ class OnlineContentRepositoryTest {
     }
 
     @Test
+    fun `removing a page favorite deletes its published snapshot`() {
+        val root = Files.createTempDirectory("inkleaf-online-snapshot-remove").toFile()
+        try {
+            val repository = OnlineContentRepository(root.resolve("state.json"))
+            val page = location(pageId = "page-1", pageIndex = 0, revision = "revision-1")
+            val snapshotFile = repository.pageFavoriteSnapshotFile(page.identity, "webp")
+            snapshotFile.writeBytes(byteArrayOf(1, 2, 3))
+            repository.recordPageFavoriteSnapshot(
+                page,
+                snapshotFile,
+                mimeType = "image/webp",
+                width = 1200,
+                height = 1800,
+            )
+
+            assertTrue(repository.removePageFavorite(page.identity))
+
+            assertFalse(snapshotFile.exists())
+            assertTrue(repository.listPageFavorites().isEmpty())
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun `page user records and reading sessions survive repository recreation`() {
         val root = Files.createTempDirectory("inkleaf-online-records").toFile()
         val file = root.resolve("state.json")
