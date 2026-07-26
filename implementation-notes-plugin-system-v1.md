@@ -124,3 +124,6 @@ fixed host DTOs, and no plugin-provided Android UI or native code.
   icon is available. Repository JVM tests cover fresh/disk hits, key isolation, stale
   fallback, forced refresh, corrupt and unavailable disk storage, and single-flight
   cache misses; they were not executed because no Gradle task was authorized.
+- PR #53 CI exposed a stale package-validator fixture that still treated API `1.1` as newer
+  after browse support raised the host API to `1.1`. The incompatibility test now derives the
+  next minor version from `PluginContract.HOST_API_VERSION` so future host bumps remain covered.

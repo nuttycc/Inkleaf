@@ -49,7 +49,9 @@ class PluginPackageValidatorTest {
 
     @Test
     fun `new API minor is retained but incompatible`() {
-        val file = packageFile(validManifest().copy(apiVersion = "1.1"))
+        val hostApiVersion = PluginContract.HOST_API_VERSION
+        val newerApiVersion = hostApiVersion.copy(minor = hostApiVersion.minor + 1)
+        val file = packageFile(validManifest().copy(apiVersion = newerApiVersion.toString()))
         try {
             val result = validator.validate(file)
             assertTrue(result.installable)
