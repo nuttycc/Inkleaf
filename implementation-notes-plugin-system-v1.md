@@ -20,6 +20,8 @@ fixed host DTOs, and no plugin-provided Android UI or native code.
    sources.
 5. Cover pure protocol, storage, quota, and state-machine behavior with JVM
    tests. Android/WebView behavior remains a user-installed phone check.
+6. Add an independently implemented CopyComic-compatible plugin fixture to
+   validate the real search, detail, chapter, and page-image path.
 
 ## Decisions applied
 
@@ -55,6 +57,12 @@ fixed host DTOs, and no plugin-provided Android UI or native code.
 - The v1 host UI exposes discovery and reading only. Declared plugin actions/settings
   are validated and available through the runtime/debug diagnostic entry point, but a
   full action/settings screen is deferred to a later slice.
+- The real-source fixture uses the current upstream default API route and platform
+  value directly. Endpoint selection, authentication settings, rankings, downloads,
+  and background rate limiting remain outside the first online-reading slice.
+- The reference CopyComic plugin repository has no declared license. The Inkleaf
+  fixture is an independent implementation based on observed public API behavior;
+  no source code is copied from that repository.
 
 ## Verification log
 
@@ -70,3 +78,7 @@ fixed host DTOs, and no plugin-provided Android UI or native code.
   cancellation-signal propagation, and structured logging. The debug APK was built
   and installed with `install-debug.ps1` using the existing Gradle configuration
   cache; no remote CI was run for this follow-up at the user's request.
+- The dependency-free CopyComic fixture unit test passes under Node. It covers
+  inline and chunked host HTTP bodies, handle closure, content DTO mapping,
+  chapter listing, page ordering, and the `chapter` to `chapter2` 404 fallback.
+  Real API and image loading remain pending user-installed phone verification.
