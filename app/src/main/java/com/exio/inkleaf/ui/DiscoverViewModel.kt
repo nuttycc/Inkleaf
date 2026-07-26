@@ -1,7 +1,12 @@
 package com.exio.inkleaf.ui
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.exio.inkleaf.data.DiscoverLayoutMode
+import com.exio.inkleaf.data.DiscoverLayoutSettings
+import com.exio.inkleaf.data.DiscoverSettingsRepository
+import com.exio.inkleaf.data.GridColumnsMode
 import com.exio.inkleaf.plugin.ComicSummary
 import com.exio.inkleaf.plugin.InstalledPlugin
 import com.exio.inkleaf.plugin.PluginBrowseCacheKey
@@ -22,8 +27,10 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -31,7 +38,8 @@ import kotlinx.coroutines.withContext
  * Navigation-scoped state holder for the comic discovery surface. Retains browse and search state
  * across SourcesScreen and bottom-tab navigation.
  */
-class DiscoverViewModel : ViewModel() {
+class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
+    /** 浏览与搜索共用这一屏：搜索是覆盖在浏览之上的临时态，退出即回到原来的内容流。 */
     enum class Mode {
         BROWSE,
         SEARCH,
@@ -63,8 +71,25 @@ class DiscoverViewModel : ViewModel() {
         NEXT_PAGE,
     }
 
+    private val settingsRepo = DiscoverSettingsRepository(app)
+
     private val _mode = MutableStateFlow(Mode.BROWSE)
     val mode: StateFlow<Mode> = _mode.asStateFlow()
+
+    /** 排版设置。initial 给默认构造对象：DataStore 首次发射前网格就有合法参数，不会闪变 */
+    val layoutSettings: StateFlow<DiscoverLayoutSettings> =
+        settingsRepo.settings.stateIn(
+            viewModelScope,
+            SharingStarted.Lazily,
+            DiscoverLayoutSettings(),
+        )
+
+    /**
+     * 下拉刷新指示器专用，与 isBrowsing 刻意分开：isBrowsing 在翻下一页时同样为 true，
+     * 共用一个标志会让触底加载把顶部的刷新圈也转起来。
+     */
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
 
     private val _installedPlugins = MutableStateFlow<List<InstalledPlugin>>(emptyList())
     val installedPlugins: StateFlow<List<InstalledPlugin>> = _installedPlugins.asStateFlow()
@@ -135,9 +160,52 @@ class DiscoverViewModel : ViewModel() {
     private var browseGeneration = 0L
     private var searchGeneration = 0L
 
-    fun selectMode(mode: Mode, browseRepository: PluginBrowseRepository) {
-        _mode.value = mode
-        if (mode == Mode.BROWSE) ensureCurrentBrowseFresh(browseRepository)
+    fun enterSearch() {
+        _mode.value = Mode.SEARCH
+    }
+
+    /**
+     * 退出搜索一并清空查询词与结果：顶栏变回源名后，搜索态在界面上再无任何可见承载，
+     * 留着它就成了用户看不见却仍会影响下一次搜索的隐藏状态。
+     */
+    fun exitSearch(browseRepository: PluginBrowseRepository) {
+        _mode.value = Mode.BROWSE
+        updateQuery("")
+        ensureCurrentBrowseFresh(browseRepository)
+    }
+
+    /** 切换当前源：落到该源的第一个内容流上 */
+    fun selectSource(repository: PluginBrowseRepository, pluginId: String) {
+        val target = _feeds.value.firstOrNull { it.pluginId == pluginId } ?: return
+        selectFeed(repository, target.key)
+    }
+
+    fun setLayout(value: DiscoverLayoutMode) {
+        viewModelScope.launch { settingsRepo.setLayout(value) }
+    }
+
+    fun setColumns(value: GridColumnsMode) {
+        viewModelScope.launch { settingsRepo.setColumns(value) }
+    }
+
+    /** 下拉刷新的统一入口：刷新用户此刻真正在看的东西 */
+    fun refresh(
+        catalog: PluginCatalog,
+        browseRepository: PluginBrowseRepository,
+        availablePlugins: List<InstalledPlugin>,
+    ) {
+        when (_mode.value) {
+            Mode.BROWSE -> {
+                if (currentBrowseKey == null) return
+                _isRefreshing.value = true
+                loadBrowseFirstPage(browseRepository, force = true, manual = true)
+            }
+            Mode.SEARCH -> {
+                if (_query.value.isBlank()) return
+                _isRefreshing.value = true
+                performSearch(catalog, availablePlugins)
+            }
+        }
     }
 
     fun loadInstalledPlugins(manager: PluginManager) {
@@ -262,11 +330,12 @@ class DiscoverViewModel : ViewModel() {
         activateBrowseTarget(repository, key, filters)
     }
 
-    fun refreshBrowse(repository: PluginBrowseRepository) {
-        loadBrowseFirstPage(repository, force = true)
-    }
-
+    /**
+     * 触底预取会在滚动中被反复调用，这里必须挡住重入：loadBrowsePage 会先 cancel 掉
+     * 正在跑的 browseJob，不挡的话每次调用都把上一次快取到手的请求掐掉，永远加载不完。
+     */
     fun loadMore(repository: PluginBrowseRepository) {
+        if (_isBrowsing.value) return
         if (_browseNextCursor.value != null) loadBrowsePage(repository)
     }
 
@@ -300,7 +369,10 @@ class DiscoverViewModel : ViewModel() {
 
     fun performSearch(catalog: PluginCatalog, availablePlugins: List<InstalledPlugin>) {
         val currentQuery = _query.value.trim()
-        if (currentQuery.isBlank()) return
+        if (currentQuery.isBlank()) {
+            _isRefreshing.value = false
+            return
+        }
 
         val activeHealthyIds =
             availablePlugins
@@ -310,7 +382,10 @@ class DiscoverViewModel : ViewModel() {
                         it.state.activeVersion != null
                 }
                 .map { it.state.pluginId }
-        if (activeHealthyIds.isEmpty()) return
+        if (activeHealthyIds.isEmpty()) {
+            _isRefreshing.value = false
+            return
+        }
 
         val targetIds =
             (_selectedPluginIds.value ?: activeHealthyIds.toSet()).filter { it in activeHealthyIds }
@@ -318,6 +393,7 @@ class DiscoverViewModel : ViewModel() {
             searchJob?.cancel()
             _results.value = emptyList()
             _isSearching.value = false
+            _isRefreshing.value = false
             _errorMessage.value = null
             return
         }
@@ -341,6 +417,7 @@ class DiscoverViewModel : ViewModel() {
             } catch (error: Throwable) {
                 if (generation == searchGeneration) _errorMessage.value = error.message ?: "搜索失败"
             } finally {
+                _isRefreshing.value = false
                 if (generation == searchGeneration) _isSearching.value = false
             }
         }
@@ -384,7 +461,11 @@ class DiscoverViewModel : ViewModel() {
         }
     }
 
-    private fun loadBrowseFirstPage(repository: PluginBrowseRepository, force: Boolean) {
+    private fun loadBrowseFirstPage(
+        repository: PluginBrowseRepository,
+        force: Boolean,
+        manual: Boolean = false,
+    ) {
         val feed = selectedFeed() ?: return
         val key = currentBrowseKey ?: return
         val filters = _browseFilters.value
@@ -423,6 +504,9 @@ class DiscoverViewModel : ViewModel() {
                     browseFailure = BrowseFailure.FIRST_PAGE
                 }
             } finally {
+                // 刷新指示器的收尾不受 generation 守卫：刷新途中用户切了分类，
+                // 这一轮就再也满足不了 key == currentBrowseKey，圈会一直转下去
+                if (manual) _isRefreshing.value = false
                 if (generation == browseGeneration && key == currentBrowseKey) {
                     _isBrowsing.value = false
                 }
