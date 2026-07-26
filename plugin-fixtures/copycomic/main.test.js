@@ -71,6 +71,7 @@ async function run() {
   router = function (request) {
     assert.equal(request.headers.version, "2025.02.12");
     assert.match(request.url, /\/search\/comic\?/);
+    assert.match(request.url, /(?:\?|&)limit=21(?:&|$)/);
     return response({
       code: 200,
       results: {
@@ -87,7 +88,7 @@ async function run() {
       }
     }, 200, true);
   };
-  const search = await registration.search({ query: "测试", cursor: null, limit: 1 }, {});
+  const search = await registration.search({ query: "测试", cursor: null, limit: 40 }, {});
   assert.equal(search.items[0].sourceId, "fixture-comic");
   assert.equal(search.items[0].title, "Fixture 漫画");
   assert.deepEqual(search.items[0].tags, ["冒险"]);

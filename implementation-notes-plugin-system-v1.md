@@ -82,3 +82,7 @@ fixed host DTOs, and no plugin-provided Android UI or native code.
   inline and chunked host HTTP bodies, handle closure, content DTO mapping,
   chapter listing, page ordering, and the `chapter` to `chapter2` 404 fallback.
   Real API and image loading remain pending user-installed phone verification.
+- The first real-device search exposed an API boundary mismatch: Inkleaf requests
+  40 items by default while the CopyComic endpoint rejects limits above 30. The
+  source now caps search pages at the reference implementation's stable size of
+  21, with a regression test that exercises a host request of 40 items.

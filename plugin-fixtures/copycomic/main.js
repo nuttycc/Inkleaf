@@ -3,7 +3,7 @@
 
   const API_BASE = "https://api.manga2025.com/api/v3";
   const PLATFORM = "1";
-  const MAX_SEARCH_LIMIT = 50;
+  const MAX_SEARCH_LIMIT = 21;
   const CHAPTER_PAGE_LIMIT = 500;
 
   function pluginError(code, message, retryable) {
