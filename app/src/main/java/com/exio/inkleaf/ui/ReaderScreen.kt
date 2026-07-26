@@ -229,6 +229,7 @@ internal fun SharedReaderScreen(
     actions: ReaderPresentationActions,
     onExit: () -> Unit,
     modifier: Modifier = Modifier,
+    chapterNavigation: ReaderChapterNavigation? = null,
     onErrorAction: ((() -> Unit) -> Unit)? = null,
     errorBackLabel: String = "返回",
     errorActionLabel: String? = null,
@@ -293,6 +294,7 @@ internal fun SharedReaderScreen(
                         cacheKeyPrefix = current.cacheKeyPrefix,
                         features = features,
                         actions = actions,
+                        chapterNavigation = chapterNavigation,
                         onBack = exitReader,
                         showControls = showControls,
                         onToggleControls = { showControls = !showControls },
@@ -311,6 +313,7 @@ private fun ComicPager(
     cacheKeyPrefix: String,
     features: ReaderPresentationFeatures,
     actions: ReaderPresentationActions,
+    chapterNavigation: ReaderChapterNavigation?,
     onBack: () -> Unit,
     showControls: Boolean,
     onToggleControls: () -> Unit,
@@ -334,7 +337,7 @@ private fun ComicPager(
     var zoomToggleAnchor by remember { mutableStateOf(Offset.Unspecified) }
     var activePanel by remember { mutableStateOf<ReaderPanel?>(null) }
     var chapterLayoutVersion by remember(volume) { mutableIntStateOf(0) }
-    val readerChapters by
+    val volumeChapters by
         produceState<List<ReaderChapterItem>?>(
             initialValue = null,
             key1 = volume,
@@ -343,8 +346,8 @@ private fun ComicPager(
                 value = loadReaderChapterItems(volume)
             }
         }
-    LaunchedEffect(readerChapters) {
-        if (readerChapters != null) chapterLayoutVersion++
+    LaunchedEffect(volumeChapters) {
+        if (volumeChapters != null) chapterLayoutVersion++
     }
     val ocrResults = remember { mutableStateMapOf<Int, OcrPageResult>() }
     val ocrResultOrder = remember { ArrayDeque<Int>() }
@@ -500,6 +503,12 @@ private fun ComicPager(
         remember(chapterProgress, volume, chapterLayoutVersion) {
             volume.chapterTitle(chapterProgress.chapterIndex)
         }
+    val readerChapters = chapterNavigation?.chapters ?: volumeChapters
+    val readerChapterCount = chapterNavigation?.chapters?.size ?: volume.chapterCount
+    val currentReaderChapterIndex =
+        chapterNavigation?.currentChapterIndex ?: chapterProgress.chapterIndex
+    val currentReaderChapterTitle =
+        readerChapters?.getOrNull(currentReaderChapterIndex)?.title ?: chapterTitle
 
     // 翻页统一走"前进/后退"抽象：将来日漫右→左模式只需反转点按区到 delta 的映射
     val turnPage: (Int) -> Unit = { delta ->
@@ -697,8 +706,8 @@ private fun ComicPager(
         ) {
             val pageCountLabel = "${pagerState.currentPage + 1} / ${volume.totalPageCount}"
             val pageLabel =
-                if (volume.chapterCount > 1) {
-                    "$chapterTitle · $pageCountLabel"
+                if (readerChapterCount > 1) {
+                    "$currentReaderChapterTitle · $pageCountLabel"
                 } else {
                     pageCountLabel
                 }
@@ -735,7 +744,7 @@ private fun ComicPager(
                     ocrProcessingPage != pagerState.currentPage,
             pagerState = pagerState,
             pageCount = volume.totalPageCount,
-            chapterCount = volume.chapterCount,
+            chapterCount = readerChapterCount,
             thumbnails = features.thumbnails,
             bookmarkPages = features.bookmarkPages,
             onNeedThumbnail = actions.onNeedThumbnail,
@@ -750,10 +759,19 @@ private fun ComicPager(
                     ReaderPanel.Chapters ->
                         ReaderChaptersPanelContent(
                             chapters = readerChapters,
-                            currentChapterIndex = chapterProgress.chapterIndex,
-                            onSelect = { page ->
+                            currentChapterIndex = currentReaderChapterIndex,
+                            onSelect = { chapterIndex ->
                                 activePanel = null
-                                scope.launch { pagerState.scrollToPage(page) }
+                                val externalNavigation = chapterNavigation
+                                if (externalNavigation != null) {
+                                    externalNavigation.onSelectChapter(chapterIndex)
+                                } else {
+                                    scope.launch {
+                                        pagerState.scrollToPage(
+                                            volume.chapterPageToGlobal(chapterIndex, 0)
+                                        )
+                                    }
+                                }
                             },
                         )
                     ReaderPanel.Bookmarks ->

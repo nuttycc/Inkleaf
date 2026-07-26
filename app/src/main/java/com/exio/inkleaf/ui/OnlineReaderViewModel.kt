@@ -22,10 +22,10 @@ import com.exio.inkleaf.data.OnlineContentIdentity
 import com.exio.inkleaf.data.OnlinePageIdentity
 import com.exio.inkleaf.data.OnlinePageLocation
 import com.exio.inkleaf.data.ReadingSessionRules
+import com.exio.inkleaf.plugin.ChapterSummary
 import com.exio.inkleaf.plugin.OnlineAvailability
 import com.exio.inkleaf.plugin.OnlineChapterVolume
 import com.exio.inkleaf.plugin.OnlinePageBookmark
-import com.exio.inkleaf.plugin.OnlinePageFavorite
 import com.exio.inkleaf.plugin.OnlineReadingSessionRecord
 import com.exio.inkleaf.plugin.PluginContentCodec
 import com.exio.inkleaf.plugin.PluginPagesRequest
@@ -41,24 +41,28 @@ import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.JsonElement
 import okhttp3.OkHttpClient
 
 internal class OnlineReaderViewModel(
     app: Application,
     private val pluginId: String,
     private val sourceId: String,
-    private val chapterId: String,
-    private val requestedRevision: String?,
-    private val opaqueContextJson: String?,
+    chapterId: String,
+    requestedRevision: String?,
+    opaqueContextJson: String?,
     private val initialPageId: String?,
     private val initialPageIndex: Int?,
 ) : AndroidViewModel(app) {
@@ -66,7 +70,19 @@ internal class OnlineReaderViewModel(
     private val repository = application.onlineContentRepository
     private val applicationScope = application.applicationScope
     private val contentIdentity = OnlineContentIdentity(pluginId, sourceId)
-    private val chapterIdentity = OnlineChapterIdentity(contentIdentity, chapterId)
+    private val initialChapterId = chapterId
+    private val routeOpaqueContext =
+        opaqueContextJson?.let {
+            runCatching { PluginContentCodec.json.parseToJsonElement(it) }.getOrNull()
+        }
+
+    private var activeChapterId: String = chapterId
+    private var activeRequestedRevision: String? = requestedRevision
+    private var activeOpaqueContext: JsonElement? = routeOpaqueContext
+    private var contentOpaqueContext: JsonElement? = routeOpaqueContext
+    private var chapterSummaries: List<ChapterSummary> = emptyList()
+    private val chapterIdentity: OnlineChapterIdentity
+        get() = OnlineChapterIdentity(contentIdentity, activeChapterId)
 
     var state by mutableStateOf<ReaderPresentationState>(ReaderPresentationState.Loading)
         private set
@@ -74,6 +90,10 @@ internal class OnlineReaderViewModel(
     val bookmarkPages = mutableStateMapOf<Int, Unit>()
     val bookmarks = mutableStateListOf<ReaderBookmarkItem>()
     val favoritePages = mutableStateMapOf<Int, Unit>()
+    var readerChapters by mutableStateOf<List<ReaderChapterItem>?>(null)
+        private set
+    var currentChapterIndex by mutableIntStateOf(-1)
+        private set
     var readerMessage by mutableStateOf<String?>(null)
         private set
 
@@ -83,14 +103,16 @@ internal class OnlineReaderViewModel(
     private var currentTitle: String = "在线漫画"
     private var currentPage by mutableIntStateOf(0)
     private var bookmarkEntriesByKey = emptyMap<String, OnlinePageBookmark>()
-    private var favoriteEntriesByIdentity = emptyMap<OnlinePageIdentity, OnlinePageFavorite>()
     private val thumbnailInFlight = mutableSetOf<Int>()
+    private val thumbnailJobs = mutableSetOf<Job>()
     private val thumbnailMutex = Mutex()
     private val bookmarkMutationMutex = Mutex()
     private val favoriteMutationMutex = Mutex()
 
     private var pendingProgressPage: Int? = null
     private var progressWriteJob: Job? = null
+    private var chapterLoadJob: Job? = null
+    private val lastPageByChapterId = mutableMapOf<String, Int>()
 
     private var sessionId: String? = null
     private var sessionStartedAtMs: Long = 0L
@@ -98,6 +120,7 @@ internal class OnlineReaderViewModel(
     private var sessionLatestLocation: OnlinePageLocation? = null
     private var activeReadingMillis: Long = 0L
     private var activeSegmentStartedElapsedMs: Long? = null
+    private var chapterReady = false
     private var processLifecycleAttached = false
     private var sessionEnded = false
 
@@ -113,30 +136,32 @@ internal class OnlineReaderViewModel(
         }
 
     init {
-        load()
+        startChapterLoad()
     }
 
     fun reload() {
-        detachProcessLifecycle()
-        volume?.close()
-        volume = null
-        thumbnails.clear()
-        bookmarkPages.clear()
-        bookmarks.clear()
-        favoritePages.clear()
-        state = ReaderPresentationState.Loading
-        sessionEnded = false
-        load()
+        startChapterLoad()
+    }
+
+    fun selectChapter(index: Int) {
+        val chapter = selectableOnlineChapter(chapterSummaries, currentChapterIndex, index) ?: return
+        if (chapterLoadJob?.isActive == true) return
+        chapterLoadJob =
+            viewModelScope.launch {
+                prepareChapterSwitch(chapter, index)
+                loadActiveChapter()
+            }
     }
 
     fun requestThumbnail(page: Int) {
-        viewModelScope.launch { loadThumbnail(page) }
+        launchThumbnailJob { loadThumbnail(page) }
     }
 
     fun saveProgress(page: Int) {
         val opened = volume ?: return
         if (page !in 0 until opened.totalPageCount) return
         currentPage = page
+        lastPageByChapterId[activeChapterId] = page
         sessionLatestLocation = locationFor(page)
         pendingProgressPage = page
         if (progressWriteJob?.isActive == true) return
@@ -162,27 +187,33 @@ internal class OnlineReaderViewModel(
 
     fun toggleBookmark(page: Int) {
         val location = locationForOrNull(page) ?: return
+        val chapterTitle = currentChapterTitle
         viewModelScope.launch {
             try {
+                var added = false
                 bookmarkMutationMutex.withLock {
                     withContext(Dispatchers.IO) {
                         val existing = repository.get(pluginId, sourceId)
                             ?.pageBookmarks
                             ?.firstOrNull { it.location.identity == location.identity }
                         if (existing == null) {
-                            repository.addPageBookmark(location, currentChapterTitle)
+                            repository.addPageBookmark(location, chapterTitle)
+                            added = true
                         } else {
                             repository.removePageBookmark(existing.location.identity)
                         }
                     }
                     refreshUserRecords()
                 }
-                readerMessage =
-                    if (page in bookmarkPages) "已添加书签" else "已移除书签"
+                if (location.identity.chapter == chapterIdentity) {
+                    readerMessage = if (added) "已添加书签" else "已移除书签"
+                }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                readerMessage = error.message?.let { "书签操作失败：$it" } ?: "书签操作失败"
+                if (location.identity.chapter == chapterIdentity) {
+                    readerMessage = error.message?.let { "书签操作失败：$it" } ?: "书签操作失败"
+                }
             }
         }
     }
@@ -212,24 +243,37 @@ internal class OnlineReaderViewModel(
 
     fun toggleFavorite(page: Int) {
         val location = locationForOrNull(page) ?: return
+        val opened = volume ?: return
+        val chapterTitle = currentChapterTitle
         viewModelScope.launch {
             try {
+                var added = false
                 favoriteMutationMutex.withLock {
-                    val existing = favoriteEntriesByIdentity[location.identity]
+                    val existing =
+                        withContext(Dispatchers.IO) {
+                            repository.get(pluginId, sourceId)
+                                ?.pageFavorites
+                                ?.firstOrNull { it.location.identity == location.identity }
+                        }
                     if (existing != null) {
                         withContext(Dispatchers.IO) {
                             repository.removePageFavorite(existing.location.identity)
                         }
                     } else {
-                        createFavoriteSnapshot(page, location)
+                        createFavoriteSnapshot(page, location, opened, chapterTitle)
+                        added = true
                     }
                     refreshUserRecords()
                 }
-                readerMessage = if (page in favoritePages) "已收藏" else "已取消收藏"
+                if (location.identity.chapter == chapterIdentity) {
+                    readerMessage = if (added) "已收藏" else "已取消收藏"
+                }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                readerMessage = error.message?.let { "收藏失败：$it" } ?: "收藏失败"
+                if (location.identity.chapter == chapterIdentity) {
+                    readerMessage = error.message?.let { "收藏失败：$it" } ?: "收藏失败"
+                }
             }
         }
     }
@@ -242,106 +286,184 @@ internal class OnlineReaderViewModel(
         finishSession()
     }
 
-    private fun load() {
-        viewModelScope.launch {
-            state = ReaderPresentationState.Loading
-            try {
-                val opaqueContext =
-                    opaqueContextJson?.let { PluginContentCodec.json.parseToJsonElement(it) }
-                val snapshot = withContext(Dispatchers.IO) { repository.get(pluginId, sourceId) }
-                currentTitle = snapshot?.detail?.title?.takeIf(String::isNotBlank) ?: "在线漫画"
-                currentChapterTitle =
-                    snapshot?.chapters
-                        ?.firstOrNull { it.chapterId == chapterId }
-                        ?.title
-                        ?.takeIf(String::isNotBlank)
-                        ?: chapterId
-                val response =
-                    application.pluginCatalog.pages(
-                        pluginId,
-                        PluginPagesRequest(
-                            sourceId = sourceId,
-                            chapterId = chapterId,
-                            revision = requestedRevision,
-                            opaqueContext = opaqueContext,
-                        ),
-                    )
-                if (response.pages.isEmpty()) throw ComicOpenException("本章节没有可阅读页面")
-                val revision =
-                    resolveOnlineChapterRevision(chapterId, requestedRevision, response)
-                currentRevision = revision
-                val opened =
-                    OnlineChapterVolume(
-                        chapterId = chapterId,
-                        title = currentChapterTitle,
-                        sourceRevision = revision,
-                        pages = response.pages,
-                        client = PAGE_CLIENT,
-                    )
-                volume = opened
-                val restored = restorePage(snapshot?.position, opened)
-                val startPage = restored.page
-                currentPage = startPage
-                val initialLocation = locationFor(startPage)
-                sessionId = UUID.randomUUID().toString()
-                sessionStartedAtMs = System.currentTimeMillis()
-                sessionStartLocation = initialLocation
+    private fun startChapterLoad() {
+        if (chapterLoadJob?.isActive == true) return
+        chapterLoadJob = viewModelScope.launch { loadActiveChapter() }
+    }
+
+    private suspend fun loadActiveChapter() {
+        state = ReaderPresentationState.Loading
+        try {
+            val snapshot = withContext(Dispatchers.IO) { repository.get(pluginId, sourceId) }
+            updateChapterNavigation(snapshot)
+            val response =
+                application.pluginCatalog.pages(
+                    pluginId,
+                    PluginPagesRequest(
+                        sourceId = sourceId,
+                        chapterId = activeChapterId,
+                        revision = activeRequestedRevision,
+                        opaqueContext = activeOpaqueContext,
+                    ),
+                )
+            if (response.pages.isEmpty()) throw ComicOpenException("本章节没有可阅读页面")
+            val revision =
+                resolveOnlineChapterRevision(activeChapterId, activeRequestedRevision, response)
+            currentRevision = revision
+            val opened =
+                OnlineChapterVolume(
+                    chapterId = activeChapterId,
+                    title = currentChapterTitle,
+                    sourceRevision = revision,
+                    pages = response.pages,
+                    client = PAGE_CLIENT,
+                )
+            volume = opened
+            val restored = restorePage(snapshot?.position, opened)
+            val startPage = restored.page
+            currentPage = startPage
+            lastPageByChapterId[activeChapterId] = startPage
+            val initialLocation = locationFor(startPage)
+            if (sessionId == null) {
+                beginReadingSession(initialLocation)
+            } else {
                 sessionLatestLocation = initialLocation
-                activeReadingMillis = 0L
-                sessionEnded = false
-                withContext(Dispatchers.IO) {
-                    repository.setAvailability(pluginId, sourceId, OnlineAvailability.AVAILABLE)
-                }
-                refreshUserRecords()
-                attachProcessLifecycle()
-                prewarmThumbnails(opened, startPage)
-                state =
-                    ReaderPresentationState.Ready(
-                        volume = opened,
-                        startPage = startPage,
-                        title = currentTitle,
-                        cacheKeyPrefix = cacheKeyPrefix(revision),
+            }
+            withContext(Dispatchers.IO) {
+                repository.setAvailability(pluginId, sourceId, OnlineAvailability.AVAILABLE)
+            }
+            refreshUserRecords()
+            prewarmThumbnails(opened, startPage)
+            state =
+                ReaderPresentationState.Ready(
+                    volume = opened,
+                    startPage = startPage,
+                    title = currentTitle,
+                    cacheKeyPrefix = cacheKeyPrefix(revision),
+                )
+            chapterReady = true
+            resumeActiveSegmentIfProcessResumed()
+            if (restored.stale) {
+                readerMessage = "源内容已变化，已打开最接近的页面"
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            chapterReady = false
+            volume?.close()
+            volume = null
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    repository.setAvailability(
+                        pluginId,
+                        sourceId,
+                        error.toOnlineAvailability(),
                     )
-                if (restored.stale) {
-                    readerMessage = "源内容已变化，已打开最接近的页面"
                 }
+            }
+            state = ReaderPresentationState.Error(error.message ?: "加载页面失败")
+        }
+    }
+
+    private fun updateChapterNavigation(
+        snapshot: com.exio.inkleaf.plugin.OnlineComicRecord?,
+    ) {
+        currentTitle = snapshot?.detail?.title?.takeIf(String::isNotBlank) ?: currentTitle
+        contentOpaqueContext = snapshot?.detail?.opaqueContext ?: contentOpaqueContext
+        if (snapshot != null && snapshot.chapters.isNotEmpty()) {
+            chapterSummaries = snapshot.chapters
+            readerChapters = buildOnlineReaderChapterItems(chapterSummaries)
+        }
+        currentChapterIndex = chapterSummaries.indexOfFirst { it.chapterId == activeChapterId }
+        val chapter = chapterSummaries.getOrNull(currentChapterIndex)
+        currentChapterTitle = chapter?.title?.takeIf(String::isNotBlank) ?: activeChapterId
+        if (activeRequestedRevision == null) activeRequestedRevision = chapter?.revision
+        if (activeOpaqueContext == null) {
+            activeOpaqueContext = chapter?.opaqueContext ?: contentOpaqueContext
+        }
+    }
+
+    private suspend fun prepareChapterSwitch(chapter: ChapterSummary, index: Int) {
+        pauseActiveSegment()
+        chapterReady = false
+        flushCurrentProgress()
+        lastPageByChapterId[activeChapterId] = currentPage
+        cancelThumbnailJobs()
+        volume?.close()
+        volume = null
+        clearChapterPresentation()
+        activeChapterId = chapter.chapterId
+        activeRequestedRevision = chapter.revision
+        activeOpaqueContext = chapter.opaqueContext
+        currentChapterTitle = chapter.title.takeIf(String::isNotBlank) ?: chapter.chapterId
+        currentChapterIndex = index
+        currentRevision = chapter.revision
+        state = ReaderPresentationState.Loading
+    }
+
+    private suspend fun flushCurrentProgress() {
+        val page = pendingProgressPage ?: currentPage
+        pendingProgressPage = null
+        progressWriteJob?.cancelAndJoin()
+        progressWriteJob = null
+        if (volume != null) {
+            try {
+                withContext(Dispatchers.IO) { persistPositionOnIo(page) }
             } catch (error: CancellationException) {
                 throw error
-            } catch (error: Exception) {
-                volume?.close()
-                volume = null
-                withContext(Dispatchers.IO) {
-                    runCatching {
-                        repository.setAvailability(
-                            pluginId,
-                            sourceId,
-                            error.toOnlineAvailability(),
-                        )
-                    }
-                }
-                state = ReaderPresentationState.Error(error.message ?: "加载页面失败")
+            } catch (_: Exception) {
+                // A position write failure must not prevent the requested chapter from opening.
             }
         }
+    }
+
+    private fun clearChapterPresentation() {
+        thumbnails.clear()
+        bookmarkPages.clear()
+        bookmarks.clear()
+        favoritePages.clear()
+        bookmarkEntriesByKey = emptyMap()
+        readerMessage = null
+    }
+
+    private fun beginReadingSession(initialLocation: OnlinePageLocation) {
+        sessionId = UUID.randomUUID().toString()
+        sessionStartedAtMs = System.currentTimeMillis()
+        sessionStartLocation = initialLocation
+        sessionLatestLocation = initialLocation
+        activeReadingMillis = 0L
+        sessionEnded = false
+        attachProcessLifecycle()
     }
 
     private fun restorePage(
         saved: com.exio.inkleaf.plugin.OnlineReadingPosition?,
         opened: OnlineChapterVolume,
     ): RestoredOnlinePage {
-        initialPageId?.let { pageId ->
-            val exact = opened.pages.indexOfFirst { it.pageId == pageId }
-            if (exact >= 0) return RestoredOnlinePage(exact, stale = false)
-            initialPageIndex?.takeIf { it in opened.pages.indices }?.let {
-                return RestoredOnlinePage(it, stale = true)
+        val rememberedPage = lastPageByChapterId[activeChapterId]
+        if (sessionId != null && rememberedPage != null && rememberedPage in opened.pages.indices) {
+            return RestoredOnlinePage(rememberedPage, stale = false)
+        }
+        initialPageId
+            ?.takeIf { sessionId == null && activeChapterId == initialChapterId }
+            ?.let { pageId ->
+                val exact = opened.pages.indexOfFirst { it.pageId == pageId }
+                if (exact >= 0) return RestoredOnlinePage(exact, stale = false)
+                initialPageIndex?.takeIf { it in opened.pages.indices }?.let {
+                    return RestoredOnlinePage(it, stale = true)
+                }
             }
-        }
-        initialPageIndex?.takeIf { it in opened.pages.indices }?.let { page ->
-            return RestoredOnlinePage(
-                page = page,
-                stale = requestedRevision != currentRevision,
-            )
-        }
-        if (saved == null || saved.chapterId != chapterId) return RestoredOnlinePage(0, false)
+        initialPageIndex
+            ?.takeIf {
+                sessionId == null && activeChapterId == initialChapterId && it in opened.pages.indices
+            }
+            ?.let { page ->
+                return RestoredOnlinePage(
+                    page = page,
+                    stale = activeRequestedRevision != currentRevision,
+                )
+            }
+        if (saved == null || saved.chapterId != activeChapterId) return RestoredOnlinePage(0, false)
         saved.pageId?.let { pageId ->
             opened.pages.indexOfFirst { it.pageId == pageId }.takeIf { it >= 0 }?.let {
                 return RestoredOnlinePage(it, stale = false)
@@ -368,7 +490,7 @@ internal class OnlineReaderViewModel(
                     ReaderBookmarkItem(
                         key = key,
                         globalPage = resolution.page,
-                        chapterIndex = 0,
+                        chapterIndex = currentChapterIndex.coerceAtLeast(0),
                         pageIndex = bookmark.location.pageIndex,
                         chapterTitle = bookmark.chapterTitleSnapshot ?: currentChapterTitle,
                         stale = resolution.stale,
@@ -385,7 +507,6 @@ internal class OnlineReaderViewModel(
             record?.pageFavorites.orEmpty().filter {
                 it.location.identity.chapter == chapterIdentity
             }
-        favoriteEntriesByIdentity = chapterFavorites.associateBy { it.location.identity }
         favoritePages.clear()
         chapterFavorites.forEach { favorite ->
             val resolution = resolvePage(favorite.location, opened)
@@ -413,8 +534,12 @@ internal class OnlineReaderViewModel(
         )
     }
 
-    private suspend fun createFavoriteSnapshot(page: Int, location: OnlinePageLocation) {
-        val opened = requireNotNull(volume) { "Reader is not ready" }
+    private suspend fun createFavoriteSnapshot(
+        page: Int,
+        location: OnlinePageLocation,
+        opened: OnlineChapterVolume,
+        chapterTitle: String,
+    ) {
         withContext(Dispatchers.IO) {
             val bytes = opened.loadPageBytes(page)
             val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -442,7 +567,7 @@ internal class OnlineReaderViewModel(
                     mimeType = mimeType,
                     width = options.outWidth,
                     height = options.outHeight,
-                    chapterTitleSnapshot = currentChapterTitle,
+                    chapterTitleSnapshot = chapterTitle,
                 )
                 published = true
             } finally {
@@ -473,10 +598,27 @@ internal class OnlineReaderViewModel(
 
     private fun prewarmThumbnails(opened: OnlineChapterVolume, startPage: Int) {
         if (opened.totalPageCount > PREWARM_MAX_PAGES) return
-        viewModelScope.launch {
+        launchThumbnailJob {
             for (page in startPage until opened.totalPageCount) loadThumbnail(page)
             for (page in startPage - 1 downTo 0) loadThumbnail(page)
         }
+    }
+
+    private fun launchThumbnailJob(block: suspend () -> Unit) {
+        val job = viewModelScope.launch(start = CoroutineStart.LAZY) { block() }
+        synchronized(thumbnailJobs) { thumbnailJobs += job }
+        job.invokeOnCompletion { synchronized(thumbnailJobs) { thumbnailJobs -= job } }
+        job.start()
+    }
+
+    private suspend fun cancelThumbnailJobs() {
+        val jobs =
+            synchronized(thumbnailJobs) {
+                thumbnailJobs.toList().also { thumbnailJobs.clear() }
+            }
+        jobs.forEach { it.cancel() }
+        jobs.joinAll()
+        thumbnailMutex.withLock { thumbnailInFlight.clear() }
     }
 
     private fun locationForOrNull(page: Int): OnlinePageLocation? {
@@ -505,7 +647,7 @@ internal class OnlineReaderViewModel(
         repository.recordPosition(
             pluginId = pluginId,
             sourceId = sourceId,
-            chapterId = chapterId,
+            chapterId = activeChapterId,
             pageId = location.identity.pageId,
             pageIndex = location.pageIndex,
             chapterRevision = location.chapterRevision,
@@ -516,6 +658,10 @@ internal class OnlineReaderViewModel(
         if (processLifecycleAttached || sessionEnded) return
         processLifecycleAttached = true
         ProcessLifecycleOwner.get().lifecycle.addObserver(processLifecycleObserver)
+        resumeActiveSegmentIfProcessResumed()
+    }
+
+    private fun resumeActiveSegmentIfProcessResumed() {
         if (
             ProcessLifecycleOwner.get()
                 .lifecycle
@@ -533,7 +679,7 @@ internal class OnlineReaderViewModel(
     }
 
     private fun startActiveSegment() {
-        if (sessionEnded || activeSegmentStartedElapsedMs != null) return
+        if (!chapterReady || sessionEnded || activeSegmentStartedElapsedMs != null) return
         activeSegmentStartedElapsedMs = SystemClock.elapsedRealtime()
     }
 
@@ -563,7 +709,7 @@ internal class OnlineReaderViewModel(
                     repository.recordPosition(
                         pluginId = pluginId,
                         sourceId = sourceId,
-                        chapterId = chapterId,
+                        chapterId = end.identity.chapter.chapterId,
                         pageId = end.identity.pageId,
                         pageIndex = end.pageIndex,
                         chapterRevision = end.chapterRevision,
@@ -596,7 +742,7 @@ internal class OnlineReaderViewModel(
     }
 
     private fun cacheKeyPrefix(revision: String): String {
-        val value = "$pluginId\u0000$sourceId\u0000$chapterId\u0000$revision"
+        val value = "$pluginId\u0000$sourceId\u0000$activeChapterId\u0000$revision"
         val digest = MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
         val key = digest.take(12).joinToString(separator = "") { "%02x".format(it.toInt() and 0xff) }
         return "online-$key"
@@ -648,3 +794,24 @@ internal class OnlineReaderViewModel(
         }
     }
 }
+
+internal fun buildOnlineReaderChapterItems(
+    chapters: List<ChapterSummary>,
+): List<ReaderChapterItem> =
+    chapters.mapIndexed { index, chapter ->
+        ReaderChapterItem(
+            index = index,
+            title = chapter.title.ifBlank { "第 ${index + 1} 章" },
+            pageCount = null,
+            isReadable = chapter.available,
+        )
+    }
+
+internal fun selectableOnlineChapter(
+    chapters: List<ChapterSummary>,
+    currentChapterIndex: Int,
+    targetChapterIndex: Int,
+): ChapterSummary? =
+    chapters
+        .getOrNull(targetChapterIndex)
+        ?.takeIf { targetChapterIndex != currentChapterIndex && it.available }

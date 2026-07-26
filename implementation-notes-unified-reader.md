@@ -14,6 +14,8 @@ reading history. It does not add offline-book downloads or cross-source deduplic
 3. Adapt plugin pages to the shared reader, preserving request headers and referer.
 4. Aggregate online records into the existing Saved and History destinations.
 5. Perform static checks and code review; device/Gradle validation remains manual.
+6. Add source-neutral chapter navigation so cached plugin chapters can switch inside the shared
+   reader without constructing a multi-chapter online volume.
 
 ## Decisions applied
 
@@ -44,6 +46,15 @@ reading history. It does not add offline-book downloads or cross-source deduplic
   comic rows. Online favorite cards render the repository-owned durable snapshot files.
 - History keeps the existing local Paging stream and prepends persisted online sessions. Online
   history supports exact-page reopen, unavailable-source retention, delete/undo, and clear.
+- Chapter navigation is independent of the active `ComicVolume`. Local reading derives chapter
+  rows from its multi-chapter volume; online reading supplies cached `ChapterSummary` rows while
+  retaining a single lazily loaded `OnlineChapterVolume`.
+- Selecting an online chapter stays in the same reader route and reading session. The current
+  position is flushed before the old volume is closed, and only the target chapter's page list is
+  requested. Per-chapter bookmarks, favorites, thumbnails, and remembered page position are then
+  restored for the new chapter.
+- Online chapter page counts remain unknown until that chapter is opened. The chapter list omits
+  the page-count badge instead of presenting unknown counts as zero or disabling the chapter.
 
 ## Deviations
 
@@ -75,3 +86,7 @@ reading history. It does not add offline-book downloads or cross-source deduplic
 - Saved/History aggregation, online route reconstruction, repository history actions, and public
   API visibility were inspected statically. Focused tests were added but not run.
 - `git diff --check` passed for Saved/History aggregation. Gradle tasks were not run.
+- Source-neutral chapter selection now returns a chapter index. Local navigation resolves that
+  index through its volume, while online navigation lazily replaces the active chapter volume.
+- Focused unit coverage was added for unknown online page counts and invalid/current/unavailable
+  chapter selection. Tests were not run because Gradle execution was not authorized.

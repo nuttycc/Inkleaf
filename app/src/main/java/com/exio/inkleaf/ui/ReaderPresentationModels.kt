@@ -22,6 +22,12 @@ internal data class ReaderPresentationFeatures(
     val favoritePages: Set<Int> = emptySet(),
 )
 
+internal data class ReaderChapterNavigation(
+    val chapters: List<ReaderChapterItem>?,
+    val currentChapterIndex: Int,
+    val onSelectChapter: (Int) -> Unit,
+)
+
 internal data class ReaderBookmarkItem(
     val key: String,
     val globalPage: Int,

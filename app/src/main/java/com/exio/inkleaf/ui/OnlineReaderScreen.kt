@@ -55,6 +55,12 @@ fun OnlineReaderScreen(
         state = viewModel.state,
         features = features,
         actions = actions,
+        chapterNavigation =
+            ReaderChapterNavigation(
+                chapters = viewModel.readerChapters,
+                currentChapterIndex = viewModel.currentChapterIndex,
+                onSelectChapter = viewModel::selectChapter,
+            ),
         onExit = {
             viewModel.endReadingSession()
             onBack()
