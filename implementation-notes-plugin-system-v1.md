@@ -4,7 +4,7 @@
 
 Implement the first usable Inkleaf comic-source plugin slice on the approved
 `feature/plugin-runtime-v1` branch. The implementation keeps the decisions from
-#40 and its child issues: a `.inkleaf-plugin` ZIP, one plugin per source,
+#40 and its child issues: a standard `.zip` plugin package, one plugin per source,
 AndroidX JavaScriptEngine 1.1.0, one persistent MessagePort per plugin isolate,
 fixed host DTOs, and no plugin-provided Android UI or native code.
 
@@ -30,6 +30,8 @@ fixed host DTOs, and no plugin-provided Android UI or native code.
   fail-closed.
 - Plugin code is extracted into immutable private app-storage version folders;
   APK/DEX/native libraries and arbitrary root files are rejected.
+- Published plugin artifacts use the standard `.zip` suffix. The root manifest,
+  rather than a custom filename extension, identifies and validates a plugin package.
 - A failed invocation is not automatically replayed. A fatal isolate/sandbox
   failure fans out to pending calls and may be recovered on the next explicit
   call.

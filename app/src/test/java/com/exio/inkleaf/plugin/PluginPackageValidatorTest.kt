@@ -176,7 +176,7 @@ class PluginPackageValidatorTest {
         manifest: PluginManifest,
         extraEntries: Map<String, String> = emptyMap(),
     ): File {
-        val file = Files.createTempFile("inkleaf-plugin", ".inkleaf-plugin").toFile()
+        val file = Files.createTempFile("inkleaf-plugin", ".zip").toFile()
         ZipOutputStream(file.outputStream()).use { zip ->
             writeEntry(zip, PluginContract.MANIFEST_PATH, json.encodeToString(manifest))
             writeEntry(zip, PluginContract.ENTRY_PATH, "'ok'")

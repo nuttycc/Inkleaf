@@ -78,7 +78,7 @@ data class PluginValidationResult(
         get() = issues.filter { it.kind == PluginIssueKind.INCOMPATIBLE }
 }
 
-/** Validates the static structure and compatibility of a .inkleaf-plugin ZIP archive. */
+/** Validates the static structure and compatibility of a plugin ZIP archive. */
 class PluginPackageValidator(
     private val supportedManifestVersion: Int = PluginContract.SUPPORTED_MANIFEST_VERSION,
     private val hostApiVersion: ApiVersion = PluginContract.HOST_API_VERSION,

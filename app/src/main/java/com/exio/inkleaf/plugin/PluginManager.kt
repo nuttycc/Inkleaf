@@ -94,7 +94,7 @@ class PluginManager(
     private suspend fun copyUriToCache(uri: Uri): File = withContext(Dispatchers.IO) {
         val cache = File(context.cacheDir, "plugin-imports")
         if (!cache.mkdirs() && !cache.isDirectory) throw IOException("Unable to create plugin import cache")
-        val target = File(cache, "${System.nanoTime()}.inkleaf-plugin")
+        val target = File(cache, "${System.nanoTime()}.zip")
         val resolver = context.contentResolver
         val sourceLength = resolver.openAssetFileDescriptor(uri, "r")?.use { it.length }
         if (sourceLength != null && sourceLength > PluginStorageLimits.MAX_PACKAGE_BYTES) {

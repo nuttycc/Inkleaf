@@ -22,7 +22,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 
-/** Debug-only manual entry for installing and exercising a real .inkleaf-plugin package. */
+/** Debug-only manual entry for installing and exercising a real plugin ZIP package. */
 class PluginDiagnosticActivity : AppCompatActivity() {
     private lateinit var report: TextView
     private lateinit var urlField: EditText
@@ -45,7 +45,7 @@ class PluginDiagnosticActivity : AppCompatActivity() {
             setPadding(24, 24, 24, 24)
         }
         root.addView(TextView(this).apply {
-            text = "安装、启用和调用真实 .inkleaf-plugin。运行时能力缺失时会 fail-closed。"
+            text = "安装、启用和调用真实插件 ZIP。运行时能力缺失时会 fail-closed。"
         }, matchWrap())
         root.addView(Button(this).apply {
             text = "选择本地插件包"

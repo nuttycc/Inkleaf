@@ -2,7 +2,7 @@ package com.exio.inkleaf.plugin
 
 import kotlinx.serialization.Serializable
 
-/** Stable metadata contract stored at the root of an .inkleaf-plugin archive. */
+/** Stable metadata contract stored at the root of a plugin ZIP archive. */
 @Serializable
 data class PluginManifest(
     val manifestVersion: Int,

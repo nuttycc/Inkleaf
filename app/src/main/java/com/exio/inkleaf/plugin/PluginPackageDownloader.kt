@@ -34,8 +34,8 @@ class PluginPackageDownloader(
         if (url.length > 8192) throw IOException("Plugin URL is too long")
         if (!cacheDirectory.mkdirs() && !cacheDirectory.isDirectory) throw IOException("Unable to create plugin download cache")
         val key = sha256String(url)
-        val partial = cacheDirectory.resolve("$key.inkleaf-plugin.partial")
-        val completed = cacheDirectory.resolve("$key.inkleaf-plugin")
+        val partial = cacheDirectory.resolve("$key.zip.partial")
+        val completed = cacheDirectory.resolve("$key.zip")
         val completedSizeMatches = source.expectedSizeBytes == null || completed.length() == source.expectedSizeBytes
         val completedHashMatches = !completed.isFile || source.expectedSha256 == null ||
             source.expectedSha256.equals(sha256(completed), ignoreCase = true)

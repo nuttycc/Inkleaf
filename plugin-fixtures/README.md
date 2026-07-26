@@ -13,7 +13,7 @@ Create an installable archive from the repository root:
 .\.scripts\package-plugin-fixture.ps1
 ```
 
-The script writes `plugin-fixtures/dist/inkleaf-fixture.inkleaf-plugin`. Import
+The script writes `plugin-fixtures/dist/inkleaf-fixture-plugin.zip`. Import
 that file from the debug plugin diagnostics activity, enable it, then use
 `describe`, `search fixture`, and `host-smoke`.
 
@@ -30,7 +30,7 @@ Create its installable archive from the repository root:
 .\.scripts\package-copycomic-plugin.ps1
 ```
 
-The script writes `plugin-fixtures/dist/copycomic.inkleaf-plugin`. Import and
+The script writes `plugin-fixtures/dist/copycomic-plugin.zip`. Import and
 enable it from the debug plugin diagnostics activity, then search for a comic in
 the normal online-source UI and open a chapter to exercise the complete chain.
 

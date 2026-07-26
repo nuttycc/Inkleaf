@@ -44,7 +44,7 @@ class PluginPackageStoreTest {
     @Test
     fun `same version same digest is idempotent and different digest is rejected`() = withStore { store, temp ->
         val first = packageFile(temp, manifest(), "inkleaf.register({})")
-        val same = first.copyTo(temp.resolve("same.inkleaf-plugin"))
+        val same = first.copyTo(temp.resolve("same.zip"))
         val changed = packageFile(temp, manifest(), "inkleaf.register({changed: true})")
 
         assertEquals(PluginInstallStatus.INSTALLED, store.install(first).status)
@@ -123,7 +123,7 @@ class PluginPackageStoreTest {
         mainScript: String,
         explicitAssetsDirectory: Boolean = false,
     ): File {
-        val file = directory.resolve("${manifest.version}-${System.nanoTime()}.inkleaf-plugin")
+        val file = directory.resolve("${manifest.version}-${System.nanoTime()}.zip")
         ZipOutputStream(file.outputStream()).use { zip ->
             write(zip, PluginContract.MANIFEST_PATH, json.encodeToString(manifest))
             write(zip, PluginContract.ENTRY_PATH, mainScript)

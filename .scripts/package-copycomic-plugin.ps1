@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$OutputPath = "plugin-fixtures/dist/copycomic.inkleaf-plugin"
+    [string]$OutputPath = "plugin-fixtures/dist/copycomic-plugin.zip"
 )
 
 $ErrorActionPreference = "Stop"
