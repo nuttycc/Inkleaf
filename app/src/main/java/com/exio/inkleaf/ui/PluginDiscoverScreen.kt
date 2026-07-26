@@ -1,41 +1,54 @@
 package com.exio.inkleaf.ui
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.ui.res.painterResource
+import com.exio.inkleaf.R
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DockedSearchBar
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SearchBarDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -48,7 +61,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -63,6 +76,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /** Native-rendered discovery surface for plugin feeds and comic search. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PluginDiscoverScreen(
     onOpenComic: (String, ComicSummary) -> Unit = { _, _ -> },
@@ -110,11 +124,13 @@ fun PluginDiscoverScreen(
     val currentSelectedIds = selectedPluginIds ?: remember(activeHealthyPlugins) {
         activeHealthyPlugins.map { it.state.pluginId }.toSet()
     }
-    val activeHealthyPluginIds = remember(activeHealthyPlugins) {
-        activeHealthyPlugins.map { it.state.pluginId }.toSet()
+    val visibleResults = remember(results, currentSelectedIds) {
+        results.filter { it.pluginId in currentSelectedIds }
     }
-    val visibleResults = remember(results, activeHealthyPluginIds) {
-        results.filter { it.pluginId in activeHealthyPluginIds }
+    val hasNoResults = remember(visibleResults) {
+        visibleResults.isEmpty() || visibleResults.all { result ->
+            result.error == null && result.page?.items.orEmpty().isEmpty()
+        }
     }
     val selectedFeed = feeds.firstOrNull { it.key == selectedFeedKey }
 
@@ -131,12 +147,17 @@ fun PluginDiscoverScreen(
             )
         },
     ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding),
+        LazyVerticalGrid(
+            columns = GridCells.Adaptive(minSize = 120.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            item {
+            // Mode Tabs (Browse vs Search)
+            item(span = { GridItemSpan(maxLineSpan) }) {
                 PrimaryTabRow(selectedTabIndex = if (mode == DiscoverViewModel.Mode.BROWSE) 0 else 1) {
                     Tab(
                         selected = mode == DiscoverViewModel.Mode.BROWSE,
@@ -152,25 +173,23 @@ fun PluginDiscoverScreen(
             }
 
             if (activeHealthyPlugins.isEmpty()) {
-                item { NoSources(onOpenSources) }
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    NoSources(onOpenSources)
+                }
             } else if (mode == DiscoverViewModel.Mode.BROWSE) {
                 if (isLoadingFeeds && feeds.isEmpty()) {
-                    item { CenteredProgress() }
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        CenteredProgress()
+                    }
                 } else if (feeds.isEmpty()) {
-                    item {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
                         if (feedLoadError != null) {
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text(
-                                    feedLoadError.orEmpty(),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.error,
-                                )
-                                TextButton(
-                                    onClick = {
-                                        viewModel.loadFeeds(application.pluginCatalog, activeHealthyPlugins)
-                                    }
-                                ) { Text("重试") }
-                            }
+                            M3ErrorBanner(
+                                message = feedLoadError.orEmpty(),
+                                onRetry = {
+                                    viewModel.loadFeeds(application.pluginCatalog, activeHealthyPlugins)
+                                },
+                            )
                         } else {
                             Text(
                                 "已启用的漫画源暂不支持推荐或分类浏览，请使用搜索。",
@@ -182,42 +201,44 @@ fun PluginDiscoverScreen(
                     }
                 } else {
                     feedLoadError?.let { error ->
-                        item {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    error,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.error,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                TextButton(
-                                    onClick = {
-                                        viewModel.loadFeeds(application.pluginCatalog, activeHealthyPlugins)
-                                    }
-                                ) { Text("重试") }
-                            }
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            M3ErrorBanner(
+                                message = error,
+                                onRetry = {
+                                    viewModel.loadFeeds(application.pluginCatalog, activeHealthyPlugins)
+                                },
+                            )
                         }
                     }
-                    item {
+
+                    // Feed selection chips
+                    item(span = { GridItemSpan(maxLineSpan) }) {
                         LazyRow(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             items(feeds, key = { it.key }) { feed ->
+                                val isSelected = feed.key == selectedFeedKey
                                 FilterChip(
-                                    selected = feed.key == selectedFeedKey,
+                                    selected = isSelected,
                                     onClick = { viewModel.selectFeed(application.pluginCatalog, feed.key) },
                                     label = { Text(feed.descriptor.title) },
+                                    leadingIcon = if (isSelected) {
+                                        {
+                                            Icon(
+                                                Icons.Default.Check,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(FilterChipDefaults.IconSize),
+                                            )
+                                        }
+                                    } else null,
                                 )
                             }
                         }
                     }
 
                     selectedFeed?.descriptor?.filters?.takeIf { it.isNotEmpty() }?.let { filters ->
-                        item {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
                             LazyRow(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 modifier = Modifier.fillMaxWidth(),
@@ -240,47 +261,41 @@ fun PluginDiscoverScreen(
                     }
 
                     selectedFeed?.let { feed ->
-                        item {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
                             Text(
                                 text = "${feed.pluginName} · ${feed.descriptor.title}",
                                 style = MaterialTheme.typography.titleMedium,
                                 color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(top = 4.dp),
                             )
                         }
 
                         browseError?.let { error ->
-                            item {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Text(
-                                        text = error,
-                                        color = MaterialTheme.colorScheme.error,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                    TextButton(onClick = { viewModel.retryBrowse(application.pluginCatalog) }) {
-                                        Text("重试")
-                                    }
-                                }
+                            item(span = { GridItemSpan(maxLineSpan) }) {
+                                M3ErrorBanner(
+                                    message = error,
+                                    onRetry = { viewModel.retryBrowse(application.pluginCatalog) },
+                                )
                             }
                         }
 
                         if (isBrowsing && browseItems.isEmpty()) {
-                            item { CenteredProgress() }
+                            item(span = { GridItemSpan(maxLineSpan) }) {
+                                CenteredProgress()
+                            }
                         } else if (!isBrowsing && browseError == null && browseItems.isEmpty()) {
-                            item {
+                            item(span = { GridItemSpan(maxLineSpan) }) {
                                 Text(
                                     "暂无内容",
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     style = MaterialTheme.typography.bodyMedium,
+                                    modifier = Modifier.padding(vertical = 16.dp),
                                 )
                             }
                         }
 
                         items(browseItems, key = { "${feed.pluginId}_${it.sourceId}" }) { comic ->
-                            DiscoverComicRow(
+                            DiscoverComicCard(
                                 comic = comic,
                                 sourceName = feed.pluginName,
                                 onClick = { onOpenComic(feed.pluginId, comic) },
@@ -288,14 +303,16 @@ fun PluginDiscoverScreen(
                         }
 
                         if (isBrowsing && browseItems.isNotEmpty()) {
-                            item { LinearProgressIndicator(modifier = Modifier.fillMaxWidth()) }
+                            item(span = { GridItemSpan(maxLineSpan) }) {
+                                LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp))
+                            }
                         } else if (browseNextCursor != null) {
-                            item {
+                            item(span = { GridItemSpan(maxLineSpan) }) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.Center,
                                 ) {
-                                    TextButton(onClick = { viewModel.loadMore(application.pluginCatalog) }) {
+                                    OutlinedButton(onClick = { viewModel.loadMore(application.pluginCatalog) }) {
                                         Text("加载更多")
                                     }
                                 }
@@ -304,100 +321,194 @@ fun PluginDiscoverScreen(
                     }
                 }
             } else {
-                item {
-                    OutlinedTextField(
-                        value = query,
-                        onValueChange = viewModel::updateQuery,
-                        label = { Text("搜索漫画") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                        keyboardActions = KeyboardActions(
-                            onSearch = {
-                                viewModel.performSearch(application.pluginCatalog, activeHealthyPlugins)
-                            }
-                        ),
+                // SEARCH Mode
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    var searchActive by remember { mutableStateOf(false) }
+                    DockedSearchBar(
+                        inputField = {
+                            SearchBarDefaults.InputField(
+                                query = query,
+                                onQueryChange = viewModel::updateQuery,
+                                onSearch = {
+                                    searchActive = false
+                                    viewModel.performSearch(application.pluginCatalog, activeHealthyPlugins)
+                                },
+                                expanded = searchActive,
+                                onExpandedChange = { searchActive = it },
+                                placeholder = { Text("搜索漫画...") },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Search, contentDescription = "搜索")
+                                },
+                                trailingIcon = {
+                                    if (query.isNotEmpty()) {
+                                        IconButton(onClick = { viewModel.updateQuery("") }) {
+                                            Icon(Icons.Default.Close, contentDescription = "清除")
+                                        }
+                                    }
+                                },
+                            )
+                        },
+                        expanded = searchActive,
+                        onExpandedChange = { searchActive = it },
                         modifier = Modifier.fillMaxWidth(),
-                    )
+                    ) {}
                 }
 
-                item {
+                // Source selection FilterChips Group
+                item(span = { GridItemSpan(maxLineSpan) }) {
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         item {
+                            val isAllSelected = currentSelectedIds.size == activeHealthyPlugins.size
                             FilterChip(
-                                selected = currentSelectedIds.size == activeHealthyPlugins.size,
+                                selected = isAllSelected,
                                 onClick = {
                                     viewModel.selectAllPlugins(activeHealthyPlugins.map { it.state.pluginId })
+                                    if (query.isNotBlank()) {
+                                        viewModel.performSearch(application.pluginCatalog, activeHealthyPlugins)
+                                    }
                                 },
                                 label = { Text("全部") },
+                                leadingIcon = if (isAllSelected) {
+                                    {
+                                        Icon(
+                                            Icons.Default.Check,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(FilterChipDefaults.IconSize),
+                                        )
+                                    }
+                                } else null,
                             )
                         }
                         items(activeHealthyPlugins, key = { it.state.pluginId }) { plugin ->
+                            val isSelected = plugin.state.pluginId in currentSelectedIds
                             FilterChip(
-                                selected = plugin.state.pluginId in currentSelectedIds,
+                                selected = isSelected,
                                 onClick = {
                                     viewModel.togglePluginSelection(
                                         plugin.state.pluginId,
                                         activeHealthyPlugins.map { it.state.pluginId },
                                     )
+                                    if (query.isNotBlank()) {
+                                        viewModel.performSearch(application.pluginCatalog, activeHealthyPlugins)
+                                    }
                                 },
                                 label = { Text(plugin.manifest?.name ?: plugin.state.pluginId) },
+                                leadingIcon = if (isSelected) {
+                                    {
+                                        Icon(
+                                            Icons.Default.Check,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(FilterChipDefaults.IconSize),
+                                        )
+                                    }
+                                } else null,
                             )
                         }
                     }
                 }
 
-                if (isSearching) item { CenteredProgress() }
-                errorMessage?.let { error ->
-                    item {
-                        Text(error, color = MaterialTheme.colorScheme.error)
+                if (isSearching) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp))
                     }
                 }
 
-                visibleResults.forEach { result ->
-                    val sourcePlugin = installedPlugins.firstOrNull { it.state.pluginId == result.pluginId }
-                    val sourceName = sourcePlugin?.manifest?.name ?: result.pluginId
-                    item(key = "header_${result.pluginId}") {
-                        Text(
-                            text = sourceName,
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
+                errorMessage?.let { error ->
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        M3ErrorBanner(
+                            message = error,
+                            onRetry = {
+                                viewModel.retrySearch(application.pluginCatalog, activeHealthyPlugins)
+                            },
                         )
                     }
-                    result.error?.let { error ->
-                        item(key = "error_${result.pluginId}") {
+                }
+
+                if (!isSearching && errorMessage == null && query.isNotBlank() && hasNoResults) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        SearchEmptyState()
+                    }
+                } else {
+                    visibleResults.forEach { result ->
+                        val sourcePlugin = installedPlugins.firstOrNull { it.state.pluginId == result.pluginId }
+                        val sourceName = sourcePlugin?.manifest?.name ?: result.pluginId
+
+                        item(span = { GridItemSpan(maxLineSpan) }, key = "header_${result.pluginId}") {
                             Text(
-                                text = "加载失败: ${error.message}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.error,
+                                text = sourceName,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
                             )
                         }
-                    } ?: run {
-                        val comics = result.page?.items.orEmpty()
-                        if (comics.isEmpty()) {
-                            item(key = "empty_${result.pluginId}") {
-                                Text(
-                                    "无搜索结果",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+
+                        result.error?.let { error ->
+                            item(span = { GridItemSpan(maxLineSpan) }, key = "error_${result.pluginId}") {
+                                M3ErrorBanner(
+                                    message = "加载失败: ${error.message}",
+                                    onRetry = {
+                                        viewModel.retrySearch(application.pluginCatalog, activeHealthyPlugins)
+                                    },
                                 )
                             }
-                        } else {
-                            items(comics, key = { "${result.pluginId}_${it.sourceId}" }) { comic ->
-                                DiscoverComicRow(
-                                    comic = comic,
-                                    sourceName = sourceName,
-                                    onClick = { onOpenComic(result.pluginId, comic) },
-                                )
+                        } ?: run {
+                            val comics = result.page?.items.orEmpty()
+                            if (comics.isEmpty()) {
+                                item(span = { GridItemSpan(maxLineSpan) }, key = "empty_${result.pluginId}") {
+                                    Text(
+                                        "无搜索结果",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(bottom = 8.dp),
+                                    )
+                                }
+                            } else {
+                                items(comics, key = { "${result.pluginId}_${it.sourceId}" }) { comic ->
+                                    DiscoverComicCard(
+                                        comic = comic,
+                                        sourceName = sourceName,
+                                        onClick = { onOpenComic(result.pluginId, comic) },
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SearchEmptyState(
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 32.dp, horizontal = 16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(
+            imageVector = Icons.Default.Search,
+            contentDescription = null,
+            modifier = Modifier.size(48.dp),
+            tint = MaterialTheme.colorScheme.outline,
+        )
+        Text(
+            text = "未找到相关漫画",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Text(
+            text = "尝试更换搜索词，或勾选更多漫画源",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -463,59 +574,142 @@ private fun CenteredProgress() {
 }
 
 @Composable
-private fun DiscoverComicRow(
+private fun M3ErrorBanner(
+    message: String,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer,
+            contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        ),
+        shape = RoundedCornerShape(12.dp),
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Default.Warning,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.error,
+            )
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+            )
+            FilledTonalButton(
+                onClick = onRetry,
+                colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = MaterialTheme.colorScheme.error,
+                    contentColor = MaterialTheme.colorScheme.onError,
+                ),
+            ) {
+                Text("重试")
+            }
+        }
+    }
+}
+
+@Composable
+private fun DiscoverComicCard(
     comic: ComicSummary,
     sourceName: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    Card(
+        onClick = onClick,
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
     ) {
-        comic.cover?.let { cover ->
-            val imageRequest = remember(cover) {
-                ImageRequest.Builder(context)
-                    .data(cover.url)
-                    .apply {
-                        cover.headers.forEach { (name, value) -> setHeader(name, value) }
-                        cover.referer?.let { setHeader("Referer", it) }
-                    }
-                    .crossfade(120)
-                    .build()
-            }
-            AsyncImage(
-                model = imageRequest,
-                contentDescription = comic.title,
-                contentScale = ContentScale.Crop,
+        Column {
+            Box(
                 modifier = Modifier
-                    .size(width = 48.dp, height = 64.dp)
-                    .clip(RoundedCornerShape(4.dp)),
-            )
-            Spacer(modifier = Modifier.width(12.dp))
-        }
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
-            Text(text = comic.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
-            comic.subtitle?.let { subtitle ->
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                )
+                    .fillMaxWidth()
+                    .aspectRatio(0.72f)
+                    .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)),
+            ) {
+                val cover = comic.cover
+                if (cover != null) {
+                    val imageRequest = remember(cover) {
+                        ImageRequest.Builder(context)
+                            .data(cover.url)
+                            .apply {
+                                cover.headers.forEach { (name, value) -> setHeader(name, value) }
+                                cover.referer?.let { setHeader("Referer", it) }
+                            }
+                            .crossfade(150)
+                            .build()
+                    }
+                    AsyncImage(
+                        model = imageRequest,
+                        contentDescription = comic.title,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(MaterialTheme.colorScheme.surfaceVariant),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_file),
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        )
+                    }
+                }
+
+                // Source badge overlaid on top-left of cover card
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.9f),
+                    shape = RoundedCornerShape(bottomEnd = 8.dp),
+                    modifier = Modifier.align(Alignment.TopStart),
+                ) {
+                    Text(
+                        text = sourceName,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
-            Text(
-                text = sourceName,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.secondary,
-            )
+
+            Column(
+                modifier = Modifier.padding(8.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    text = comic.title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                comic.subtitle?.let { subtitle ->
+                    if (subtitle.isNotBlank()) {
+                        Text(
+                            text = subtitle,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
         }
     }
 }

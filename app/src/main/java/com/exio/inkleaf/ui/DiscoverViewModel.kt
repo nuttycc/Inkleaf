@@ -70,6 +70,7 @@ class DiscoverViewModel : ViewModel() {
     private var feedLoadJob: Job? = null
     private var browseJob: Job? = null
     private var searchJob: Job? = null
+    private var feedLoadGeneration = 0L
     private var browseGeneration = 0L
     private var searchGeneration = 0L
 
@@ -98,6 +99,7 @@ class DiscoverViewModel : ViewModel() {
     }
 
     fun loadFeeds(catalog: PluginCatalog, availablePlugins: List<InstalledPlugin>) {
+        val generation = ++feedLoadGeneration
         feedLoadJob?.cancel()
         feedLoadJob = viewModelScope.launch {
             _isLoadingFeeds.value = true
@@ -132,20 +134,24 @@ class DiscoverViewModel : ViewModel() {
                             }
                         }.awaitAll()
                 }
-                val discoveredFeeds = loadResults.flatMap { it.feeds }
-                _feedLoadError.value = loadResults.mapNotNull { it.error }.takeIf { it.isNotEmpty() }
-                    ?.joinToString("\n")
-                _feeds.value = discoveredFeeds
-                val selected = discoveredFeeds.firstOrNull { it.key == _selectedFeedKey.value }
-                    ?: discoveredFeeds.firstOrNull()
-                if (selected?.key != _selectedFeedKey.value ||
-                    selected?.pluginVersion != previousSelected?.pluginVersion ||
-                    selected?.descriptor != previousSelected?.descriptor
-                ) {
-                    selectFeed(catalog, selected?.key)
+                if (generation == feedLoadGeneration) {
+                    val discoveredFeeds = loadResults.flatMap { it.feeds }
+                    _feedLoadError.value = loadResults.mapNotNull { it.error }.takeIf { it.isNotEmpty() }
+                        ?.joinToString("\n")
+                    _feeds.value = discoveredFeeds
+                    val selected = discoveredFeeds.firstOrNull { it.key == _selectedFeedKey.value }
+                        ?: discoveredFeeds.firstOrNull()
+                    if (selected?.key != _selectedFeedKey.value ||
+                        selected?.pluginVersion != previousSelected?.pluginVersion ||
+                        selected?.descriptor != previousSelected?.descriptor
+                    ) {
+                        selectFeed(catalog, selected?.key)
+                    }
                 }
             } finally {
-                _isLoadingFeeds.value = false
+                if (generation == feedLoadGeneration) {
+                    _isLoadingFeeds.value = false
+                }
             }
         }
     }
@@ -207,7 +213,7 @@ class DiscoverViewModel : ViewModel() {
 
     fun performSearch(catalog: PluginCatalog, availablePlugins: List<InstalledPlugin>) {
         val currentQuery = _query.value.trim()
-        if (currentQuery.isBlank() || _isSearching.value) return
+        if (currentQuery.isBlank()) return
 
         val activeHealthyIds = availablePlugins
             .filter { !it.state.disabled && it.state.health == PluginHealth.HEALTHY && it.state.activeVersion != null }
@@ -218,7 +224,13 @@ class DiscoverViewModel : ViewModel() {
         val targetIds = (_selectedPluginIds.value ?: activeHealthyIds.toSet())
             .filter { it in activeHealthyIds }
 
-        if (targetIds.isEmpty()) return
+        if (targetIds.isEmpty()) {
+            searchJob?.cancel()
+            _results.value = emptyList()
+            _isSearching.value = false
+            _errorMessage.value = null
+            return
+        }
 
         val generation = ++searchGeneration
         searchJob?.cancel()
@@ -245,6 +257,11 @@ class DiscoverViewModel : ViewModel() {
                 }
             }
         }
+    }
+
+    fun retrySearch(catalog: PluginCatalog, availablePlugins: List<InstalledPlugin>) {
+        _errorMessage.value = null
+        performSearch(catalog, availablePlugins)
     }
 
     private fun selectedFeed(): Feed? = _feeds.value.firstOrNull { it.key == _selectedFeedKey.value }

@@ -1,24 +1,47 @@
 package com.exio.inkleaf.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Button
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.ui.res.painterResource
+import com.exio.inkleaf.R
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SuggestionChip
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -26,10 +49,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
@@ -37,14 +65,17 @@ import com.exio.inkleaf.InkleafApplication
 import com.exio.inkleaf.plugin.ChapterSummary
 import com.exio.inkleaf.plugin.ComicDetail
 import com.exio.inkleaf.plugin.OnlineAvailability
+import com.exio.inkleaf.plugin.OnlineUserReference
 import com.exio.inkleaf.plugin.PluginChapterRequest
 import com.exio.inkleaf.plugin.PluginDetailRequest
 import com.exio.inkleaf.plugin.PluginRpcException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OnlineComicScreen(
     pluginId: String,
@@ -55,6 +86,7 @@ fun OnlineComicScreen(
     modifier: Modifier = Modifier,
 ) {
     val application = LocalContext.current.applicationContext as InkleafApplication
+    val coroutineScope = rememberCoroutineScope()
     val opaqueContext = remember(opaqueContextJson) {
         opaqueContextJson?.let { runCatching { com.exio.inkleaf.plugin.PluginContentCodec.json.parseToJsonElement(it) }.getOrNull() }
     }
@@ -63,11 +95,20 @@ fun OnlineComicScreen(
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(true) }
     var reload by remember { mutableIntStateOf(0) }
+    var isBookmarked by remember { mutableStateOf(false) }
+    var sourceName by remember { mutableStateOf(pluginId) }
 
     LaunchedEffect(pluginId, sourceId, opaqueContext, reload) {
         loading = true
         errorMessage = null
+        detail = null
         chapters = emptyList()
+        withContext(Dispatchers.IO) {
+            val installed = application.pluginManager.installed()
+            sourceName = installed.firstOrNull { it.state.pluginId == pluginId }?.manifest?.name ?: pluginId
+            val initialRecord = application.onlineContentRepository.get(pluginId, sourceId)
+            isBookmarked = initialRecord?.references?.contains(OnlineUserReference.BOOKMARK) == true
+        }
         try {
             val loadedDetail = application.pluginCatalog.detail(
                 pluginId,
@@ -76,7 +117,8 @@ fun OnlineComicScreen(
             detail = loadedDetail
             try {
                 withContext(Dispatchers.IO) {
-                    application.onlineContentRepository.recordDetail(pluginId, loadedDetail)
+                    val record = application.onlineContentRepository.recordDetail(pluginId, loadedDetail)
+                    isBookmarked = record.references.contains(OnlineUserReference.BOOKMARK)
                 }
             } catch (storageError: CancellationException) {
                 throw storageError
@@ -117,8 +159,33 @@ fun OnlineComicScreen(
             }
             detail = snapshot?.detail
             chapters = snapshot?.chapters.orEmpty()
+            if (snapshot != null) {
+                isBookmarked = snapshot.references.contains(OnlineUserReference.BOOKMARK)
+            }
         } finally {
             loading = false
+        }
+    }
+
+    val toggleBookmark: () -> Unit = {
+        val previousState = isBookmarked
+        val nextState = !previousState
+        isBookmarked = nextState
+        coroutineScope.launch(Dispatchers.IO) {
+            try {
+                application.onlineContentRepository.setReference(
+                    pluginId = pluginId,
+                    sourceId = sourceId,
+                    reference = OnlineUserReference.BOOKMARK,
+                    present = nextState,
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                withContext(Dispatchers.Main) {
+                    isBookmarked = previousState
+                }
+            }
         }
     }
 
@@ -135,62 +202,260 @@ fun OnlineComicScreen(
             )
         },
     ) { padding ->
-        LazyColumn(
+        LazyVerticalGrid(
+            columns = GridCells.Adaptive(minSize = 96.dp),
             modifier = Modifier.fillMaxSize().padding(padding),
             contentPadding = PaddingValues(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (loading) {
-                item { CircularProgressIndicator() }
+            if (loading && detail == null) {
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
+                        horizontalArrangement = Arrangement.Center,
+                    ) {
+                        CircularProgressIndicator()
+                    }
+                }
             }
+
             detail?.let { comic ->
-                comic.cover?.let { cover ->
-                    item {
-                        val request = remember(cover) {
-                            ImageRequest.Builder(application)
-                                .data(cover.url)
-                                .apply {
-                                    cover.headers.forEach { (name, value) -> setHeader(name, value) }
-                                    cover.referer?.let { setHeader("Referer", it) }
+                // Large Hero Cover Header
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column {
+                            comic.cover?.let { cover ->
+                                val request = remember(cover) {
+                                    ImageRequest.Builder(application)
+                                        .data(cover.url)
+                                        .apply {
+                                            cover.headers.forEach { (name, value) -> setHeader(name, value) }
+                                            cover.referer?.let { setHeader("Referer", it) }
+                                        }
+                                        .crossfade(150)
+                                        .build()
                                 }
-                                .crossfade(120)
-                                .build()
+                                AsyncImage(
+                                    model = request,
+                                    contentDescription = comic.title,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(280.dp)
+                                        .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)),
+                                )
+                            } ?: Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(200.dp)
+                                    .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    painter = painterResource(R.drawable.ic_file),
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                    modifier = Modifier.size(48.dp),
+                                )
+                            }
+
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Text(
+                                    text = comic.title,
+                                    style = MaterialTheme.typography.headlineSmall,
+                                    fontWeight = FontWeight.Bold,
+                                )
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(
+                                        modifier = Modifier.weight(1f).padding(end = 8.dp),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                                    ) {
+                                        comic.subtitle?.takeIf { it.isNotBlank() }?.let { author ->
+                                            Text(
+                                                text = author,
+                                                style = MaterialTheme.typography.titleMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        }
+                                        Surface(
+                                            color = MaterialTheme.colorScheme.primaryContainer,
+                                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            shape = RoundedCornerShape(6.dp),
+                                        ) {
+                                            Text(
+                                                text = sourceName,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        }
+                                    }
+
+                                    // Quick Bookmark/Save Action
+                                    if (isBookmarked) {
+                                        FilledTonalButton(
+                                            onClick = toggleBookmark,
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                                        ) {
+                                            Icon(
+                                                painter = painterResource(R.drawable.ic_bookmark),
+                                                contentDescription = "已追漫",
+                                                modifier = Modifier.size(18.dp),
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("已追漫")
+                                        }
+                                    } else {
+                                        OutlinedButton(
+                                            onClick = toggleBookmark,
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                                        ) {
+                                            Icon(
+                                                painter = painterResource(R.drawable.ic_bookmark_border),
+                                                contentDescription = "追漫",
+                                                modifier = Modifier.size(18.dp),
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("追漫")
+                                        }
+                                    }
+                                }
+                            }
                         }
-                        AsyncImage(
-                            model = request,
-                            contentDescription = comic.title,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxWidth().height(240.dp),
+                    }
+                }
+
+                // Metadata Tag Chips
+                val validTags = comic.tags.filter { it.isNotBlank() }
+                if (comic.status?.isNotBlank() == true || validTags.isNotEmpty()) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            comic.status?.takeIf { it.isNotBlank() }?.let { status ->
+                                item {
+                                    AssistChip(
+                                        onClick = {},
+                                        label = { Text(status) },
+                                        leadingIcon = {
+                                            Icon(
+                                                imageVector = Icons.Default.Check,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(AssistChipDefaults.IconSize),
+                                            )
+                                        },
+                                    )
+                                }
+                            }
+                            items(validTags) { tag ->
+                                SuggestionChip(
+                                    onClick = {},
+                                    label = { Text(tag) },
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Description
+                comic.description?.takeIf { it.isNotBlank() }?.let { desc ->
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        Text(
+                            text = desc,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(vertical = 4.dp),
                         )
                     }
                 }
-                item {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(comic.title, style = MaterialTheme.typography.headlineSmall)
-                        comic.subtitle?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                        comic.description?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
-                    }
-                }
             }
+
+            // M3 Error Card
             errorMessage?.let { message ->
-                item {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(message, color = MaterialTheme.colorScheme.error)
-                        Button(onClick = { reload++ }) { Text("重试") }
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer,
+                            contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Warning,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error,
+                            )
+                            Text(
+                                text = message,
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.weight(1f),
+                            )
+                            FilledTonalButton(
+                                onClick = { reload++ },
+                                colors = ButtonDefaults.filledTonalButtonColors(
+                                    containerColor = MaterialTheme.colorScheme.error,
+                                    contentColor = MaterialTheme.colorScheme.onError,
+                                ),
+                            ) {
+                                Text("重试")
+                            }
+                        }
                     }
                 }
             }
+
+            // 3-4 Column Compact Chapter Grid
             if (chapters.isNotEmpty()) {
-                item { Text("章节", style = MaterialTheme.typography.titleMedium) }
-                items(chapters, key = { it.chapterId }) { chapter ->
-                    TextButton(
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    Text(
+                        text = "章节 (${chapters.size})",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
+                    )
+                }
+
+                itemsIndexed(chapters, key = { index, chapter -> "${chapter.chapterId}_$index" }) { _, chapter ->
+                    OutlinedButton(
                         onClick = {
                             onOpenChapter(chapter, chapter.opaqueContext ?: detail?.opaqueContext ?: opaqueContext)
                         },
                         enabled = !loading && chapter.available && errorMessage == null,
-                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
+                        modifier = Modifier.fillMaxWidth().height(38.dp),
                     ) {
-                        Text(chapter.title, modifier = Modifier.fillMaxWidth())
+                        Text(
+                            text = chapter.title,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
                 }
             }
@@ -207,3 +472,4 @@ internal fun Throwable.toOnlineAvailability(): OnlineAvailability {
         else -> OnlineAvailability.TEMPORARY_ERROR
     }
 }
+
