@@ -40,6 +40,10 @@ reading history. It does not add offline-book downloads or cross-source deduplic
   thumbnails, OCR, and favorite snapshots all use the descriptor's headers and referer.
 - Online reader progress, page bookmarks, durable page favorites, and qualifying reading
   sessions are written by a route-scoped ViewModel and survive plugin unavailability.
+- Saved now combines local and online bookmarks and favorites without creating synthetic local
+  comic rows. Online favorite cards render the repository-owned durable snapshot files.
+- History keeps the existing local Paging stream and prepends persisted online sessions. Online
+  history supports exact-page reopen, unavailable-source retention, delete/undo, and clear.
 
 ## Deviations
 
@@ -50,6 +54,9 @@ reading history. It does not add offline-book downloads or cross-source deduplic
   integration instead of adding a second Room schema and migration.
 - A plugin chapter with any missing `pageId` must provide a non-blank chapter revision.
   The first version rejects an unstable chapter instead of using a remote image URL as identity.
+- Online history is a separate leading section because local history remains paged. A fully
+  interleaved cross-source chronological Paging stream is deferred until both stores share a
+  paging boundary.
 
 ## Verification log
 
@@ -65,3 +72,6 @@ reading history. It does not add offline-book downloads or cross-source deduplic
   the stable cancellation-aware resume API for OkHttp page delivery.
 - `git diff --check` passed for the online volume, reader adapter, snapshot removal, and
   focused unit-test additions. Tests were not run.
+- Saved/History aggregation, online route reconstruction, repository history actions, and public
+  API visibility were inspected statically. Focused tests were added but not run.
+- `git diff --check` passed for Saved/History aggregation. Gradle tasks were not run.

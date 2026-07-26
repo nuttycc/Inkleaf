@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
@@ -49,6 +50,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -62,6 +64,7 @@ import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.compose.itemKey
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.exio.inkleaf.R
 import java.io.File
 
@@ -69,6 +72,7 @@ import java.io.File
 @Composable
 fun HistoryScreen(
     onOpenSession: (comicId: Long, page: Int) -> Unit,
+    onOpenOnlineSession: (OnlineReaderTarget) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: HistoryViewModel = viewModel(),
 ) {
@@ -85,6 +89,7 @@ fun HistoryScreen(
 
     LifecycleResumeEffect(viewModel) {
         viewModel.refreshDateLabels()
+        viewModel.refreshOnlineSessions()
         onPauseOrDispose { viewModel.cancelPendingResolve() }
     }
 
@@ -106,6 +111,17 @@ fun HistoryScreen(
                         pendingDelete = null
                     }
                 }
+                is HistoryEvent.OnlineSessionDeleted -> {
+                    val result =
+                        snackbarHostState.showSnackbar(
+                            message = "已删除在线阅读记录",
+                            actionLabel = "撤销",
+                            duration = SnackbarDuration.Long,
+                        )
+                    if (result == SnackbarResult.ActionPerformed) {
+                        viewModel.restoreOnlineSession(event.snapshot)
+                    }
+                }
                 is HistoryEvent.Message -> snackbarHostState.showSnackbar(event.text)
                 is HistoryEvent.NavigateToReader -> onOpenSession(event.comicId, event.page)
                 is HistoryEvent.ConfirmSourceChanged -> sourceChanged = event
@@ -114,9 +130,12 @@ fun HistoryScreen(
     }
 
     val refresh = items.loadState.refresh
-    val hasItems = items.itemCount > 0
-    val showEmpty = refresh is LoadState.NotLoading && !hasItems
-    val showInitialSkeleton = refresh is LoadState.Loading && !hasItems
+    val onlineSessions = viewModel.onlineSessions
+    val hasItems = items.itemCount > 0 || onlineSessions.orEmpty().isNotEmpty()
+    val showEmpty =
+        refresh is LoadState.NotLoading && !hasItems && onlineSessions != null
+    val showInitialSkeleton =
+        refresh is LoadState.Loading && items.itemCount == 0 && onlineSessions.isNullOrEmpty()
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -158,7 +177,7 @@ fun HistoryScreen(
         when {
             showInitialSkeleton ->
                 HistorySkeletonList(modifier = Modifier.fillMaxSize().padding(innerPadding))
-            refresh is LoadState.Error && !hasItems ->
+            refresh is LoadState.Error && !hasItems && onlineSessions != null ->
                 HistoryError(
                     message = "无法加载阅读历史",
                     onRetry = { items.retry() },
@@ -168,9 +187,14 @@ fun HistoryScreen(
             else ->
                 HistoryTimelineList(
                     items = items,
+                    onlineSessions = onlineSessions.orEmpty(),
                     resolvingSessionId = viewModel.resolvingSessionId,
                     onOpen = viewModel::continueReading,
                     onDelete = { viewModel.deleteSession(it.id) },
+                    onOpenOnline = { session ->
+                        viewModel.openOnlineSession(session, onOpenOnlineSession)
+                    },
+                    onDeleteOnline = viewModel::deleteOnlineSession,
                     modifier = Modifier.fillMaxSize().padding(innerPadding),
                 )
         }
@@ -193,6 +217,7 @@ fun HistoryScreen(
                         clearInProgress = true
                         // Cancel any pending single-delete undo.
                         pendingDelete = null
+                        snackbarHostState.currentSnackbarData?.dismiss()
                         viewModel.clearHistory()
                         showClearConfirm = false
                         clearInProgress = false
@@ -241,12 +266,29 @@ fun HistoryScreen(
 @Composable
 private fun HistoryTimelineList(
     items: LazyPagingItems<HistoryListItem>,
+    onlineSessions: List<OnlineHistorySessionUi>,
     resolvingSessionId: String?,
     onOpen: (HistorySessionUi) -> Unit,
     onDelete: (HistorySessionUi) -> Unit,
+    onOpenOnline: (OnlineHistorySessionUi) -> Unit,
+    onDeleteOnline: (OnlineHistorySessionUi) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(modifier = modifier) {
+        if (onlineSessions.isNotEmpty()) {
+            item(key = "online-history-header") { HistoryDateHeader("在线漫画") }
+            items(onlineSessions, key = OnlineHistorySessionUi::key) { session ->
+                OnlineHistorySessionRow(
+                    session = session,
+                    onOpen = { onOpenOnline(session) },
+                    onDelete = { onDeleteOnline(session) },
+                )
+                HorizontalDivider(
+                    modifier = Modifier.padding(start = 84.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                )
+            }
+        }
         items(
             count = items.itemCount,
             key = items.itemKey { it.stableKey },
@@ -268,6 +310,23 @@ private fun HistoryTimelineList(
                 null -> HistorySessionSkeletonRow()
             }
         }
+        when (items.loadState.refresh) {
+            is LoadState.Loading ->
+                if (items.itemCount == 0) {
+                    item(key = "refresh-skeleton") { HistorySessionSkeletonRow() }
+                }
+            is LoadState.Error ->
+                if (items.itemCount == 0) {
+                    item(key = "refresh-error") {
+                        HistoryError(
+                            message = "无法加载本地阅读历史",
+                            onRetry = { items.retry() },
+                            modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        )
+                    }
+                }
+            else -> Unit
+        }
         when (items.loadState.append) {
             is LoadState.Loading ->
                 item(key = "append-skeleton") {
@@ -282,6 +341,112 @@ private fun HistoryTimelineList(
                     )
                 }
             else -> Unit
+        }
+    }
+}
+
+@Composable
+private fun OnlineHistorySessionRow(
+    session: OnlineHistorySessionUi,
+    onOpen: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val unavailable = !session.availability.canOpenReader()
+    var menuOpen by remember { mutableStateOf(false) }
+    Row(
+        modifier =
+            Modifier.fillMaxWidth()
+                .clickable(onClick = onOpen)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        OnlineHistoryCover(session = session, unavailable = unavailable)
+        Column(
+            modifier = Modifier.weight(1f).alpha(if (unavailable) 0.8f else 1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                text = session.title,
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = session.endLocationLabel,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = "${session.timeRangeLabel} · ${session.durationLabel}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (unavailable) {
+                Text(
+                    text = session.availability.displayLabel(),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
+        Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+            IconButton(onClick = { menuOpen = true }) {
+                Icon(Icons.Filled.MoreVert, contentDescription = "会话操作")
+            }
+            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                DropdownMenuItem(
+                    text = { Text("删除记录") },
+                    onClick = {
+                        menuOpen = false
+                        onDelete()
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun OnlineHistoryCover(
+    session: OnlineHistorySessionUi,
+    unavailable: Boolean,
+) {
+    val context = LocalContext.current
+    val request =
+        remember(session.cover) {
+            session.cover?.let { cover ->
+                ImageRequest.Builder(context)
+                    .data(cover.url)
+                    .apply {
+                        cover.headers.forEach { (name, value) -> setHeader(name, value) }
+                        cover.referer?.let { setHeader("Referer", it) }
+                    }
+                    .build()
+            }
+        }
+    Box(
+        modifier =
+            Modifier.width(56.dp)
+                .aspectRatio(2f / 3f)
+                .clip(RoundedCornerShape(6.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                .alpha(if (unavailable) 0.55f else 1f),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (request != null) {
+            AsyncImage(
+                model = request,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            Icon(
+                painter = painterResource(R.drawable.ic_image),
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

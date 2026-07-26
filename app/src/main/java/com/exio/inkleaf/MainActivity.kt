@@ -65,6 +65,7 @@ import com.exio.inkleaf.ui.HistoryScreen
 import com.exio.inkleaf.ui.OcrModelDownloadScreen
 import com.exio.inkleaf.ui.OnlineComicScreen
 import com.exio.inkleaf.ui.OnlineReaderScreen
+import com.exio.inkleaf.ui.OnlineReaderTarget
 import com.exio.inkleaf.ui.PluginDiscoverScreen
 import com.exio.inkleaf.ui.SourcesScreen
 import com.exio.inkleaf.ui.ReaderScreen
@@ -120,7 +121,20 @@ data class OnlineReaderRoute(
     val chapterId: String,
     val chapterRevision: String? = null,
     val opaqueContextJson: String? = null,
+    val initialPageId: String? = null,
+    val initialPageIndex: Int? = null,
 )
+
+private fun OnlineReaderTarget.toRoute(): OnlineReaderRoute =
+    OnlineReaderRoute(
+        pluginId = pluginId,
+        sourceId = sourceId,
+        chapterId = chapterId,
+        chapterRevision = chapterRevision,
+        opaqueContextJson = opaqueContextJson,
+        initialPageId = initialPageId,
+        initialPageIndex = initialPageIndex,
+    )
 
 /** 外层壳↔二级：全宽滑动的运动量大，350~450ms 区间体感比较合适 */
 private const val NAV_TRANSITION_MS = 400
@@ -512,7 +526,10 @@ class MainActivity : AppCompatActivity() {
                                                 outerNavController.navigate(
                                                     ReaderRoute(comicId, page)
                                                 )
-                                            }
+                                            },
+                                            onOpenOnlineSession = { target ->
+                                                outerNavController.navigate(target.toRoute())
+                                            },
                                         )
                                     }
                                     composable<FavoritesRoute> {
@@ -521,6 +538,9 @@ class MainActivity : AppCompatActivity() {
                                                 outerNavController.navigate(
                                                     ReaderRoute(comicId, globalPage)
                                                 )
+                                            },
+                                            onOpenOnlinePage = { target ->
+                                                outerNavController.navigate(target.toRoute())
                                             },
                                             onOpenFavorite = { id ->
                                                 outerNavController.navigate(FavoriteViewerRoute(id))
@@ -647,6 +667,8 @@ class MainActivity : AppCompatActivity() {
                                 chapterId = route.chapterId,
                                 chapterRevision = route.chapterRevision,
                                 opaqueContextJson = route.opaqueContextJson,
+                                initialPageId = route.initialPageId,
+                                initialPageIndex = route.initialPageIndex,
                                 onBack = { outerNavController.popBackStack() },
                                 onNavigateToModelDownload = {
                                     outerNavController.navigate(OcrModelDownloadRoute)

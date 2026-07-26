@@ -17,11 +17,19 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -38,15 +46,27 @@ import java.io.File
 @Composable
 internal fun FavoritesContent(
     favorites: List<FavoritePageEntity>?,
+    onlineFavorites: List<OnlineSavedFavoriteUi>?,
     onOpenFavorite: (Long) -> Unit,
+    onOpenOnlineFavorite: (OnlineSavedFavoriteUi) -> Unit,
+    onRemoveOnlineFavorite: (OnlineSavedFavoriteUi) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     when {
-        favorites == null -> Box(modifier = modifier)
+        favorites == null && onlineFavorites == null -> Box(modifier = modifier)
 
-        favorites.isEmpty() -> EmptyFavorites(modifier = modifier)
+        favorites.orEmpty().isEmpty() && onlineFavorites.orEmpty().isEmpty() ->
+            EmptyFavorites(modifier = modifier)
 
-        else ->
+        else -> {
+            val entries =
+                remember(favorites, onlineFavorites) {
+                    buildList {
+                            favorites.orEmpty().forEach { add(FavoriteGridEntry.Local(it)) }
+                            onlineFavorites.orEmpty().forEach { add(FavoriteGridEntry.Online(it)) }
+                        }
+                        .sortedByDescending(FavoriteGridEntry::addedAt)
+                }
             LazyVerticalGrid(
                 columns = GridCells.Adaptive(minSize = GridDefaults.AdaptiveMinCellWidth),
                 contentPadding = PaddingValues(12.dp),
@@ -54,13 +74,38 @@ internal fun FavoritesContent(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = modifier,
             ) {
-                items(favorites, key = { favorite -> favorite.id }) { favorite ->
-                    FavoriteCard(
-                        favorite = favorite,
-                        onClick = { onOpenFavorite(favorite.id) },
-                    )
+                items(entries, key = FavoriteGridEntry::stableKey) { entry ->
+                    when (entry) {
+                        is FavoriteGridEntry.Local ->
+                            FavoriteCard(
+                                favorite = entry.favorite,
+                                onClick = { onOpenFavorite(entry.favorite.id) },
+                            )
+                        is FavoriteGridEntry.Online ->
+                            OnlineFavoriteCard(
+                                item = entry.favorite,
+                                onClick = { onOpenOnlineFavorite(entry.favorite) },
+                                onRemove = { onRemoveOnlineFavorite(entry.favorite) },
+                            )
+                    }
                 }
             }
+        }
+    }
+}
+
+private sealed interface FavoriteGridEntry {
+    val stableKey: String
+    val addedAt: Long
+
+    data class Local(val favorite: FavoritePageEntity) : FavoriteGridEntry {
+        override val stableKey: String = "local:${favorite.id}"
+        override val addedAt: Long = favorite.addedAt
+    }
+
+    data class Online(val favorite: OnlineSavedFavoriteUi) : FavoriteGridEntry {
+        override val stableKey: String = favorite.key
+        override val addedAt: Long = favorite.addedAtMs
     }
 }
 
@@ -140,5 +185,78 @@ private fun FavoriteCard(
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+@Composable
+private fun OnlineFavoriteCard(
+    item: OnlineSavedFavoriteUi,
+    onClick: () -> Unit,
+    onRemove: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var menuOpen by remember { mutableStateOf(false) }
+    Column(modifier = modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onClick)) {
+        Box(
+            modifier =
+                Modifier.fillMaxWidth()
+                    .aspectRatio(2f / 3f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+            contentAlignment = Alignment.Center,
+        ) {
+            val snapshot = remember(item.snapshotFile) { item.snapshotFile?.takeIf(File::isFile) }
+            if (snapshot != null) {
+                AsyncImage(
+                    model = snapshot,
+                    contentDescription = item.title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                Text(
+                    text = item.title.take(1),
+                    style = MaterialTheme.typography.headlineLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Box(modifier = Modifier.align(Alignment.TopEnd)) {
+                IconButton(onClick = { menuOpen = true }) {
+                    Icon(Icons.Filled.MoreVert, contentDescription = "收藏操作")
+                }
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text("取消收藏") },
+                        onClick = {
+                            menuOpen = false
+                            onRemove()
+                        },
+                    )
+                }
+            }
+        }
+        Text(
+            text = item.title,
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+        Text(
+            text = "${item.chapterTitle} · 第 ${item.pageIndex + 1} 页",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (!item.availability.canOpenReader()) {
+            Text(
+                text = item.availability.displayLabel(),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }

@@ -12,6 +12,8 @@ fun OnlineReaderScreen(
     chapterId: String,
     chapterRevision: String?,
     opaqueContextJson: String?,
+    initialPageId: String? = null,
+    initialPageIndex: Int? = null,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     onNavigateToModelDownload: () -> Unit = {},
@@ -25,6 +27,8 @@ fun OnlineReaderScreen(
             chapterId = chapterId,
             requestedRevision = chapterRevision,
             opaqueContextJson = opaqueContextJson,
+            initialPageId = initialPageId,
+            initialPageIndex = initialPageIndex,
         )
     }
     val features =

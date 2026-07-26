@@ -59,6 +59,8 @@ internal class OnlineReaderViewModel(
     private val chapterId: String,
     private val requestedRevision: String?,
     private val opaqueContextJson: String?,
+    private val initialPageId: String?,
+    private val initialPageIndex: Int?,
 ) : AndroidViewModel(app) {
     private val application = getApplication<InkleafApplication>()
     private val repository = application.onlineContentRepository
@@ -277,7 +279,8 @@ internal class OnlineReaderViewModel(
                         client = PAGE_CLIENT,
                     )
                 volume = opened
-                val startPage = restorePage(snapshot?.position, opened)
+                val restored = restorePage(snapshot?.position, opened)
+                val startPage = restored.page
                 currentPage = startPage
                 val initialLocation = locationFor(startPage)
                 sessionId = UUID.randomUUID().toString()
@@ -299,6 +302,9 @@ internal class OnlineReaderViewModel(
                         title = currentTitle,
                         cacheKeyPrefix = cacheKeyPrefix(revision),
                     )
+                if (restored.stale) {
+                    readerMessage = "源内容已变化，已打开最接近的页面"
+                }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
@@ -321,14 +327,30 @@ internal class OnlineReaderViewModel(
     private fun restorePage(
         saved: com.exio.inkleaf.plugin.OnlineReadingPosition?,
         opened: OnlineChapterVolume,
-    ): Int {
-        if (saved == null || saved.chapterId != chapterId) return 0
-        saved.pageId?.let { pageId ->
-            opened.pages.indexOfFirst { it.pageId == pageId }.takeIf { it >= 0 }?.let { return it }
+    ): RestoredOnlinePage {
+        initialPageId?.let { pageId ->
+            val exact = opened.pages.indexOfFirst { it.pageId == pageId }
+            if (exact >= 0) return RestoredOnlinePage(exact, stale = false)
+            initialPageIndex?.takeIf { it in opened.pages.indices }?.let {
+                return RestoredOnlinePage(it, stale = true)
+            }
         }
-        return saved.pageIndex.takeIf {
+        initialPageIndex?.takeIf { it in opened.pages.indices }?.let { page ->
+            return RestoredOnlinePage(
+                page = page,
+                stale = requestedRevision != currentRevision,
+            )
+        }
+        if (saved == null || saved.chapterId != chapterId) return RestoredOnlinePage(0, false)
+        saved.pageId?.let { pageId ->
+            opened.pages.indexOfFirst { it.pageId == pageId }.takeIf { it >= 0 }?.let {
+                return RestoredOnlinePage(it, stale = false)
+            }
+        }
+        val restored = saved.pageIndex.takeIf {
             saved.chapterRevision == currentRevision && it in opened.pages.indices
         } ?: 0
+        return RestoredOnlinePage(restored, stale = false)
     }
 
     private suspend fun refreshUserRecords() {
@@ -590,6 +612,8 @@ internal class OnlineReaderViewModel(
     }
 
     private data class ResolvedOnlinePage(val page: Int, val stale: Boolean)
+
+    private data class RestoredOnlinePage(val page: Int, val stale: Boolean)
 
     private companion object {
         const val THUMB_TARGET_WIDTH = 168

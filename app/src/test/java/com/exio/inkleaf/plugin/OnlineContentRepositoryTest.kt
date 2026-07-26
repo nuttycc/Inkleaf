@@ -206,6 +206,32 @@ class OnlineContentRepositoryTest {
     }
 
     @Test
+    fun `reading sessions can be removed restored and cleared without deleting progress`() {
+        val root = Files.createTempDirectory("inkleaf-online-history-actions").toFile()
+        try {
+            val repository = OnlineContentRepository(root.resolve("state.json"), clockMs = { 100L })
+            val firstPage = location(pageId = "page-1", pageIndex = 0, revision = "revision-1")
+            val lastPage = location(pageId = "page-8", pageIndex = 7, revision = "revision-1")
+            repository.recordPosition(PLUGIN_ID, SOURCE_ID, "chapter-1", "page-8", 7, "revision-1")
+            val firstSession = readingSession("session-1", firstPage, lastPage)
+            val secondSession = readingSession("session-2", firstPage, lastPage)
+            repository.recordReadingSession(firstSession)
+            repository.recordReadingSession(secondSession)
+
+            assertTrue(repository.removeReadingSession(content(), firstSession.sessionId))
+            assertEquals(listOf("session-2"), repository.listReadingSessions().map { it.sessionId })
+
+            repository.recordReadingSession(firstSession)
+            assertEquals(2, repository.listReadingSessions().size)
+            assertEquals(2, repository.clearReadingSessions())
+            assertTrue(repository.listReadingSessions().isEmpty())
+            assertEquals(7, repository.get(PLUGIN_ID, SOURCE_ID)?.position?.pageIndex)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun `existing state json decodes with defaults for new user records`() {
         val root = Files.createTempDirectory("inkleaf-online-legacy").toFile()
         val file = root.resolve("state.json")
@@ -245,6 +271,23 @@ class OnlineContentRepositoryTest {
             pageId = pageId,
             pageIndex = pageIndex,
             chapterRevision = revision,
+        )
+
+    private fun readingSession(
+        id: String,
+        start: OnlinePageLocation,
+        end: OnlinePageLocation,
+    ) =
+        OnlineReadingSessionRecord(
+            sessionId = id,
+            content = content(),
+            titleSnapshot = "Comic",
+            startedAtMs = 10L,
+            endedAtMs = 90L,
+            activeReadingMillis = 80L,
+            timeZoneId = "Asia/Shanghai",
+            start = start,
+            end = end,
         )
 
     private companion object {

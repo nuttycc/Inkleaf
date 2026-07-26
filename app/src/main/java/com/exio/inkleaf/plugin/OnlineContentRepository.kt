@@ -289,6 +289,18 @@ class OnlineContentRepository(
         }
     }
 
+    fun clearReadingSessions(): Int = synchronized(lock) {
+        val state = read()
+        val removedCount = state.records.sumOf { it.readingSessions.size }
+        if (removedCount == 0) return@synchronized 0
+        write(
+            state.copy(
+                records = state.records.map { record -> record.copy(readingSessions = emptyList()) }
+            )
+        )
+        removedCount
+    }
+
     fun recordDetail(pluginId: String, detail: ComicDetail): OnlineComicRecord = synchronized(lock) {
         val key = key(pluginId, detail.sourceId)
         update(key) { current ->

@@ -10,6 +10,7 @@ import androidx.paging.PagingData
 import androidx.paging.cachedIn
 import androidx.paging.insertSeparators
 import androidx.paging.map
+import com.exio.inkleaf.InkleafApplication
 import com.exio.inkleaf.data.ComicRepository
 import com.exio.inkleaf.data.HistoryDateGrouping
 import com.exio.inkleaf.data.ReadingPositionResolution
@@ -19,6 +20,8 @@ import com.exio.inkleaf.data.SystemReadingClock
 import com.exio.inkleaf.data.db.BookSourceType
 import com.exio.inkleaf.data.db.HistoryRowProjection
 import com.exio.inkleaf.data.db.ReadingSessionEntity
+import com.exio.inkleaf.plugin.OnlineComicRecord
+import com.exio.inkleaf.plugin.OnlineReadingSessionRecord
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -26,6 +29,7 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
@@ -35,6 +39,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 sealed interface HistoryListItem {
     val stableKey: String
@@ -71,6 +76,8 @@ data class HistorySessionUi(
 sealed interface HistoryEvent {
     data class SessionDeleted(val snapshot: ReadingSessionEntity) : HistoryEvent
 
+    data class OnlineSessionDeleted(val snapshot: OnlineReadingSessionRecord) : HistoryEvent
+
     data class Message(val text: String) : HistoryEvent
 
     data class NavigateToReader(val comicId: Long, val page: Int) : HistoryEvent
@@ -86,6 +93,7 @@ sealed interface HistoryEvent {
 class HistoryViewModel(app: Application) : AndroidViewModel(app) {
     private val sessionRepo = ReadingSessionRepository.getInstance(app)
     private val comicRepo = ComicRepository(app)
+    private val onlineRepository = (app as InkleafApplication).onlineContentRepository
     private val clock = SystemReadingClock()
     private val eventChannel = Channel<HistoryEvent>(Channel.BUFFERED)
     private val todayRefresh = MutableStateFlow(0)
@@ -97,8 +105,16 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
 
     private var resolveGeneration = 0L
     private var resolveJob: Job? = null
+    private var onlineRefreshJob: Job? = null
+
+    internal var onlineSessions by mutableStateOf<List<OnlineHistorySessionUi>?>(null)
+        private set
 
     val events = eventChannel.receiveAsFlow()
+
+    init {
+        refreshOnlineSessions()
+    }
 
     val timeline: Flow<PagingData<HistoryListItem>> =
         todayRefresh
@@ -149,6 +165,35 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
         if (today == lastRefreshDate) return
         lastRefreshDate = today
         todayRefresh.value += 1
+    }
+
+    fun refreshOnlineSessions() {
+        onlineRefreshJob?.cancel()
+        onlineRefreshJob =
+            viewModelScope.launch {
+                try {
+                    onlineSessions =
+                        withContext(Dispatchers.IO) {
+                            onlineRepository.list()
+                                .flatMap(OnlineComicRecord::toOnlineHistorySessions)
+                                .sortedWith(
+                                    compareByDescending<OnlineHistorySessionUi> {
+                                            it.stored.endedAtMs
+                                        }.thenByDescending { it.key }
+                                )
+                        }
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    onlineSessions = emptyList()
+                    eventChannel.send(
+                        HistoryEvent.Message(
+                            error.message?.let { "加载在线阅读历史失败：$it" }
+                                ?: "加载在线阅读历史失败"
+                        )
+                    )
+                }
+            }
     }
 
     fun continueReading(session: HistorySessionUi) {
@@ -261,15 +306,80 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun clearHistory() {
+    internal fun deleteOnlineSession(session: OnlineHistorySessionUi) {
         viewModelScope.launch {
             try {
-                sessionRepo.clearHistory()
-                eventChannel.send(HistoryEvent.Message("已清空阅读历史"))
+                withContext(Dispatchers.IO) {
+                    check(
+                        onlineRepository.removeReadingSession(
+                            session.stored.content,
+                            session.stored.sessionId,
+                        )
+                    )
+                }
+                refreshOnlineSessions()
+                eventChannel.send(HistoryEvent.OnlineSessionDeleted(session.stored))
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {
-                eventChannel.send(HistoryEvent.Message("清空阅读历史失败"))
+                eventChannel.send(HistoryEvent.Message("删除在线阅读记录失败"))
+            }
+        }
+    }
+
+    fun restoreOnlineSession(snapshot: OnlineReadingSessionRecord) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { onlineRepository.recordReadingSession(snapshot) }
+                refreshOnlineSessions()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                eventChannel.send(HistoryEvent.Message("恢复在线阅读记录失败"))
+            }
+        }
+    }
+
+    fun clearHistory() {
+        viewModelScope.launch {
+            var localFailed = false
+            var onlineFailed = false
+            try {
+                sessionRepo.clearHistory()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                localFailed = true
+            }
+            try {
+                withContext(Dispatchers.IO) { onlineRepository.clearReadingSessions() }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                onlineFailed = true
+            }
+            refreshOnlineSessions()
+            eventChannel.send(
+                HistoryEvent.Message(
+                    when {
+                        !localFailed && !onlineFailed -> "已清空阅读历史"
+                        localFailed && onlineFailed -> "清空阅读历史失败"
+                        else -> "部分阅读历史未能清空"
+                    }
+                )
+            )
+        }
+    }
+
+    internal fun openOnlineSession(
+        session: OnlineHistorySessionUi,
+        onOpen: (OnlineReaderTarget) -> Unit,
+    ) {
+        if (session.availability.canOpenReader()) {
+            onOpen(session.target)
+        } else {
+            viewModelScope.launch {
+                eventChannel.send(HistoryEvent.Message(session.availability.displayLabel()))
             }
         }
     }
@@ -281,6 +391,24 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
         resolvingSessionId = null
     }
 }
+
+private fun OnlineComicRecord.toOnlineHistorySessions(): List<OnlineHistorySessionUi> =
+    readingSessions.map { session ->
+        val end = session.end
+        OnlineHistorySessionUi(
+            key =
+                "online:${key.pluginId}:${key.sourceId}:${session.sessionId}",
+            title = session.titleSnapshot.ifBlank { titleSnapshot() },
+            endLocationLabel = "${chapterTitle(end)} · 第 ${end.pageIndex + 1} 页",
+            timeRangeLabel =
+                formatTimeRange(session.startedAtMs, session.endedAtMs, session.timeZoneId),
+            durationLabel = formatDuration(session.activeReadingMillis),
+            cover = detail?.cover,
+            availability = availability,
+            target = readerTarget(end),
+            stored = session,
+        )
+    }
 
 private fun HistoryRowProjection.toHistoryListItem(): HistoryListItem =
     HistoryListItem.Session(toUi())
