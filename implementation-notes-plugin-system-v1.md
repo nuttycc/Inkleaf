@@ -41,6 +41,11 @@ fixed host DTOs, and no plugin-provided Android UI or native code.
   feeds and per-feed filters through `describe`; API 1.0 plugins remain compatible.
 - Browse requests use an opaque cursor and return the existing `ComicSummary`
   page shape. Search and browse remain separate protocol operations.
+- Browse feed first pages use a disposable memory-and-disk cache keyed by plugin
+  ID, active version, feed ID, and canonical filters. Fresh entries are reused for
+  15 minutes; stale entries remain visible while one background refresh runs.
+- Only first pages are persisted under `cacheDir/plugin-browse`. Later pages stay
+  in the navigation-scoped ViewModel and manual refresh always requests a new first page.
 - API 1.1 feed filters intentionally expose only single-select descriptors in
   the first UI slice. Other existing filter descriptor types remain available
   to older top-level descriptor consumers but are not advertised as browse UI support.
@@ -112,3 +117,8 @@ fixed host DTOs, and no plugin-provided Android UI or native code.
   configuration cache. JVM unit tests were added for descriptor compatibility,
   feed/filter validation, browse page identity, and request encoding, but were not
   executed because no Gradle test task was authorized.
+- Browse-cache verification remained local and lightweight: `git diff --check` passed,
+  and the resolved Compose Material Icons Core 1.7.8 sources confirm the new `Refresh`
+  icon is available. Repository JVM tests cover fresh/disk hits, key isolation, stale
+  fallback, forced refresh, corrupt and unavailable disk storage, and single-flight
+  cache misses; they were not executed because no Gradle task was authorized.

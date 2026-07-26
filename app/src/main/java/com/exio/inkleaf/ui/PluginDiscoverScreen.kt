@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Warning
@@ -69,11 +70,8 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.exio.inkleaf.InkleafApplication
 import com.exio.inkleaf.plugin.ComicSummary
-import com.exio.inkleaf.plugin.InstalledPlugin
 import com.exio.inkleaf.plugin.PluginFilterDescriptor
 import com.exio.inkleaf.plugin.PluginHealth
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 /** Native-rendered discovery surface for plugin feeds and comic search. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -88,6 +86,7 @@ fun PluginDiscoverScreen(
     val application = context.applicationContext as InkleafApplication
 
     val mode by viewModel.mode.collectAsStateWithLifecycle()
+    val installedPlugins by viewModel.installedPlugins.collectAsStateWithLifecycle()
     val feeds by viewModel.feeds.collectAsStateWithLifecycle()
     val isLoadingFeeds by viewModel.isLoadingFeeds.collectAsStateWithLifecycle()
     val feedLoadError by viewModel.feedLoadError.collectAsStateWithLifecycle()
@@ -103,10 +102,8 @@ fun PluginDiscoverScreen(
     val isSearching by viewModel.isSearching.collectAsStateWithLifecycle()
     val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
 
-    var installedPlugins by remember { mutableStateOf<List<InstalledPlugin>>(emptyList()) }
-
     LaunchedEffect(Unit) {
-        installedPlugins = withContext(Dispatchers.IO) { application.pluginManager.installed() }
+        viewModel.loadInstalledPlugins(application.pluginManager)
     }
 
     val activeHealthyPlugins = remember(installedPlugins) {
@@ -118,7 +115,11 @@ fun PluginDiscoverScreen(
         activeHealthyPlugins.map { "${it.state.pluginId}:${it.state.activeVersion}" }
     }
     LaunchedEffect(activePluginSignature) {
-        viewModel.loadFeeds(application.pluginCatalog, activeHealthyPlugins)
+        viewModel.loadFeeds(
+            application.pluginCatalog,
+            application.pluginBrowseRepository,
+            activeHealthyPlugins,
+        )
     }
 
     val currentSelectedIds = selectedPluginIds ?: remember(activeHealthyPlugins) {
@@ -140,6 +141,14 @@ fun PluginDiscoverScreen(
             TopAppBar(
                 title = { Text("发现") },
                 actions = {
+                    if (mode == DiscoverViewModel.Mode.BROWSE && selectedFeed != null) {
+                        IconButton(
+                            onClick = { viewModel.refreshBrowse(application.pluginBrowseRepository) },
+                            enabled = !isBrowsing,
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = "刷新当前内容流")
+                        }
+                    }
                     IconButton(onClick = onOpenSources) {
                         Icon(Icons.Default.Settings, contentDescription = "漫画源管理")
                     }
@@ -161,12 +170,22 @@ fun PluginDiscoverScreen(
                 PrimaryTabRow(selectedTabIndex = if (mode == DiscoverViewModel.Mode.BROWSE) 0 else 1) {
                     Tab(
                         selected = mode == DiscoverViewModel.Mode.BROWSE,
-                        onClick = { viewModel.selectMode(DiscoverViewModel.Mode.BROWSE) },
+                        onClick = {
+                            viewModel.selectMode(
+                                DiscoverViewModel.Mode.BROWSE,
+                                application.pluginBrowseRepository,
+                            )
+                        },
                         text = { Text("浏览") },
                     )
                     Tab(
                         selected = mode == DiscoverViewModel.Mode.SEARCH,
-                        onClick = { viewModel.selectMode(DiscoverViewModel.Mode.SEARCH) },
+                        onClick = {
+                            viewModel.selectMode(
+                                DiscoverViewModel.Mode.SEARCH,
+                                application.pluginBrowseRepository,
+                            )
+                        },
                         text = { Text("搜索") },
                     )
                 }
@@ -187,7 +206,12 @@ fun PluginDiscoverScreen(
                             M3ErrorBanner(
                                 message = feedLoadError.orEmpty(),
                                 onRetry = {
-                                    viewModel.loadFeeds(application.pluginCatalog, activeHealthyPlugins)
+                                    viewModel.loadFeeds(
+                                        application.pluginCatalog,
+                                        application.pluginBrowseRepository,
+                                        activeHealthyPlugins,
+                                        force = true,
+                                    )
                                 },
                             )
                         } else {
@@ -205,7 +229,12 @@ fun PluginDiscoverScreen(
                             M3ErrorBanner(
                                 message = error,
                                 onRetry = {
-                                    viewModel.loadFeeds(application.pluginCatalog, activeHealthyPlugins)
+                                    viewModel.loadFeeds(
+                                        application.pluginCatalog,
+                                        application.pluginBrowseRepository,
+                                        activeHealthyPlugins,
+                                        force = true,
+                                    )
                                 },
                             )
                         }
@@ -221,7 +250,9 @@ fun PluginDiscoverScreen(
                                 val isSelected = feed.key == selectedFeedKey
                                 FilterChip(
                                     selected = isSelected,
-                                    onClick = { viewModel.selectFeed(application.pluginCatalog, feed.key) },
+                                    onClick = {
+                                        viewModel.selectFeed(application.pluginBrowseRepository, feed.key)
+                                    },
                                     label = { Text(feed.descriptor.title) },
                                     leadingIcon = if (isSelected) {
                                         {
@@ -249,7 +280,7 @@ fun PluginDiscoverScreen(
                                         selectedOptionId = browseFilters[filter.id],
                                         onSelected = { optionId ->
                                             viewModel.selectBrowseFilter(
-                                                application.pluginCatalog,
+                                                application.pluginBrowseRepository,
                                                 filter.id,
                                                 optionId,
                                             )
@@ -274,7 +305,9 @@ fun PluginDiscoverScreen(
                             item(span = { GridItemSpan(maxLineSpan) }) {
                                 M3ErrorBanner(
                                     message = error,
-                                    onRetry = { viewModel.retryBrowse(application.pluginCatalog) },
+                                    onRetry = {
+                                        viewModel.retryBrowse(application.pluginBrowseRepository)
+                                    },
                                 )
                             }
                         }
@@ -312,7 +345,9 @@ fun PluginDiscoverScreen(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.Center,
                                 ) {
-                                    OutlinedButton(onClick = { viewModel.loadMore(application.pluginCatalog) }) {
+                                    OutlinedButton(
+                                        onClick = { viewModel.loadMore(application.pluginBrowseRepository) },
+                                    ) {
                                         Text("加载更多")
                                     }
                                 }
