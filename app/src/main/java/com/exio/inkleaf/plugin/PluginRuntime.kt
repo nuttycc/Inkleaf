@@ -28,6 +28,7 @@ import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
@@ -166,7 +167,7 @@ class AndroidJavaScriptPluginRuntime(
             }
             client.awaitReady()
         } catch (error: Throwable) {
-            close()
+            closeOffMain()
             throw mapRuntimeError(error)
         }
     }
@@ -423,7 +424,7 @@ class PluginRuntimeManager(
                 runtimesToClose to sandboxToClose
             }
         }
-        resources.first.forEach { it.close() }
+        runBlocking { resources.first.forEach { it.closeOffMain() } }
         runCatching { resources.second?.close() }
         callbackExecutor.shutdownNow()
     }
@@ -465,7 +466,7 @@ class PluginRuntimeManager(
                 }
                 runtimes.remove(plugin.state.pluginId, it)
                 runtimeLastUsed.remove(plugin.state.pluginId)
-                it.close()
+                it.closeOffMain()
             }
             evictIdleRuntimeLocked(plugin.state.pluginId)
             val currentSandbox = ensureSandboxLocked()
@@ -507,7 +508,7 @@ class PluginRuntimeManager(
             try {
                 runtime.start()
             } catch (error: Throwable) {
-                runtime.close()
+                runtime.closeOffMain()
                 throw error
             }
             runtimes[plugin.state.pluginId] = runtime
@@ -556,7 +557,7 @@ class PluginRuntimeManager(
     }
 
     /** Evict only a runtime with no active invocation; busy isolates are never force-closed. */
-    private fun evictIdleRuntimeLocked(requestedPluginId: String) {
+    private suspend fun evictIdleRuntimeLocked(requestedPluginId: String) {
         if (runtimes.size < PluginRuntimePolicy.MAX_ACTIVE_ISOLATES) return
         val candidateId =
             runtimes.keys
@@ -573,7 +574,7 @@ class PluginRuntimeManager(
                 )
         val candidate = runtimes.remove(candidateId)
         runtimeLastUsed.remove(candidateId)
-        candidate?.close()
+        candidate?.closeOffMain()
     }
 
     private suspend fun ensureSandboxLocked(): JavaScriptSandbox {
@@ -610,7 +611,7 @@ class PluginRuntimeManager(
                     else -> return@withLock null
                 }.also { runtimeLastUsed.remove(pluginId) }
             } ?: return
-        runtime.close()
+        runtime.closeOffMain()
         runCatching { store.recordFatalFailure(pluginId) }
     }
 
@@ -623,7 +624,7 @@ class PluginRuntimeManager(
             sandbox = null
             runtimesToClose to sandboxToClose
         }
-        resources.first.forEach { it.close() }
+        resources.first.forEach { it.closeOffMain() }
         runCatching { resources.second?.close() }
     }
 
@@ -633,7 +634,7 @@ class PluginRuntimeManager(
             runtimeLastUsed.remove(pluginId)
             removed
         }
-        runtime?.close()
+        runtime?.closeOffMain()
     }
 
     private companion object {
@@ -645,6 +646,14 @@ class PluginRuntimeManager(
                 JavaScriptSandbox.JS_FEATURE_ISOLATE_TERMINATION,
             )
     }
+}
+
+internal suspend fun closeRuntimeOffMain(close: () -> Unit) {
+    withContext(NonCancellable + Dispatchers.IO) { close() }
+}
+
+private suspend fun AndroidJavaScriptPluginRuntime.closeOffMain() {
+    closeRuntimeOffMain(::close)
 }
 
 private suspend fun <T> ListenableFuture<T>.awaitJavaScript(): T =
