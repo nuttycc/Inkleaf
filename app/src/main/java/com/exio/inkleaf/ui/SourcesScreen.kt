@@ -397,6 +397,12 @@ internal fun HealthStatusBadge(
 ) {
     val (label, containerColor, contentColor) =
         when {
+            pluginState.health == PluginHealth.STORAGE_CORRUPT ->
+                Triple(
+                    "BROKEN (状态损坏)",
+                    MaterialTheme.colorScheme.errorContainer,
+                    MaterialTheme.colorScheme.onErrorContainer,
+                )
             pluginState.disabled ->
                 Triple(
                     "已禁用",

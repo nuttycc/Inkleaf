@@ -32,6 +32,7 @@ data class PluginVersionRecord(
 enum class PluginHealth {
     HEALTHY,
     RUNTIME_UNHEALTHY,
+    STORAGE_CORRUPT,
 }
 
 enum class PluginInstallStatus {

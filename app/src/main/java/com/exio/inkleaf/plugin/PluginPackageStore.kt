@@ -167,7 +167,12 @@ class PluginPackageStore(
                 .orEmpty()
                 .filter { it.isDirectory && PluginIds.isValid(it.name) }
                 .mapNotNull { directory ->
-                    readState(directory)?.let { installedPlugin(directory, it) }
+                    try {
+                        readState(directory)?.let { installedPlugin(directory, it) }
+                    } catch (error: PluginInstallException) {
+                        if (error.code != PluginInstallErrorCode.STORAGE_FAILURE) throw error
+                        corruptInstalledPlugin(directory)
+                    }
                 }
                 .sortedBy { it.state.pluginId }
         }
@@ -467,6 +472,19 @@ class PluginPackageStore(
             manifest = manifest,
         )
     }
+
+    private fun corruptInstalledPlugin(directory: File): InstalledPlugin =
+        InstalledPlugin(
+            state =
+                PluginState(
+                    pluginId = directory.name,
+                    disabled = true,
+                    health = PluginHealth.STORAGE_CORRUPT,
+                    updatedAtMs = directory.resolve(STATE_FILE).lastModified(),
+                ),
+            directory = directory,
+            activeDirectory = null,
+        )
 
     private fun readState(directory: File): PluginState? {
         val file = directory.resolve(STATE_FILE)
