@@ -17,7 +17,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CardDefaults
@@ -69,9 +72,9 @@ import com.exio.inkleaf.plugin.PluginHealth
 import com.exio.inkleaf.plugin.PluginSettingDescriptor
 
 /**
- * Shows one comic source's settings, actions, status, and uninstall controls.
+ * Shows one comic source's settings, actions, status, and lifecycle management controls.
  *
- * Implements Scheme A: Card-Grouped & Status-First layout using Material 3 Expressive cards.
+ * Implements Scheme A with protected setting editors and TopAppBar lifecycle menu.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -90,7 +93,10 @@ fun SourceDetailScreen(
     val message by viewModel.message.collectAsStateWithLifecycle()
 
     val snackbarHostState = remember { SnackbarHostState() }
+    var showMenu by remember { mutableStateOf(false) }
     var showUninstallConfirm by remember { mutableStateOf(false) }
+    var showResetConfirm by remember { mutableStateOf(false) }
+    var editingDescriptor by remember { mutableStateOf<PluginSettingDescriptor?>(null) }
 
     LaunchedEffect(pluginId) { viewModel.load(pluginId) }
 
@@ -129,6 +135,35 @@ fun SourceDetailScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 },
+                actions = {
+                    Box {
+                        IconButton(onClick = { showMenu = true }, enabled = !busy) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = "更多操作")
+                        }
+                        DropdownMenu(
+                            expanded = showMenu,
+                            onDismissRequest = { showMenu = false },
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("恢复默认设置") },
+                                onClick = {
+                                    showMenu = false
+                                    showResetConfirm = true
+                                },
+                            )
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = {
+                                    Text("卸载此漫画源", color = MaterialTheme.colorScheme.error)
+                                },
+                                onClick = {
+                                    showMenu = false
+                                    showUninstallConfirm = true
+                                },
+                            )
+                        }
+                    }
+                },
             )
         },
     ) { padding ->
@@ -162,6 +197,9 @@ fun SourceDetailScreen(
                             values = values,
                             enabled = !busy,
                             onValueChange = { id, value -> viewModel.setValue(id, value) },
+                            onEditProtectedSetting = { descriptor ->
+                                editingDescriptor = descriptor
+                            },
                         )
                     }
                 }
@@ -198,15 +236,41 @@ fun SourceDetailScreen(
                     )
                 }
             }
-
-            item { SectionHeader("危险区域") }
-            item {
-                DangerZoneCard(
-                    busy = busy,
-                    onUninstallClick = { showUninstallConfirm = true },
-                )
-            }
         }
+    }
+
+    editingDescriptor?.let { descriptor ->
+        val currentValue = values[descriptor.id] ?: descriptor.defaultValue.orEmpty()
+        ProtectedSettingEditDialog(
+            descriptor = descriptor,
+            currentValue = currentValue,
+            onDismiss = { editingDescriptor = null },
+            onSave = { newValue ->
+                viewModel.setValue(descriptor.id, newValue)
+                editingDescriptor = null
+            },
+        )
+    }
+
+    if (showResetConfirm) {
+        AlertDialog(
+            onDismissRequest = { showResetConfirm = false },
+            title = { Text("恢复默认设置") },
+            text = { Text("是否清除此漫画源的所有自定义配置并重置为插件默认状态？") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showResetConfirm = false
+                        viewModel.resetToDefaults()
+                    },
+                ) {
+                    Text("确认恢复")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showResetConfirm = false }) { Text("取消") }
+            },
+        )
     }
 
     if (showUninstallConfirm) {
@@ -339,6 +403,7 @@ private fun SettingGroupCard(
     values: Map<String, String>,
     enabled: Boolean,
     onValueChange: (String, String) -> Unit,
+    onEditProtectedSetting: (PluginSettingDescriptor) -> Unit,
 ) {
     OutlinedCard(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
@@ -355,6 +420,7 @@ private fun SettingGroupCard(
                     value = values[descriptor.id] ?: descriptor.defaultValue.orEmpty(),
                     enabled = enabled,
                     onValueChange = { onValueChange(descriptor.id, it) },
+                    onEditProtectedSetting = { onEditProtectedSetting(descriptor) },
                 )
                 if (index < descriptors.lastIndex) {
                     HorizontalDivider(
@@ -399,43 +465,6 @@ private fun ActionGroupCard(
     }
 }
 
-@Composable
-private fun DangerZoneCard(
-    busy: Boolean,
-    onUninstallClick: () -> Unit,
-) {
-    OutlinedCard(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-        shape = MaterialTheme.shapes.large,
-        colors =
-            CardDefaults.outlinedCardColors(
-                containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.12f)
-            ),
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(
-                text = "卸载此漫画源后，配置、缓存与日志将被删除，保留书签及历史记录。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            OutlinedButton(
-                onClick = onUninstallClick,
-                enabled = !busy,
-                modifier = Modifier.fillMaxWidth(),
-                colors =
-                    ButtonDefaults.outlinedButtonColors(
-                        contentColor = MaterialTheme.colorScheme.error
-                    ),
-            ) {
-                Text("卸载此漫画源")
-            }
-        }
-    }
-}
-
 /** Maps plugin-declared descriptors to controls without interpreting site-specific semantics. */
 @Composable
 private fun SettingControl(
@@ -443,6 +472,7 @@ private fun SettingControl(
     value: String,
     enabled: Boolean,
     onValueChange: (String) -> Unit,
+    onEditProtectedSetting: () -> Unit,
 ) {
     when (descriptor.type) {
         "boolean" ->
@@ -491,51 +521,117 @@ private fun SettingControl(
             }
         }
 
-        // Text and secret settings share an input; secret values are masked.
+        // Text & Secret settings use protected read-only preview with modal editor to prevent accidental edits.
         else -> {
-            val masked = descriptor.type == "secret" || descriptor.secret
-            // Persist on focus loss to avoid a DataStore write for every keystroke.
-            var draft by remember(descriptor.id, value) { mutableStateOf(value) }
-            var revealed by remember { mutableStateOf(false) }
-            OutlinedTextField(
-                value = draft,
-                onValueChange = { draft = it },
-                label = { Text(descriptor.title) },
-                singleLine = true,
-                enabled = enabled,
-                isError = descriptor.required && draft.isBlank(),
-                visualTransformation =
-                    if (masked && !revealed) PasswordVisualTransformation()
-                    else VisualTransformation.None,
-                trailingIcon =
-                    if (masked) {
-                        {
-                            IconButton(onClick = { revealed = !revealed }) {
-                                Icon(
-                                    painter =
-                                        painterResource(
-                                            if (revealed) {
-                                                MaterialSymbolsOutlinedR.drawable
-                                                    .materialsymbols_ic_visibility_off_outlined
-                                            } else {
-                                                MaterialSymbolsOutlinedR.drawable
-                                                    .materialsymbols_ic_visibility_outlined
-                                            }
-                                        ),
-                                    contentDescription = if (revealed) "隐藏" else "显示",
-                                )
-                            }
-                        }
-                    } else null,
+            val isSecret = descriptor.type == "secret" || descriptor.secret
+            val displayValue =
+                if (value.isBlank()) {
+                    descriptor.defaultValue?.takeIf { it.isNotBlank() }?.let { "默认：$it" } ?: "未设置"
+                } else if (isSecret) {
+                    "••••••••"
+                } else {
+                    value
+                }
+            ListItem(
+                supportingContent = {
+                    Text(
+                        text = displayValue,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                },
+                trailingContent = {
+                    IconButton(onClick = onEditProtectedSetting, enabled = enabled) {
+                        Icon(
+                            Icons.Filled.Edit,
+                            contentDescription = "编辑",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                },
                 modifier =
-                    Modifier.fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
-                        .onFocusChanged { focus ->
-                            if (!focus.isFocused && draft != value) onValueChange(draft)
-                        },
-            )
+                    Modifier.then(
+                        if (enabled) Modifier.clickable(onClick = onEditProtectedSetting)
+                        else Modifier
+                    ),
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            ) {
+                Text(descriptor.title)
+            }
         }
     }
+}
+
+@Composable
+private fun ProtectedSettingEditDialog(
+    descriptor: PluginSettingDescriptor,
+    currentValue: String,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit,
+) {
+    val isSecret = descriptor.type == "secret" || descriptor.secret
+    var draft by remember(descriptor.id, currentValue) { mutableStateOf(currentValue) }
+    var revealed by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("编辑：${descriptor.title}") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = draft,
+                    onValueChange = { draft = it },
+                    label = { Text(descriptor.title) },
+                    singleLine = true,
+                    isError = descriptor.required && draft.isBlank(),
+                    visualTransformation =
+                        if (isSecret && !revealed) PasswordVisualTransformation()
+                        else VisualTransformation.None,
+                    trailingIcon =
+                        if (isSecret) {
+                            {
+                                IconButton(onClick = { revealed = !revealed }) {
+                                    Icon(
+                                        painter =
+                                            painterResource(
+                                                if (revealed) {
+                                                    MaterialSymbolsOutlinedR.drawable
+                                                        .materialsymbols_ic_visibility_off_outlined
+                                                } else {
+                                                    MaterialSymbolsOutlinedR.drawable
+                                                        .materialsymbols_ic_visibility_outlined
+                                                }
+                                            ),
+                                        contentDescription = if (revealed) "隐藏" else "显示",
+                                    )
+                                }
+                            }
+                        } else null,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                descriptor.defaultValue?.takeIf { it.isNotBlank() }?.let { defaultValue ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        AssistChip(
+                            onClick = { draft = defaultValue },
+                            label = { Text("恢复默认值") },
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onSave(draft) },
+                enabled = !descriptor.required || draft.isNotBlank(),
+            ) {
+                Text("保存")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
 }
 
 @Composable

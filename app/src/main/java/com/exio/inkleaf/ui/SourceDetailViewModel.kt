@@ -145,6 +145,18 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun resetToDefaults() {
+        val id = pluginId ?: return
+        launchOperation {
+            settingsDirty = false
+            app().pluginSettingsRepository.clear(id)
+            _values.value = emptyMap()
+            app().pluginRuntimeManager.reload(id)
+            app().pluginBrowseRepository.clear(id)
+            _message.value = "已重置为默认设置"
+        }
+    }
+
     fun uninstall(onDone: () -> Unit) {
         val id = pluginId ?: return
         launchOperation {
