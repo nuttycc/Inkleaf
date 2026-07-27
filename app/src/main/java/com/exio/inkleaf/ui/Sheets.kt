@@ -43,6 +43,17 @@ internal fun StandardSheetTitle(
     )
 }
 
+/** sheet 内的分组小标题，例如排版抽屉里的"列数""封面比例"。 */
+@Composable
+internal fun SheetSectionLabel(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 20.dp, bottom = 8.dp),
+    )
+}
+
 /**
  * sheet 内容列的统一骨架：铺满宽度 + 导航栏避让 + 底部呼吸留白。 把 navigationBarsPadding 的约定收在一处，新增 sheet 不会漏掉 而让内容被手势条遮住。
  */

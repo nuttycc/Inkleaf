@@ -126,8 +126,6 @@ import com.exio.inkleaf.data.ComicOpenException
 import com.exio.inkleaf.data.ComicVolume
 import com.exio.inkleaf.data.PageRenderRequest
 import com.exio.inkleaf.data.ReaderPageCacheKey
-import com.exio.inkleaf.data.db.BookmarkEntity
-import com.exio.inkleaf.data.db.FavoritePageEntity
 import com.exio.inkleaf.data.ocr.OcrModelSettingsRepository
 import com.exio.inkleaf.data.ocr.OcrModelVariant
 import com.exio.inkleaf.data.ocr.OcrPageResult
@@ -158,31 +156,96 @@ fun ReaderScreen(
         val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY]!!
         ReaderViewModel(app, comicId, initialPage)
     }
-    // 工具栏显隐提升到这一层：系统栏控制要在 Loading 阶段就生效，
-    // 不能等 Ready 才开始（否则进入时多一次"系统栏缩进"的视觉跳变）
-    var showControls by remember { mutableStateOf(false) }
+    val bookmarksByKey =
+        viewModel.resolvedBookmarks.associate { resolved ->
+            "local:${resolved.bookmark.id}" to resolved.bookmark
+        }
+    val presentationState =
+        when (val state = viewModel.state) {
+            ReaderUiState.Loading -> ReaderPresentationState.Loading
+            is ReaderUiState.Error -> ReaderPresentationState.Error(state.message)
+            is ReaderUiState.Ready ->
+                ReaderPresentationState.Ready(
+                    volume = state.volume,
+                    startPage = state.startPage,
+                    title = state.title,
+                    cacheKeyPrefix = "comic-$comicId",
+                )
+        }
+    val features =
+        ReaderPresentationFeatures(
+            thumbnails = viewModel.thumbnails,
+            bookmarkPages = viewModel.bookmarkPages.keys.toSet(),
+            bookmarks =
+                viewModel.resolvedBookmarks.map { resolved ->
+                    val bookmark = resolved.bookmark
+                    ReaderBookmarkItem(
+                        key = "local:${bookmark.id}",
+                        globalPage = resolved.globalPage,
+                        chapterIndex = bookmark.chapterIndex,
+                        pageIndex = bookmark.pageIndex,
+                        chapterTitle = bookmark.chapterTitle,
+                        stale = resolved.stale,
+                    )
+                },
+            favoritePages = viewModel.favoritePages.keys.toSet(),
+        )
+    val actions =
+        ReaderPresentationActions(
+            onNeedThumbnail = viewModel::requestThumbnail,
+            onToggleBookmark = viewModel::toggleBookmark,
+            onRemoveBookmark = { item ->
+                val bookmark = requireNotNull(bookmarksByKey[item.key]) { "Unknown bookmark" }
+                viewModel.removeBookmark(bookmark)
+                ReaderBookmarkUndo { viewModel.restoreBookmark(bookmark) }
+            },
+            onToggleFavorite = viewModel::toggleFavorite,
+            onSetCover = viewModel::setCurrentPageAsCover,
+            onPageChanged = viewModel::saveProgress,
+            onNavigateToModelDownload = onNavigateToModelDownload,
+            readerMessage = viewModel.readerMessage,
+            onReaderMessageConsumed = viewModel::consumeReaderMessage,
+        )
 
+    SharedReaderScreen(
+        state = presentationState,
+        features = features,
+        actions = actions,
+        onExit = {
+            viewModel.endReadingSession()
+            onBack()
+        },
+        onErrorAction = { onDone -> viewModel.removeFromShelf(onDone) },
+        errorBackLabel = "返回书架",
+        errorActionLabel = "从书架移除",
+        modifier = modifier,
+    )
+}
+
+@Composable
+internal fun SharedReaderScreen(
+    state: ReaderPresentationState,
+    features: ReaderPresentationFeatures,
+    actions: ReaderPresentationActions,
+    onExit: () -> Unit,
+    modifier: Modifier = Modifier,
+    chapterNavigation: ReaderChapterNavigation? = null,
+    onErrorAction: ((() -> Unit) -> Unit)? = null,
+    errorBackLabel: String = "返回",
+    errorActionLabel: String? = null,
+) {
+    var showControls by remember { mutableStateOf(false) }
     val view = LocalView.current
     val window = (view.context as? Activity)?.window
-
-    val readerMessage = viewModel.readerMessage
-
-    // 统一的退出路径：先结算阅读会话、恢复系统栏、再 pop。
-    // 若等离开组合后才恢复（onDispose），返回动画播完时 insets 才从 0 跳回，
-    // 书架顶栏会肉眼可见地向下弹一截；提前到退出瞬间恢复，
-    // 跳变发生在纯黑的阅读页上，视觉无感
     val exitReader = {
-        viewModel.endReadingSession()
         if (window != null) {
             WindowCompat.getInsetsController(window, view)
                 .show(WindowInsetsCompat.Type.systemBars())
         }
-        onBack()
+        onExit()
     }
 
-    // 系统返回手势/返回键也要走 exitReader，而不是让 Navigation 直接 pop
     BackHandler(onBack = exitReader)
-
     if (window != null) {
         DisposableEffect(showControls) {
             val controller = WindowCompat.getInsetsController(window, view)
@@ -195,7 +258,6 @@ fun ReaderScreen(
             }
             onDispose {}
         }
-        // 离开阅读页时恢复系统栏，否则书架也会卡在沉浸态
         DisposableEffect(Unit) {
             onDispose {
                 WindowCompat.getInsetsController(window, view)
@@ -207,44 +269,35 @@ fun ReaderScreen(
         onDispose { PaddleOcrEngine.releaseWhenIdle() }
     }
 
-    // 整个阅读页（含 Loading/Error）统一黑底：从书架进入只有一次
-    // 平滑的"渐入黑色"，不会出现 白→黑 的背景突变
     Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
-        Crossfade(targetState = viewModel.state, label = "reader-state") { s ->
-            when (s) {
-                ReaderUiState.Loading -> LoadingView(Modifier.fillMaxSize())
-                is ReaderUiState.Error ->
+        Crossfade(targetState = state, label = "reader-state") { current ->
+            when (current) {
+                ReaderPresentationState.Loading -> LoadingView(Modifier.fillMaxSize())
+                is ReaderPresentationState.Error ->
                     ErrorView(
-                        message = s.message,
+                        message = current.message,
                         onBack = exitReader,
-                        onRemove = { viewModel.removeFromShelf(onDone = exitReader) },
+                        backLabel = errorBackLabel,
+                        onRemove =
+                            onErrorAction?.let { action ->
+                                { action(exitReader) }
+                            },
+                        removeLabel = errorActionLabel,
                         modifier = Modifier.fillMaxSize(),
                     )
 
-                is ReaderUiState.Ready ->
+                is ReaderPresentationState.Ready ->
                     ComicPager(
-                        volume = s.volume,
-                        startPage = s.startPage,
-                        title = s.title,
-                        cacheKeyPrefix = "comic-$comicId",
-                        thumbnails = viewModel.thumbnails,
-                        bookmarkPages = viewModel.bookmarkPages,
-                        resolvedBookmarks = viewModel.resolvedBookmarks,
-                        staleBookmarkIds = viewModel.staleBookmarkIds.keys,
-                        favoritePages = viewModel.favoritePages,
-                        onNeedThumbnail = viewModel::requestThumbnail,
-                        onToggleBookmark = viewModel::toggleBookmark,
-                        onRemoveBookmark = viewModel::removeBookmark,
-                        onRestoreBookmark = viewModel::restoreBookmark,
-                        onToggleFavorite = viewModel::toggleFavorite,
-                        onSetCover = viewModel::setCurrentPageAsCover,
-                        onPageChanged = viewModel::saveProgress,
+                        volume = current.volume,
+                        startPage = current.startPage,
+                        title = current.title,
+                        cacheKeyPrefix = current.cacheKeyPrefix,
+                        features = features,
+                        actions = actions,
+                        chapterNavigation = chapterNavigation,
                         onBack = exitReader,
                         showControls = showControls,
                         onToggleControls = { showControls = !showControls },
-                        onNavigateToModelDownload = onNavigateToModelDownload,
-                        readerMessage = readerMessage,
-                        onReaderMessageConsumed = viewModel::consumeReaderMessage,
                         modifier = Modifier.fillMaxSize(),
                     )
             }
@@ -258,24 +311,12 @@ private fun ComicPager(
     startPage: Int,
     title: String,
     cacheKeyPrefix: String,
-    thumbnails: Map<Int, ImageBitmap>,
-    bookmarkPages: Map<Int, BookmarkEntity>,
-    resolvedBookmarks: List<ResolvedReaderBookmark>,
-    staleBookmarkIds: Set<Long>,
-    favoritePages: Map<Int, FavoritePageEntity>,
-    onNeedThumbnail: (Int) -> Unit,
-    onToggleBookmark: (Int) -> Unit,
-    onRemoveBookmark: suspend (BookmarkEntity) -> Unit,
-    onRestoreBookmark: suspend (BookmarkEntity) -> Unit,
-    onToggleFavorite: (Int) -> Unit,
-    onSetCover: (Int) -> Unit,
-    onPageChanged: (Int) -> Unit,
+    features: ReaderPresentationFeatures,
+    actions: ReaderPresentationActions,
+    chapterNavigation: ReaderChapterNavigation?,
     onBack: () -> Unit,
     showControls: Boolean,
     onToggleControls: () -> Unit,
-    onNavigateToModelDownload: () -> Unit,
-    readerMessage: String?,
-    onReaderMessageConsumed: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -296,7 +337,7 @@ private fun ComicPager(
     var zoomToggleAnchor by remember { mutableStateOf(Offset.Unspecified) }
     var activePanel by remember { mutableStateOf<ReaderPanel?>(null) }
     var chapterLayoutVersion by remember(volume) { mutableIntStateOf(0) }
-    val readerChapters by
+    val volumeChapters by
         produceState<List<ReaderChapterItem>?>(
             initialValue = null,
             key1 = volume,
@@ -305,13 +346,13 @@ private fun ComicPager(
                 value = loadReaderChapterItems(volume)
             }
         }
-    LaunchedEffect(readerChapters) {
-        if (readerChapters != null) chapterLayoutVersion++
+    LaunchedEffect(volumeChapters) {
+        if (volumeChapters != null) chapterLayoutVersion++
     }
     val ocrResults = remember { mutableStateMapOf<Int, OcrPageResult>() }
     val ocrResultOrder = remember { ArrayDeque<Int>() }
     val snackbarHostState = remember { SnackbarHostState() }
-    val bookmarkRemovalsInFlight = remember { mutableStateSetOf<Long>() }
+    val bookmarkRemovalsInFlight = remember { mutableStateSetOf<String>() }
     var bottomControlsHeightPx by remember { mutableIntStateOf(0) }
     var ocrProcessingPage by remember { mutableStateOf<Int?>(null) }
     var ocrSelection by remember { mutableStateOf(OcrSelectionSession()) }
@@ -341,7 +382,7 @@ private fun ComicPager(
                 // page source.
                 if (!isOcrModelReady(context.filesDir, variant)) {
                     pendingOcrPage = page
-                    onNavigateToModelDownload()
+                    actions.onNavigateToModelDownload()
                     ocrProcessingPage = null
                     return@launch
                 }
@@ -400,11 +441,12 @@ private fun ComicPager(
         }
     }
 
-    fun removeBookmark(bookmark: BookmarkEntity) {
-        if (!bookmarkRemovalsInFlight.add(bookmark.id)) return
+    fun removeBookmark(bookmark: ReaderBookmarkItem) {
+        val remove = actions.onRemoveBookmark ?: return
+        if (!bookmarkRemovalsInFlight.add(bookmark.key)) return
         scope.launch {
             try {
-                onRemoveBookmark(bookmark)
+                val undo = remove(bookmark)
                 val result =
                     snackbarHostState.showSnackbar(
                         message = "已移除书签",
@@ -412,7 +454,7 @@ private fun ComicPager(
                     )
                 if (result == SnackbarResult.ActionPerformed) {
                     try {
-                        onRestoreBookmark(bookmark)
+                        undo.restore()
                     } catch (error: Exception) {
                         if (error is CancellationException) throw error
                         snackbarHostState.showSnackbar("恢复书签失败")
@@ -422,7 +464,7 @@ private fun ComicPager(
                 if (error is CancellationException) throw error
                 snackbarHostState.showSnackbar("移除书签失败")
             } finally {
-                bookmarkRemovalsInFlight.remove(bookmark.id)
+                bookmarkRemovalsInFlight.remove(bookmark.key)
             }
         }
     }
@@ -461,6 +503,18 @@ private fun ComicPager(
         remember(chapterProgress, volume, chapterLayoutVersion) {
             volume.chapterTitle(chapterProgress.chapterIndex)
         }
+    val readerChapters =
+        if (chapterNavigation != null) chapterNavigation.chapters else volumeChapters
+    val readerChapterCount =
+        if (chapterNavigation != null) {
+            chapterNavigation.chapters?.size ?: (chapterNavigation.currentChapterIndex + 1)
+        } else {
+            volume.chapterCount
+        }
+    val currentReaderChapterIndex =
+        chapterNavigation?.currentChapterIndex ?: chapterProgress.chapterIndex
+    val currentReaderChapterTitle =
+        readerChapters?.getOrNull(currentReaderChapterIndex)?.title ?: chapterTitle
 
     // 翻页统一走"前进/后退"抽象：将来日漫右→左模式只需反转点按区到 delta 的映射
     val turnPage: (Int) -> Unit = { delta ->
@@ -471,7 +525,7 @@ private fun ComicPager(
     }
 
     LaunchedEffect(pagerState) {
-        snapshotFlow { pagerState.currentPage }.collect { page -> onPageChanged(page) }
+        snapshotFlow { pagerState.currentPage }.collect { page -> actions.onPageChanged(page) }
     }
 
     val activeOcrResult =
@@ -481,9 +535,9 @@ private fun ComicPager(
     val bottomControlsHeight = with(LocalDensity.current) { bottomControlsHeightPx.toDp() }
 
     SnackbarMessageEffect(
-        message = readerMessage,
+        message = actions.readerMessage,
         hostState = snackbarHostState,
-        onConsumed = onReaderMessageConsumed,
+        onConsumed = actions.onReaderMessageConsumed,
     )
 
     Box(
@@ -535,7 +589,7 @@ private fun ComicPager(
                 page = page,
                 currentPage = pagerState.currentPage,
                 cacheKeyPrefix = cacheKeyPrefix,
-                thumbnail = thumbnails[page],
+                thumbnail = features.thumbnails[page],
                 zoomToggleRequest = zoomToggleRequest,
                 zoomResetRequest = zoomResetRequest,
                 zoomTogglePage = zoomTogglePage,
@@ -658,8 +712,8 @@ private fun ComicPager(
         ) {
             val pageCountLabel = "${pagerState.currentPage + 1} / ${volume.totalPageCount}"
             val pageLabel =
-                if (volume.chapterCount > 1) {
-                    "$chapterTitle · $pageCountLabel"
+                if (readerChapterCount > 1) {
+                    "$currentReaderChapterTitle · $pageCountLabel"
                 } else {
                     pageCountLabel
                 }
@@ -675,10 +729,13 @@ private fun ComicPager(
         ReaderTopBar(
             visible = showControls && activeOcrResult == null,
             title = title,
-            isBookmarked = bookmarkPages.containsKey(pagerState.currentPage),
+            isBookmarked = pagerState.currentPage in features.bookmarkPages,
             isZoomed = zoomedPage == pagerState.currentPage,
             onBack = onBack,
-            onToggleBookmark = { onToggleBookmark(pagerState.currentPage) },
+            onToggleBookmark =
+                actions.onToggleBookmark?.let { toggle ->
+                    { toggle(pagerState.currentPage) }
+                },
             onResetZoom = {
                 zoomResetPage = pagerState.currentPage
                 zoomResetRequest++
@@ -693,10 +750,10 @@ private fun ComicPager(
                     ocrProcessingPage != pagerState.currentPage,
             pagerState = pagerState,
             pageCount = volume.totalPageCount,
-            chapterCount = volume.chapterCount,
-            thumbnails = thumbnails,
-            bookmarkPages = bookmarkPages,
-            onNeedThumbnail = onNeedThumbnail,
+            chapterCount = readerChapterCount,
+            thumbnails = features.thumbnails,
+            bookmarkPages = features.bookmarkPages,
+            onNeedThumbnail = actions.onNeedThumbnail,
             onPagesSelected = { activePanel = null },
             onHeightChanged = { bottomControlsHeightPx = it },
             activePanel = activePanel,
@@ -708,41 +765,56 @@ private fun ComicPager(
                     ReaderPanel.Chapters ->
                         ReaderChaptersPanelContent(
                             chapters = readerChapters,
-                            currentChapterIndex = chapterProgress.chapterIndex,
-                            onSelect = { page ->
+                            currentChapterIndex = currentReaderChapterIndex,
+                            onSelect = { chapterIndex ->
                                 activePanel = null
-                                scope.launch { pagerState.scrollToPage(page) }
+                                val externalNavigation = chapterNavigation
+                                if (externalNavigation != null) {
+                                    externalNavigation.onSelectChapter(chapterIndex)
+                                } else {
+                                    scope.launch {
+                                        pagerState.scrollToPage(
+                                            volume.chapterPageToGlobal(chapterIndex, 0)
+                                        )
+                                    }
+                                }
                             },
                         )
                     ReaderPanel.Bookmarks ->
                         ReaderBookmarksPanelContent(
-                            bookmarks = resolvedBookmarks,
-                            staleBookmarkIds = staleBookmarkIds,
-                            thumbnails = thumbnails,
-                            onNeedThumbnail = onNeedThumbnail,
+                            bookmarks = features.bookmarks,
+                            thumbnails = features.thumbnails,
+                            onNeedThumbnail = actions.onNeedThumbnail,
                             onSelect = { page ->
                                 activePanel = null
                                 scope.launch { pagerState.scrollToPage(page) }
                             },
                             removalsInFlight = bookmarkRemovalsInFlight,
-                            onRemove = ::removeBookmark,
+                            onRemove =
+                                if (actions.onRemoveBookmark == null) null else ::removeBookmark,
                         )
                     ReaderPanel.Tools ->
                         ReaderToolsPanelContent(
-                            isFavorite = favoritePages.containsKey(pagerState.currentPage),
+                            isFavorite = pagerState.currentPage in features.favoritePages,
                             ocrBusy = ocrProcessingPage != null,
-                            onToggleFavorite = {
-                                activePanel = null
-                                onToggleFavorite(pagerState.currentPage)
-                            },
+                            onToggleFavorite =
+                                actions.onToggleFavorite?.let { toggleFavorite ->
+                                    {
+                                        activePanel = null
+                                        toggleFavorite(pagerState.currentPage)
+                                    }
+                                },
                             onRecognizePage = {
                                 activePanel = null
                                 recognizePage(pagerState.currentPage)
                             },
-                            onSetCover = {
-                                activePanel = null
-                                onSetCover(pagerState.currentPage)
-                            },
+                            onSetCover =
+                                actions.onSetCover?.let { setCover ->
+                                    {
+                                        activePanel = null
+                                        setCover(pagerState.currentPage)
+                                    }
+                                },
                         )
                 }
             },
@@ -766,7 +838,7 @@ private fun ReaderTopBar(
     isBookmarked: Boolean,
     isZoomed: Boolean,
     onBack: () -> Unit,
-    onToggleBookmark: () -> Unit,
+    onToggleBookmark: (() -> Unit)?,
     onResetZoom: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -805,19 +877,21 @@ private fun ReaderTopBar(
                     Text(text = "100%", color = Color.White)
                 }
             }
-            IconButton(onClick = onToggleBookmark) {
-                Icon(
-                    painter =
-                        painterResource(
-                            if (isBookmarked) {
-                                R.drawable.ic_bookmark
-                            } else {
-                                R.drawable.ic_bookmark_border
-                            }
-                        ),
-                    contentDescription = if (isBookmarked) "移除当前页书签" else "添加当前页书签",
-                    tint = if (isBookmarked) accent else Color.White,
-                )
+            if (onToggleBookmark != null) {
+                IconButton(onClick = onToggleBookmark) {
+                    Icon(
+                        painter =
+                            painterResource(
+                                if (isBookmarked) {
+                                    R.drawable.ic_bookmark
+                                } else {
+                                    R.drawable.ic_bookmark_border
+                                }
+                            ),
+                        contentDescription = if (isBookmarked) "移除当前页书签" else "添加当前页书签",
+                        tint = if (isBookmarked) accent else Color.White,
+                    )
+                }
             }
         }
     }
@@ -833,7 +907,7 @@ private fun ReaderBottomControls(
     pageCount: Int,
     chapterCount: Int,
     thumbnails: Map<Int, ImageBitmap>,
-    bookmarkPages: Map<Int, BookmarkEntity>,
+    bookmarkPages: Set<Int>,
     onNeedThumbnail: (Int) -> Unit,
     onPagesSelected: () -> Unit,
     onHeightChanged: (Int) -> Unit,
@@ -1127,7 +1201,7 @@ private fun FilmstripRow(
     pageCount: Int,
     listState: LazyListState,
     thumbnails: Map<Int, ImageBitmap>,
-    bookmarkPages: Map<Int, BookmarkEntity>,
+    bookmarkPages: Set<Int>,
     onNeedThumbnail: (Int) -> Unit,
     currentPage: Int,
     accent: Color,
@@ -1152,9 +1226,8 @@ private fun FilmstripRow(
         //   下一次页码变化掐死重启，表现为抖动
         // - 目标就在屏幕内的近距离移动（如普通翻页）：动画滚动，平滑流动
         // - 目标在屏幕外（远跳）："剪辑式"跳转——先瞬移到目标同方向
-        //   一屏之外（用户感知不到），再动画滑完最后一屏。观感是一段
-        //   干脆的滑动到位，实际途经的格子只有十来个且已预热，
-        //   不会像全程 animateScrollToItem 那样逐格爬过几十个格子
+        //   Jump to one screen before the target, then animate only the final screenful. Visible
+        //   thumbnails load on demand without animateScrollToItem crawling through dozens of cells.
         val visibleItems = info.visibleItemsInfo
         val targetVisible = visibleItems.any { it.index == currentPage }
         when {
@@ -1193,7 +1266,7 @@ private fun FilmstripRow(
                 thumbnail = thumbnails[page],
                 onNeedThumbnail = onNeedThumbnail,
                 selected = page == currentPage,
-                bookmarked = bookmarkPages.containsKey(page),
+                bookmarked = page in bookmarkPages,
                 accent = accent,
                 onClick = { onPageSelected(page) },
             )
@@ -1212,8 +1285,7 @@ private fun FilmstripThumb(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    // 缓存未命中时向 ViewModel 要一次（预热通常已备好，这里兜底）；
-    // 重复请求由 ViewModel 去重，这里只管报告"我可见了"
+    // Request a missing thumbnail when its cell becomes visible. The ViewModel deduplicates work.
     if (thumbnail == null) {
         LaunchedEffect(page) { onNeedThumbnail(page) }
     }
@@ -1713,7 +1785,9 @@ private fun LoadingView(modifier: Modifier = Modifier) {
 private fun ErrorView(
     message: String,
     onBack: () -> Unit,
-    onRemove: () -> Unit,
+    backLabel: String,
+    onRemove: (() -> Unit)?,
+    removeLabel: String?,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -1725,11 +1799,13 @@ private fun ErrorView(
         Text(text = message, color = Color.White, style = MaterialTheme.typography.bodyLarge)
         Spacer(modifier = Modifier.height(16.dp))
         Button(onClick = onBack) {
-            Text("返回书架")
+            Text(backLabel)
         }
-        Spacer(modifier = Modifier.height(8.dp))
-        OutlinedButton(onClick = onRemove) {
-            Text("从书架移除")
+        if (onRemove != null && removeLabel != null) {
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedButton(onClick = onRemove) {
+                Text(removeLabel)
+            }
         }
     }
 }

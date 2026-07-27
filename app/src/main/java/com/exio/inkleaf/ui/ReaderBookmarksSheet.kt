@@ -41,20 +41,18 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.exio.inkleaf.R
-import com.exio.inkleaf.data.db.BookmarkEntity
 
 @Composable
 internal fun ColumnScope.ReaderBookmarksPanelContent(
-    bookmarks: List<ResolvedReaderBookmark>,
-    staleBookmarkIds: Set<Long>,
+    bookmarks: List<ReaderBookmarkItem>,
     thumbnails: Map<Int, ImageBitmap>,
     onNeedThumbnail: (Int) -> Unit,
     onSelect: (Int) -> Unit,
-    removalsInFlight: Set<Long>,
-    onRemove: (BookmarkEntity) -> Unit,
+    removalsInFlight: Set<String>,
+    onRemove: ((ReaderBookmarkItem) -> Unit)?,
 ) {
     var pendingStaleSelection by remember {
-        mutableStateOf<Pair<Int, BookmarkEntity>?>(null)
+        mutableStateOf<ReaderBookmarkItem?>(null)
     }
     val orderedBookmarks = bookmarks.sortedBy { it.globalPage }
 
@@ -78,33 +76,30 @@ internal fun ColumnScope.ReaderBookmarksPanelContent(
             ) {
                 items(
                     items = orderedBookmarks,
-                    key = { it.bookmark.id },
+                    key = { it.key },
                 ) { item ->
                     val globalPage = item.globalPage
-                    val bookmark = item.bookmark
-                    val stale = bookmark.id in staleBookmarkIds
                     ReaderBookmarkRow(
-                        bookmark = bookmark,
-                        globalPage = globalPage,
+                        bookmark = item,
                         thumbnail = thumbnails[globalPage],
-                        stale = stale,
-                        removalInFlight = bookmark.id in removalsInFlight,
+                        removalInFlight = item.key in removalsInFlight,
                         onNeedThumbnail = onNeedThumbnail,
                         onClick = {
-                            if (stale) {
-                                pendingStaleSelection = globalPage to bookmark
+                            if (item.stale) {
+                                pendingStaleSelection = item
                             } else {
                                 onSelect(globalPage)
                             }
                         },
-                        onRemove = { onRemove(bookmark) },
+                        onRemove = onRemove?.let { remove -> { remove(item) } },
                     )
                 }
             }
         }
     }
 
-    pendingStaleSelection?.let { (globalPage, _) ->
+    pendingStaleSelection?.let { bookmark ->
+        val globalPage = bookmark.globalPage
         AlertDialog(
             onDismissRequest = { pendingStaleSelection = null },
             title = { Text("源内容已变化") },
@@ -132,17 +127,15 @@ internal fun ColumnScope.ReaderBookmarksPanelContent(
 
 @Composable
 private fun ReaderBookmarkRow(
-    bookmark: BookmarkEntity,
-    globalPage: Int,
+    bookmark: ReaderBookmarkItem,
     thumbnail: ImageBitmap?,
-    stale: Boolean,
     removalInFlight: Boolean,
     onNeedThumbnail: (Int) -> Unit,
     onClick: () -> Unit,
-    onRemove: () -> Unit,
+    onRemove: (() -> Unit)?,
 ) {
-    if (!stale && thumbnail == null) {
-        LaunchedEffect(globalPage) { onNeedThumbnail(globalPage) }
+    if (!bookmark.stale && thumbnail == null) {
+        LaunchedEffect(bookmark.globalPage) { onNeedThumbnail(bookmark.globalPage) }
     }
 
     Surface(
@@ -166,10 +159,10 @@ private fun ReaderBookmarkRow(
                         .clip(RoundedCornerShape(8.dp))
                         .background(MaterialTheme.colorScheme.surfaceContainerHighest),
             ) {
-                if (!stale && thumbnail != null) {
+                if (!bookmark.stale && thumbnail != null) {
                     Image(
                         bitmap = thumbnail,
-                        contentDescription = "全书第 ${globalPage + 1} 页缩略图",
+                        contentDescription = "全书第 ${bookmark.globalPage + 1} 页缩略图",
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize(),
                     )
@@ -199,14 +192,15 @@ private fun ReaderBookmarkRow(
                 )
 
                 Text(
-                    text = "全书第 ${globalPage + 1} 页 · 章节第 ${bookmark.pageIndex + 1} 页",
+                    text =
+                        "全书第 ${bookmark.globalPage + 1} 页 · " + "章节第 ${bookmark.pageIndex + 1} 页",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
 
-                if (stale) {
+                if (bookmark.stale) {
                     Text(
                         text = "源内容已变化，当前页码为近似位置",
                         style = MaterialTheme.typography.labelSmall,
@@ -216,16 +210,18 @@ private fun ReaderBookmarkRow(
                 }
             }
 
-            IconButton(
-                onClick = onRemove,
-                enabled = !removalInFlight,
-            ) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_bookmark),
-                    contentDescription = "移除书签",
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(20.dp),
-                )
+            if (onRemove != null) {
+                IconButton(
+                    onClick = onRemove,
+                    enabled = !removalInFlight,
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_bookmark),
+                        contentDescription = "移除书签",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
             }
         }
     }

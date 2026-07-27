@@ -1,0 +1,11 @@
+{
+  "manifestVersion": 1,
+  "id": "io.inkleaf.fixture",
+  "name": "Inkleaf Fixture Source",
+  "version": "1.0.0",
+  "apiVersion": "1.0",
+  "capabilities": ["search", "detail", "chapters", "pages"],
+  "description": "A deterministic source used for manual plugin runtime checks.",
+  "icon": "assets/icon.txt",
+  "author": { "name": "Inkleaf" }
+}

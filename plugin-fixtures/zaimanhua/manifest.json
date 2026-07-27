@@ -1,0 +1,12 @@
+{
+  "manifestVersion": 1,
+  "id": "io.inkleaf.source.zaimanhua",
+  "name": "再漫画",
+  "version": "0.1.0",
+  "apiVersion": "1.2",
+  "capabilities": ["search", "detail", "chapters", "pages", "browse", "settings"],
+  "description": "再漫画 (zaimanhua) 在线漫画源。",
+  "author": {
+    "name": "Inkleaf"
+  }
+}

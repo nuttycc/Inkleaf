@@ -6,6 +6,13 @@ import com.exio.inkleaf.data.AlbumExporter
 import com.exio.inkleaf.data.AlbumRepository
 import com.exio.inkleaf.data.ComicRepository
 import com.exio.inkleaf.data.ReaderCache
+import com.exio.inkleaf.plugin.OnlineContentRepository
+import com.exio.inkleaf.plugin.PluginBrowseRepository
+import com.exio.inkleaf.plugin.PluginCatalog
+import com.exio.inkleaf.plugin.PluginManager
+import com.exio.inkleaf.plugin.PluginPackageStore
+import com.exio.inkleaf.plugin.PluginRuntimeManager
+import com.exio.inkleaf.plugin.PluginSettingsRepository
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -18,6 +25,37 @@ import kotlinx.coroutines.launch
 
 class InkleafApplication : Application() {
     internal val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val pluginPackageStore: PluginPackageStore by lazy {
+        PluginPackageStore(File(filesDir, "plugins"))
+    }
+    val pluginSettingsRepository: PluginSettingsRepository by lazy {
+        PluginSettingsRepository(this)
+    }
+    val pluginRuntimeManager: PluginRuntimeManager by lazy {
+        PluginRuntimeManager(
+            this,
+            pluginPackageStore,
+            settingsRepository = pluginSettingsRepository,
+        )
+    }
+    val pluginCatalog: PluginCatalog by lazy {
+        PluginCatalog(pluginRuntimeManager)
+    }
+    val pluginBrowseRepository: PluginBrowseRepository by lazy {
+        PluginBrowseRepository(File(cacheDir, "plugin-browse"), pluginCatalog::browse)
+    }
+    val pluginManager: PluginManager by lazy {
+        PluginManager(
+            this,
+            pluginPackageStore,
+            pluginRuntimeManager,
+            onlineContentRepository,
+            pluginSettingsRepository,
+        )
+    }
+    val onlineContentRepository: OnlineContentRepository by lazy {
+        OnlineContentRepository(File(filesDir, "online-content/state.json"))
+    }
     private lateinit var shelfWarmup: Deferred<Unit>
 
     override fun onCreate() {

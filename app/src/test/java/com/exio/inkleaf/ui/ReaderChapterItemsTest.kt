@@ -32,7 +32,6 @@ class ReaderChapterItemsTest {
                 chapterCount = 3,
                 titleOf = { index -> if (index == 0) "" else "Chapter ${index + 1}" },
                 pageCountOf = { index -> listOf(12, 0, -1)[index] },
-                startPageOf = { index -> listOf(0, 12, 12)[index] },
                 readableOf = { _, _ -> true },
             )
 
@@ -43,7 +42,6 @@ class ReaderChapterItemsTest {
         assertFalse(items[1].isReadable)
         assertFalse(items[2].isReadable)
         assertEquals(0, items[2].pageCount)
-        assertEquals(12, items[2].startPage)
     }
 
     @Test
@@ -61,7 +59,6 @@ class ReaderChapterItemsTest {
         assertEquals("第 1 章", items[0].title)
         assertEquals("第二章", items[1].title)
         assertEquals(listOf(0, 12, 0, 5), items.map { it.pageCount })
-        assertEquals(listOf(0, 0, 12, 12), items.map { it.startPage })
         assertEquals(listOf(false, true, false, true), items.map { it.isReadable })
         assertEquals(1, volume.metadataProbeCount)
         assertEquals(0, volume.individualReadabilityProbeCount)

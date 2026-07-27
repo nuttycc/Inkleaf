@@ -27,9 +27,9 @@ import com.exio.inkleaf.R
 internal fun ReaderToolsPanelContent(
     isFavorite: Boolean,
     ocrBusy: Boolean,
-    onToggleFavorite: () -> Unit,
+    onToggleFavorite: (() -> Unit)?,
     onRecognizePage: () -> Unit,
-    onSetCover: () -> Unit,
+    onSetCover: (() -> Unit)?,
 ) {
     Column(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
         ReaderAttachedPanelHeader(title = ReaderPanel.Tools.title())
@@ -46,7 +46,8 @@ internal fun ReaderToolsPanelContent(
                 subtitle = if (isFavorite) "取消收藏" else "存入全书收藏集",
                 icon = if (isFavorite) R.drawable.ic_favorite else R.drawable.ic_favorite_border,
                 isActive = isFavorite,
-                onClick = onToggleFavorite,
+                enabled = onToggleFavorite != null,
+                onClick = { onToggleFavorite?.invoke() },
                 modifier = Modifier.weight(1f),
             )
             ReaderToolCard(
@@ -60,21 +61,23 @@ internal fun ReaderToolsPanelContent(
             )
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
+        if (onSetCover != null) {
+            Spacer(modifier = Modifier.height(10.dp))
 
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-        ) {
-            ReaderToolCard(
-                label = "设为封面",
-                subtitle = "设置为漫画书缩略图",
-                icon = R.drawable.ic_image,
-                onClick = onSetCover,
-                modifier = Modifier.weight(1f),
-            )
-            // Balance the 2-column grid so the cover card stays at half width
-            Spacer(modifier = Modifier.weight(1f))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            ) {
+                ReaderToolCard(
+                    label = "设为封面",
+                    subtitle = "设置为漫画书缩略图",
+                    icon = R.drawable.ic_image,
+                    onClick = onSetCover,
+                    modifier = Modifier.weight(1f),
+                )
+                // Balance the 2-column grid so the cover card stays at half width
+                Spacer(modifier = Modifier.weight(1f))
+            }
         }
     }
 }

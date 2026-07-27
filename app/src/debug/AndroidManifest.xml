@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <!-- DUMP is granted to ADB shell but not to ordinary apps. -->
+        <receiver
+            android:name="com.exio.inkleaf.plugin.AdbPluginInstallReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
+        <activity
+            android:name="com.exio.inkleaf.debug.PluginDiagnosticActivity"
+            android:exported="true"
+            android:label="Plugin diagnostics"
+            android:theme="@style/Theme.Inkleaf" />
+        <activity
+            android:name="com.exio.inkleaf.debug.JavaScriptEngineDiagnosticActivity"
+            android:exported="true"
+            android:label="JavaScriptEngine diagnostics"
+            android:theme="@style/Theme.Inkleaf">
+            <intent-filter>
+                <action android:name="com.exio.inkleaf.action.JS_DIAGNOSTIC" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>

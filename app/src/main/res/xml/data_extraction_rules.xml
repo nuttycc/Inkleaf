@@ -16,6 +16,10 @@
         <exclude
             domain="file"
             path="ai_enhanced_images/" />
+        <!-- Error reports are device-local diagnostics and can contain exception details. -->
+        <exclude
+            domain="file"
+            path="errors.log" />
         <!-- TODO: Use <include> and <exclude> to control what is backed up.
         <include .../>
         <exclude .../>
@@ -31,5 +35,8 @@
         <exclude
             domain="file"
             path="ai_enhanced_images/" />
+        <exclude
+            domain="file"
+            path="errors.log" />
     </device-transfer>
 </data-extraction-rules>

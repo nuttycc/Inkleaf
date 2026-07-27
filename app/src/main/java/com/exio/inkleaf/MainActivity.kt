@@ -63,10 +63,16 @@ import com.exio.inkleaf.ui.AlbumEditorScreen
 import com.exio.inkleaf.ui.FavoriteViewerScreen
 import com.exio.inkleaf.ui.HistoryScreen
 import com.exio.inkleaf.ui.OcrModelDownloadScreen
+import com.exio.inkleaf.ui.OnlineComicScreen
+import com.exio.inkleaf.ui.OnlineReaderScreen
+import com.exio.inkleaf.ui.OnlineReaderTarget
+import com.exio.inkleaf.ui.PluginDiscoverScreen
 import com.exio.inkleaf.ui.ReaderScreen
 import com.exio.inkleaf.ui.SavedScreen
 import com.exio.inkleaf.ui.SettingsScreen
 import com.exio.inkleaf.ui.ShelfScreen
+import com.exio.inkleaf.ui.SourceDetailScreen
+import com.exio.inkleaf.ui.SourcesScreen
 import com.exio.inkleaf.ui.ThemeSettingsScreen
 import com.exio.inkleaf.ui.theme.InkleafTheme
 import kotlin.time.Duration.Companion.milliseconds
@@ -98,6 +104,41 @@ import kotlinx.serialization.Serializable
 
 @Serializable data object OcrModelDownloadRoute
 
+@Serializable data object PluginDiscoverRoute
+
+@Serializable data object SourcesRoute
+
+@Serializable data class SourceDetailRoute(val pluginId: String)
+
+@Serializable
+data class OnlineComicRoute(
+    val pluginId: String,
+    val sourceId: String,
+    val opaqueContextJson: String? = null,
+)
+
+@Serializable
+data class OnlineReaderRoute(
+    val pluginId: String,
+    val sourceId: String,
+    val chapterId: String,
+    val chapterRevision: String? = null,
+    val opaqueContextJson: String? = null,
+    val initialPageId: String? = null,
+    val initialPageIndex: Int? = null,
+)
+
+private fun OnlineReaderTarget.toRoute(): OnlineReaderRoute =
+    OnlineReaderRoute(
+        pluginId = pluginId,
+        sourceId = sourceId,
+        chapterId = chapterId,
+        chapterRevision = chapterRevision,
+        opaqueContextJson = opaqueContextJson,
+        initialPageId = initialPageId,
+        initialPageIndex = initialPageIndex,
+    )
+
 /** 外层壳↔二级：全宽滑动的运动量大，350~450ms 区间体感比较合适 */
 private const val NAV_TRANSITION_MS = 400
 
@@ -109,6 +150,7 @@ private enum class TopLevelDestination {
     SHELF,
     HISTORY,
     FAVORITES,
+    DISCOVER,
 }
 
 private data class ExternalOpenRequest(val id: Long, val uri: Uri)
@@ -136,10 +178,12 @@ private fun InkleafBottomBar(
     onOpenShelf: () -> Unit,
     onOpenHistory: () -> Unit,
     onSelectFavorites: () -> Unit,
+    onOpenDiscover: () -> Unit,
 ) {
     val shelfSelected = selectedDestination == TopLevelDestination.SHELF
     val historySelected = selectedDestination == TopLevelDestination.HISTORY
     val favoritesSelected = selectedDestination == TopLevelDestination.FAVORITES
+    val discoverSelected = selectedDestination == TopLevelDestination.DISCOVER
 
     Box(
         modifier =
@@ -194,7 +238,18 @@ private fun InkleafBottomBar(
                     tint = tint,
                 )
             }
-            CompactBottomBarPlaceholder(iconRes = R.drawable.ic_tune)
+            CompactBottomBarItem(
+                selected = discoverSelected,
+                onClick = {
+                    if (!discoverSelected) onOpenDiscover()
+                },
+            ) { tint ->
+                Icon(
+                    painter = painterResource(R.drawable.ic_tune),
+                    contentDescription = "发现",
+                    tint = tint,
+                )
+            }
         }
     }
 }
@@ -205,6 +260,7 @@ private fun TopLevelScaffold(
     onOpenShelf: () -> Unit,
     onOpenHistory: () -> Unit,
     onSelectFavorites: () -> Unit,
+    onOpenDiscover: () -> Unit,
     content: @Composable (PaddingValues) -> Unit,
 ) {
     Scaffold(
@@ -217,6 +273,7 @@ private fun TopLevelScaffold(
                 onOpenShelf = onOpenShelf,
                 onOpenHistory = onOpenHistory,
                 onSelectFavorites = onSelectFavorites,
+                onOpenDiscover = onOpenDiscover,
             )
         },
         content = content,
@@ -416,6 +473,8 @@ class MainActivity : AppCompatActivity() {
                                         TopLevelDestination.HISTORY
                                     innerDestination?.hasRoute<FavoritesRoute>() == true ->
                                         TopLevelDestination.FAVORITES
+                                    innerDestination?.hasRoute<PluginDiscoverRoute>() == true ->
+                                        TopLevelDestination.DISCOVER
                                     else -> TopLevelDestination.SHELF
                                 }
                             // 收藏查看结果写在外层 Shell entry 上，再桥进内层已保存页
@@ -434,6 +493,9 @@ class MainActivity : AppCompatActivity() {
                                 },
                                 onSelectFavorites = {
                                     innerNavController.navigateTopLevel(FavoritesRoute)
+                                },
+                                onOpenDiscover = {
+                                    innerNavController.navigateTopLevel(PluginDiscoverRoute)
                                 },
                             ) { topLevelPadding ->
                                 NavHost(
@@ -467,7 +529,10 @@ class MainActivity : AppCompatActivity() {
                                                 outerNavController.navigate(
                                                     ReaderRoute(comicId, page)
                                                 )
-                                            }
+                                            },
+                                            onOpenOnlineSession = { target ->
+                                                outerNavController.navigate(target.toRoute())
+                                            },
                                         )
                                     }
                                     composable<FavoritesRoute> {
@@ -476,6 +541,9 @@ class MainActivity : AppCompatActivity() {
                                                 outerNavController.navigate(
                                                     ReaderRoute(comicId, globalPage)
                                                 )
+                                            },
+                                            onOpenOnlinePage = { target ->
+                                                outerNavController.navigate(target.toRoute())
                                             },
                                             onOpenFavorite = { id ->
                                                 outerNavController.navigate(FavoriteViewerRoute(id))
@@ -486,6 +554,23 @@ class MainActivity : AppCompatActivity() {
                                                     FAVORITES_RESULT_MESSAGE_KEY,
                                                     null,
                                                 )
+                                            },
+                                        )
+                                    }
+                                    composable<PluginDiscoverRoute> {
+                                        PluginDiscoverScreen(
+                                            onOpenComic = { pluginId, comic ->
+                                                outerNavController.navigate(
+                                                    OnlineComicRoute(
+                                                        pluginId = pluginId,
+                                                        sourceId = comic.sourceId,
+                                                        opaqueContextJson =
+                                                            comic.opaqueContext?.toString(),
+                                                    )
+                                                )
+                                            },
+                                            onOpenSources = {
+                                                outerNavController.navigate(SourcesRoute)
                                             },
                                         )
                                     }
@@ -554,6 +639,57 @@ class MainActivity : AppCompatActivity() {
                         }
                         composable<OcrModelDownloadRoute> {
                             OcrModelDownloadScreen(onBack = { outerNavController.popBackStack() })
+                        }
+                        composable<SourcesRoute> {
+                            SourcesScreen(
+                                onBack = { outerNavController.popBackStack() },
+                                onOpenSource = { pluginId ->
+                                    outerNavController.navigate(SourceDetailRoute(pluginId))
+                                },
+                            )
+                        }
+                        composable<SourceDetailRoute> { entry ->
+                            val route = entry.toRoute<SourceDetailRoute>()
+                            SourceDetailScreen(
+                                pluginId = route.pluginId,
+                                onBack = { outerNavController.popBackStack() },
+                            )
+                        }
+                        composable<OnlineComicRoute> { entry ->
+                            val route = entry.toRoute<OnlineComicRoute>()
+                            OnlineComicScreen(
+                                pluginId = route.pluginId,
+                                sourceId = route.sourceId,
+                                opaqueContextJson = route.opaqueContextJson,
+                                onBack = { outerNavController.popBackStack() },
+                                onOpenChapter = { chapter, effectiveContext ->
+                                    outerNavController.navigate(
+                                        OnlineReaderRoute(
+                                            pluginId = route.pluginId,
+                                            sourceId = route.sourceId,
+                                            chapterId = chapter.chapterId,
+                                            chapterRevision = chapter.revision,
+                                            opaqueContextJson = effectiveContext?.toString(),
+                                        )
+                                    )
+                                },
+                            )
+                        }
+                        composable<OnlineReaderRoute> { entry ->
+                            val route = entry.toRoute<OnlineReaderRoute>()
+                            OnlineReaderScreen(
+                                pluginId = route.pluginId,
+                                sourceId = route.sourceId,
+                                chapterId = route.chapterId,
+                                chapterRevision = route.chapterRevision,
+                                opaqueContextJson = route.opaqueContextJson,
+                                initialPageId = route.initialPageId,
+                                initialPageIndex = route.initialPageIndex,
+                                onBack = { outerNavController.popBackStack() },
+                                onNavigateToModelDownload = {
+                                    outerNavController.navigate(OcrModelDownloadRoute)
+                                },
+                            )
                         }
                     }
                 }

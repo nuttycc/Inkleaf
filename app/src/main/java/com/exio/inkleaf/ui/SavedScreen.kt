@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
@@ -29,6 +28,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
@@ -54,10 +54,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
@@ -76,6 +78,33 @@ internal data class SavedBookmarkGroup(
     val latestAddedAt: Long,
     val bookmarks: List<BookmarkWithComic>,
 )
+
+internal data class OnlineSavedBookmarkGroup(
+    val key: String,
+    val title: String,
+    val latestAddedAt: Long,
+    val bookmarks: List<OnlineSavedBookmarkUi>,
+)
+
+private val onlineBookmarkComparator =
+    Comparator<OnlineSavedBookmarkUi> { left, right ->
+        val chapterOrder =
+            when {
+                left.chapterIndex != null && right.chapterIndex != null ->
+                    left.chapterIndex.compareTo(right.chapterIndex)
+                left.chapterIndex != null -> -1
+                right.chapterIndex != null -> 1
+                else -> right.addedAtMs.compareTo(left.addedAtMs)
+            }
+        if (chapterOrder != 0) return@Comparator chapterOrder
+
+        val chapterIdOrder = left.target.chapterId.compareTo(right.target.chapterId)
+        if (chapterIdOrder != 0) return@Comparator chapterIdOrder
+
+        val pageOrder = left.pageIndex.compareTo(right.pageIndex)
+        if (pageOrder != 0) return@Comparator pageOrder
+        left.key.compareTo(right.key)
+    }
 
 internal fun groupAndSortBookmarks(bookmarks: List<BookmarkWithComic>): List<SavedBookmarkGroup> =
     bookmarks
@@ -99,10 +128,26 @@ internal fun groupAndSortBookmarks(bookmarks: List<BookmarkWithComic>): List<Sav
                 .thenByDescending { group -> group.bookmarks.maxOf { it.bookmark.id } }
         )
 
+internal fun groupAndSortOnlineBookmarks(
+    bookmarks: List<OnlineSavedBookmarkUi>
+): List<OnlineSavedBookmarkGroup> =
+    bookmarks
+        .groupBy { "${it.target.pluginId}:${it.target.sourceId}" }
+        .map { (key, sourceBookmarks) ->
+            OnlineSavedBookmarkGroup(
+                key = key,
+                title = sourceBookmarks.first().title,
+                latestAddedAt = sourceBookmarks.maxOf { it.addedAtMs },
+                bookmarks = sourceBookmarks.sortedWith(onlineBookmarkComparator),
+            )
+        }
+        .sortedByDescending { it.latestAddedAt }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SavedScreen(
     onOpenBookmark: (comicId: Long, globalPage: Int) -> Unit,
+    onOpenOnlinePage: (OnlineReaderTarget) -> Unit,
     onOpenFavorite: (Long) -> Unit,
     modifier: Modifier = Modifier,
     viewerMessage: String? = null,
@@ -112,9 +157,16 @@ fun SavedScreen(
 ) {
     val bookmarks by savedViewModel.bookmarks.collectAsStateWithLifecycle()
     val favorites by favoritesViewModel.favorites.collectAsStateWithLifecycle()
+    val onlineBookmarks = savedViewModel.onlineBookmarks
+    val onlineFavorites = savedViewModel.onlineFavorites
     val snackbarHostState = remember { SnackbarHostState() }
     var selectedTab by rememberSaveable { mutableIntStateOf(BOOKMARKS_TAB_INDEX) }
     var sourceChanged by remember { mutableStateOf<BookmarkResolution.SourceChanged?>(null) }
+
+    LifecycleResumeEffect(savedViewModel) {
+        savedViewModel.refreshOnlineRecords()
+        onPauseOrDispose {}
+    }
 
     SnackbarMessageEffect(
         message = favoritesViewModel.message,
@@ -139,6 +191,18 @@ fun SavedScreen(
                         )
                     if (result == SnackbarResult.ActionPerformed) {
                         savedViewModel.restore(event.bookmark)
+                    }
+                }
+
+                is SavedEvent.OnlineBookmarkRemoved -> {
+                    val result =
+                        snackbarHostState.showSnackbar(
+                            message = "已移除书签",
+                            actionLabel = "撤销",
+                            duration = SnackbarDuration.Long,
+                        )
+                    if (result == SnackbarResult.ActionPerformed) {
+                        savedViewModel.restoreOnlineBookmark(event.bookmark)
                     }
                 }
 
@@ -183,6 +247,7 @@ fun SavedScreen(
             BOOKMARKS_TAB_INDEX ->
                 BookmarksContent(
                     bookmarks = bookmarks,
+                    onlineBookmarks = onlineBookmarks,
                     thumbnailStates = savedViewModel.thumbnailStates,
                     onLoadThumbnail = savedViewModel::loadThumbnail,
                     onRemove = savedViewModel::remove,
@@ -205,13 +270,30 @@ fun SavedScreen(
                             }
                         }
                     },
+                    onOpenOnline = { item ->
+                        if (item.availability.canOpenReader()) {
+                            onOpenOnlinePage(item.target)
+                        } else {
+                            savedViewModel.showMessage(item.availability.displayLabel())
+                        }
+                    },
+                    onRemoveOnline = savedViewModel::removeOnlineBookmark,
                     modifier = Modifier.fillMaxSize().padding(innerPadding),
                 )
 
             else ->
                 FavoritesContent(
                     favorites = favorites,
+                    onlineFavorites = onlineFavorites,
                     onOpenFavorite = onOpenFavorite,
+                    onOpenOnlineFavorite = { item ->
+                        if (item.availability.canOpenReader()) {
+                            onOpenOnlinePage(item.target)
+                        } else {
+                            savedViewModel.showMessage(item.availability.displayLabel())
+                        }
+                    },
+                    onRemoveOnlineFavorite = savedViewModel::removeOnlineFavorite,
                     modifier = Modifier.fillMaxSize().padding(innerPadding),
                 )
         }
@@ -244,19 +326,27 @@ fun SavedScreen(
 @Composable
 private fun BookmarksContent(
     bookmarks: List<BookmarkWithComic>?,
+    onlineBookmarks: List<OnlineSavedBookmarkUi>?,
     thumbnailStates: Map<Long, BookmarkThumbnailState>,
     onLoadThumbnail: (BookmarkEntity) -> Unit,
     onRemove: (BookmarkEntity) -> Unit,
     onOpen: (BookmarkEntity) -> Unit,
+    onOpenOnline: (OnlineSavedBookmarkUi) -> Unit,
+    onRemoveOnline: (OnlineSavedBookmarkUi) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     when {
-        bookmarks == null -> Box(modifier = modifier)
+        bookmarks == null && onlineBookmarks == null -> Box(modifier = modifier)
 
-        bookmarks.isEmpty() -> EmptyBookmarks(modifier = modifier)
+        bookmarks.orEmpty().isEmpty() && onlineBookmarks.orEmpty().isEmpty() ->
+            EmptyBookmarks(modifier = modifier)
 
         else -> {
-            val groups = remember(bookmarks) { groupAndSortBookmarks(bookmarks) }
+            val groups = remember(bookmarks) { groupAndSortBookmarks(bookmarks.orEmpty()) }
+            val onlineGroups =
+                remember(onlineBookmarks) {
+                    groupAndSortOnlineBookmarks(onlineBookmarks.orEmpty())
+                }
             LazyColumn(modifier = modifier) {
                 groups.forEach { group ->
                     item(key = "header-${group.comicId}") {
@@ -275,7 +365,160 @@ private fun BookmarksContent(
                         )
                     }
                 }
+                onlineGroups.forEach { group ->
+                    item(key = "online-header-${group.key}") {
+                        OnlineBookmarkGroupHeader(group)
+                    }
+                    items(group.bookmarks, key = { it.key }) { item ->
+                        OnlineBookmarkRow(
+                            item = item,
+                            onClick = { onOpenOnline(item) },
+                            onRemove = { onRemoveOnline(item) },
+                        )
+                    }
+                }
             }
+        }
+    }
+}
+
+@Composable
+private fun OnlineBookmarkGroupHeader(group: OnlineSavedBookmarkGroup) {
+    val unavailable = group.bookmarks.none { it.availability.canOpenReader() }
+    Row(
+        modifier =
+            Modifier.fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surfaceContainer)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = group.title,
+            style = MaterialTheme.typography.titleMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            text = if (unavailable) "来源不可用" else "${group.bookmarks.size} 个书签",
+            style = MaterialTheme.typography.labelMedium,
+            color =
+                if (unavailable) MaterialTheme.colorScheme.error
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun OnlineBookmarkRow(
+    item: OnlineSavedBookmarkUi,
+    onClick: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    val unavailable = !item.availability.canOpenReader()
+    var showMenu by remember { mutableStateOf(false) }
+    Row(
+        modifier =
+            Modifier.fillMaxWidth()
+                .clickable(onClick = onClick)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        OnlineBookmarkThumbnail(
+            item = item,
+            modifier =
+                Modifier.width(56.dp).aspectRatio(2f / 3f).alpha(if (unavailable) 0.55f else 1f),
+        )
+        Column(
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier.weight(1f).alpha(if (unavailable) 0.7f else 1f),
+        ) {
+            Text(
+                text = item.title,
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = "${item.chapterTitle} · 第 ${item.pageIndex + 1} 页",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (unavailable) {
+                Text(
+                    text = item.availability.displayLabel(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
+        Box(modifier = Modifier.align(Alignment.Bottom)) {
+            IconButton(
+                onClick = { showMenu = true },
+                modifier = Modifier.offset(x = 8.dp, y = 2.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.MoreVert,
+                    contentDescription = "书签操作",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+            DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                DropdownMenuItem(
+                    text = { Text("跳转到此页") },
+                    enabled = !unavailable,
+                    onClick = {
+                        showMenu = false
+                        onClick()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("取消书签") },
+                    onClick = {
+                        showMenu = false
+                        onRemove()
+                    },
+                )
+            }
+        }
+    }
+    HorizontalDivider(modifier = Modifier.padding(start = 84.dp))
+}
+
+@Composable
+private fun OnlineBookmarkThumbnail(
+    item: OnlineSavedBookmarkUi,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val request =
+        remember(item.cover) {
+            item.cover?.toImageRequest(context)
+        }
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier =
+            modifier
+                .clip(RoundedCornerShape(4.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        if (request != null) {
+            AsyncImage(
+                model = request,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            Text(
+                text = item.title.take(1),
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
@@ -355,17 +598,17 @@ private fun BookmarkRow(
             )
         }
         Box(modifier = Modifier.align(Alignment.Bottom)) {
-            Icon(
-                imageVector = Icons.Filled.MoreVert,
-                contentDescription = "书签操作",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier =
-                    Modifier.offset(x = 8.dp, y = 2.dp)
-                        .clip(CircleShape)
-                        .clickable { showMenu = true }
-                        .padding(4.dp)
-                        .size(16.dp),
-            )
+            IconButton(
+                onClick = { showMenu = true },
+                modifier = Modifier.offset(x = 8.dp, y = 2.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.MoreVert,
+                    contentDescription = "书签操作",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
             DropdownMenu(
                 expanded = showMenu,
                 onDismissRequest = { showMenu = false },

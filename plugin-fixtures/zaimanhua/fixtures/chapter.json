@@ -1,0 +1,26 @@
+{
+  "errno": 0,
+  "errmsg": "",
+  "data": {
+    "data": {
+      "chapter_id": 183982,
+      "comic_id": 86949,
+      "title": "14话",
+      "chapter_order": 16,
+      "direction": 1,
+      "page_url": [
+        "https://images.zaimanhua.com/img/chapterpic%2F43365%2F161441%2F1.jpg?sign=c3db9bd6424e2843b2a5a27f5103479c&t=1785146068",
+        "https://images.zaimanhua.com/img/chapterpic%2F43365%2F161441%2F2.jpg?sign=76c7220289729f79a62df46df3f9da19&t=1785146068",
+        "https://images.zaimanhua.com/img/chapterpic%2F43365%2F161441%2F3.jpg?sign=8fa0830708a4e32dc37a1233d9375578&t=1785146068"
+      ],
+      "picnum": 9,
+      "page_url_hd": [
+        "https://images.zaimanhua.com/img/chapterpic%2F43365%2F161441%2F1.jpg?sign=c3db9bd6424e2843b2a5a27f5103479c&t=1785146068",
+        "https://images.zaimanhua.com/img/chapterpic%2F43365%2F161441%2F2.jpg?sign=76c7220289729f79a62df46df3f9da19&t=1785146068",
+        "https://images.zaimanhua.com/img/chapterpic%2F43365%2F161441%2F3.jpg?sign=8fa0830708a4e32dc37a1233d9375578&t=1785146068"
+      ],
+      "comment_count": 0,
+      "canRead": true
+    }
+  }
+}

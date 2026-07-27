@@ -1,0 +1,90 @@
+{
+  "errno": 0,
+  "errmsg": "",
+  "data": {
+    "comicList": [
+      {
+        "id": 86949,
+        "name": "明魔录",
+        "authors": "李凌风",
+        "types": "冒险,热血,战争,武侠",
+        "status": "连载中",
+        "last_update_chapter_name": "14话",
+        "last_update_chapter_id": 183982,
+        "last_updatetime": 1785137332,
+        "cover": "https://images.zaimanhua.com/img/webpic/4/12457441782545251.jpg",
+        "comic_py": "mingmolu",
+        "isFee": false,
+        "hotNum": 0,
+        "authorTag": {
+          "id": 0,
+          "tagName": "",
+          "tagPy": ""
+        },
+        "authorTagList": [
+          {
+            "id": 0,
+            "tagName": "李凌风",
+            "tagPy": ""
+          }
+        ],
+        "copyright": 1
+      },
+      {
+        "id": 84761,
+        "name": "星河传说：抗争之焰",
+        "authors": "异风2000",
+        "types": "格斗,科幻,热血,战争",
+        "status": "连载中",
+        "last_update_chapter_name": "第05话 伤痛的过去",
+        "last_update_chapter_id": 191463,
+        "last_updatetime": 1785062217,
+        "cover": "https://images.zaimanhua.com/img/webpic/3/8769031784284074.jpg",
+        "comic_py": "xingxiechuanshuokangzhengzhiyan",
+        "isFee": false,
+        "hotNum": 0,
+        "authorTag": {
+          "id": 0,
+          "tagName": "",
+          "tagPy": ""
+        },
+        "authorTagList": [
+          {
+            "id": 0,
+            "tagName": "异风2000",
+            "tagPy": ""
+          }
+        ],
+        "copyright": 1
+      },
+      {
+        "id": 86625,
+        "name": "白骨精英",
+        "authors": "Docurro",
+        "types": "魔法,热血,搞笑,神鬼,宅系",
+        "status": "连载中",
+        "last_update_chapter_name": "9.是成仙？还是成为白骨精英",
+        "last_update_chapter_id": 189627,
+        "last_updatetime": 1784700972,
+        "cover": "https://images.zaimanhua.com/img/webpic/15/2866551779778818.jpg",
+        "comic_py": "baigujingying",
+        "isFee": false,
+        "hotNum": 0,
+        "authorTag": {
+          "id": 0,
+          "tagName": "",
+          "tagPy": ""
+        },
+        "authorTagList": [
+          {
+            "id": 0,
+            "tagName": "Docurro",
+            "tagPy": ""
+          }
+        ],
+        "copyright": 1
+      }
+    ],
+    "totalNum": 723
+  }
+}

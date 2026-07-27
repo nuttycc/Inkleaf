@@ -42,8 +42,7 @@ import kotlinx.coroutines.withContext
 internal data class ReaderChapterItem(
     val index: Int,
     val title: String,
-    val pageCount: Int,
-    val startPage: Int,
+    val pageCount: Int?,
     val isReadable: Boolean,
 )
 
@@ -52,17 +51,15 @@ internal fun shouldShowChapterMenu(chapterCount: Int): Boolean = chapterCount >=
 private fun readerChapterItem(
     index: Int,
     title: String,
-    pageCount: Int,
-    startPage: Int,
+    pageCount: Int?,
     isReadable: Boolean,
 ): ReaderChapterItem {
-    val normalizedPageCount = pageCount.coerceAtLeast(0)
+    val normalizedPageCount = pageCount?.coerceAtLeast(0)
     return ReaderChapterItem(
         index = index,
         title = title.ifBlank { "第 ${index + 1} 章" },
         pageCount = normalizedPageCount,
-        startPage = startPage,
-        isReadable = normalizedPageCount > 0 && isReadable,
+        isReadable = (normalizedPageCount == null || normalizedPageCount > 0) && isReadable,
     )
 }
 
@@ -70,7 +67,6 @@ internal fun buildReaderChapterItems(
     chapterCount: Int,
     titleOf: (Int) -> String,
     pageCountOf: (Int) -> Int,
-    startPageOf: (Int) -> Int,
     readableOf: ((index: Int, pageCount: Int) -> Boolean)? = null,
 ): List<ReaderChapterItem> =
     List(chapterCount) { index ->
@@ -79,7 +75,6 @@ internal fun buildReaderChapterItems(
             index = index,
             title = titleOf(index),
             pageCount = pageCount,
-            startPage = startPageOf(index),
             isReadable = readableOf?.invoke(index, pageCount) ?: true,
         )
     }
@@ -89,23 +84,18 @@ internal suspend fun loadReaderChapterItems(volume: ComicVolume): List<ReaderCha
         val chapterCount = volume.chapterCount
         val titles = Array(chapterCount) { "" }
         val pageCounts = IntArray(chapterCount)
-        val startPages = IntArray(chapterCount)
         val readable = BooleanArray(chapterCount)
         val metadata = volume.probeChapterMetadata()
-        var nextStartPage = 0
         for (index in 0 until chapterCount) {
             val chapterMetadata = metadata.getOrNull(index)
             titles[index] = volume.chapterTitle(index)
             pageCounts[index] = chapterMetadata?.pageCount?.coerceAtLeast(0) ?: 0
             readable[index] = chapterMetadata?.isReadable == true
-            startPages[index] = nextStartPage
-            nextStartPage += pageCounts[index]
         }
         buildReaderChapterItems(
             chapterCount = chapterCount,
             titleOf = { index -> titles[index] },
             pageCountOf = { index -> pageCounts[index] },
-            startPageOf = { index -> startPages[index] },
             readableOf = { index, _ -> readable[index] },
         )
     }
@@ -239,7 +229,7 @@ internal fun ReaderChapterRow(
         }
 
     Surface(
-        onClick = { onSelect(chapter.startPage) },
+        onClick = { onSelect(chapter.index) },
         enabled = chapter.isReadable,
         shape = RoundedCornerShape(14.dp),
         color = containerColor,
@@ -300,7 +290,8 @@ internal fun ReaderChapterRow(
                 )
             }
 
-            if (chapter.isReadable) {
+            val pageCount = chapter.pageCount
+            if (chapter.isReadable && pageCount != null) {
                 Surface(
                     shape = RoundedCornerShape(8.dp),
                     color =
@@ -312,7 +303,7 @@ internal fun ReaderChapterRow(
                     modifier = Modifier.padding(start = 8.dp),
                 ) {
                     Text(
-                        text = "${chapter.pageCount} 页",
+                        text = "$pageCount 页",
                         style = MaterialTheme.typography.labelSmall,
                         color =
                             if (isCurrent) {
