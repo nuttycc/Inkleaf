@@ -484,6 +484,7 @@ class PluginRuntimeManager(
                         plugin.state.pluginId,
                         plugin.directory,
                         globalHttpSemaphore = globalHttpSemaphore,
+                        networkContext = context,
                         settingsReader = { pluginId, settingId ->
                             settingsRepository?.resolve(pluginId, settingId)
                         },

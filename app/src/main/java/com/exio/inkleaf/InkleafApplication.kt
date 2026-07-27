@@ -2,6 +2,8 @@ package com.exio.inkleaf
 
 import android.app.Application
 import android.util.Log
+import coil.ImageLoader
+import coil.ImageLoaderFactory
 import com.exio.inkleaf.data.AlbumExporter
 import com.exio.inkleaf.data.AlbumRepository
 import com.exio.inkleaf.data.ComicRepository
@@ -10,10 +12,12 @@ import com.exio.inkleaf.plugin.OnlineContentRepository
 import com.exio.inkleaf.plugin.PluginBrowseRepository
 import com.exio.inkleaf.plugin.PluginCatalog
 import com.exio.inkleaf.plugin.PluginManager
+import com.exio.inkleaf.plugin.PluginNetworkPolicy
 import com.exio.inkleaf.plugin.PluginPackageStore
 import com.exio.inkleaf.plugin.PluginRuntimeManager
 import com.exio.inkleaf.plugin.PluginSettingsRepository
 import java.io.File
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
@@ -22,8 +26,10 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import okhttp3.Call
+import okhttp3.OkHttpClient
 
-class InkleafApplication : Application() {
+class InkleafApplication : Application(), ImageLoaderFactory {
     internal val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val pluginPackageStore: PluginPackageStore by lazy {
         PluginPackageStore(File(filesDir, "plugins"))
@@ -56,7 +62,22 @@ class InkleafApplication : Application() {
     val onlineContentRepository: OnlineContentRepository by lazy {
         OnlineContentRepository(File(filesDir, "online-content/state.json"))
     }
+    internal val onlineImageCallFactory: Call.Factory by lazy {
+        val client =
+            OkHttpClient.Builder()
+                .connectTimeout(10, TimeUnit.SECONDS)
+                .readTimeout(30, TimeUnit.SECONDS)
+                .build()
+        PluginNetworkPolicy.createCallFactory(
+            this,
+            client,
+            followSslRedirects = true,
+        )
+    }
     private lateinit var shelfWarmup: Deferred<Unit>
+
+    override fun newImageLoader(): ImageLoader =
+        ImageLoader.Builder(this).callFactory { onlineImageCallFactory }.build()
 
     override fun onCreate() {
         super.onCreate()

@@ -10,7 +10,6 @@ import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.suspendCancellableCoroutine
 import okhttp3.Call
 import okhttp3.Callback
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.ResponseBody
@@ -22,7 +21,7 @@ internal class OnlineChapterVolume(
     private val title: String,
     override val sourceRevision: String,
     internal val pages: List<PageDescriptor>,
-    private val client: OkHttpClient,
+    private val client: Call.Factory,
 ) : ComicVolume {
     private val closed = AtomicBoolean(false)
     private val calls = ConcurrentHashMap.newKeySet<Call>()

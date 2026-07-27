@@ -19,7 +19,11 @@ class PluginManager(
     private val onlineContentRepository: OnlineContentRepository? = null,
     private val settingsRepository: PluginSettingsRepository? = null,
     private val downloader: PluginPackageDownloader =
-        PluginPackageDownloader(OkHttpClient(), File(context.cacheDir, "plugin-downloads")),
+        PluginPackageDownloader(
+            OkHttpClient(),
+            File(context.cacheDir, "plugin-downloads"),
+            networkContext = context,
+        ),
 ) {
     private val installUrlLocks = Array(INSTALL_URL_LOCK_COUNT) { Mutex() }
 

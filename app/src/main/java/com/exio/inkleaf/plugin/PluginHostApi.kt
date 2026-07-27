@@ -1,8 +1,8 @@
 package com.exio.inkleaf.plugin
 
+import android.content.Context
 import java.io.File
 import java.io.IOException
-import java.net.Proxy
 import java.nio.charset.StandardCharsets
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
@@ -125,6 +125,7 @@ class PluginHostSession(
         FilePluginLogger(pluginId, pluginDirectory.resolve("logs"), json, clockMs),
     private val globalHttpSemaphore: Semaphore = DEFAULT_GLOBAL_HTTP_SEMAPHORE,
     private val settingsReader: PluginSettingsReader = PluginSettingsReader { _, _ -> null },
+    private val networkContext: Context? = null,
 ) : PluginRpcHostHandler, AutoCloseable {
     private val closed = AtomicBoolean(false)
     private val lifecycleLock = Any()
@@ -136,13 +137,18 @@ class PluginHostSession(
     private val bodyHandles = ConcurrentHashMap<String, PluginBodyHandle>()
     private val httpClientDelegate = lazy {
         OkHttpClient.Builder()
-            .dns(PluginNetworkPolicy.publicDns)
-            .proxy(Proxy.NO_PROXY)
             .cookieJar(cookieJar)
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(20, TimeUnit.SECONDS)
             .writeTimeout(20, TimeUnit.SECONDS)
             .build()
+    }
+    private val httpCallFactoryDelegate = lazy {
+        PluginNetworkPolicy.createCallFactory(
+            networkContext,
+            httpClientDelegate.value,
+            followSslRedirects = true,
+        )
     }
     private val httpClient: OkHttpClient
         get() = httpClientDelegate.value
@@ -272,19 +278,19 @@ class PluginHostSession(
         }
         return globalHttpSemaphore.withPermit {
             httpSemaphore.withPermit {
-                val client =
+                val callFactory =
                     synchronized(lifecycleLock) {
                         if (closed.get()) throw hostError("Plugin host session is closed")
-                        httpClientDelegate.value
+                        httpCallFactoryDelegate.value
                     }
-                executeHttp(client, builder.build())
+                executeHttp(callFactory, builder.build())
             }
         }
     }
 
-    private suspend fun executeHttp(client: OkHttpClient, request: Request): PluginHttpResponse =
+    private suspend fun executeHttp(factory: Call.Factory, request: Request): PluginHttpResponse =
         suspendCancellableCoroutine { continuation ->
-            val call = client.newCall(request)
+            val call = factory.newCall(request)
             continuation.invokeOnCancellation { call.cancel() }
             try {
                 call.enqueue(

@@ -1,7 +1,11 @@
 package com.exio.inkleaf.plugin
 
 import java.net.InetAddress
+import java.net.Proxy
+import java.net.URI
 import java.net.UnknownHostException
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
@@ -65,6 +69,100 @@ class PluginNetworkPolicyTest {
                 listOf(address("127.0.0.1"), address("::1")),
             )
         }
+    }
+
+    @Test
+    fun `active VPN allows only hostname DNS answers from the fake IP benchmark range`() {
+        val fakeIp = address("198.18.0.60")
+
+        assertThrows(UnknownHostException::class.java) {
+            PluginNetworkPolicy.requirePublicAddresses(
+                "api.example.com",
+                listOf(fakeIp),
+            )
+        }
+        assertEquals(
+            listOf(fakeIp),
+            PluginNetworkPolicy.requirePublicAddresses(
+                "api.example.com",
+                listOf(fakeIp),
+                allowVpnFakeIp = true,
+            ),
+        )
+        assertThrows(UnknownHostException::class.java) {
+            PluginNetworkPolicy.requirePublicAddresses(
+                "198.18.0.60",
+                listOf(fakeIp),
+                allowVpnFakeIp = true,
+            )
+        }
+        assertThrows(UnknownHostException::class.java) {
+            PluginNetworkPolicy.requirePublicAddresses(
+                "api.example.com",
+                listOf(address("192.168.1.1")),
+                allowVpnFakeIp = true,
+            )
+        }
+    }
+
+    @Test
+    fun `IP literals are validated before OkHttp can bypass custom DNS`() {
+        PluginNetworkPolicy.requirePublicUrlHost("api.example.com")
+        PluginNetworkPolicy.requirePublicUrlHost("8.8.8.8")
+        PluginNetworkPolicy.requirePublicUrlHost("2606:4700:4700::1111")
+
+        listOf("127.0.0.1", "192.168.1.1", "198.18.0.60", "::1").forEach { literal ->
+            assertThrows(literal, UnknownHostException::class.java) {
+                PluginNetworkPolicy.requirePublicUrlHost(literal)
+            }
+        }
+    }
+
+    @Test
+    fun `policy proxy selector validates IP literals before route selection`() {
+        val client =
+            PluginNetworkPolicy.createCallFactory(null, OkHttpClient(), followSslRedirects = true)
+                as OkHttpClient
+        val selector = client.proxySelector
+
+        assertEquals(listOf(Proxy.NO_PROXY), selector.select(URI("https://public.example/")))
+        listOf("http://127.0.0.1/", "http://198.18.0.60/", "http://[::1]/").forEach { url ->
+            assertThrows(UnknownHostException::class.java) {
+                selector.select(URI(url))
+            }
+        }
+    }
+
+    @Test
+    fun `policy client rejects private IP literals before network execution`() {
+        val factory =
+            PluginNetworkPolicy.createCallFactory(null, OkHttpClient(), followSslRedirects = true)
+        val request = Request.Builder().url("http://127.0.0.1/admin").build()
+
+        assertThrows(UnknownHostException::class.java) {
+            factory.newCall(request).execute()
+        }
+    }
+
+    @Test
+    fun `policy preserves caller redirect settings and caps SSL redirects`() {
+        val noRedirects =
+            PluginNetworkPolicy.createCallFactory(
+                null,
+                OkHttpClient.Builder().followRedirects(false).followSslRedirects(false).build(),
+                followSslRedirects = true,
+            ) as OkHttpClient
+        assertFalse(noRedirects.followRedirects)
+        assertFalse(noRedirects.followSslRedirects)
+
+        val noSslRedirects =
+            PluginNetworkPolicy.createCallFactory(
+                null,
+                OkHttpClient(),
+                followSslRedirects = false,
+            ) as OkHttpClient
+        assertTrue(noSslRedirects.followRedirects)
+        assertFalse(noSslRedirects.followSslRedirects)
     }
 
     @Test
