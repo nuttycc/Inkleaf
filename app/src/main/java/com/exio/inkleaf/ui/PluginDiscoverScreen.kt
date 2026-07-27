@@ -974,8 +974,7 @@ private fun ComicCover(
         return
     }
 
-    val imageRequest =
-        remember(cover) { cover.toImageRequest(context, crossfadeMillis = 150) }
+    val imageRequest = remember(cover) { cover.toImageRequest(context, crossfadeMillis = 150) }
     AsyncImage(
         model = imageRequest,
         contentDescription = contentDescription,

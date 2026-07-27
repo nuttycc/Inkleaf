@@ -145,10 +145,7 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
             val result =
                 app().pluginCatalog.invokeAction(id, PluginActionRequest(actionId = action.id))
             // Only a top-level message has a defined UI representation.
-            _message.value =
-                SourceDetailFeedback(
-                    sourceActionMessage(result, action.title)
-                )
+            _message.value = SourceDetailFeedback(sourceActionMessage(result, action.title))
             // An action may alter plugin-owned state, so invalidate runtime-derived data now.
             app().pluginRuntimeManager.reload(id)
             app().pluginBrowseRepository.clear(id)
@@ -193,7 +190,8 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
         launchOperation("卸载漫画源") {
             settingsSaveMutex.withLock {
                 if (app().pluginManager.uninstall(id)) {
-                    // Uninstall clears settings, so the exit path must not touch the removed source.
+                    // Uninstall clears settings, so the exit path must not touch the removed
+                    // source.
                     markSettingsClean()
                     onDone()
                 }

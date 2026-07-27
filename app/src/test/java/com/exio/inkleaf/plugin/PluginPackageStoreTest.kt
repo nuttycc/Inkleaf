@@ -202,20 +202,22 @@ class PluginPackageStoreTest {
         }
 
     @Test
-    fun `corrupt state remains visible without hiding healthy plugins`() = withStore { store, temp ->
-        store.install(packageFile(temp, manifest(), "inkleaf.register({})"))
-        val corruptDirectory = temp.resolve("plugins/$CORRUPT_PLUGIN_ID")
-        assertTrue(corruptDirectory.mkdirs())
-        corruptDirectory.resolve("state.json").writeText("{not-json")
+    fun `corrupt state remains visible without hiding healthy plugins`() =
+        withStore { store, temp ->
+            store.install(packageFile(temp, manifest(), "inkleaf.register({})"))
+            val corruptDirectory = temp.resolve("plugins/$CORRUPT_PLUGIN_ID")
+            assertTrue(corruptDirectory.mkdirs())
+            corruptDirectory.resolve("state.json").writeText("{not-json")
 
-        val installed = store.list()
+            val installed = store.list()
 
-        assertEquals(listOf(CORRUPT_PLUGIN_ID, PLUGIN_ID), installed.map { it.state.pluginId })
-        val corrupt = requireNotNull(installed.firstOrNull { it.state.pluginId == CORRUPT_PLUGIN_ID })
-        assertEquals(PluginHealth.STORAGE_CORRUPT, corrupt.state.health)
-        assertTrue(corrupt.state.disabled)
-        assertNull(corrupt.manifest)
-    }
+            assertEquals(listOf(CORRUPT_PLUGIN_ID, PLUGIN_ID), installed.map { it.state.pluginId })
+            val corrupt =
+                requireNotNull(installed.firstOrNull { it.state.pluginId == CORRUPT_PLUGIN_ID })
+            assertEquals(PluginHealth.STORAGE_CORRUPT, corrupt.state.health)
+            assertTrue(corrupt.state.disabled)
+            assertNull(corrupt.manifest)
+        }
 
     private fun withStore(
         clockMs: () -> Long = { 10_000L },

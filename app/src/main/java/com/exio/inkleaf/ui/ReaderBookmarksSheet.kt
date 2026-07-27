@@ -193,8 +193,7 @@ private fun ReaderBookmarkRow(
 
                 Text(
                     text =
-                        "全书第 ${bookmark.globalPage + 1} 页 · " +
-                            "章节第 ${bookmark.pageIndex + 1} 页",
+                        "全书第 ${bookmark.globalPage + 1} 页 · " + "章节第 ${bookmark.pageIndex + 1} 页",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,

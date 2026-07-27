@@ -489,15 +489,15 @@ class PluginPackageStore(
         if (!file.isFile) return null
         val state =
             runCatching {
-                json.decodeFromString<PluginState>(file.readText(StandardCharsets.UTF_8))
-            }
-            .getOrElse {
-                throw PluginInstallException(
-                    PluginInstallErrorCode.STORAGE_FAILURE,
-                    "Invalid plugin state: ${file.path}",
-                    it,
-                )
-            }
+                    json.decodeFromString<PluginState>(file.readText(StandardCharsets.UTF_8))
+                }
+                .getOrElse {
+                    throw PluginInstallException(
+                        PluginInstallErrorCode.STORAGE_FAILURE,
+                        "Invalid plugin state: ${file.path}",
+                        it,
+                    )
+                }
         return normalizeVersionReferences(directory, state)
     }
 

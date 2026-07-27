@@ -209,14 +209,14 @@ class PluginBrowseRepositoryTest {
                         page("comic-1")
                     },
                 )
-            val refresh =
-                async { repository.refreshFirstPage(KEY, REQUEST, expectedRevision = null) }
+            val refresh = async {
+                repository.refreshFirstPage(KEY, REQUEST, expectedRevision = null)
+            }
             remoteStarted.await()
-            val clear =
-                async {
-                    clearStarted.complete(Unit)
-                    repository.clear(KEY.pluginId)
-                }
+            val clear = async {
+                clearStarted.complete(Unit)
+                repository.clear(KEY.pluginId)
+            }
             clearStarted.await()
 
             finishRemote.complete(Unit)

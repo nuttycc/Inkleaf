@@ -514,9 +514,7 @@ private fun SettingControl(
 
         "select" -> {
             var expanded by remember { mutableStateOf(false) }
-            val selectedTitle =
-                descriptor.options.firstOrNull { it.id == value }?.title
-                    ?: "未选择"
+            val selectedTitle = descriptor.options.firstOrNull { it.id == value }?.title ?: "未选择"
             Box {
                 ListItem(
                     supportingContent = { Text(selectedTitle) },

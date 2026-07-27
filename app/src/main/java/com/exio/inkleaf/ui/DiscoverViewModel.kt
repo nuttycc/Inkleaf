@@ -446,12 +446,11 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
         _isBrowsing.value = false
         browseFailure = null
 
-        val session =
-            key?.let { resolvedKey ->
-                browseSessions[resolvedKey]?.takeIf {
-                    it.cacheGeneration == repository.cacheGeneration(resolvedKey.pluginId)
-                }
+        val session = key?.let { resolvedKey ->
+            browseSessions[resolvedKey]?.takeIf {
+                it.cacheGeneration == repository.cacheGeneration(resolvedKey.pluginId)
             }
+        }
         if (key != null && session == null) browseSessions.remove(key)
         _browseItems.value = session?.items.orEmpty()
         _browseNextCursor.value = session?.nextCursor

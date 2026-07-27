@@ -119,8 +119,7 @@ fun OnlineComicScreen(
                     installed.firstOrNull { it.state.pluginId == pluginId }?.manifest?.name
                         ?: pluginId
                 val initialRecord = application.onlineContentRepository.get(pluginId, sourceId)
-                name to
-                    (initialRecord?.references?.contains(OnlineUserReference.BOOKMARK) == true)
+                name to (initialRecord?.references?.contains(OnlineUserReference.BOOKMARK) == true)
             }
         sourceName = loadedSourceName
         isBookmarked = initiallyBookmarked
@@ -185,8 +184,7 @@ fun OnlineComicScreen(
             detail = snapshot?.detail
             chapters = snapshot?.chapters.orEmpty()
             if (snapshot != null) {
-                val storedBookmarkState =
-                    snapshot.references.contains(OnlineUserReference.BOOKMARK)
+                val storedBookmarkState = snapshot.references.contains(OnlineUserReference.BOOKMARK)
                 isBookmarked = storedBookmarkState
                 persistedBookmarkState = storedBookmarkState
             }

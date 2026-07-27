@@ -118,9 +118,7 @@ internal class OnlineChapterVolume(
                 object : Callback {
                     override fun onFailure(call: Call, e: java.io.IOException) {
                         calls -= call
-                        continuation.resumeWithException(
-                            ComicOpenException(e.message ?: "页面下载失败")
-                        )
+                        continuation.resumeWithException(ComicOpenException(e.message ?: "页面下载失败"))
                     }
 
                     override fun onResponse(call: Call, response: Response) {
