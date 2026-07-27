@@ -64,8 +64,7 @@ private fun Context.appVersionNameOrUnknown(): String =
                         PackageManager.PackageInfoFlags.of(0),
                     )
                 } else {
-                    @Suppress("DEPRECATION")
-                    packageManager.getPackageInfo(packageName, 0)
+                    @Suppress("DEPRECATION") packageManager.getPackageInfo(packageName, 0)
                 }
             packageInfo.versionName
         }
@@ -82,8 +81,9 @@ internal fun buildAppErrorReport(
 ): AppErrorReport {
     val errorName = error::class.java.simpleName.ifBlank { error::class.java.name }
     val reason =
-        (error.message?.lineSequence()?.firstOrNull { it.isNotBlank() }?.trim() ?: errorName)
-            .take(MAX_ERROR_SUMMARY_CHARS)
+        (error.message?.lineSequence()?.firstOrNull { it.isNotBlank() }?.trim() ?: errorName).take(
+            MAX_ERROR_SUMMARY_CHARS
+        )
     val details = buildString {
         appendLine("Time: $timestamp")
         appendLine("App version: $appVersion")

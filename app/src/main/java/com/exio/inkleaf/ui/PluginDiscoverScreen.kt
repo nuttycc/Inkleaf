@@ -184,7 +184,8 @@ fun PluginDiscoverScreen(
     val reachedPrefetchEdge by remember {
         derivedStateOf {
             val info = gridState.layoutInfo
-            val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: return@derivedStateOf false
+            val lastVisible =
+                info.visibleItemsInfo.lastOrNull()?.index ?: return@derivedStateOf false
             lastVisible >= info.totalItemsCount - LOAD_MORE_PREFETCH
         }
     }
@@ -192,9 +193,7 @@ fun PluginDiscoverScreen(
     // 只监听 reachedPrefetchEdge 的话它不会二次变化，翻页就停在这里了
     LaunchedEffect(reachedPrefetchEdge, browseItems.size, browseNextCursor, mode) {
         if (
-            mode == DiscoverViewModel.Mode.BROWSE &&
-                reachedPrefetchEdge &&
-                browseNextCursor != null
+            mode == DiscoverViewModel.Mode.BROWSE && reachedPrefetchEdge && browseNextCursor != null
         ) {
             viewModel.loadMore(application.pluginBrowseRepository)
         }
@@ -773,10 +772,8 @@ private fun LazyGridScope.searchContent(
 
     visibleResults.forEach { result ->
         val sourceName =
-            installedPlugins
-                .firstOrNull { it.state.pluginId == result.pluginId }
-                ?.manifest
-                ?.name ?: result.pluginId
+            installedPlugins.firstOrNull { it.state.pluginId == result.pluginId }?.manifest?.name
+                ?: result.pluginId
 
         item(span = { GridItemSpan(maxLineSpan) }, key = "header_${result.pluginId}") {
             Text(
@@ -870,15 +867,17 @@ private fun DiscoverComicCard(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-                comic.subtitle?.takeIf { it.isNotBlank() }?.let { subtitle ->
-                    Text(
-                        text = subtitle,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
+                comic.subtitle
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { subtitle ->
+                        Text(
+                            text = subtitle,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
             }
         }
     }
@@ -887,8 +886,7 @@ private fun DiscoverComicCard(
 /**
  * 密度型信息行：无卡片、无阴影，靠分隔线切分，一屏能放下网格两倍的条目。
  *
- * 第三行放 tags 而不是源名：源名在这两种场景下都已由顶栏或分组标题给出，而 tags 是网格卡片
- * 塞不下、却真正帮人决定"要不要点进去"的信息。
+ * 第三行放 tags 而不是源名：源名在这两种场景下都已由顶栏或分组标题给出，而 tags 是网格卡片 塞不下、却真正帮人决定"要不要点进去"的信息。
  */
 @Composable
 private fun DiscoverComicRow(
@@ -898,14 +896,16 @@ private fun DiscoverComicRow(
 ) {
     Column(modifier = modifier.fillMaxWidth()) {
         Row(
-            modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 10.dp),
+            modifier =
+                Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 10.dp),
             horizontalArrangement = Arrangement.spacedBy(14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             ComicCover(
                 cover = comic.cover,
                 contentDescription = comic.title,
-                modifier = Modifier.size(width = 64.dp, height = 88.dp).clip(RoundedCornerShape(6.dp)),
+                modifier =
+                    Modifier.size(width = 64.dp, height = 88.dp).clip(RoundedCornerShape(6.dp)),
             )
 
             Column(
@@ -918,34 +918,35 @@ private fun DiscoverComicRow(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-                comic.subtitle?.takeIf { it.isNotBlank() }?.let { subtitle ->
-                    Text(
-                        text = subtitle,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                comic.tags.takeIf { it.isNotEmpty() }?.let { tags ->
-                    Text(
-                        text = tags.take(3).joinToString(" · "),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.outline,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
+                comic.subtitle
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { subtitle ->
+                        Text(
+                            text = subtitle,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                comic.tags
+                    .takeIf { it.isNotEmpty() }
+                    ?.let { tags ->
+                        Text(
+                            text = tags.take(3).joinToString(" · "),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
             }
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerHighest)
     }
 }
 
-/**
- * 封面图。网格卡片和信息行共用：插件封面往往需要 Referer 或自定义请求头才能取到图，
- * 这段逻辑复制两份就迟早会改一处漏一处。
- */
+/** 封面图。网格卡片和信息行共用：插件封面往往需要 Referer 或自定义请求头才能取到图， 这段逻辑复制两份就迟早会改一处漏一处。 */
 @Composable
 private fun ComicCover(
     cover: PageImage?,

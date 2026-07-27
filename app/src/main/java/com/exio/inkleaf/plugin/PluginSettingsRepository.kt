@@ -22,9 +22,9 @@ private val Context.pluginSettingsDataStore by preferencesDataStore(name = "plug
  * Plugins declare settings through describe(). The site-agnostic host persists user choices and
  * returns them through settings.get.
  *
- * Descriptor caching avoids a reentrant RPC: settings.get is called while plugin code awaits a
- * host response, so calling describe() at that point could deadlock. Isolate startup prewarms the
- * cache and settings.get remains a direct memory lookup.
+ * Descriptor caching avoids a reentrant RPC: settings.get is called while plugin code awaits a host
+ * response, so calling describe() at that point could deadlock. Isolate startup prewarms the cache
+ * and settings.get remains a direct memory lookup.
  *
  * The cache need not be persisted because a running plugin always passed isolate prewarming.
  */

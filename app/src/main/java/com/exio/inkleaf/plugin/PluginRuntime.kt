@@ -430,91 +430,95 @@ class PluginRuntimeManager(
     }
 
     private suspend fun runtimeFor(plugin: InstalledPlugin): AndroidJavaScriptPluginRuntime {
-        val (resolved, created) = lock.withLock {
-            check(!closed.get()) { "Plugin runtime manager is closed" }
-            val currentPlugin =
-                withContext(Dispatchers.IO) { store.get(plugin.state.pluginId) }
-                    ?: throw PluginRpcException(
-                        PluginRpcError(PluginErrorCode.NOT_FOUND, "Plugin is not installed")
+        val (resolved, created) =
+            lock.withLock {
+                check(!closed.get()) { "Plugin runtime manager is closed" }
+                val currentPlugin =
+                    withContext(Dispatchers.IO) { store.get(plugin.state.pluginId) }
+                        ?: throw PluginRpcException(
+                            PluginRpcError(PluginErrorCode.NOT_FOUND, "Plugin is not installed")
+                        )
+                if (currentPlugin.state.disabled) {
+                    throw PluginRpcException(
+                        PluginRpcError(PluginErrorCode.PLUGIN_DISABLED, "Plugin is disabled")
                     )
-            if (currentPlugin.state.disabled) {
-                throw PluginRpcException(
-                    PluginRpcError(PluginErrorCode.PLUGIN_DISABLED, "Plugin is disabled")
-                )
-            }
-            if (currentPlugin.state.health == PluginHealth.RUNTIME_UNHEALTHY) {
-                throw PluginRpcException(
-                    PluginRpcError(
-                        PluginErrorCode.RUNTIME_UNHEALTHY,
-                        "Plugin requires explicit recovery",
-                    )
-                )
-            }
-            if (currentPlugin.state.activeVersion != plugin.state.activeVersion) {
-                throw PluginRpcException(
-                    PluginRpcError(
-                        PluginErrorCode.RUNTIME_TERMINATED,
-                        "Plugin version changed while the invocation was waiting",
-                        retryable = true,
-                    )
-                )
-            }
-            runtimes[plugin.state.pluginId]?.let {
-                if (it.version == plugin.state.activeVersion) {
-                    runtimeLastUsed[plugin.state.pluginId] = accessCounter.incrementAndGet()
-                    return@withLock it to false
                 }
-                runtimes.remove(plugin.state.pluginId, it)
-                runtimeLastUsed.remove(plugin.state.pluginId)
-                it.closeOffMain()
-            }
-            evictIdleRuntimeLocked(plugin.state.pluginId)
-            val currentSandbox = ensureSandboxLocked()
-            val activeDirectory =
-                plugin.activeDirectory
-                    ?: throw PluginRpcException(
-                        PluginRpcError(PluginErrorCode.NOT_FOUND, "Plugin has no active version")
+                if (currentPlugin.state.health == PluginHealth.RUNTIME_UNHEALTHY) {
+                    throw PluginRpcException(
+                        PluginRpcError(
+                            PluginErrorCode.RUNTIME_UNHEALTHY,
+                            "Plugin requires explicit recovery",
+                        )
                     )
-            val hostSession =
-                PluginHostSession(
-                    plugin.state.pluginId,
-                    plugin.directory,
-                    globalHttpSemaphore = globalHttpSemaphore,
-                    settingsReader = { pluginId, settingId ->
-                        settingsRepository?.resolve(pluginId, settingId)
-                    },
-                )
-            lateinit var runtime: AndroidJavaScriptPluginRuntime
-            runtime =
-                AndroidJavaScriptPluginRuntime(
-                    pluginId = plugin.state.pluginId,
-                    version = plugin.state.activeVersion!!,
-                    versionDirectory = activeDirectory,
-                    sandbox = currentSandbox,
-                    callbackExecutor = callbackExecutor,
-                    hostSession = hostSession,
-                    onTerminated = { info ->
-                        callbackExecutor.execute {
-                            runBlocking {
-                                if (info?.status == TerminationInfo.STATUS_SANDBOX_DEAD) {
-                                    handleSandboxDeath()
-                                } else {
-                                    handleFatal(plugin.state.pluginId, runtime)
+                }
+                if (currentPlugin.state.activeVersion != plugin.state.activeVersion) {
+                    throw PluginRpcException(
+                        PluginRpcError(
+                            PluginErrorCode.RUNTIME_TERMINATED,
+                            "Plugin version changed while the invocation was waiting",
+                            retryable = true,
+                        )
+                    )
+                }
+                runtimes[plugin.state.pluginId]?.let {
+                    if (it.version == plugin.state.activeVersion) {
+                        runtimeLastUsed[plugin.state.pluginId] = accessCounter.incrementAndGet()
+                        return@withLock it to false
+                    }
+                    runtimes.remove(plugin.state.pluginId, it)
+                    runtimeLastUsed.remove(plugin.state.pluginId)
+                    it.closeOffMain()
+                }
+                evictIdleRuntimeLocked(plugin.state.pluginId)
+                val currentSandbox = ensureSandboxLocked()
+                val activeDirectory =
+                    plugin.activeDirectory
+                        ?: throw PluginRpcException(
+                            PluginRpcError(
+                                PluginErrorCode.NOT_FOUND,
+                                "Plugin has no active version",
+                            )
+                        )
+                val hostSession =
+                    PluginHostSession(
+                        plugin.state.pluginId,
+                        plugin.directory,
+                        globalHttpSemaphore = globalHttpSemaphore,
+                        settingsReader = { pluginId, settingId ->
+                            settingsRepository?.resolve(pluginId, settingId)
+                        },
+                    )
+                lateinit var runtime: AndroidJavaScriptPluginRuntime
+                runtime =
+                    AndroidJavaScriptPluginRuntime(
+                        pluginId = plugin.state.pluginId,
+                        version = plugin.state.activeVersion!!,
+                        versionDirectory = activeDirectory,
+                        sandbox = currentSandbox,
+                        callbackExecutor = callbackExecutor,
+                        hostSession = hostSession,
+                        onTerminated = { info ->
+                            callbackExecutor.execute {
+                                runBlocking {
+                                    if (info?.status == TerminationInfo.STATUS_SANDBOX_DEAD) {
+                                        handleSandboxDeath()
+                                    } else {
+                                        handleFatal(plugin.state.pluginId, runtime)
+                                    }
                                 }
                             }
-                        }
-                    },
-                )
-            try {
-                runtime.start()
-            } catch (error: Throwable) {
-                runtime.closeOffMain()
-                throw error
+                        },
+                    )
+                try {
+                    runtime.start()
+                } catch (error: Throwable) {
+                    runtime.closeOffMain()
+                    throw error
+                }
+                runtimes[plugin.state.pluginId] = runtime
+                runtimeLastUsed[plugin.state.pluginId] = accessCounter.incrementAndGet()
+                runtime to true
             }
-            runtimes[plugin.state.pluginId] = runtime
-            runtimeLastUsed[plugin.state.pluginId] = accessCounter.incrementAndGet()
-            runtime to true
-        }
         // Prewarm outside the non-reentrant lock because describe performs a plugin RPC.
         if (created) prewarmSettingDescriptors(resolved)
         return resolved

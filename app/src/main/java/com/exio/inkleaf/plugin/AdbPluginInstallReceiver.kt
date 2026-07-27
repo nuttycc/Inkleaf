@@ -35,7 +35,9 @@ class AdbPluginInstallReceiver : BroadcastReceiver() {
                 throw error
             } catch (error: Throwable) {
                 pending.setResultCode(Activity.RESULT_CANCELED)
-                pending.setResultData("ERROR|${sanitize(error.message ?: "Unknown installation error")}")
+                pending.setResultData(
+                    "ERROR|${sanitize(error.message ?: "Unknown installation error")}"
+                )
             } finally {
                 pending.finish()
             }
@@ -48,14 +50,19 @@ class AdbPluginInstallReceiver : BroadcastReceiver() {
         require(SESSION_PATTERN.matches(session)) { "Invalid transfer session" }
 
         val directory = File(app.cacheDir, STAGING_DIRECTORY)
-        require(directory.isDirectory || directory.mkdirs()) { "Unable to create staging directory" }
+        require(directory.isDirectory || directory.mkdirs()) {
+            "Unable to create staging directory"
+        }
         val encodedFile = File(directory, "$session.base64")
 
         return when (intent.getStringExtra(EXTRA_OPERATION)) {
             OPERATION_BEGIN -> {
-                directory.listFiles()?.filter { it.name != encodedFile.name }?.forEach { stale ->
-                    require(stale.delete()) { "Unable to clear a stale transfer file" }
-                }
+                directory
+                    .listFiles()
+                    ?.filter { it.name != encodedFile.name }
+                    ?.forEach { stale ->
+                        require(stale.delete()) { "Unable to clear a stale transfer file" }
+                    }
                 encodedFile.writeText("", StandardCharsets.US_ASCII)
                 "READY"
             }
@@ -96,7 +103,9 @@ class AdbPluginInstallReceiver : BroadcastReceiver() {
 
             val validation = PluginPackageValidator().validate(packageFile)
             val manifest = validation.packageContent?.manifest
-            require(validation.installable && manifest != null) { "Plugin package failed validation" }
+            require(validation.installable && manifest != null) {
+                "Plugin package failed validation"
+            }
             val expectedPluginId = intent.getStringExtra(EXTRA_EXPECTED_PLUGIN_ID)
             val expectedVersion = intent.getStringExtra(EXTRA_EXPECTED_VERSION)
             require(expectedPluginId.isNullOrBlank() || manifest.id == expectedPluginId) {
@@ -110,7 +119,9 @@ class AdbPluginInstallReceiver : BroadcastReceiver() {
             require(result.status != PluginInstallStatus.REJECTED) {
                 result.errorMessage ?: result.errorCode?.name ?: "Plugin installation was rejected"
             }
-            require(result.activatable) { "Plugin was installed but is incompatible with this host" }
+            require(result.activatable) {
+                "Plugin was installed but is incompatible with this host"
+            }
             return "${result.status}|${result.pluginId}|${result.version}"
         } finally {
             encodedFile.delete()

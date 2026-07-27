@@ -84,10 +84,7 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
             DiscoverLayoutSettings(),
         )
 
-    /**
-     * 下拉刷新指示器专用，与 isBrowsing 刻意分开：isBrowsing 在翻下一页时同样为 true，
-     * 共用一个标志会让触底加载把顶部的刷新圈也转起来。
-     */
+    /** 下拉刷新指示器专用，与 isBrowsing 刻意分开：isBrowsing 在翻下一页时同样为 true， 共用一个标志会让触底加载把顶部的刷新圈也转起来。 */
     private val _isRefreshing = MutableStateFlow(false)
     val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
 
@@ -164,10 +161,7 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
         _mode.value = Mode.SEARCH
     }
 
-    /**
-     * 退出搜索一并清空查询词与结果：顶栏变回源名后，搜索态在界面上再无任何可见承载，
-     * 留着它就成了用户看不见却仍会影响下一次搜索的隐藏状态。
-     */
+    /** 退出搜索一并清空查询词与结果：顶栏变回源名后，搜索态在界面上再无任何可见承载， 留着它就成了用户看不见却仍会影响下一次搜索的隐藏状态。 */
     fun exitSearch(browseRepository: PluginBrowseRepository) {
         _mode.value = Mode.BROWSE
         updateQuery("")
@@ -331,8 +325,8 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * 触底预取会在滚动中被反复调用，这里必须挡住重入：loadBrowsePage 会先 cancel 掉
-     * 正在跑的 browseJob，不挡的话每次调用都把上一次快取到手的请求掐掉，永远加载不完。
+     * 触底预取会在滚动中被反复调用，这里必须挡住重入：loadBrowsePage 会先 cancel 掉 正在跑的
+     * browseJob，不挡的话每次调用都把上一次快取到手的请求掐掉，永远加载不完。
      */
     fun loadMore(repository: PluginBrowseRepository) {
         if (_isBrowsing.value) return

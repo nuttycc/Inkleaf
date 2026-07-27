@@ -8,13 +8,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -38,7 +36,6 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -60,7 +57,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -282,7 +278,7 @@ fun SourceDetailScreen(
                     onClick = {
                         showResetConfirm = false
                         viewModel.resetToDefaults()
-                    },
+                    }
                 ) {
                     Text("确认恢复")
                 }
@@ -395,13 +391,17 @@ private fun SourceIdentityCard(
                 )
             }
 
-            plugin?.manifest?.description?.takeIf { it.isNotBlank() }?.let { description ->
-                Text(
-                    text = description,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            plugin
+                ?.manifest
+                ?.description
+                ?.takeIf { it.isNotBlank() }
+                ?.let { description ->
+                    Text(
+                        text = description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -541,7 +541,8 @@ private fun SettingControl(
             }
         }
 
-        // Text & Secret settings use protected read-only preview with modal editor to prevent accidental edits.
+        // Text & Secret settings use protected read-only preview with modal editor to prevent
+        // accidental edits.
         else -> {
             val isSecret = descriptor.type == "secret" || descriptor.secret
             val displayValue =
@@ -629,17 +630,19 @@ private fun ProtectedSettingEditDialog(
                         } else null,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                descriptor.defaultValue?.takeIf { it.isNotBlank() }?.let { defaultValue ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End,
-                    ) {
-                        AssistChip(
-                            onClick = { draft = defaultValue },
-                            label = { Text("恢复默认值") },
-                        )
+                descriptor.defaultValue
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { defaultValue ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End,
+                        ) {
+                            AssistChip(
+                                onClick = { draft = defaultValue },
+                                label = { Text("恢复默认值") },
+                            )
+                        }
                     }
-                }
             }
         },
         confirmButton = {
@@ -661,8 +664,7 @@ private fun ActionRow(
     onClick: () -> Unit,
 ) {
     ListItem(
-        modifier =
-            Modifier.then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier),
+        modifier = Modifier.then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier),
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
     ) {
         Text(
