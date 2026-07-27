@@ -2,9 +2,11 @@ package com.exio.inkleaf.plugin
 
 import java.io.File
 import java.io.IOException
+import java.net.Proxy
 import java.security.MessageDigest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
@@ -22,18 +24,25 @@ data class PluginDownloadProgress(
 
 /** Downloads local-install-compatible packages with a bounded partial-file resume path. */
 class PluginPackageDownloader(
-    private val client: OkHttpClient = OkHttpClient(),
+    client: OkHttpClient = OkHttpClient(),
     private val cacheDirectory: File,
 ) {
+    private val client =
+        client
+            .newBuilder()
+            .dns(PluginNetworkPolicy.publicDns)
+            .proxy(Proxy.NO_PROXY)
+            .followSslRedirects(false)
+            .build()
+
     suspend fun download(
         source: PluginDownloadSource,
         onProgress: (PluginDownloadProgress) -> Unit = {},
     ): File =
         withContext(Dispatchers.IO) {
             val url = source.url.trim()
-            require(url.startsWith("https://") || url.startsWith("http://")) {
-                "Only HTTP(S) plugin URLs are supported"
-            }
+            val parsedUrl = url.toHttpUrlOrNull()
+            require(parsedUrl?.isHttps == true) { "Only HTTPS plugin URLs are supported" }
             if (url.length > 8192) throw IOException("Plugin URL is too long")
             if (!cacheDirectory.mkdirs() && !cacheDirectory.isDirectory)
                 throw IOException("Unable to create plugin download cache")
@@ -54,7 +63,7 @@ class PluginPackageDownloader(
             }
 
             val existingBytes = partial.takeIf { it.isFile }?.length() ?: 0L
-            val requestBuilder = Request.Builder().url(url)
+            val requestBuilder = Request.Builder().url(parsedUrl)
             if (existingBytes > 0L) requestBuilder.header("Range", "bytes=$existingBytes-")
             val response = client.newCall(requestBuilder.build()).execute()
             response.use { result ->

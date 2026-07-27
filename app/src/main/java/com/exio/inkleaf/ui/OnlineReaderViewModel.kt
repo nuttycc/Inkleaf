@@ -28,10 +28,12 @@ import com.exio.inkleaf.plugin.OnlineChapterVolume
 import com.exio.inkleaf.plugin.OnlinePageBookmark
 import com.exio.inkleaf.plugin.OnlineReadingSessionRecord
 import com.exio.inkleaf.plugin.PluginContentCodec
+import com.exio.inkleaf.plugin.PluginNetworkPolicy
 import com.exio.inkleaf.plugin.PluginPagesRequest
 import com.exio.inkleaf.plugin.resolveOnlineChapterRevision
 import java.io.File
 import java.io.FileOutputStream
+import java.net.Proxy
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
@@ -780,6 +782,8 @@ internal class OnlineReaderViewModel(
         const val PROGRESS_WRITE_INTERVAL_MS = 500L
         val PAGE_CLIENT =
             OkHttpClient.Builder()
+                .dns(PluginNetworkPolicy.publicDns)
+                .proxy(Proxy.NO_PROXY)
                 .connectTimeout(10, TimeUnit.SECONDS)
                 .readTimeout(30, TimeUnit.SECONDS)
                 .build()

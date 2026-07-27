@@ -13,6 +13,8 @@ import okhttp3.Callback
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
+import okhttp3.ResponseBody
+import okio.Buffer
 
 /** Adapts one plugin chapter to the host reader's source-neutral volume contract. */
 internal class OnlineChapterVolume(
@@ -128,7 +130,8 @@ internal class OnlineChapterVolume(
                                 if (!it.isSuccessful) {
                                     throw ComicOpenException("页面请求失败（HTTP ${it.code}）")
                                 }
-                                it.body?.bytes() ?: throw ComicOpenException("页面响应为空")
+                                it.body?.readPageBytes(PluginRuntimePolicy.MAX_IMAGE_BYTES)
+                                    ?: throw ComicOpenException("页面响应为空")
                             }
                         }
                         result.fold(
@@ -143,6 +146,23 @@ internal class OnlineChapterVolume(
                 }
             )
         }
+}
+
+internal fun ResponseBody.readPageBytes(maxBytes: Long): ByteArray {
+    require(maxBytes >= 0L) { "maxBytes must not be negative" }
+    if (contentLength() > maxBytes) throw ComicOpenException("页面图像超过大小限制")
+    val input = source()
+    val output = Buffer()
+    var total = 0L
+    while (true) {
+        val remaining = maxBytes - total
+        val readLimit = if (remaining >= 64 * 1024L) 64 * 1024L else remaining + 1L
+        val read = input.read(output, readLimit)
+        if (read < 0L) break
+        total += read
+        if (total > maxBytes) throw ComicOpenException("页面图像超过大小限制")
+    }
+    return output.readByteArray()
 }
 
 /** Resolves a revision without ever treating a remote image URL as durable identity. */

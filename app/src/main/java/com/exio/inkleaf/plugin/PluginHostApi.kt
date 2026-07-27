@@ -2,6 +2,7 @@ package com.exio.inkleaf.plugin
 
 import java.io.File
 import java.io.IOException
+import java.net.Proxy
 import java.nio.charset.StandardCharsets
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
@@ -135,6 +136,8 @@ class PluginHostSession(
     private val bodyHandles = ConcurrentHashMap<String, PluginBodyHandle>()
     private val httpClientDelegate = lazy {
         OkHttpClient.Builder()
+            .dns(PluginNetworkPolicy.publicDns)
+            .proxy(Proxy.NO_PROXY)
             .cookieJar(cookieJar)
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(20, TimeUnit.SECONDS)

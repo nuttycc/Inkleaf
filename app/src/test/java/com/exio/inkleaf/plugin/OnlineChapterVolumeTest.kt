@@ -1,6 +1,10 @@
 package com.exio.inkleaf.plugin
 
 import com.exio.inkleaf.data.ComicOpenException
+import okhttp3.MediaType
+import okhttp3.ResponseBody
+import okio.Buffer
+import okio.BufferedSource
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertThrows
@@ -35,6 +39,20 @@ class OnlineChapterVolumeTest {
         )
     }
 
+    @Test
+    fun `page body is rejected before an unknown-length response grows past its limit`() {
+        val body = unknownLengthBody(ByteArray(6))
+
+        assertThrows(ComicOpenException::class.java) { body.readPageBytes(maxBytes = 5L) }
+    }
+
+    @Test
+    fun `page body at the limit is returned`() {
+        val bytes = ByteArray(5) { it.toByte() }
+
+        assertEquals(bytes.toList(), unknownLengthBody(bytes).readPageBytes(5L).toList())
+    }
+
     private fun response(
         pageIds: List<String?>,
         urlSuffix: String = "",
@@ -51,6 +69,15 @@ class OnlineChapterVolumeTest {
                     )
                 },
         )
+
+    private fun unknownLengthBody(bytes: ByteArray): ResponseBody =
+        object : ResponseBody() {
+            override fun contentType(): MediaType? = null
+
+            override fun contentLength(): Long = -1L
+
+            override fun source(): BufferedSource = Buffer().write(bytes)
+        }
 
     private companion object {
         const val CHAPTER_ID = "chapter-1"
