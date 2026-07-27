@@ -38,7 +38,7 @@ To package, push, install, and activate the plugin on the only connected ADB
 device:
 
 ```powershell
-.\.scripts\package-and-push-copycomic-plugin.ps1
+.\.scripts\deploy-plugin.ps1 -Plugin copycomic
 ```
 
 Pass `-Serial <device-id>` when multiple devices are connected, or

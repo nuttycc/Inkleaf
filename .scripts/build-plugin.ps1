@@ -14,31 +14,7 @@ param(
 # is never mistaken for hand-written code and never drifts out of sync in a commit.
 
 $ErrorActionPreference = "Stop"
-
-function Initialize-SafeOutputDirectory {
-    param(
-        [Parameter(Mandatory)] [string] $Root,
-        [Parameter(Mandatory)] [string] $TargetDirectory
-    )
-
-    if (-not (Test-Path -LiteralPath $Root)) {
-        New-Item -ItemType Directory -Path $Root | Out-Null
-    }
-    $current = $Root
-    $relative = $TargetDirectory.Substring($Root.Length).TrimStart('\', '/')
-    $segments = @($relative -split '[\\/]' | Where-Object { $_ })
-    foreach ($segment in @('') + $segments) {
-        if ($segment) { $current = Join-Path $current $segment }
-        if (-not (Test-Path -LiteralPath $current)) {
-            New-Item -ItemType Directory -Path $current | Out-Null
-        }
-        $item = Get-Item -Force -LiteralPath $current
-        if (-not $item.PSIsContainer -or
-            ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-            throw "Output directory must not contain a reparse point: $current"
-        }
-    }
-}
+. (Join-Path $PSScriptRoot "plugin-package-common.ps1")
 
 if ($Plugin -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') {
     throw "Plugin name must be a simple directory name: $Plugin"
@@ -59,16 +35,7 @@ foreach ($required in @($runtimeFile, $sourceFile, $manifestFile)) {
 if (-not $OutputPath) { $OutputPath = "plugin-fixtures/dist/$Plugin-plugin.zip" }
 
 $distRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot "plugin-fixtures/dist"))
-$outputCandidate =
-    if ([IO.Path]::IsPathRooted($OutputPath)) { $OutputPath }
-    else { Join-Path $repoRoot $OutputPath }
-$output = [IO.Path]::GetFullPath($outputCandidate)
-$distPrefix = $distRoot.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
-if (-not $output.StartsWith($distPrefix, [StringComparison]::OrdinalIgnoreCase) -or
-    [IO.Path]::GetExtension($output) -ne ".zip") {
-    throw "OutputPath must be a .zip file below $distRoot"
-}
-Initialize-SafeOutputDirectory -Root $distRoot -TargetDirectory (Split-Path -Parent $output)
+$output = Resolve-SafePluginPackageOutputPath -RepoRoot $repoRoot -OutputPath $OutputPath
 
 $buildDirectory = Join-Path $distRoot "build/$Plugin"
 Initialize-SafeOutputDirectory -Root $distRoot -TargetDirectory $buildDirectory

@@ -45,34 +45,10 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "plugin-package-common.ps1")
 
 function Write-Info([string] $Message) { Write-Host "[info] $Message" -ForegroundColor Cyan }
 function Write-Ok([string] $Message) { Write-Host "[ok]   $Message" -ForegroundColor Green }
-
-function Initialize-SafeOutputDirectory {
-    param(
-        [Parameter(Mandatory)] [string] $Root,
-        [Parameter(Mandatory)] [string] $TargetDirectory
-    )
-
-    if (-not (Test-Path -LiteralPath $Root)) {
-        New-Item -ItemType Directory -Path $Root | Out-Null
-    }
-    $current = $Root
-    $relative = $TargetDirectory.Substring($Root.Length).TrimStart('\', '/')
-    $segments = @($relative -split '[\\/]' | Where-Object { $_ })
-    foreach ($segment in @('') + $segments) {
-        if ($segment) { $current = Join-Path $current $segment }
-        if (-not (Test-Path -LiteralPath $current)) {
-            New-Item -ItemType Directory -Path $current | Out-Null
-        }
-        $item = Get-Item -Force -LiteralPath $current
-        if (-not $item.PSIsContainer -or
-            ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-            throw "Output directory must not contain a reparse point: $current"
-        }
-    }
-}
 
 function Resolve-AdbPath {
     $fromPath = Get-Command adb -ErrorAction SilentlyContinue
@@ -298,25 +274,8 @@ if (-not (Test-Path -LiteralPath $packageScript)) {
 
 if (-not $OutputPath) { $OutputPath = "plugin-fixtures/dist/$Plugin-plugin.zip" }
 
-$distRoot = [IO.Path]::GetFullPath((Join-Path $script:RepoRoot "plugin-fixtures\dist"))
-$outputCandidate =
-    if ([IO.Path]::IsPathRooted($OutputPath)) { $OutputPath }
-    else { Join-Path $script:RepoRoot $OutputPath }
-$localPackage = [IO.Path]::GetFullPath($outputCandidate)
-$distPrefix = $distRoot.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
-if (-not $localPackage.StartsWith($distPrefix, [StringComparison]::OrdinalIgnoreCase) -or
-    [IO.Path]::GetExtension($localPackage) -ne ".zip") {
-    throw "OutputPath must be a .zip file below $distRoot"
-}
-$outputDirectory = Split-Path -Parent $localPackage
-Initialize-SafeOutputDirectory -Root $distRoot -TargetDirectory $outputDirectory
-if (Test-Path -LiteralPath $localPackage) {
-    $outputItem = Get-Item -Force -LiteralPath $localPackage
-    if ($outputItem.PSIsContainer -or
-        ($outputItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-        throw "Output file must not be a directory or reparse point: $localPackage"
-    }
-}
+$localPackage =
+    Resolve-SafePluginPackageOutputPath -RepoRoot $script:RepoRoot -OutputPath $OutputPath
 
 $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
 if (-not $manifest.version -or -not $manifest.id) {

@@ -4,18 +4,18 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot ".."))
+. (Join-Path $PSScriptRoot "plugin-package-common.ps1")
+
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $source = Join-Path $repoRoot "plugin-fixtures/inkleaf-fixture"
-$output = Join-Path $repoRoot $OutputPath
-$outputDirectory = Split-Path -Parent $output
+$output = Resolve-SafePluginPackageOutputPath -RepoRoot $repoRoot -OutputPath $OutputPath
 
 if (-not (Test-Path (Join-Path $source "manifest.json")) -or
     -not (Test-Path (Join-Path $source "main.js"))) {
     throw "Fixture source is incomplete: $source"
 }
 
-New-Item -ItemType Directory -Force -Path $outputDirectory | Out-Null
-if (Test-Path $output) { Remove-Item -LiteralPath $output -Force }
+if (Test-Path -LiteralPath $output) { Remove-Item -LiteralPath $output -Force }
 
 Push-Location $source
 try {
