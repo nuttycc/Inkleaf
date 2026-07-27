@@ -17,9 +17,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonPrimitive
 
 /** Coordinates plugin-declared settings, actions, status, and uninstall state for one source. */
 data class SourceDetailFeedback(val text: String, val copyDetails: String? = null)
@@ -131,8 +132,7 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
             // Only a top-level message has a defined UI representation.
             _message.value =
                 SourceDetailFeedback(
-                    (result as? JsonObject)?.get("message")?.jsonPrimitive?.contentOrNull
-                        ?: "${action.title}：操作完成"
+                    sourceActionMessage(result, action.title)
                 )
             // An action may alter plugin-owned state, so invalidate runtime-derived data now.
             app().pluginRuntimeManager.reload(id)
@@ -236,3 +236,7 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun app() = getApplication<InkleafApplication>()
 }
+
+internal fun sourceActionMessage(result: JsonElement, actionTitle: String): String =
+    ((result as? JsonObject)?.get("message") as? JsonPrimitive)?.contentOrNull
+        ?: "$actionTitle：操作完成"

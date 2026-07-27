@@ -17,7 +17,6 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -483,9 +482,7 @@ fun OnlineComicScreen(
                     )
                 }
 
-                itemsIndexed(chapters, key = { index, chapter -> "${chapter.chapterId}_$index" }) {
-                    _,
-                    chapter ->
+                items(chapters, key = { chapter -> chapter.chapterId }) { chapter ->
                     OutlinedButton(
                         onClick = {
                             onOpenChapter(
@@ -493,7 +490,7 @@ fun OnlineComicScreen(
                                 chapter.opaqueContext ?: detail?.opaqueContext ?: opaqueContext,
                             )
                         },
-                        enabled = !loading && chapter.available && errorMessage == null,
+                        enabled = !loading && chapter.available,
                         shape = RoundedCornerShape(8.dp),
                         contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
                         modifier = Modifier.fillMaxWidth().height(38.dp),
