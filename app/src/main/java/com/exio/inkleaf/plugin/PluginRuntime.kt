@@ -360,12 +360,18 @@ class PluginRuntimeManager(
     suspend fun install(packageFile: File, activate: Boolean = false): PluginInstallResult {
         val result = withContext(Dispatchers.IO) { store.install(packageFile, activate = false) }
         if (activate && result.status != PluginInstallStatus.REJECTED && result.activatable) {
-            activate(requireNotNull(result.pluginId), requireNotNull(result.version))
+            val pluginId = requireNotNull(result.pluginId)
+            val version = requireNotNull(result.version)
+            val alreadyActive =
+                withContext(Dispatchers.IO) {
+                    store.get(pluginId)?.state?.isActiveAndReady(version) == true
+                }
+            if (!alreadyActive) activate(pluginId, version)
         }
         return result
     }
 
-    suspend fun activate(pluginId: String, version: String): InstalledPlugin {
+    private suspend fun activate(pluginId: String, version: String): InstalledPlugin {
         val previousVersion =
             withContext(Dispatchers.IO) { store.get(pluginId)?.state?.activeVersion }
         val activated = withContext(Dispatchers.IO) { store.activate(pluginId, version) }

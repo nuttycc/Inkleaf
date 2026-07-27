@@ -61,6 +61,9 @@ class PluginPackageStore(
             }
             val versionDirectory = versionDirectory(directory, version)
             requireInstalledVersion(versionDirectory)
+            if (state.isActiveAndReady(version)) {
+                return@synchronized installedPlugin(directory, state)
+            }
             val nextState =
                 state.copy(
                     activeVersion = version,
@@ -209,9 +212,28 @@ class PluginPackageStore(
         }
 
         val manifest = content.manifest
-        val digest = sha256(packageFile)
         val directory = pluginDirectory(manifest.id)
         val state = readState(directory) ?: PluginState(pluginId = manifest.id)
+        val activeVersion = state.activeVersion
+        if (
+            activeVersion != null &&
+                requireNotNull(SemVer.parse(manifest.version)) <
+                    requireNotNull(SemVer.parse(activeVersion))
+        ) {
+            return PluginInstallResult(
+                status = PluginInstallStatus.REJECTED,
+                pluginId = manifest.id,
+                version = manifest.version,
+                activatable = validation.activatable,
+                validation = validation,
+                errorCode = PluginInstallErrorCode.DOWNGRADE_NOT_ALLOWED,
+                errorMessage =
+                    "Plugin downgrade is not allowed: ${manifest.id}@${manifest.version} is older " +
+                        "than active version $activeVersion",
+            )
+        }
+
+        val digest = sha256(packageFile)
         val existing = state.versions.firstOrNull { it.version == manifest.version }
         if (existing != null) {
             if (!existing.sha256.equals(digest, ignoreCase = true)) {

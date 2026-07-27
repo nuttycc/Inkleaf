@@ -2,7 +2,7 @@ package com.exio.inkleaf.plugin
 
 import java.math.BigInteger
 
-/** SemVer 2.0 value used for plugin update and rollback ordering. */
+/** SemVer 2.0 value used for plugin update and retention ordering. */
 data class SemVer(
     val major: BigInteger,
     val minor: BigInteger,

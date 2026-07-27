@@ -15,6 +15,12 @@ data class PluginState(
     val updatedAtMs: Long = 0L,
 )
 
+internal fun PluginState.isActiveAndReady(version: String): Boolean =
+    activeVersion == version &&
+        !disabled &&
+        health == PluginHealth.HEALTHY &&
+        fatalFailureTimesMs.isEmpty()
+
 @Serializable
 data class PluginVersionRecord(
     val version: String,
@@ -39,6 +45,7 @@ enum class PluginInstallErrorCode {
     PACKAGE_TOO_LARGE,
     VALIDATION_FAILED,
     VERSION_CONFLICT,
+    DOWNGRADE_NOT_ALLOWED,
     INCOMPATIBLE_VERSION,
     STORAGE_FAILURE,
 }

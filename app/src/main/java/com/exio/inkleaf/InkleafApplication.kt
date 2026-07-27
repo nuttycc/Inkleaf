@@ -25,7 +25,7 @@ import kotlinx.coroutines.launch
 
 class InkleafApplication : Application() {
     internal val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    val pluginPackageStore: PluginPackageStore by lazy {
+    private val pluginPackageStore: PluginPackageStore by lazy {
         PluginPackageStore(File(filesDir, "plugins"))
     }
     val pluginSettingsRepository: PluginSettingsRepository by lazy {

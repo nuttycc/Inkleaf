@@ -20,7 +20,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 
-/** Coordinates plugin-declared settings, actions, versions, and uninstall state for one source. */
+/** Coordinates plugin-declared settings, actions, status, and uninstall state for one source. */
 class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _plugin = MutableStateFlow<InstalledPlugin?>(null)
@@ -133,15 +133,6 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
             app().pluginManager.setEnabled(id, enabled)
             reloadPlugin(id)
             if (enabled) describe(id)
-        }
-    }
-
-    fun activate(version: String) {
-        val id = pluginId ?: return
-        launchOperation {
-            app().pluginManager.activate(id, version)
-            reloadPlugin(id)
-            describe(id)
         }
     }
 

@@ -47,12 +47,6 @@ class PluginManager(
         }
     }
 
-    suspend fun activate(pluginId: String, version: String): InstalledPlugin {
-        val activated = runtimeManager.activate(pluginId, version)
-        markAvailable(pluginId)
-        return activated
-    }
-
     suspend fun setEnabled(pluginId: String, enabled: Boolean): InstalledPlugin? {
         val updated = runtimeManager.setEnabled(pluginId, enabled)
         if (updated != null) {

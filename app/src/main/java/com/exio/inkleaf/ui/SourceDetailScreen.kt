@@ -61,10 +61,9 @@ import com.exio.inkleaf.plugin.InstalledPlugin
 import com.exio.inkleaf.plugin.PluginActionDescriptor
 import com.exio.inkleaf.plugin.PluginHealth
 import com.exio.inkleaf.plugin.PluginSettingDescriptor
-import com.exio.inkleaf.plugin.PluginVersionRecord
 
 /**
- * Shows one comic source's settings, actions, versions, and uninstall controls.
+ * Shows one comic source's settings, actions, status, and uninstall controls.
  *
  * Plugins declare settings through describe(); the host only maps descriptors to controls and
  * remains unaware of site-specific behavior.
@@ -167,21 +166,6 @@ fun SourceDetailScreen(
                         action = action,
                         enabled = !busy && action.enabled,
                         onClick = { viewModel.invokeAction(action) },
-                    )
-                }
-            }
-
-            plugin?.state?.versions?.takeIf { it.isNotEmpty() }?.let { versions ->
-                item { SectionHeader("版本") }
-                val ordered = versions.sortedByDescending { it.installedAtMs }
-                items(ordered.size, key = { "version_${ordered[it].version}" }) { index ->
-                    val record = ordered[index]
-                    VersionRow(
-                        record = record,
-                        activeVersion = plugin?.state?.activeVersion,
-                        previousVersion = plugin?.state?.previousVersion,
-                        enabled = !busy,
-                        onActivate = { viewModel.activate(record.version) },
                     )
                 }
             }
@@ -433,43 +417,5 @@ private fun ActionRow(
                 if (action.destructive) MaterialTheme.colorScheme.error
                 else MaterialTheme.colorScheme.onSurface,
         )
-    }
-}
-
-@Composable
-private fun VersionRow(
-    record: PluginVersionRecord,
-    activeVersion: String?,
-    previousVersion: String?,
-    enabled: Boolean,
-    onActivate: () -> Unit,
-) {
-    val isActive = record.version == activeVersion
-    val label =
-        when {
-            isActive -> "当前版本"
-            !record.compatible -> "与当前宿主 API 不兼容"
-            record.version == previousVersion -> "上一版本"
-            else -> null
-        }
-    ListItem(
-        supportingContent =
-            label?.let {
-                {
-                    Text(
-                        text = it,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            },
-        trailingContent = {
-            if (!isActive && record.compatible) {
-                TextButton(onClick = onActivate, enabled = enabled) { Text("启用") }
-            }
-        },
-        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-    ) {
-        Text("v${record.version}")
     }
 }

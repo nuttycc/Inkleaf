@@ -16,7 +16,7 @@ class PluginPackageStoreTest {
     private val json = Json { encodeDefaults = true }
 
     @Test
-    fun `install activation and downgrade keep immutable versions`() =
+    fun `internal activation retains previous version for recovery`() =
         withStore { store, temp ->
             val first =
                 packageFile(
@@ -46,25 +46,87 @@ class PluginPackageStoreTest {
             assertTrue(updated.directory.resolve("versions/1.0.0/main.js").isFile)
             assertTrue(updated.directory.resolve("versions/1.1.0/main.js").isFile)
 
-            // Downgrading uses the normal activation path; previousVersion is only a label.
-            val downgraded = store.activate(PLUGIN_ID, requireNotNull(updated.state.previousVersion))
-            assertEquals("1.0.0", downgraded.state.activeVersion)
-            assertEquals("1.1.0", downgraded.state.previousVersion)
+            val restored = store.activate(PLUGIN_ID, requireNotNull(updated.state.previousVersion))
+            assertEquals("1.0.0", restored.state.activeVersion)
+            assertEquals("1.1.0", restored.state.previousVersion)
         }
 
     @Test
     fun `same version same digest is idempotent and different digest is rejected`() =
-        withStore { store, temp ->
+        withStore(clockMs = generateSequence(1L) { it + 1L }.iterator()::next) { store, temp ->
             val first = packageFile(temp, manifest(), "inkleaf.register({})")
             val same = first.copyTo(temp.resolve("same.zip"))
             val changed = packageFile(temp, manifest(), "inkleaf.register({changed: true})")
 
-            assertEquals(PluginInstallStatus.INSTALLED, store.install(first).status)
-            assertEquals(PluginInstallStatus.ALREADY_INSTALLED, store.install(same).status)
+            assertEquals(PluginInstallStatus.INSTALLED, store.install(first, activate = true).status)
+            val updatedAtMs = store.get(PLUGIN_ID)?.state?.updatedAtMs
+            assertEquals(
+                PluginInstallStatus.ALREADY_INSTALLED,
+                store.install(same, activate = true).status,
+            )
+            assertEquals("1.0.0", store.get(PLUGIN_ID)?.state?.activeVersion)
+            assertEquals(updatedAtMs, store.get(PLUGIN_ID)?.state?.updatedAtMs)
             val conflict = store.install(changed)
             assertEquals(PluginInstallStatus.REJECTED, conflict.status)
             assertEquals(PluginInstallErrorCode.VERSION_CONFLICT, conflict.errorCode)
             assertEquals(1, store.get(PLUGIN_ID)?.state?.versions?.size)
+        }
+
+    @Test
+    fun `package older than active version is rejected without storage changes`() =
+        withStore { store, temp ->
+            val active = packageFile(temp, manifest(version = "1.1.0"), "inkleaf.register({})")
+            val older = packageFile(temp, manifest(version = "1.0.0"), "inkleaf.register({})")
+            assertEquals(PluginInstallStatus.INSTALLED, store.install(active, activate = true).status)
+
+            val rejected = store.install(older, activate = true)
+
+            assertEquals(PluginInstallStatus.REJECTED, rejected.status)
+            assertEquals(PluginInstallErrorCode.DOWNGRADE_NOT_ALLOWED, rejected.errorCode)
+            assertTrue(rejected.errorMessage?.contains("active version 1.1.0") == true)
+            val installed = requireNotNull(store.get(PLUGIN_ID))
+            assertEquals("1.1.0", installed.state.activeVersion)
+            assertEquals(listOf("1.1.0"), installed.state.versions.map { it.version })
+            assertFalse(installed.directory.resolve("versions/1.0.0").exists())
+        }
+
+    @Test
+    fun `prerelease package is rejected below an active release`() =
+        withStore { store, temp ->
+            val release = packageFile(temp, manifest(version = "1.0.0"), "inkleaf.register({})")
+            val prerelease =
+                packageFile(temp, manifest(version = "1.0.0-rc.1"), "inkleaf.register({})")
+            store.install(release, activate = true)
+
+            val rejected = store.install(prerelease)
+
+            assertEquals(PluginInstallStatus.REJECTED, rejected.status)
+            assertEquals(PluginInstallErrorCode.DOWNGRADE_NOT_ALLOWED, rejected.errorCode)
+        }
+
+    @Test
+    fun `update is compared with active version instead of highest retained version`() =
+        withStore { store, temp ->
+            val active = packageFile(temp, manifest(version = "1.0.0"), "inkleaf.register({})")
+            val incompatible =
+                packageFile(
+                    temp,
+                    manifest(version = "3.0.0", apiVersion = "2.0"),
+                    "inkleaf.register({})",
+                )
+            val update = packageFile(temp, manifest(version = "2.0.0"), "inkleaf.register({})")
+            store.install(active, activate = true)
+            store.install(incompatible)
+
+            val installed = store.install(update, activate = true)
+
+            assertEquals(PluginInstallStatus.INSTALLED, installed.status)
+            val state = requireNotNull(store.get(PLUGIN_ID)).state
+            assertEquals("2.0.0", state.activeVersion)
+            assertEquals(
+                setOf("1.0.0", "2.0.0", "3.0.0"),
+                state.versions.map { it.version }.toSet(),
+            )
         }
 
     @Test
@@ -111,10 +173,13 @@ class PluginPackageStoreTest {
             assertTrue(store.get(PLUGIN_ID)?.state?.fatalFailureTimesMs?.isEmpty() == true)
         }
 
-    private fun withStore(block: (PluginPackageStore, File) -> Unit) {
+    private fun withStore(
+        clockMs: () -> Long = { 10_000L },
+        block: (PluginPackageStore, File) -> Unit,
+    ) {
         val temp = Files.createTempDirectory("inkleaf-plugin-store").toFile()
         try {
-            block(PluginPackageStore(temp.resolve("plugins"), clockMs = { 10_000L }), temp)
+            block(PluginPackageStore(temp.resolve("plugins"), clockMs = clockMs), temp)
         } finally {
             temp.deleteRecursively()
         }
