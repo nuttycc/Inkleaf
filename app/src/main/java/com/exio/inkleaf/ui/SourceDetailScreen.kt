@@ -1,5 +1,7 @@
 package com.exio.inkleaf.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -40,8 +42,10 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -58,6 +62,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -92,6 +97,7 @@ fun SourceDetailScreen(
     val describeError by viewModel.describeError.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
 
+    val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     var showMenu by remember { mutableStateOf(false) }
     var showUninstallConfirm by remember { mutableStateOf(false) }
@@ -101,8 +107,22 @@ fun SourceDetailScreen(
     LaunchedEffect(pluginId) { viewModel.load(pluginId) }
 
     LaunchedEffect(message) {
-        message?.let {
-            snackbarHostState.showSnackbar(it)
+        message?.let { feedback ->
+            val result =
+                snackbarHostState.showSnackbar(
+                    message = feedback.text,
+                    actionLabel = feedback.copyDetails?.let { "复制详情" },
+                    duration =
+                        if (feedback.copyDetails != null) SnackbarDuration.Long
+                        else SnackbarDuration.Short,
+                )
+            if (result == SnackbarResult.ActionPerformed) {
+                feedback.copyDetails?.let { details ->
+                    context
+                        .getSystemService(ClipboardManager::class.java)
+                        ?.setPrimaryClip(ClipData.newPlainText("Inkleaf 错误详情", details))
+                }
+            }
             viewModel.consumeMessage()
         }
     }

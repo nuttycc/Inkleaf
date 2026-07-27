@@ -1,10 +1,11 @@
 package com.exio.inkleaf.ui
 
 import android.app.Application
-import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.exio.inkleaf.InkleafApplication
+import com.exio.inkleaf.diagnostics.AppErrorReport
+import com.exio.inkleaf.diagnostics.AppErrorReporter
 import com.exio.inkleaf.plugin.InstalledPlugin
 import com.exio.inkleaf.plugin.PluginActionDescriptor
 import com.exio.inkleaf.plugin.PluginActionRequest
@@ -21,6 +22,8 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 
 /** Coordinates plugin-declared settings, actions, status, and uninstall state for one source. */
+data class SourceDetailFeedback(val text: String, val copyDetails: String? = null)
+
 class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _plugin = MutableStateFlow<InstalledPlugin?>(null)
@@ -43,8 +46,8 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
     private val _describeError = MutableStateFlow<String?>(null)
     val describeError: StateFlow<String?> = _describeError.asStateFlow()
 
-    private val _message = MutableStateFlow<String?>(null)
-    val message: StateFlow<String?> = _message.asStateFlow()
+    private val _message = MutableStateFlow<SourceDetailFeedback?>(null)
+    val message: StateFlow<SourceDetailFeedback?> = _message.asStateFlow()
 
     private var pluginId: String? = null
     private var settingsDirty = false
@@ -52,13 +55,20 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
     fun load(pluginId: String) {
         this.pluginId = pluginId
         viewModelScope.launch {
-            val app = app()
-            _plugin.value =
-                withContext(Dispatchers.IO) {
-                    app.pluginManager.installed().firstOrNull { it.state.pluginId == pluginId }
-                }
-            _values.value = app.pluginSettingsRepository.storedValues(pluginId)
-            describe(pluginId)
+            try {
+                val app = app()
+                _plugin.value =
+                    withContext(Dispatchers.IO) {
+                        app.pluginManager.installed().firstOrNull { it.state.pluginId == pluginId }
+                    }
+                _values.value = app.pluginSettingsRepository.storedValues(pluginId)
+                describe(pluginId)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                val report = reportError("加载漫画源详情", error)
+                _describeError.value = report.summary
+            }
         }
     }
 
@@ -74,7 +84,8 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
         } catch (error: Throwable) {
             _settings.value = emptyList()
             _actions.value = emptyList()
-            _describeError.value = error.message ?: "无法读取该源的设置项"
+            val report = reportError("读取漫画源描述", error)
+            _describeError.value = report.summary
         }
     }
 
@@ -103,14 +114,14 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Throwable) {
-                Log.e(TAG, "Unable to apply source settings for $id", error)
+                reportError("保存漫画源设置", error, showFeedback = false)
             }
         }
     }
 
     fun invokeAction(action: PluginActionDescriptor) {
         val id = pluginId ?: return
-        launchOperation {
+        launchOperation("运行漫画源操作：${action.title}") {
             if (settingsDirty) {
                 applySettingsChange(app(), id, _values.value)
                 settingsDirty = false
@@ -119,8 +130,10 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
                 app().pluginCatalog.invokeAction(id, PluginActionRequest(actionId = action.id))
             // Only a top-level message has a defined UI representation.
             _message.value =
-                (result as? JsonObject)?.get("message")?.jsonPrimitive?.contentOrNull
-                    ?: "${action.title}：操作完成"
+                SourceDetailFeedback(
+                    (result as? JsonObject)?.get("message")?.jsonPrimitive?.contentOrNull
+                        ?: "${action.title}：操作完成"
+                )
             // An action may alter plugin-owned state, so invalidate runtime-derived data now.
             app().pluginRuntimeManager.reload(id)
             app().pluginBrowseRepository.clear(id)
@@ -129,7 +142,7 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setEnabled(enabled: Boolean) {
         val id = pluginId ?: return
-        launchOperation {
+        launchOperation(if (enabled) "启用漫画源" else "停用漫画源") {
             app().pluginManager.setEnabled(id, enabled)
             reloadPlugin(id)
             if (enabled) describe(id)
@@ -138,7 +151,7 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
 
     fun recover() {
         val id = pluginId ?: return
-        launchOperation {
+        launchOperation("恢复漫画源") {
             app().pluginManager.recover(id)
             reloadPlugin(id)
             describe(id)
@@ -147,19 +160,19 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
 
     fun resetToDefaults() {
         val id = pluginId ?: return
-        launchOperation {
+        launchOperation("重置漫画源设置") {
             settingsDirty = false
             app().pluginSettingsRepository.clear(id)
             _values.value = emptyMap()
             app().pluginRuntimeManager.reload(id)
             app().pluginBrowseRepository.clear(id)
-            _message.value = "已重置为默认设置"
+            _message.value = SourceDetailFeedback("已重置为默认设置")
         }
     }
 
     fun uninstall(onDone: () -> Unit) {
         val id = pluginId ?: return
-        launchOperation {
+        launchOperation("卸载漫画源") {
             // Uninstall clears settings, so the exit path must not touch the removed source.
             settingsDirty = false
             if (app().pluginManager.uninstall(id)) onDone()
@@ -187,7 +200,7 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
         app.pluginBrowseRepository.clear(pluginId)
     }
 
-    private fun launchOperation(operation: suspend () -> Unit) {
+    private fun launchOperation(operationName: String, operation: suspend () -> Unit) {
         if (_busy.value) return
         viewModelScope.launch {
             _busy.value = true
@@ -196,16 +209,30 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Throwable) {
-                _message.value = "操作失败: ${error.message ?: "未知错误"}"
+                reportError(operationName, error)
             } finally {
                 _busy.value = false
             }
         }
     }
 
-    private fun app() = getApplication<InkleafApplication>()
-
-    private companion object {
-        const val TAG = "SourceDetailViewModel"
+    private suspend fun reportError(
+        operationName: String,
+        error: Throwable,
+        showFeedback: Boolean = true,
+    ): AppErrorReport {
+        val report =
+            AppErrorReporter.report(
+                context = getApplication(),
+                operation = operationName,
+                error = error,
+                metadata = mapOf("Plugin ID" to (pluginId ?: "unknown")),
+            )
+        if (showFeedback) {
+            _message.value = SourceDetailFeedback(report.summary, report.details)
+        }
+        return report
     }
+
+    private fun app() = getApplication<InkleafApplication>()
 }
