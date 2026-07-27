@@ -337,7 +337,6 @@ internal class OnlineReaderViewModel(
                 repository.setAvailability(pluginId, sourceId, OnlineAvailability.AVAILABLE)
             }
             refreshUserRecords()
-            prewarmThumbnails(opened, startPage)
             state =
                 ReaderPresentationState.Ready(
                     volume = opened,
@@ -609,14 +608,6 @@ internal class OnlineReaderViewModel(
         }
     }
 
-    private fun prewarmThumbnails(opened: OnlineChapterVolume, startPage: Int) {
-        if (opened.totalPageCount > PREWARM_MAX_PAGES) return
-        launchThumbnailJob {
-            for (page in startPage until opened.totalPageCount) loadThumbnail(page)
-            for (page in startPage - 1 downTo 0) loadThumbnail(page)
-        }
-    }
-
     private fun launchThumbnailJob(block: suspend () -> Unit) {
         val job = viewModelScope.launch(start = CoroutineStart.LAZY) { block() }
         synchronized(thumbnailJobs) { thumbnailJobs += job }
@@ -778,7 +769,6 @@ internal class OnlineReaderViewModel(
 
     private companion object {
         const val THUMB_TARGET_WIDTH = 168
-        const val PREWARM_MAX_PAGES = 400
         const val PROGRESS_WRITE_INTERVAL_MS = 500L
         val PAGE_CLIENT =
             OkHttpClient.Builder()
