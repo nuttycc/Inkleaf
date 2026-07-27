@@ -1226,9 +1226,8 @@ private fun FilmstripRow(
         //   下一次页码变化掐死重启，表现为抖动
         // - 目标就在屏幕内的近距离移动（如普通翻页）：动画滚动，平滑流动
         // - 目标在屏幕外（远跳）："剪辑式"跳转——先瞬移到目标同方向
-        //   一屏之外（用户感知不到），再动画滑完最后一屏。观感是一段
-        //   干脆的滑动到位，实际途经的格子只有十来个且已预热，
-        //   不会像全程 animateScrollToItem 那样逐格爬过几十个格子
+        //   Jump to one screen before the target, then animate only the final screenful. Visible
+        //   thumbnails load on demand without animateScrollToItem crawling through dozens of cells.
         val visibleItems = info.visibleItemsInfo
         val targetVisible = visibleItems.any { it.index == currentPage }
         when {
@@ -1286,8 +1285,7 @@ private fun FilmstripThumb(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    // 缓存未命中时向 ViewModel 要一次（预热通常已备好，这里兜底）；
-    // 重复请求由 ViewModel 去重，这里只管报告"我可见了"
+    // Request a missing thumbnail when its cell becomes visible. The ViewModel deduplicates work.
     if (thumbnail == null) {
         LaunchedEffect(page) { onNeedThumbnail(page) }
     }
