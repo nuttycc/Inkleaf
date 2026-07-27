@@ -487,7 +487,8 @@ class PluginPackageStore(
     private fun readState(directory: File): PluginState? {
         val file = directory.resolve(STATE_FILE)
         if (!file.isFile) return null
-        return runCatching {
+        val state =
+            runCatching {
                 json.decodeFromString<PluginState>(file.readText(StandardCharsets.UTF_8))
             }
             .getOrElse {
@@ -497,6 +498,43 @@ class PluginPackageStore(
                     it,
                 )
             }
+        return normalizeVersionReferences(directory, state)
+    }
+
+    private fun normalizeVersionReferences(directory: File, state: PluginState): PluginState {
+        fun validReference(version: String?): String? {
+            if (version == null || SemVer.parse(version) == null) return null
+            val record = state.versions.firstOrNull { it.version == version }
+            if (record?.compatible != true) return null
+            val versionDirectory = versionDirectory(directory, version)
+            return version.takeIf {
+                versionDirectory.isDirectory &&
+                    versionDirectory.resolve(PluginContract.ENTRY_PATH).isFile &&
+                    versionDirectory.resolve(PluginContract.MANIFEST_PATH).isFile
+            }
+        }
+
+        val activeVersion = validReference(state.activeVersion)
+        val previousVersion = validReference(state.previousVersion)?.takeIf { it != activeVersion }
+        if (activeVersion == state.activeVersion && previousVersion == state.previousVersion) {
+            return state
+        }
+        val normalized =
+            state.copy(
+                activeVersion = activeVersion,
+                previousVersion = previousVersion,
+                updatedAtMs = clockMs(),
+            )
+        try {
+            writeStateAtomically(directory, normalized)
+        } catch (error: Throwable) {
+            throw PluginInstallException(
+                PluginInstallErrorCode.STORAGE_FAILURE,
+                "Unable to repair plugin version references: ${directory.path}",
+                error,
+            )
+        }
+        return normalized
     }
 
     private fun writeStateAtomically(directory: File, state: PluginState) {

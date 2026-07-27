@@ -10,12 +10,16 @@ import com.exio.inkleaf.plugin.InstalledPlugin
 import com.exio.inkleaf.plugin.PluginActionDescriptor
 import com.exio.inkleaf.plugin.PluginActionRequest
 import com.exio.inkleaf.plugin.PluginSettingDescriptor
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -51,12 +55,32 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
     val message: StateFlow<SourceDetailFeedback?> = _message.asStateFlow()
 
     private var pluginId: String? = null
-    @Volatile
-    private var settingsDirty = false
+    private var loadedPluginId: String? = null
+    private var loadJob: Job? = null
+    private var authoritativeSettingIds: Set<String>? = null
+    private val settingsRevision = AtomicLong(0L)
+    private val persistedSettingsRevision = AtomicLong(0L)
+    private val settingsSaveMutex = Mutex()
 
     fun load(pluginId: String) {
+        if (loadedPluginId == pluginId) {
+            if (_describeError.value != null && loadJob?.isActive != true) {
+                loadJob = viewModelScope.launch { describe(pluginId) }
+            }
+            return
+        }
+        if (this.pluginId == pluginId && loadJob?.isActive == true) {
+            return
+        }
+        if (this.pluginId != pluginId) {
+            authoritativeSettingIds = null
+            _settings.value = emptyList()
+            _actions.value = emptyList()
+            _values.value = emptyMap()
+        }
         this.pluginId = pluginId
-        viewModelScope.launch {
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch {
             try {
                 val app = app()
                 _plugin.value =
@@ -64,6 +88,8 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
                         app.pluginManager.installed().firstOrNull { it.state.pluginId == pluginId }
                     }
                 _values.value = app.pluginSettingsRepository.storedValues(pluginId)
+                markSettingsClean()
+                loadedPluginId = pluginId
                 describe(pluginId)
             } catch (error: CancellationException) {
                 throw error
@@ -80,12 +106,11 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
             val described = app.pluginCatalog.describe(pluginId)
             _settings.value = described.settings
             _actions.value = described.actions
+            authoritativeSettingIds = described.settings.mapTo(linkedSetOf()) { it.id }
             _describeError.value = null
         } catch (error: CancellationException) {
             throw error
         } catch (error: Throwable) {
-            _settings.value = emptyList()
-            _actions.value = emptyList()
             val report = reportError("读取漫画源描述", error)
             _describeError.value = report.summary
         }
@@ -93,41 +118,30 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setValue(settingId: String, value: String) {
         if (pluginId == null) return
+        if (_values.value[settingId] == value) return
         // Update optimistically so controls do not bounce while DataStore catches up.
         _values.value = _values.value + (settingId to value)
-        settingsDirty = true
+        settingsRevision.incrementAndGet()
     }
 
-    /**
-     * Applies pending settings once when the detail screen is left.
-     *
-     * Rebuilding after each edit would repeatedly close the isolate. The final work runs in the
-     * application scope because removing the back-stack entry also clears this ViewModel.
-     */
-    fun flushSettingsChange() {
-        if (!settingsDirty) return
-        val id = pluginId ?: return
-        val app = app()
-        val values = _values.value
-        app.applicationScope.launch {
-            try {
-                applySettingsChange(app, id, values)
-                settingsDirty = false
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Throwable) {
-                reportError("保存漫画源设置", error, showFeedback = false)
-            }
+    /** Waits for pending settings to persist before allowing normal navigation away. */
+    fun saveSettingsAndThen(onSaved: () -> Unit) {
+        if (_busy.value) return
+        val id = pluginId
+        if (id == null || !hasPendingSettings()) {
+            onSaved()
+            return
+        }
+        launchOperation("保存漫画源设置") {
+            persistPendingSettings(app(), id)
+            onSaved()
         }
     }
 
     fun invokeAction(action: PluginActionDescriptor) {
         val id = pluginId ?: return
         launchOperation("运行漫画源操作：${action.title}") {
-            if (settingsDirty) {
-                applySettingsChange(app(), id, _values.value)
-                settingsDirty = false
-            }
+            persistPendingSettings(app(), id)
             val result =
                 app().pluginCatalog.invokeAction(id, PluginActionRequest(actionId = action.id))
             // Only a top-level message has a defined UI representation.
@@ -162,11 +176,14 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
     fun resetToDefaults() {
         val id = pluginId ?: return
         launchOperation("重置漫画源设置") {
-            settingsDirty = false
-            app().pluginSettingsRepository.clear(id)
-            _values.value = emptyMap()
-            app().pluginRuntimeManager.reload(id)
-            app().pluginBrowseRepository.clear(id)
+            settingsSaveMutex.withLock {
+                app().pluginSettingsRepository.clear(id)
+                _values.value = emptyMap()
+                val revision = settingsRevision.incrementAndGet()
+                app().pluginRuntimeManager.reload(id)
+                app().pluginBrowseRepository.clear(id)
+                persistedSettingsRevision.set(revision)
+            }
             _message.value = SourceDetailFeedback("已重置为默认设置")
         }
     }
@@ -174,9 +191,13 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
     fun uninstall(onDone: () -> Unit) {
         val id = pluginId ?: return
         launchOperation("卸载漫画源") {
-            // Uninstall clears settings, so the exit path must not touch the removed source.
-            settingsDirty = false
-            if (app().pluginManager.uninstall(id)) onDone()
+            settingsSaveMutex.withLock {
+                if (app().pluginManager.uninstall(id)) {
+                    // Uninstall clears settings, so the exit path must not touch the removed source.
+                    markSettingsClean()
+                    onDone()
+                }
+            }
         }
     }
 
@@ -195,10 +216,32 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
         app: InkleafApplication,
         pluginId: String,
         values: Map<String, String>,
+        settingIds: Set<String>,
     ) {
-        app.pluginSettingsRepository.setValues(pluginId, values)
+        app.pluginSettingsRepository.setValues(pluginId, values, settingIds)
         app.pluginRuntimeManager.reload(pluginId)
         app.pluginBrowseRepository.clear(pluginId)
+    }
+
+    private fun hasPendingSettings(): Boolean =
+        settingsRevision.get() != persistedSettingsRevision.get()
+
+    private fun markSettingsClean() {
+        persistedSettingsRevision.set(settingsRevision.get())
+    }
+
+    private suspend fun persistPendingSettings(app: InkleafApplication, pluginId: String) {
+        settingsSaveMutex.withLock {
+            val revision = settingsRevision.get()
+            if (revision == persistedSettingsRevision.get()) return@withLock
+            val values = _values.value
+            val settingIds =
+                checkNotNull(authoritativeSettingIds) {
+                    "Plugin setting descriptors are unavailable"
+                }
+            applySettingsChange(app, pluginId, values, settingIds)
+            persistedSettingsRevision.set(revision)
+        }
     }
 
     private fun launchOperation(operationName: String, operation: suspend () -> Unit) {

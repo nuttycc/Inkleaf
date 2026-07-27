@@ -235,10 +235,7 @@ internal class OnlineReaderViewModel(
         return ReaderBookmarkUndo {
             bookmarkMutationMutex.withLock {
                 withContext(Dispatchers.IO) {
-                    repository.addPageBookmark(
-                        removed.location,
-                        removed.chapterTitleSnapshot,
-                    )
+                    repository.restorePageBookmark(removed)
                 }
                 refreshUserRecords()
             }

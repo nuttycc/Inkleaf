@@ -229,6 +229,28 @@ class OnlineContentRepositoryTest {
     }
 
     @Test
+    fun `restoring a page bookmark does not replace a newer bookmark`() {
+        val root = Files.createTempDirectory("inkleaf-online-bookmark-conflict").toFile()
+        var now = 100L
+        try {
+            val repository = OnlineContentRepository(root.resolve("state.json"), clockMs = { now })
+            val page = location(pageId = "page-1", pageIndex = 0, revision = "revision-1")
+            val removed = repository.addPageBookmark(page, chapterTitleSnapshot = "Old title")
+            assertTrue(repository.removePageBookmark(page.identity))
+            now = 200L
+            val replacement =
+                repository.addPageBookmark(page, chapterTitleSnapshot = "Current title")
+
+            val restored = repository.restorePageBookmark(removed)
+
+            assertEquals(replacement, restored)
+            assertEquals(listOf(replacement), repository.listPageBookmarks())
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun `reading sessions can be removed restored and cleared without deleting progress`() {
         val root = Files.createTempDirectory("inkleaf-online-history-actions").toFile()
         try {

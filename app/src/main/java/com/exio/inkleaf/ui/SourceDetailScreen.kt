@@ -2,6 +2,7 @@ package com.exio.inkleaf.ui
 
 import android.content.ClipData
 import android.content.ClipboardManager
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -49,7 +50,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -124,8 +124,8 @@ fun SourceDetailScreen(
         }
     }
 
-    // Rebuild the isolate once on exit so several edits take effect atomically.
-    DisposableEffect(Unit) { onDispose { viewModel.flushSettingsChange() } }
+    val leaveScreen = { viewModel.saveSettingsAndThen(onBack) }
+    BackHandler { leaveScreen() }
 
     val displayName = plugin?.manifest?.name ?: pluginId
 
@@ -148,7 +148,7 @@ fun SourceDetailScreen(
             TopAppBar(
                 title = { Text(displayName) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = leaveScreen, enabled = !busy) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 },

@@ -102,6 +102,7 @@ fun OnlineComicScreen(
     var loading by remember { mutableStateOf(true) }
     var reload by remember { mutableIntStateOf(0) }
     var isBookmarked by remember { mutableStateOf(false) }
+    var persistedBookmarkState by remember { mutableStateOf(false) }
     var sourceName by remember { mutableStateOf(pluginId) }
     val bookmarkMutationMutex = remember { Mutex() }
     var bookmarkMutationVersion by remember { mutableIntStateOf(0) }
@@ -123,6 +124,7 @@ fun OnlineComicScreen(
             }
         sourceName = loadedSourceName
         isBookmarked = initiallyBookmarked
+        persistedBookmarkState = initiallyBookmarked
         try {
             val loadedDetail =
                 application.pluginCatalog.detail(
@@ -138,6 +140,7 @@ fun OnlineComicScreen(
                         record.references.contains(OnlineUserReference.BOOKMARK)
                     }
                 isBookmarked = storedBookmarkState
+                persistedBookmarkState = storedBookmarkState
             } catch (storageError: CancellationException) {
                 throw storageError
             } catch (_: Exception) {
@@ -182,7 +185,10 @@ fun OnlineComicScreen(
             detail = snapshot?.detail
             chapters = snapshot?.chapters.orEmpty()
             if (snapshot != null) {
-                isBookmarked = snapshot.references.contains(OnlineUserReference.BOOKMARK)
+                val storedBookmarkState =
+                    snapshot.references.contains(OnlineUserReference.BOOKMARK)
+                isBookmarked = storedBookmarkState
+                persistedBookmarkState = storedBookmarkState
             }
         } finally {
             loading = false
@@ -207,12 +213,13 @@ fun OnlineComicScreen(
                             present = nextState,
                         )
                     }
+                    persistedBookmarkState = nextState
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (error: Exception) {
                 if (mutationVersion == bookmarkMutationVersion) {
-                    isBookmarked = previousState
+                    isBookmarked = persistedBookmarkState
                     errorMessage = error.message?.let { "追漫状态保存失败：$it" } ?: "追漫状态保存失败"
                 }
             }

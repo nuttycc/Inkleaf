@@ -123,12 +123,13 @@ class PluginPackageStoreTest {
             check(corruptState != originalState)
             stateFile.writeText(corruptState)
 
-            val installed = store.install(update)
+            val installed = store.install(update, activate = true)
 
             assertEquals(PluginInstallStatus.INSTALLED, installed.status)
-            assertTrue(
-                requireNotNull(store.get(PLUGIN_ID)).state.versions.any { it.version == "1.1.0" }
-            )
+            val repairedState = requireNotNull(store.get(PLUGIN_ID)).state
+            assertEquals("1.1.0", repairedState.activeVersion)
+            assertNull(repairedState.previousVersion)
+            assertTrue(repairedState.versions.any { it.version == "1.1.0" })
         }
 
     @Test

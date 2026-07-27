@@ -42,17 +42,22 @@ class PluginSettingsRepository(context: Context) {
         observeValues(pluginId).first()
 
     /** Persists a settings snapshot in one DataStore transaction. */
-    suspend fun setValues(pluginId: String, values: Map<String, String>) {
+    suspend fun setValues(
+        pluginId: String,
+        values: Map<String, String>,
+        descriptorIds: Set<String>,
+    ) {
         val prefix = namespacePrefix(pluginId)
+        val snapshot = descriptorBackedValues(values, descriptorIds)
         dataStore.edit { prefs ->
             prefs
                 .asMap()
                 .keys
                 .filter { key ->
-                    key.name.startsWith(prefix) && key.name.removePrefix(prefix) !in values
+                    key.name.startsWith(prefix) && key.name.removePrefix(prefix) !in snapshot
                 }
                 .forEach { prefs.remove(it) }
-            values.forEach { (settingId, value) ->
+            snapshot.forEach { (settingId, value) ->
                 prefs[compositeKey(pluginId, settingId)] = value
             }
         }
@@ -103,3 +108,13 @@ class PluginSettingsRepository(context: Context) {
     // Newline is safe because validateId rejects ISO control characters in setting ids.
     private fun namespacePrefix(pluginId: String) = "$pluginId\n"
 }
+
+internal fun descriptorBackedValues(
+    values: Map<String, String>,
+    descriptorIds: Set<String>,
+): Map<String, String> =
+    if (values.keys.all(descriptorIds::contains)) {
+        values
+    } else {
+        values.filterKeys(descriptorIds::contains)
+    }

@@ -169,7 +169,15 @@ class OnlineContentRepository(
     /** Restores a removed bookmark without changing its original ordering timestamp. */
     fun restorePageBookmark(bookmark: OnlinePageBookmark): OnlinePageBookmark =
         synchronized(lock) {
-            storePageBookmark(key(bookmark.location.identity.chapter.content), bookmark)
+            val contentKey = key(bookmark.location.identity.chapter.content)
+            val existing =
+                read()
+                    .records
+                    .firstOrNull { it.key == contentKey }
+                    ?.pageBookmarks
+                    ?.firstOrNull { it.location.identity == bookmark.location.identity }
+            if (existing != null) return@synchronized existing
+            storePageBookmark(contentKey, bookmark)
             bookmark
         }
 
