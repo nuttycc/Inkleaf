@@ -59,6 +59,11 @@ data class PluginSettingDescriptor(
     val defaultValue: String? = null,
     /** Select settings reuse the filter-option structure. */
     val options: List<PluginFilterOption> = emptyList(),
+    /**
+     * Optional group heading. Sources that expose many knobs would otherwise render as one long
+     * flat list. Omitting it keeps the pre-1.2 behaviour, so older plugins need no changes.
+     */
+    val section: String? = null,
 )
 
 @Serializable
@@ -314,6 +319,7 @@ object PluginContentCodec {
                 throw PluginContentValidationException("Setting ids must be unique")
             }
             validateText(setting.title, "setting.title", 256)
+            setting.section?.let { validateText(it, "setting.section", 256) }
             if (setting.options.size > PluginContentLimits.MAX_DESCRIPTORS) {
                 throw PluginContentValidationException("Setting contains too many options")
             }

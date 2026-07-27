@@ -101,6 +101,18 @@ fun SourceDetailScreen(
 
     val displayName = plugin?.manifest?.name ?: pluginId
 
+    // Group by first appearance rather than sorting: the plugin's declaration order is the only
+    // ordering signal we have, and reordering it would scramble the author's intent.
+    val settingSections =
+        remember(settings) {
+            val ordered = LinkedHashMap<String?, MutableList<PluginSettingDescriptor>>()
+            settings.forEach { descriptor ->
+                val section = descriptor.section?.takeIf { it.isNotBlank() }
+                ordered.getOrPut(section) { mutableListOf() }.add(descriptor)
+            }
+            ordered.map { (section, group) -> section to group.toList() }
+        }
+
     Scaffold(
         modifier = modifier,
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -134,15 +146,19 @@ fun SourceDetailScreen(
             }
 
             if (settings.isNotEmpty()) {
-                item { SectionHeader("设置") }
-                items(settings.size, key = { "setting_${settings[it].id}" }) { index ->
-                    val descriptor = settings[index]
-                    SettingControl(
-                        descriptor = descriptor,
-                        value = values[descriptor.id] ?: descriptor.defaultValue.orEmpty(),
-                        enabled = !busy,
-                        onValueChange = { viewModel.setValue(descriptor.id, it) },
-                    )
+                settingSections.forEach { (section, group) ->
+                    item(key = "setting_section_${section.orEmpty()}") {
+                        SectionHeader(section ?: "设置")
+                    }
+                    items(group.size, key = { "setting_${group[it].id}" }) { index ->
+                        val descriptor = group[index]
+                        SettingControl(
+                            descriptor = descriptor,
+                            value = values[descriptor.id] ?: descriptor.defaultValue.orEmpty(),
+                            enabled = !busy,
+                            onValueChange = { viewModel.setValue(descriptor.id, it) },
+                        )
+                    }
                 }
             }
 

@@ -48,7 +48,7 @@ object PluginCapabilities {
 
 object PluginContract {
     const val SUPPORTED_MANIFEST_VERSION = 1
-    val HOST_API_VERSION = ApiVersion(major = 1, minor = 1)
+    val HOST_API_VERSION = ApiVersion(major = 1, minor = 2)
     const val MANIFEST_PATH = "manifest.json"
     const val ENTRY_PATH = "main.js"
     const val ASSET_PREFIX = "assets/"
