@@ -1,0 +1,127 @@
+{
+  "errno": 0,
+  "errmsg": "",
+  "data": {
+    "data": {
+      "id": 86949,
+      "title": "明魔录",
+      "aliasName": "",
+      "realName": "",
+      "direction": 1,
+      "islong": 1,
+      "is_dmzj": 0,
+      "cover": "https://images.zaimanhua.com/img/webpic/4/12457441782545251.jpg",
+      "description": "昔日辉煌的神龙帝国陨落已有百年，东方大陆迎来了最黑暗的时刻，未知世界而来的邪神腐化了大地，人类抱团取暖艰难求生，但是不去的意志激励着他们继续抵抗。职业猎魔人也走上了江湖的舞台。名门弟子如意即将出山踏上自己的江湖之旅，然而一场由师门布置的棋局正在等待着她。",
+      "last_updatetime": 1785137332,
+      "last_update_chapter_name": "14话",
+      "copyright": 1,
+      "first_letter": "m",
+      "comic_py": "mingmolu",
+      "hidden": 0,
+      "hot_num": 7636,
+      "hit_num": 6995,
+      "uid": 1245744,
+      "is_lock": 0,
+      "last_update_chapter_id": 183982,
+      "types": [
+        {
+          "tag_id": 4,
+          "tag_name": "冒险",
+          "tag_py": "maoxian"
+        },
+        {
+          "tag_id": 3248,
+          "tag_name": "热血",
+          "tag_py": "rexue"
+        },
+        {
+          "tag_id": 3251,
+          "tag_name": "战争",
+          "tag_py": "zhanzheng"
+        },
+        {
+          "tag_id": 3324,
+          "tag_name": "武侠",
+          "tag_py": "wuxia"
+        }
+      ],
+      "status": [
+        {
+          "tag_id": 2309,
+          "tag_name": "连载中",
+          "tag_py": "lianzaizhong"
+        }
+      ],
+      "authors": [
+        {
+          "tag_id": 37010,
+          "tag_name": "李凌风",
+          "tag_py": "lilingfeng"
+        }
+      ],
+      "subscribe_num": 0,
+      "chapters": [
+        {
+          "title": "连载",
+          "data": [
+            {
+              "chapter_id": 183982,
+              "chapter_title": "14话",
+              "chapter_name": "14话",
+              "updatetime": 1785137332,
+              "filesize": 0,
+              "chapter_order": 16,
+              "is_fee": false,
+              "canRead": true,
+              "volumn_id": 999
+            },
+            {
+              "chapter_id": 183615,
+              "chapter_title": "13话",
+              "chapter_name": "第13话",
+              "updatetime": 1784511650,
+              "filesize": 0,
+              "chapter_order": 15,
+              "is_fee": false,
+              "canRead": true,
+              "volumn_id": 999
+            },
+            {
+              "chapter_id": 183287,
+              "chapter_title": "12话",
+              "chapter_name": "第12话",
+              "updatetime": 1783987886,
+              "filesize": 0,
+              "chapter_order": 14,
+              "is_fee": false,
+              "canRead": true,
+              "volumn_id": 999
+            }
+          ]
+        }
+      ],
+      "is_need_login": 0,
+      "url_links": [],
+      "isHideChapter": 0,
+      "dh_url_links": [],
+      "corner_mark": "",
+      "is_fee": 0,
+      "canRead": true,
+      "comicNotice": "",
+      "authorNotice": "大家好，我是《明魔录》的作者李凌风，这个漫画会在本平台与b漫同步连载，直至B漫开启章节收费后会在本平台停止连载，设定集可以去B漫付费观看，感谢您的支持！"
+    },
+    "readingRecord": {
+      "type_name": "",
+      "uid": 0,
+      "source": 0,
+      "biz_id": 0,
+      "chapter_id": 0,
+      "viewing_time": 0,
+      "record": 0,
+      "volume_id": 0,
+      "total_num": 0,
+      "chapter_name": "",
+      "volume_name": ""
+    }
+  }
+}

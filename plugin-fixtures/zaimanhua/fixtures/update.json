@@ -1,0 +1,61 @@
+{
+  "data": [
+    {
+      "id": 0,
+      "comic_id": 86949,
+      "islong": 1,
+      "authors": "李凌风",
+      "copyright": 0,
+      "cover": "https://images.zaimanhua.com/img/webpic/4/12457441782545251.jpg",
+      "hot_hits": 0,
+      "last_name": "",
+      "status": "连载中",
+      "title": "明魔录",
+      "types": "冒险,热血,战争,武侠",
+      "alias_name": "",
+      "comic_py": "",
+      "last_update_chapter_name": "14话",
+      "last_update_chapter_id": 183982,
+      "last_updatetime": 1785137332,
+      "last_update_volumn": "连载"
+    },
+    {
+      "id": 0,
+      "comic_id": 87382,
+      "islong": 2,
+      "authors": "杂烩火锅",
+      "copyright": 0,
+      "cover": "https://images.zaimanhua.com/img/webpic/7/4400071784236475.jpg",
+      "hot_hits": 0,
+      "last_name": "",
+      "status": "连载中",
+      "title": "喜欢说反话的乐梓仁同学",
+      "types": "校园,其他,搞笑,宅系",
+      "alias_name": "",
+      "comic_py": "",
+      "last_update_chapter_name": "11.人生三大错觉之一",
+      "last_update_chapter_id": 190527,
+      "last_updatetime": 1785130639,
+      "last_update_volumn": "连载"
+    },
+    {
+      "id": 0,
+      "comic_id": 52785,
+      "islong": 2,
+      "authors": "三十七",
+      "copyright": 0,
+      "cover": "https://images.zaimanhua.com/img/webpic/3/1080211231590073854.jpg",
+      "hot_hits": 0,
+      "last_name": "",
+      "status": "连载中",
+      "title": "闪光的碎片",
+      "types": "亲情/治愈/搞笑",
+      "alias_name": "",
+      "comic_py": "",
+      "last_update_chapter_name": "135寒假",
+      "last_update_chapter_id": 189968,
+      "last_updatetime": 1785121074,
+      "last_update_volumn": "连载"
+    }
+  ]
+}

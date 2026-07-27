@@ -1,0 +1,68 @@
+{
+  "errno": 0,
+  "errmsg": "",
+  "data": {
+    "list": [
+      {
+        "id": 77856,
+        "comic_id": 0,
+        "islong": 0,
+        "authors": "岸本斉史",
+        "copyright": 0,
+        "cover": "https://images.zaimanhua.com/webpic/18/4928421c68f1478ab1456a7129464706.jpg",
+        "hot_hits": 8299,
+        "last_name": "全一卷",
+        "status": "已完结",
+        "title": "火影忍者外传-第七代火影与绯色花月",
+        "types": "冒险,热血",
+        "alias_name": "",
+        "comic_py": "hyrzwcdqdhyyfshy",
+        "last_update_chapter_name": "全一卷",
+        "last_update_chapter_id": 0,
+        "last_updatetime": 0,
+        "last_update_volumn": ""
+      },
+      {
+        "id": 82013,
+        "comic_id": 0,
+        "islong": 0,
+        "authors": "◆xqs6E2kxUA",
+        "copyright": 0,
+        "cover": "https://images.zaimanhua.com/webpic/3/6e73a627d1934379ae2c710d39f5327d.jpg",
+        "hot_hits": 7335,
+        "last_name": "第16话",
+        "status": "已完结",
+        "title": "污忍以成为火影为目标的NARUTO",
+        "types": "AA",
+        "alias_name": "污忍以成為火影為目標的NARUTO",
+        "comic_py": "wrywcwhywmbdnaruto",
+        "last_update_chapter_name": "第16话",
+        "last_update_chapter_id": 0,
+        "last_updatetime": 0,
+        "last_update_volumn": ""
+      },
+      {
+        "id": 77482,
+        "comic_id": 0,
+        "islong": 0,
+        "authors": "IDW",
+        "copyright": 0,
+        "cover": "https://images.zaimanhua.com/webpic/10/3b53c8f830e9496ca6c161439e96cfe2.jpg",
+        "hot_hits": 5517,
+        "last_name": "第4卷",
+        "status": "连载中",
+        "title": "忍者神龟×火影忍者",
+        "types": "冒险/格斗",
+        "alias_name": "忍者神龟x火影忍者",
+        "comic_py": "renzheshenguihuoyingrenzhe",
+        "last_update_chapter_name": "第4卷",
+        "last_update_chapter_id": 0,
+        "last_updatetime": 0,
+        "last_update_volumn": ""
+      }
+    ],
+    "page": 1,
+    "size": 20,
+    "total": 29
+  }
+}
