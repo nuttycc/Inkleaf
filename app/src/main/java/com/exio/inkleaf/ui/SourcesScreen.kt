@@ -24,10 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -48,7 +45,6 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -64,6 +60,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import com.composables.icons.materialsymbols.outlined.R as MaterialSymbolsOutlinedR
 import com.exio.inkleaf.InkleafApplication
 import com.exio.inkleaf.R
 import com.exio.inkleaf.plugin.InstalledPlugin
@@ -84,6 +81,7 @@ import kotlinx.coroutines.withContext
 @Composable
 fun SourcesScreen(
     onBack: () -> Unit,
+    onOpenSource: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -259,21 +257,7 @@ fun SourcesScreen(
                                 )
                             }
                         },
-                        onActivate = { version ->
-                            launchOperation {
-                                application.pluginManager.activate(plugin.state.pluginId, version)
-                            }
-                        },
-                        onRollback = {
-                            launchOperation {
-                                application.pluginManager.rollback(plugin.state.pluginId)
-                            }
-                        },
-                        onUninstall = {
-                            launchOperation {
-                                application.pluginManager.uninstall(plugin.state.pluginId)
-                            }
-                        },
+                        onOpen = { onOpenSource(plugin.state.pluginId) },
                     )
                 }
             }
@@ -405,8 +389,9 @@ private fun ImportSourceSheetContent(
     }
 }
 
+/** Health badge shared by the source list and source detail screen. */
 @Composable
-private fun HealthStatusBadge(
+internal fun HealthStatusBadge(
     pluginState: PluginState,
     modifier: Modifier = Modifier,
 ) {
@@ -470,150 +455,68 @@ private fun HealthStatusBadge(
     }
 }
 
+/** A list row shows identity, health, and enabled state; details belong on the nested screen. */
 @Composable
 private fun SourceManagementItem(
     plugin: InstalledPlugin,
     busy: Boolean,
     onToggle: () -> Unit,
-    onActivate: (String) -> Unit,
-    onRollback: () -> Unit,
-    onUninstall: () -> Unit,
+    onOpen: () -> Unit,
 ) {
-    var showUninstallConfirm by remember { mutableStateOf(false) }
     val displayName = plugin.manifest?.name ?: plugin.state.pluginId
 
     ElevatedCard(
+        onClick = onOpen,
         modifier = Modifier.fillMaxWidth(),
         elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
     ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            ListItem(
-                headlineContent = {
+        ListItem(
+            supportingContent = {
+                Column(
+                    modifier = Modifier.padding(top = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
                     Text(
-                        text = displayName,
-                        style = MaterialTheme.typography.titleMedium,
+                        text =
+                            "id: ${plugin.state.pluginId} · v${plugin.state.activeVersion ?: "未启用"}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                },
-                supportingContent = {
-                    Column(
-                        modifier = Modifier.padding(top = 4.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        Text(
-                            text =
-                                "id: ${plugin.state.pluginId} · v${plugin.state.activeVersion ?: "未启用"}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        HealthStatusBadge(pluginState = plugin.state)
-                    }
-                },
-                leadingContent = {
-                    Surface(
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                        modifier = Modifier.size(40.dp),
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                painter = painterResource(R.drawable.ic_tune),
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                            )
-                        }
-                    }
-                },
-                trailingContent = {
-                    Switch(
-                        checked = !plugin.state.disabled && plugin.state.activeVersion != null,
-                        onCheckedChange = { onToggle() },
-                        enabled = !busy && plugin.state.activeVersion != null,
-                    )
-                },
-                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-            )
-
-            HorizontalDivider(
-                modifier = Modifier.padding(horizontal = 16.dp),
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-            )
-
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (plugin.state.previousVersion != null) {
-                    OutlinedButton(
-                        onClick = onRollback,
-                        enabled = !busy,
-                    ) {
+                    HealthStatusBadge(pluginState = plugin.state)
+                }
+            },
+            leadingContent = {
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    modifier = Modifier.size(40.dp),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
                         Icon(
-                            painter = painterResource(R.drawable.ic_history),
+                            painter =
+                                painterResource(
+                                    MaterialSymbolsOutlinedR.drawable
+                                        .materialsymbols_ic_extension_outlined
+                                ),
                             contentDescription = null,
-                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
                         )
-                        Spacer(Modifier.width(4.dp))
-                        Text("回滚")
                     }
                 }
-
-                plugin.state.versions
-                    .filter { it.compatible && it.version != plugin.state.activeVersion }
-                    .forEach { versionRecord ->
-                        TextButton(
-                            onClick = { onActivate(versionRecord.version) },
-                            enabled = !busy,
-                        ) {
-                            Text("启用 v${versionRecord.version}")
-                        }
-                    }
-
-                OutlinedButton(
-                    onClick = { showUninstallConfirm = true },
-                    enabled = !busy,
-                    colors =
-                        ButtonDefaults.outlinedButtonColors(
-                            contentColor = MaterialTheme.colorScheme.error
-                        ),
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Delete,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text("卸载")
-                }
-            }
+            },
+            trailingContent = {
+                Switch(
+                    checked = !plugin.state.disabled && plugin.state.activeVersion != null,
+                    onCheckedChange = { onToggle() },
+                    enabled = !busy && plugin.state.activeVersion != null,
+                )
+            },
+            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        ) {
+            Text(
+                text = displayName,
+                style = MaterialTheme.typography.titleMedium,
+            )
         }
-    }
-
-    if (showUninstallConfirm) {
-        AlertDialog(
-            onDismissRequest = { showUninstallConfirm = false },
-            title = { Text("卸载漫画源") },
-            text = { Text("卸载将移除插件文件、插件配置、Cookie 和日志。阅读历史、书签及已保存记录会保留，但该来源将暂时不可用。") },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        showUninstallConfirm = false
-                        onUninstall()
-                    },
-                    colors =
-                        ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.error,
-                            contentColor = MaterialTheme.colorScheme.onError,
-                        ),
-                ) {
-                    Text("确认卸载")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showUninstallConfirm = false }) {
-                    Text("取消")
-                }
-            },
-        )
     }
 }

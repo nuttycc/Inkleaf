@@ -71,6 +71,7 @@ import com.exio.inkleaf.ui.ReaderScreen
 import com.exio.inkleaf.ui.SavedScreen
 import com.exio.inkleaf.ui.SettingsScreen
 import com.exio.inkleaf.ui.ShelfScreen
+import com.exio.inkleaf.ui.SourceDetailScreen
 import com.exio.inkleaf.ui.SourcesScreen
 import com.exio.inkleaf.ui.ThemeSettingsScreen
 import com.exio.inkleaf.ui.theme.InkleafTheme
@@ -106,6 +107,8 @@ import kotlinx.serialization.Serializable
 @Serializable data object PluginDiscoverRoute
 
 @Serializable data object SourcesRoute
+
+@Serializable data class SourceDetailRoute(val pluginId: String)
 
 @Serializable
 data class OnlineComicRoute(
@@ -638,7 +641,19 @@ class MainActivity : AppCompatActivity() {
                             OcrModelDownloadScreen(onBack = { outerNavController.popBackStack() })
                         }
                         composable<SourcesRoute> {
-                            SourcesScreen(onBack = { outerNavController.popBackStack() })
+                            SourcesScreen(
+                                onBack = { outerNavController.popBackStack() },
+                                onOpenSource = { pluginId ->
+                                    outerNavController.navigate(SourceDetailRoute(pluginId))
+                                },
+                            )
+                        }
+                        composable<SourceDetailRoute> { entry ->
+                            val route = entry.toRoute<SourceDetailRoute>()
+                            SourceDetailScreen(
+                                pluginId = route.pluginId,
+                                onBack = { outerNavController.popBackStack() },
+                            )
                         }
                         composable<OnlineComicRoute> { entry ->
                             val route = entry.toRoute<OnlineComicRoute>()

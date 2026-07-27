@@ -1,11 +1,64 @@
 (function () {
   "use strict";
 
-  const API_BASE = "https://api.manga2025.com/api/v3";
+  const DEFAULT_API_BASE = "https://api.manga2025.com/api/v3";
   const PLATFORM = "1";
   const BROWSE_PLATFORM = "3";
   const MAX_SEARCH_LIMIT = 21;
   const CHAPTER_PAGE_LIMIT = 500;
+
+  // Keep verified route knowledge in the plugin package so endpoint changes do not leak into
+  // Android UI or become part of the host contract.
+  const API_DOMAIN_OPTIONS = [
+    { id: "https://api.manga2025.com/api/v3", title: "默认 · 热辣漫画线路 2" },
+    { id: "https://api.2026copy.com/api/v3", title: "大陆专线新站" },
+    { id: "https://mapi.copy20.com/api/v3", title: "大陆专线 1" },
+    { id: "https://mapi.copy2000.site/api/v3", title: "大陆专线 2" },
+    { id: "https://api.2025copy.com/api/v3", title: "大陆专线 3" },
+    { id: "https://api.mangacopy.com/api/v3", title: "国际服" },
+    { id: "https://api.copy2000.online/api/v3", title: "国际服 1" },
+    { id: "https://mapi.hotmangasd.com/api/v3", title: "热辣漫画线路 1" },
+    { id: "https://mapi.hotmangasf.com/api/v3", title: "热辣漫画线路 3" },
+    { id: "https://mapi.hotmangasg.com/api/v3", title: "热辣漫画线路 4" },
+    { id: "https://mapi.elfgjfghkk.club/api/v3", title: "热辣漫画线路 5" },
+    { id: "https://mapi.fgjfghkk.club/api/v3", title: "热辣漫画线路 6" },
+    { id: "https://mapi.fgjfghkkcenter.club/api/v3", title: "热辣漫画线路 7" }
+  ];
+  const SETTING_DESCRIPTORS = [
+    {
+      id: "apiDomain",
+      title: "接口线路（不可用时切换）",
+      type: "select",
+      defaultValue: DEFAULT_API_BASE,
+      options: API_DOMAIN_OPTIONS
+    },
+    {
+      id: "originalImage",
+      title: "阅读时加载原图",
+      type: "boolean",
+      defaultValue: "false"
+    }
+  ];
+
+  // Settings are immutable during one isolate lifetime. The host rebuilds this isolate when the
+  // user leaves the source settings screen, which makes a batch of edits take effect atomically.
+  let cachedSettings = null;
+
+  async function settings() {
+    if (cachedSettings) return cachedSettings;
+    const [domain, original] = await Promise.all([
+      inkleaf.host.settings.get("apiDomain"),
+      inkleaf.host.settings.get("originalImage")
+    ]);
+    const requestedDomain = text(domain);
+    cachedSettings = {
+      apiBase: API_DOMAIN_OPTIONS.some(function (option) {
+        return option.id === requestedDomain;
+      }) ? requestedDomain : DEFAULT_API_BASE,
+      originalImage: text(original) === "true"
+    };
+    return cachedSettings;
+  }
 
   function pluginError(code, message, retryable) {
     const error = new Error(message);
@@ -35,15 +88,29 @@
       .join("&");
   }
 
-  function apiHeaders() {
-    return {
+  function apiHost(apiBase) {
+    return text(apiBase).replace(/^https?:\/\//i, "").split("/")[0].toLowerCase();
+  }
+
+  function isHotMangaApiBase(apiBase) {
+    const host = apiHost(apiBase);
+    return host.indexOf("hotmanga") >= 0 ||
+      host === "api.manga2025.com" ||
+      host.indexOf("fgjfghkk") >= 0;
+  }
+
+  function apiHeaders(active) {
+    const hotManga = isHotMangaApiBase(active.apiBase);
+    const headers = {
       Accept: "application/json",
       "Accept-Language": "en-US,en;q=0.9,zh-TW;q=0.8,zh;q=0.7",
-      version: "2025.02.12",
-      Origin: "https://m.relamanhua.org",
+      version: hotManga ? "2025.02.12" : "2025.05.09",
+      Origin: hotManga ? "https://m.relamanhua.org" : "https://2025copy.com",
       platform: PLATFORM,
-      webp: "1"
+      webp: hotManga ? "1" : "0"
     };
+    if (!hotManga) headers.region = "0";
+    return headers;
   }
 
   // JavaScriptEngine isolates are not guaranteed to expose browser decoding globals.
@@ -157,11 +224,13 @@
   }
 
   async function apiGet(path, parameters, signal) {
+    const active = await settings();
     const query = parameters ? queryString(parameters) : "";
+    const headers = apiHeaders(active);
     const response = await inkleaf.host.http.request({
       method: "GET",
-      url: API_BASE + path + (query ? "?" + query : ""),
-      headers: apiHeaders()
+      url: active.apiBase + path + (query ? "?" + query : ""),
+      headers: headers
     }, signal);
     const body = await responseText(response, signal);
     if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -387,16 +456,19 @@
 
   async function loadChapterContent(sourceId, chapterId, signal) {
     const basePath = "/comic/" + encodeURIComponent(sourceId) + "/";
+    const active = await settings();
+    const primaryPath = isHotMangaApiBase(active.apiBase) ? "chapter" : "chapter2";
+    const secondaryPath = primaryPath === "chapter" ? "chapter2" : "chapter";
     try {
       return await apiGet(
-        basePath + "chapter/" + encodeURIComponent(chapterId),
+        basePath + primaryPath + "/" + encodeURIComponent(chapterId),
         { platform: PLATFORM },
         signal
       );
     } catch (error) {
       if (!error || error.statusCode !== 404) throw error;
       return apiGet(
-        basePath + "chapter2/" + encodeURIComponent(chapterId),
+        basePath + secondaryPath + "/" + encodeURIComponent(chapterId),
         { platform: PLATFORM },
         signal
       );
@@ -405,7 +477,35 @@
 
   inkleaf.register({
     describe: async function () {
-      return { schemaVersion: 1, feeds: feedDescriptors(), actions: [], filters: [], settings: [] };
+      return {
+        schemaVersion: 1,
+        feeds: feedDescriptors(),
+        actions: [
+          { id: "probeDomain", title: "检测当前线路是否可用", kind: "action" }
+        ],
+        filters: [],
+        settings: SETTING_DESCRIPTORS
+      };
+    },
+
+    invokeAction: async function (request, context) {
+      const actionId = text(request && request.actionId);
+      const signal = context && context.signal;
+      if (actionId === "probeDomain") {
+        const active = await settings();
+        try {
+          await apiGet("/comics", {
+            limit: 1,
+            offset: 0,
+            ordering: "-datetime_updated",
+            platform: BROWSE_PLATFORM
+          }, signal);
+          return { message: "线路可用：" + active.apiBase };
+        } catch (error) {
+          return { message: "线路不可用：" + (error && error.message ? error.message : "未知错误") };
+        }
+      }
+      throw pluginError("NOT_FOUND", "Unknown action: " + actionId, false);
     },
 
     search: async function (request, context) {
@@ -448,26 +548,32 @@
       }
 
       if (feedId === "newest") {
-        let results;
-        try {
-          results = await apiGet("/comics", {
+        const active = await settings();
+        const primaryPath = isHotMangaApiBase(active.apiBase) ? "/comics" : "/update/newest";
+        const secondaryPath = primaryPath === "/comics" ? "/update/newest" : "/comics";
+        function newestParameters(path) {
+          const parameters = {
             limit: limit,
             offset: offset,
-            ordering: "-datetime_updated",
             platform: BROWSE_PLATFORM
-          }, signal);
+          };
+          if (path === "/comics") parameters.ordering = "-datetime_updated";
+          return parameters;
+        }
+        let results;
+        try {
+          results = await apiGet(primaryPath, newestParameters(primaryPath), signal);
           return browsePage(results, offset, function (row) {
             const record = asObject(row);
             return text(asObject(record.comic).path_word) ? record.comic : record;
           });
         } catch (error) {
           if (!error || error.statusCode !== 404) throw error;
-          results = await apiGet("/update/newest", {
-            limit: limit,
-            offset: offset,
-            platform: BROWSE_PLATFORM
-          }, signal);
-          return browsePage(results, offset, function (row) { return asObject(row).comic; });
+          results = await apiGet(secondaryPath, newestParameters(secondaryPath), signal);
+          return browsePage(results, offset, function (row) {
+            const record = asObject(row);
+            return text(asObject(record.comic).path_word) ? record.comic : record;
+          });
         }
       }
 
@@ -583,6 +689,7 @@
       const chapter = asObject(results.chapter);
       const urls = chapterImageUrls(chapter);
       if (!urls.length) throw pluginError("NOT_FOUND", "No readable images found for this chapter", false);
+      const active = await settings();
       return {
         sourceId: sourceId,
         chapterId: chapterId,
@@ -591,7 +698,8 @@
           return {
             pageId: chapterId + "-" + (index + 1),
             index: index,
-            url: url,
+            // CopyComic uses a .c<width>x suffix for resized images; removing it requests source.
+            url: active.originalImage ? url.replace(/\.c[0-9]+x\./, ".") : url,
             headers: { Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8" }
           };
         })

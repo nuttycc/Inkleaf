@@ -57,6 +57,8 @@ data class PluginSettingDescriptor(
     val secret: Boolean = false,
     val required: Boolean = false,
     val defaultValue: String? = null,
+    /** Select settings reuse the filter-option structure. */
+    val options: List<PluginFilterOption> = emptyList(),
 )
 
 @Serializable
@@ -304,9 +306,28 @@ object PluginContentCodec {
             validateText(action.title, "action.title", 256)
         }
         validateFilters(value.filters, "filter")
+        val settingIds = HashSet<String>(value.settings.size)
         value.settings.forEach { setting ->
             validateId(setting.id, "setting.id")
+            // Values are keyed by id, so duplicates would silently overwrite one another.
+            if (!settingIds.add(setting.id)) {
+                throw PluginContentValidationException("Setting ids must be unique")
+            }
             validateText(setting.title, "setting.title", 256)
+            if (setting.options.size > PluginContentLimits.MAX_DESCRIPTORS) {
+                throw PluginContentValidationException("Setting contains too many options")
+            }
+            val optionIds = HashSet<String>(setting.options.size)
+            setting.options.forEach { option ->
+                validateId(option.id, "setting.option.id")
+                if (!optionIds.add(option.id)) {
+                    throw PluginContentValidationException("Setting option ids must be unique")
+                }
+                validateText(option.title, "setting.option.title", 256)
+            }
+            if (setting.type == "select" && setting.options.isEmpty()) {
+                throw PluginContentValidationException("Select settings require options")
+            }
         }
         return value.copy(
             feeds =

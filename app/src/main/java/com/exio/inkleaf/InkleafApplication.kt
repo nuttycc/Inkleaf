@@ -12,6 +12,7 @@ import com.exio.inkleaf.plugin.PluginCatalog
 import com.exio.inkleaf.plugin.PluginManager
 import com.exio.inkleaf.plugin.PluginPackageStore
 import com.exio.inkleaf.plugin.PluginRuntimeManager
+import com.exio.inkleaf.plugin.PluginSettingsRepository
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -27,8 +28,15 @@ class InkleafApplication : Application() {
     val pluginPackageStore: PluginPackageStore by lazy {
         PluginPackageStore(File(filesDir, "plugins"))
     }
+    val pluginSettingsRepository: PluginSettingsRepository by lazy {
+        PluginSettingsRepository(this)
+    }
     val pluginRuntimeManager: PluginRuntimeManager by lazy {
-        PluginRuntimeManager(this, pluginPackageStore)
+        PluginRuntimeManager(
+            this,
+            pluginPackageStore,
+            settingsRepository = pluginSettingsRepository,
+        )
     }
     val pluginCatalog: PluginCatalog by lazy {
         PluginCatalog(pluginRuntimeManager)
@@ -37,7 +45,13 @@ class InkleafApplication : Application() {
         PluginBrowseRepository(File(cacheDir, "plugin-browse"), pluginCatalog::browse)
     }
     val pluginManager: PluginManager by lazy {
-        PluginManager(this, pluginPackageStore, pluginRuntimeManager, onlineContentRepository)
+        PluginManager(
+            this,
+            pluginPackageStore,
+            pluginRuntimeManager,
+            onlineContentRepository,
+            pluginSettingsRepository,
+        )
     }
     val onlineContentRepository: OnlineContentRepository by lazy {
         OnlineContentRepository(File(filesDir, "online-content/state.json"))

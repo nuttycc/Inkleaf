@@ -105,6 +105,35 @@ class PluginBrowseRepository(
     suspend fun loadPage(pluginId: String, request: PluginBrowseRequest): PluginSearchPage =
         remoteBrowse(pluginId, request)
 
+    /**
+     * Removes all browse cache entries for one source.
+     *
+     * Settings are absent from the cache key, so changing a route or image mode must invalidate
+     * entries that could otherwise remain visible for 15 minutes. Disk names are SHA-256 cache-key
+     * hashes; reading at most 64 envelopes is acceptable for this infrequent operation.
+     */
+    suspend fun clear(pluginId: String) {
+        withContext(Dispatchers.IO) {
+            synchronized(memoryLock) {
+                memory.keys.filter { it.pluginId == pluginId }.forEach { memory.remove(it) }
+            }
+            cacheDirectory
+                .listFiles { file -> file.isFile && file.extension == "json" }
+                ?.forEach { file ->
+                    val envelope =
+                        runCatching {
+                                json.decodeFromString(
+                                    BrowseCacheEnvelope.serializer(),
+                                    file.readText(StandardCharsets.UTF_8),
+                                )
+                            }
+                            .getOrNull()
+                    // Corrupt cache entries have no value and can be removed at the same time.
+                    if (envelope == null || envelope.pluginId == pluginId) file.delete()
+                }
+        }
+    }
+
     private fun readInternal(key: PluginBrowseCacheKey): PluginBrowseCacheSnapshot? {
         synchronized(memoryLock) { memory[key] }
             ?.let {

@@ -25,6 +25,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.decodeFromJsonElement
@@ -85,6 +86,19 @@ data class PluginHttpChunk(
 
 @Serializable data class PluginKvDelete(val key: String)
 
+/** Input for settings.get; id matches PluginSettingDescriptor.id from describe(). */
+@Serializable data class PluginSettingGet(val id: String)
+
+/**
+ * Host-written, plugin-read-only access to source settings.
+ *
+ * This stays separate from plugin-owned, read-write kv storage so plugin code cannot silently
+ * change a user's choice. Null means there is no stored value or descriptor default.
+ */
+fun interface PluginSettingsReader {
+    suspend fun read(pluginId: String, settingId: String): String?
+}
+
 @Serializable
 data class PluginLogEntry(
     val level: String,
@@ -109,6 +123,7 @@ class PluginHostSession(
     private val logger: PluginLogger =
         FilePluginLogger(pluginId, pluginDirectory.resolve("logs"), json, clockMs),
     private val globalHttpSemaphore: Semaphore = DEFAULT_GLOBAL_HTTP_SEMAPHORE,
+    private val settingsReader: PluginSettingsReader = PluginSettingsReader { _, _ -> null },
 ) : PluginRpcHostHandler, AutoCloseable {
     private val closed = AtomicBoolean(false)
     private val lifecycleLock = Any()
@@ -156,6 +171,10 @@ class PluginHostSession(
                 buildJsonObject { put("deleted", kv.delete(request.key)) }
             }
             "kv.keys" -> json.encodeToJsonElement(kv.keys())
+            "settings.get" -> {
+                val request = json.decodeFromJsonElement<PluginSettingGet>(params)
+                settingsReader.read(pluginId, request.id)?.let(::JsonPrimitive) ?: JsonNull
+            }
             "cookie.list" -> json.encodeToJsonElement(cookieJar.snapshot())
             "cookie.set" -> {
                 val request = json.decodeFromJsonElement<PluginCookieSet>(params)

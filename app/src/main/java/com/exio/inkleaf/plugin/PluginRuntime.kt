@@ -276,6 +276,7 @@ class PluginRuntimeManager(
     private val context: Context,
     private val store: PluginPackageStore = PluginPackageStore(File(context.filesDir, "plugins")),
     private val callbackExecutor: ExecutorService = Executors.newCachedThreadPool(),
+    private val settingsRepository: PluginSettingsRepository? = null,
 ) : AutoCloseable {
     private val lock = Mutex()
     private val globalSemaphore = Semaphore(PluginRuntimePolicy.MAX_GLOBAL_CONCURRENCY)
@@ -382,22 +383,6 @@ class PluginRuntimeManager(
         }
     }
 
-    suspend fun rollback(pluginId: String): InstalledPlugin? {
-        val previousActive =
-            withContext(Dispatchers.IO) { store.get(pluginId)?.state?.activeVersion }
-        val rolledBack = withContext(Dispatchers.IO) { store.rollback(pluginId) } ?: return null
-        closeRuntime(pluginId)
-        return try {
-            runtimeFor(rolledBack)
-            rolledBack
-        } catch (error: Throwable) {
-            closeRuntime(pluginId)
-            if (previousActive != null)
-                withContext(Dispatchers.IO) { store.activate(pluginId, previousActive) }
-            throw error
-        }
-    }
-
     suspend fun setEnabled(pluginId: String, enabled: Boolean): InstalledPlugin? {
         val updated = withContext(Dispatchers.IO) { store.setEnabled(pluginId, enabled) }
         if (!enabled) closeRuntime(pluginId)
@@ -438,7 +423,7 @@ class PluginRuntimeManager(
     }
 
     private suspend fun runtimeFor(plugin: InstalledPlugin): AndroidJavaScriptPluginRuntime {
-        return lock.withLock {
+        val (resolved, created) = lock.withLock {
             check(!closed.get()) { "Plugin runtime manager is closed" }
             val currentPlugin =
                 withContext(Dispatchers.IO) { store.get(plugin.state.pluginId) }
@@ -470,7 +455,7 @@ class PluginRuntimeManager(
             runtimes[plugin.state.pluginId]?.let {
                 if (it.version == plugin.state.activeVersion) {
                     runtimeLastUsed[plugin.state.pluginId] = accessCounter.incrementAndGet()
-                    return@withLock it
+                    return@withLock it to false
                 }
                 runtimes.remove(plugin.state.pluginId, it)
                 runtimeLastUsed.remove(plugin.state.pluginId)
@@ -488,6 +473,9 @@ class PluginRuntimeManager(
                     plugin.state.pluginId,
                     plugin.directory,
                     globalHttpSemaphore = globalHttpSemaphore,
+                    settingsReader = { pluginId, settingId ->
+                        settingsRepository?.resolve(pluginId, settingId)
+                    },
                 )
             lateinit var runtime: AndroidJavaScriptPluginRuntime
             runtime =
@@ -518,8 +506,47 @@ class PluginRuntimeManager(
             }
             runtimes[plugin.state.pluginId] = runtime
             runtimeLastUsed[plugin.state.pluginId] = accessCounter.incrementAndGet()
-            runtime
+            runtime to true
         }
+        // Prewarm outside the non-reentrant lock because describe performs a plugin RPC.
+        if (created) prewarmSettingDescriptors(resolved)
+        return resolved
+    }
+
+    /**
+     * Caches plugin-declared settings after isolate startup so settings.get can resolve defaults.
+     *
+     * This is best effort: a missing or failing describe call leaves the settings panel empty but
+     * must not prevent browse, search, or reading calls.
+     */
+    private suspend fun prewarmSettingDescriptors(runtime: AndroidJavaScriptPluginRuntime) {
+        val repository = settingsRepository ?: return
+        try {
+            val described =
+                runtime.invoke(
+                    "describe",
+                    timeoutMs = PluginRuntimePolicy.LIGHT_DEADLINE_MS,
+                )
+            repository.cacheDescriptors(
+                runtime.pluginId,
+                withContext(Dispatchers.Default) { PluginContentCodec.describe(described) }
+                    .settings,
+            )
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Throwable) {
+            repository.forgetDescriptors(runtime.pluginId)
+        }
+    }
+
+    /**
+     * Invalidates a source runtime so the next invocation rebuilds it.
+     *
+     * Long-lived isolates may cache settings at module scope, so setting changes require rebuild.
+     */
+    suspend fun reload(pluginId: String) {
+        closeRuntime(pluginId)
+        settingsRepository?.forgetDescriptors(pluginId)
     }
 
     /** Evict only a runtime with no active invocation; busy isolates are never force-closed. */

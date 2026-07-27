@@ -109,6 +109,11 @@ object PluginBootstrap {
                   delete: function(request, signal) { return hostCall("kv.delete", request, signal); },
                   keys: function(signal) { return hostCall("kv.keys", {}, signal); }
                 }),
+                // User-selected source settings are read-only to plugins. Plugin-owned kv storage
+                // remains a separate read-write channel. Missing values resolve to null.
+                settings: Object.freeze({
+                  get: function(id, signal) { return hostCall("settings.get", { id: id }, signal); }
+                }),
                 cookie: Object.freeze({
                   list: function(signal) { return hostCall("cookie.list", {}, signal); },
                   set: function(request, signal) { return hostCall("cookie.set", request, signal); },

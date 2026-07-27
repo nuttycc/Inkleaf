@@ -10,6 +10,16 @@ let router;
 let nextHandle = 0;
 let closedHandles = 0;
 const bodyHandles = new Map();
+const storedApiBase = process.env.COPYCOMIC_TEST_API_BASE || "https://api.manga2025.com/api/v3";
+const testApiBase = process.env.COPYCOMIC_EXPECTED_API_BASE || storedApiBase;
+const testOriginalImage = process.env.COPYCOMIC_TEST_ORIGINAL_IMAGE === "true";
+const testApiHost = testApiBase.replace(/^https?:\/\//, "").split("/")[0].toLowerCase();
+const isHotMangaProfile = testApiHost.includes("hotmanga") ||
+  testApiHost === "api.manga2025.com" || testApiHost.includes("fgjfghkk");
+const storedSettings = {
+  apiDomain: storedApiBase,
+  originalImage: String(testOriginalImage)
+};
 
 function response(payload, statusCode, chunked) {
   const bytes = Buffer.from(typeof payload === "string" ? payload : JSON.stringify(payload), "utf8");
@@ -52,6 +62,9 @@ global.inkleaf = {
         if (bodyHandles.delete(request.handle)) closedHandles += 1;
         return { closed: true };
       }
+    },
+    settings: {
+      get: async function (id) { return storedSettings[id] ?? null; }
     }
   }
 };
@@ -71,11 +84,46 @@ async function run() {
       .map(function (filter) { return filter.id; }),
     ["audience", "period", "kind"]
   );
+  const routeSetting = descriptor.settings.find(function (setting) {
+    return setting.id === "apiDomain";
+  });
+  assert.ok(routeSetting, "API route setting must be present");
+  assert.equal(routeSetting.options.length, 13);
+  assert.equal(routeSetting.defaultValue, "https://api.manga2025.com/api/v3");
+  assert.deepEqual(descriptor.settings.map(function (setting) { return setting.id; }), [
+    "apiDomain", "originalImage"
+  ]);
+  assert.deepEqual(routeSetting.options.map(function (option) { return option.id; }), [
+    "https://api.manga2025.com/api/v3",
+    "https://api.2026copy.com/api/v3",
+    "https://mapi.copy20.com/api/v3",
+    "https://mapi.copy2000.site/api/v3",
+    "https://api.2025copy.com/api/v3",
+    "https://api.mangacopy.com/api/v3",
+    "https://api.copy2000.online/api/v3",
+    "https://mapi.hotmangasd.com/api/v3",
+    "https://mapi.hotmangasf.com/api/v3",
+    "https://mapi.hotmangasg.com/api/v3",
+    "https://mapi.elfgjfghkk.club/api/v3",
+    "https://mapi.fgjfghkk.club/api/v3",
+    "https://mapi.fgjfghkkcenter.club/api/v3"
+  ]);
 
   router = function (request) {
-    assert.equal(request.headers.version, "2025.02.12");
+    assert.ok(request.url.startsWith(testApiBase + "/"));
+    assert.equal(request.headers.version, isHotMangaProfile ? "2025.02.12" : "2025.05.09");
+    assert.equal(
+      request.headers.Origin,
+      isHotMangaProfile ? "https://m.relamanhua.org" : "https://2025copy.com"
+    );
+    assert.equal(request.headers.webp, isHotMangaProfile ? "1" : "0");
+    assert.equal(request.headers.region, isHotMangaProfile ? undefined : "0");
+    assert.equal(request.headers.platform, "1");
+    assert.equal(request.headers.Authorization, undefined);
+    assert.equal(request.headers["sec-fetch-mode"], undefined);
     assert.match(request.url, /\/search\/comic\?/);
     assert.match(request.url, /(?:\?|&)limit=21(?:&|$)/);
+    assert.match(request.url, /(?:\?|&)platform=1(?:&|$)/);
     return response({
       code: 200,
       results: {
@@ -98,6 +146,18 @@ async function run() {
   assert.deepEqual(search.items[0].tags, ["冒险"]);
   assert.equal(search.nextCursor, "1");
   assert.equal(closedHandles, 1, "chunked response must be closed");
+
+  router = function (request) {
+    assert.match(request.url, /\/comics\?/);
+    assert.match(request.url, /(?:\?|&)platform=3(?:&|$)/);
+    return response({ code: 200, results: { total: 0, list: [] } });
+  };
+  const probeSuccess = await registration.invokeAction({ actionId: "probeDomain" }, {});
+  assert.match(probeSuccess.message, /^线路可用：/);
+
+  router = function () { return response("unavailable", 500); };
+  const probeFailure = await registration.invokeAction({ actionId: "probeDomain" }, {});
+  assert.match(probeFailure.message, /^线路不可用：/);
 
   router = function (request) {
     assert.match(request.url, /\/recs\?/);
@@ -165,12 +225,22 @@ async function run() {
   let newestRequests = 0;
   router = function (request) {
     newestRequests += 1;
-    if (newestRequests === 1) {
-      assert.match(request.url, /\/comics\?/);
+    if (/\/comics\?/.test(request.url)) {
       assert.match(request.url, /(?:\?|&)ordering=-datetime_updated(?:&|$)/);
+    } else {
+      assert.doesNotMatch(request.url, /(?:\?|&)ordering=/);
+    }
+    if (newestRequests === 1) {
+      assert.match(
+        request.url,
+        isHotMangaProfile ? /\/comics\?/ : /\/update\/newest\?/
+      );
       return response("not found", 404);
     }
-    assert.match(request.url, /\/update\/newest\?/);
+    assert.match(
+      request.url,
+      isHotMangaProfile ? /\/update\/newest\?/ : /\/comics\?/
+    );
     return response({
       code: 200,
       results: {
@@ -182,6 +252,17 @@ async function run() {
   const newest = await registration.browse({ feedId: "newest", filters: {} }, {});
   assert.equal(newestRequests, 2, "newest must use its fallback after a 404");
   assert.equal(newest.items[0].sourceId, "newest-comic");
+
+  let failedNewestRequests = 0;
+  router = function () {
+    failedNewestRequests += 1;
+    return response("server error", 500);
+  };
+  await assert.rejects(
+    registration.browse({ feedId: "newest", filters: {} }, {}),
+    function (error) { return error && error.statusCode === 500; }
+  );
+  assert.equal(failedNewestRequests, 1, "newest must not fall back after non-404 errors");
 
   await assert.rejects(
     registration.browse({ feedId: "recommend", cursor: "invalid", filters: {} }, {}),
@@ -234,16 +315,25 @@ async function run() {
   const pageRequests = [];
   router = function (request) {
     pageRequests.push(request.url);
-    if (/\/chapter\/chapter-1\?/.test(request.url)) {
+    assert.equal(request.headers.Authorization, undefined);
+    assert.match(request.url, /(?:\?|&)platform=1(?:&|$)/);
+    if (pageRequests.length === 1) {
+      assert.match(
+        request.url,
+        isHotMangaProfile ? /\/chapter\/chapter-1\?/ : /\/chapter2\/chapter-1\?/
+      );
       return response("not found", 404);
     }
-    assert.match(request.url, /\/chapter2\/chapter-1\?/);
+    assert.match(
+      request.url,
+      isHotMangaProfile ? /\/chapter2\/chapter-1\?/ : /\/chapter\/chapter-1\?/
+    );
     return response({
       code: 200,
       results: {
         chapter: {
           contents: [
-            { url: "https://img.example/page-a.webp" },
+            { url: "https://img.example/page-a.c800x.webp" },
             { url: "https://img.example/page-b.webp" }
           ],
           words: [2, 1]
@@ -256,12 +346,30 @@ async function run() {
     chapterId: "chapter-1",
     revision: "r1"
   }, {});
-  assert.equal(pageRequests.length, 2, "404 must try chapter2");
+  assert.equal(pageRequests.length, 2, "404 must try the alternate chapter endpoint");
   assert.equal(pages.pages[0].url, "https://img.example/page-b.webp");
+  assert.equal(
+    pages.pages[1].url,
+    testOriginalImage
+      ? "https://img.example/page-a.webp"
+      : "https://img.example/page-a.c800x.webp"
+  );
   assert.equal(pages.pages[1].index, 1);
   assert.equal(pages.revision, "r1");
 
-  process.stdout.write("copycomic fixture unit tests passed\n");
+  let failedPageRequests = 0;
+  router = function () {
+    failedPageRequests += 1;
+    return response("rate limited", 429);
+  };
+  await assert.rejects(
+    registration.pages({ sourceId: "fixture-comic", chapterId: "chapter-1" }, {}),
+    function (error) { return error && error.statusCode === 429; }
+  );
+  assert.equal(failedPageRequests, 1, "chapter loading must not fall back after non-404 errors");
+
+  process.stdout.write("copycomic fixture unit tests passed (" +
+    (isHotMangaProfile ? "hot-manga" : "standard") + ")\n");
 }
 
 run().catch(function (error) {

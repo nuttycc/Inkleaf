@@ -16,7 +16,7 @@ class PluginPackageStoreTest {
     private val json = Json { encodeDefaults = true }
 
     @Test
-    fun `install activation update and rollback keep immutable versions`() =
+    fun `install activation and downgrade keep immutable versions`() =
         withStore { store, temp ->
             val first =
                 packageFile(
@@ -46,9 +46,10 @@ class PluginPackageStoreTest {
             assertTrue(updated.directory.resolve("versions/1.0.0/main.js").isFile)
             assertTrue(updated.directory.resolve("versions/1.1.0/main.js").isFile)
 
-            val rolledBack = requireNotNull(store.rollback(PLUGIN_ID))
-            assertEquals("1.0.0", rolledBack.state.activeVersion)
-            assertEquals("1.1.0", rolledBack.state.previousVersion)
+            // Downgrading uses the normal activation path; previousVersion is only a label.
+            val downgraded = store.activate(PLUGIN_ID, requireNotNull(updated.state.previousVersion))
+            assertEquals("1.0.0", downgraded.state.activeVersion)
+            assertEquals("1.1.0", downgraded.state.previousVersion)
         }
 
     @Test

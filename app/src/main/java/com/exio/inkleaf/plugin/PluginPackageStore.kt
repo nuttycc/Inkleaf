@@ -77,31 +77,6 @@ class PluginPackageStore(
         }
     }
 
-    fun rollback(pluginId: String): InstalledPlugin? {
-        requireValidPluginId(pluginId)
-        return synchronized(lock) {
-            val directory = pluginDirectory(pluginId)
-            val state = readState(directory) ?: return@synchronized null
-            val previous = state.previousVersion ?: return@synchronized null
-            val previousRecord =
-                state.versions.firstOrNull { it.version == previous } ?: return@synchronized null
-            if (!previousRecord.compatible) return@synchronized null
-            val previousDirectory = versionDirectory(directory, previous)
-            if (!previousDirectory.isDirectory) return@synchronized null
-            val nextState =
-                state.copy(
-                    activeVersion = previous,
-                    previousVersion = state.activeVersion?.takeIf { it != previous },
-                    disabled = false,
-                    health = PluginHealth.HEALTHY,
-                    fatalFailureTimesMs = emptyList(),
-                    updatedAtMs = clockMs(),
-                )
-            writeStateAtomically(directory, nextState)
-            installedPlugin(directory, nextState)
-        }
-    }
-
     fun deactivate(pluginId: String, expectedVersion: String? = null): InstalledPlugin? {
         requireValidPluginId(pluginId)
         return synchronized(lock) {

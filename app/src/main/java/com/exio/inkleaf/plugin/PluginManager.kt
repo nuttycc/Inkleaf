@@ -14,6 +14,7 @@ class PluginManager(
     private val store: PluginPackageStore,
     private val runtimeManager: PluginRuntimeManager,
     private val onlineContentRepository: OnlineContentRepository? = null,
+    private val settingsRepository: PluginSettingsRepository? = null,
     private val downloader: PluginPackageDownloader =
         PluginPackageDownloader(OkHttpClient(), File(context.cacheDir, "plugin-downloads")),
 ) {
@@ -52,11 +53,6 @@ class PluginManager(
         return activated
     }
 
-    suspend fun rollback(pluginId: String): InstalledPlugin? =
-        runtimeManager.rollback(pluginId).also { result ->
-            if (result != null) markAvailable(pluginId)
-        }
-
     suspend fun setEnabled(pluginId: String, enabled: Boolean): InstalledPlugin? {
         val updated = runtimeManager.setEnabled(pluginId, enabled)
         if (updated != null) {
@@ -79,6 +75,8 @@ class PluginManager(
     suspend fun uninstall(pluginId: String): Boolean {
         val removed = runtimeManager.uninstall(pluginId)
         if (removed) {
+            // The uninstall contract includes user-selected source settings.
+            settingsRepository?.clear(pluginId)
             withContext(Dispatchers.IO) {
                 onlineContentRepository?.setPluginAvailability(
                     pluginId,
