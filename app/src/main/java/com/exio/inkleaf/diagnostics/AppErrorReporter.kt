@@ -1,8 +1,9 @@
 package com.exio.inkleaf.diagnostics
 
 import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import android.util.Log
-import com.exio.inkleaf.BuildConfig
 import java.io.File
 import java.time.Instant
 import java.util.Collections
@@ -31,7 +32,7 @@ object AppErrorReporter {
                 error = error,
                 metadata = metadata,
                 timestamp = Instant.now().toString(),
-                appVersion = BuildConfig.VERSION_NAME,
+                appVersion = context.appVersionNameOrUnknown(),
             )
         Log.e(TAG, "$operation failed", error)
         withContext(Dispatchers.IO) {
@@ -53,6 +54,24 @@ object AppErrorReporter {
     private const val TAG = "AppErrorReporter"
     private const val LOG_FILE_NAME = "errors.log"
 }
+
+private fun Context.appVersionNameOrUnknown(): String =
+    runCatching {
+            val packageInfo =
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    packageManager.getPackageInfo(
+                        packageName,
+                        PackageManager.PackageInfoFlags.of(0),
+                    )
+                } else {
+                    @Suppress("DEPRECATION")
+                    packageManager.getPackageInfo(packageName, 0)
+                }
+            packageInfo.versionName
+        }
+        .getOrNull()
+        .orEmpty()
+        .ifBlank { "unknown" }
 
 internal fun buildAppErrorReport(
     operation: String,
