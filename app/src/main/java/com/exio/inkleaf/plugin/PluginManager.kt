@@ -6,6 +6,8 @@ import java.io.File
 import java.io.IOException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 
@@ -19,6 +21,8 @@ class PluginManager(
     private val downloader: PluginPackageDownloader =
         PluginPackageDownloader(OkHttpClient(), File(context.cacheDir, "plugin-downloads")),
 ) {
+    private val installUrlLocks = Array(INSTALL_URL_LOCK_COUNT) { Mutex() }
+
     suspend fun installFile(packageFile: File, activate: Boolean = false): PluginInstallResult =
         runtimeManager.install(packageFile, activate).also { result ->
             if (activate && result.status != PluginInstallStatus.REJECTED && result.activatable) {
@@ -40,11 +44,14 @@ class PluginManager(
         activate: Boolean = false,
         onProgress: (PluginDownloadProgress) -> Unit = {},
     ): PluginInstallResult {
-        val downloaded = downloader.download(source, onProgress)
-        return try {
-            installFile(downloaded, activate)
-        } finally {
-            deleteStagedPackage(downloaded)
+        val lockIndex = (source.url.trim().hashCode() and Int.MAX_VALUE) % installUrlLocks.size
+        return installUrlLocks[lockIndex].withLock {
+            val downloaded = downloader.download(source, onProgress)
+            try {
+                installFile(downloaded, activate)
+            } finally {
+                deleteStagedPackage(downloaded)
+            }
         }
     }
 
@@ -127,4 +134,8 @@ class PluginManager(
                 throw error
             }
         }
+
+    private companion object {
+        const val INSTALL_URL_LOCK_COUNT = 32
+    }
 }

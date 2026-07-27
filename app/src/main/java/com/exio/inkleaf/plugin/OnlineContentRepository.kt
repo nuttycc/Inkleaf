@@ -162,15 +162,14 @@ class OnlineContentRepository(
                     chapterTitleSnapshot = chapterTitleSnapshot,
                     addedAtMs = clockMs(),
                 )
-            update(contentKey) { current ->
-                current.copy(
-                    pageBookmarks =
-                        (current.pageBookmarks.filterNot {
-                                it.location.identity == location.identity
-                            } + bookmark)
-                            .sortedByDescending { it.addedAtMs }
-                )
-            }
+            storePageBookmark(contentKey, bookmark)
+            bookmark
+        }
+
+    /** Restores a removed bookmark without changing its original ordering timestamp. */
+    fun restorePageBookmark(bookmark: OnlinePageBookmark): OnlinePageBookmark =
+        synchronized(lock) {
+            storePageBookmark(key(bookmark.location.identity.chapter.content), bookmark)
             bookmark
         }
 
@@ -420,6 +419,7 @@ class OnlineContentRepository(
                             else record
                         }
                 )
+            if (next == state) return@synchronized
             write(next)
         }
 
@@ -451,6 +451,7 @@ class OnlineContentRepository(
         val state = read()
         val current = state.records.firstOrNull { it.key == key } ?: OnlineComicRecord(key)
         val updated = transform(current)
+        if (updated == current) return current
         val records = state.records.filterNot { it.key == key } + updated
         write(
             OnlineContentState(
@@ -458,6 +459,21 @@ class OnlineContentRepository(
             )
         )
         return updated
+    }
+
+    private fun storePageBookmark(
+        contentKey: OnlineContentKey,
+        bookmark: OnlinePageBookmark,
+    ) {
+        update(contentKey) { current ->
+            current.copy(
+                pageBookmarks =
+                    (current.pageBookmarks.filterNot {
+                            it.location.identity == bookmark.location.identity
+                        } + bookmark)
+                        .sortedByDescending { it.addedAtMs }
+            )
+        }
     }
 
     private fun removeUserRecord(

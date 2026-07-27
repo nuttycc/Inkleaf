@@ -421,15 +421,7 @@ object PluginContentCodec {
     }
 
     private fun validateHeaders(headers: Map<String, String>, field: String) {
-        if (
-            headers.size > 64 ||
-                headers.keys.any { it.isBlank() || it.length > 256 } ||
-                headers.values.any { it.length > 16 * 1024 } ||
-                headers.keys.any { !HEADER_NAME_PATTERN.matches(it) } ||
-                headers.values.any { value ->
-                    value.any { it != '\t' && it !in '\u0020'..'\u007e' }
-                }
-        ) {
+        if (!PluginNetworkPolicy.areValidHttpHeaders(headers)) {
             throw PluginContentValidationException("$field exceeds the host limit")
         }
     }
@@ -449,7 +441,6 @@ object PluginContentCodec {
     private val SUPPORTED_FEED_FILTER_TYPES = setOf("select")
     private val SUPPORTED_FILTER_TYPES = setOf("text", "select", "multiSelect", "boolean")
     private val SUPPORTED_SETTING_TYPES = setOf("text", "secret", "boolean", "select")
-    private val HEADER_NAME_PATTERN = Regex("^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
 }
 
 object PluginContentLimits {

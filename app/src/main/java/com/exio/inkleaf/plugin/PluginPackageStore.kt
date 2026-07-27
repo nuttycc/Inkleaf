@@ -220,11 +220,9 @@ class PluginPackageStore(
         val directory = pluginDirectory(manifest.id)
         val state = readState(directory) ?: PluginState(pluginId = manifest.id)
         val activeVersion = state.activeVersion
-        if (
-            activeVersion != null &&
-                requireNotNull(SemVer.parse(manifest.version)) <
-                    requireNotNull(SemVer.parse(activeVersion))
-        ) {
+        val parsedVersion = requireNotNull(SemVer.parse(manifest.version))
+        val parsedActiveVersion = activeVersion?.let(SemVer::parse)
+        if (parsedActiveVersion != null && parsedVersion < parsedActiveVersion) {
             return PluginInstallResult(
                 status = PluginInstallStatus.REJECTED,
                 pluginId = manifest.id,

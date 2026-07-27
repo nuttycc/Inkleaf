@@ -235,7 +235,9 @@ class PluginHostSession(
         ) {
             throw invalidArgumentError("Invalid HTTP method")
         }
-        if (!validHttpHeaders(request.headers)) throw invalidArgumentError("Invalid HTTP headers")
+        if (!PluginNetworkPolicy.areValidHttpHeaders(request.headers)) {
+            throw invalidArgumentError("Invalid HTTP headers")
+        }
         val body =
             request.bodyBase64?.let {
                 try {
@@ -387,11 +389,13 @@ class PluginHostSession(
         val start = request.offset.toInt()
         val end = (start + size).coerceAtMost(handle.body.size)
         val chunk = handle.body.copyOfRange(start, end)
+        val eof = end == handle.body.size
+        if (eof) bodyHandles.remove(request.handle, handle)
         return PluginHttpChunk(
             handle = request.handle,
             offset = end.toLong(),
             bodyBase64 = Base64.getEncoder().encodeToString(chunk),
-            eof = end == handle.body.size,
+            eof = eof,
         )
     }
 
@@ -416,22 +420,12 @@ class PluginHostSession(
             PluginRpcError(PluginErrorCode.HOST_UNAVAILABLE, message, retryable = true)
         )
 
-    private fun validHttpHeaders(headers: Map<String, String>): Boolean =
-        headers.size <= 64 &&
-            headers.keys.all {
-                it.isNotBlank() && it.length <= 256 && HEADER_NAME_PATTERN.matches(it)
-            } &&
-            headers.values.all { value ->
-                value.length <= 16 * 1024 && value.all { it == '\t' || it in '\u0020'..'\u007e' }
-            }
-
     private companion object {
         const val HTTP_INLINE_BODY_BYTES = 512 * 1024
         const val HTTP_CHUNK_BYTES = 384 * 1024
         val METHODS_REQUIRING_BODY = setOf("POST", "PUT", "PATCH", "PROPPATCH", "REPORT")
         val DEFAULT_GLOBAL_HTTP_SEMAPHORE =
             Semaphore(PluginRuntimePolicy.MAX_GLOBAL_HTTP_CONCURRENCY)
-        val HEADER_NAME_PATTERN = Regex("^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
         val defaultJson = Json {
             encodeDefaults = true
             explicitNulls = false

@@ -108,6 +108,30 @@ class PluginPackageStoreTest {
     }
 
     @Test
+    fun `malformed persisted active version does not crash installation`() =
+        withStore { store, temp ->
+            val active = packageFile(temp, manifest(version = "1.0.0"), "inkleaf.register({})")
+            val update = packageFile(temp, manifest(version = "1.1.0"), "inkleaf.register({})")
+            store.install(active, activate = true)
+            val stateFile = temp.resolve("plugins/$PLUGIN_ID/state.json")
+            val originalState = stateFile.readText()
+            val corruptState =
+                originalState.replace(
+                    "\"activeVersion\":\"1.0.0\"",
+                    "\"activeVersion\":\"invalid\"",
+                )
+            check(corruptState != originalState)
+            stateFile.writeText(corruptState)
+
+            val installed = store.install(update)
+
+            assertEquals(PluginInstallStatus.INSTALLED, installed.status)
+            assertTrue(
+                requireNotNull(store.get(PLUGIN_ID)).state.versions.any { it.version == "1.1.0" }
+            )
+        }
+
+    @Test
     fun `update is compared with active version instead of highest retained version`() =
         withStore { store, temp ->
             val active = packageFile(temp, manifest(version = "1.0.0"), "inkleaf.register({})")

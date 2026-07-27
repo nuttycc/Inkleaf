@@ -26,15 +26,6 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
-enum class PluginRpcMessageKind {
-    REQUEST,
-    RESPONSE,
-    HOST_REQUEST,
-    HOST_RESPONSE,
-    CANCEL,
-    READY,
-}
-
 data class PluginRpcError(
     val code: String,
     val message: String,
@@ -43,41 +34,28 @@ data class PluginRpcError(
 )
 
 sealed interface PluginRpcMessage {
-    val kind: PluginRpcMessageKind
-
     data class Request(
         val requestId: String,
         val method: String,
         val params: JsonElement = JsonObject(emptyMap()),
-    ) : PluginRpcMessage {
-        override val kind: PluginRpcMessageKind = PluginRpcMessageKind.REQUEST
-    }
+    ) : PluginRpcMessage
 
     data class Response(
         val requestId: String,
         val result: JsonElement? = null,
         val error: PluginRpcError? = null,
         val hostResponse: Boolean = false,
-    ) : PluginRpcMessage {
-        override val kind: PluginRpcMessageKind =
-            if (hostResponse) PluginRpcMessageKind.HOST_RESPONSE else PluginRpcMessageKind.RESPONSE
-    }
+    ) : PluginRpcMessage
 
     data class HostRequest(
         val requestId: String,
         val method: String,
         val params: JsonElement = JsonObject(emptyMap()),
-    ) : PluginRpcMessage {
-        override val kind: PluginRpcMessageKind = PluginRpcMessageKind.HOST_REQUEST
-    }
+    ) : PluginRpcMessage
 
-    data class Cancel(val requestId: String) : PluginRpcMessage {
-        override val kind: PluginRpcMessageKind = PluginRpcMessageKind.CANCEL
-    }
+    data class Cancel(val requestId: String) : PluginRpcMessage
 
-    data object Ready : PluginRpcMessage {
-        override val kind: PluginRpcMessageKind = PluginRpcMessageKind.READY
-    }
+    data object Ready : PluginRpcMessage
 }
 
 class PluginRpcProtocolException(message: String) : Exception(message)

@@ -32,6 +32,18 @@ internal object PluginNetworkPolicy {
             else -> false
         }
 
+    internal fun areValidHttpHeaders(headers: Map<String, String>): Boolean =
+        headers.size <= MAX_HEADER_COUNT &&
+            headers.keys.all {
+                it.isNotBlank() &&
+                    it.length <= MAX_HEADER_NAME_LENGTH &&
+                    HEADER_NAME_PATTERN.matches(it)
+            } &&
+            headers.values.all { value ->
+                value.length <= MAX_HEADER_VALUE_LENGTH &&
+                    value.all { it == '\t' || it in '\u0020'..'\u007e' }
+            }
+
     private fun isPublicIpv4(bytes: ByteArray): Boolean {
         val first = bytes[0].toInt() and 0xff
         val second = bytes[1].toInt() and 0xff
@@ -75,4 +87,9 @@ internal object PluginNetworkPolicy {
         if (first == 0x3f && second == 0xff && (third and 0xf0) == 0x00) return false
         return true
     }
+
+    private const val MAX_HEADER_COUNT = 64
+    private const val MAX_HEADER_NAME_LENGTH = 256
+    private const val MAX_HEADER_VALUE_LENGTH = 16 * 1024
+    private val HEADER_NAME_PATTERN = Regex("^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
 }

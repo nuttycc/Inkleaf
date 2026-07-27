@@ -43,7 +43,15 @@ class PluginSettingsRepository(context: Context) {
 
     /** Persists a settings snapshot in one DataStore transaction. */
     suspend fun setValues(pluginId: String, values: Map<String, String>) {
+        val prefix = namespacePrefix(pluginId)
         dataStore.edit { prefs ->
+            prefs
+                .asMap()
+                .keys
+                .filter { key ->
+                    key.name.startsWith(prefix) && key.name.removePrefix(prefix) !in values
+                }
+                .forEach { prefs.remove(it) }
             values.forEach { (settingId, value) ->
                 prefs[compositeKey(pluginId, settingId)] = value
             }

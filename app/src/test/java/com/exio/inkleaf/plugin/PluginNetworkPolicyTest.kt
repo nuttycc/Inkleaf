@@ -67,5 +67,21 @@ class PluginNetworkPolicyTest {
         }
     }
 
+    @Test
+    fun `HTTP header policy is shared at the plugin boundary`() {
+        assertTrue(
+            PluginNetworkPolicy.areValidHttpHeaders(
+                mapOf("Accept" to "application/json", "X-Trace-Id" to "abc\t123")
+            )
+        )
+        assertFalse(PluginNetworkPolicy.areValidHttpHeaders(mapOf("Bad Header" to "value")))
+        assertFalse(PluginNetworkPolicy.areValidHttpHeaders(mapOf("X-Test" to "line\nbreak")))
+        assertFalse(
+            PluginNetworkPolicy.areValidHttpHeaders(
+                (0..64).associate { index -> "X-Header-$index" to "value" }
+            )
+        )
+    }
+
     private fun address(literal: String): InetAddress = InetAddress.getByName(literal)
 }

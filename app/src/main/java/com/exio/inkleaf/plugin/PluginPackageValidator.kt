@@ -25,6 +25,7 @@ enum class PluginIssueCode {
     UNEXPECTED_ENTRY,
     MISSING_MANIFEST,
     MISSING_ENTRY,
+    TOO_MANY_ENTRIES,
     ENTRY_TOO_LARGE,
     INVALID_UTF8,
     INVALID_MANIFEST,
@@ -81,6 +82,7 @@ class PluginPackageValidator(
     private val hostApiVersion: ApiVersion = PluginContract.HOST_API_VERSION,
     private val maxManifestBytes: Long = 256 * 1024,
     private val maxMainScriptBytes: Long = 8 * 1024 * 1024,
+    private val maxEntries: Int = 1_024,
 ) {
     private val json = Json {
         ignoreUnknownKeys = true
@@ -127,8 +129,19 @@ class PluginPackageValidator(
         var mainBytes: ByteArray? = null
 
         val enumeration = zip.entries()
+        var entryCount = 0
         while (enumeration.hasMoreElements()) {
             val entry = enumeration.nextElement()
+            entryCount += 1
+            if (entryCount > maxEntries) {
+                issues +=
+                    issue(
+                        PluginIssueKind.ERROR,
+                        PluginIssueCode.TOO_MANY_ENTRIES,
+                        "Archive contains more than $maxEntries entries",
+                    )
+                break
+            }
             val name = entry.name
             if (!entries.add(name)) {
                 issues +=

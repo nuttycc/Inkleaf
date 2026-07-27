@@ -138,6 +138,18 @@ class PluginPackageValidatorTest {
     }
 
     @Test
+    fun `archive entry count is bounded`() {
+        val file = packageFile(validManifest(), extraEntries = mapOf("assets/extra.txt" to ""))
+        try {
+            val result = PluginPackageValidator(maxEntries = 3).validate(file)
+            assertFalse(result.installable)
+            assertTrue(result.errors.any { it.code == PluginIssueCode.TOO_MANY_ENTRIES })
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
     fun `semver follows prerelease ordering`() {
         assertTrue(
             requireNotNull(SemVer.parse("1.0.0-alpha")) < requireNotNull(SemVer.parse("1.0.0"))

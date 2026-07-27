@@ -10,6 +10,7 @@ import java.security.MessageDigest
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -55,7 +56,7 @@ class PluginBrowseRepository(
     private val maxDiskEntries: Int = DEFAULT_MAX_DISK_ENTRIES,
 ) {
     private val json = Json { ignoreUnknownKeys = true }
-    private val entryLocks = Array(LOCK_STRIPE_COUNT) { Mutex() }
+    private val pluginLocks = Array(LOCK_STRIPE_COUNT) { Mutex() }
     private val memoryLock = Any()
     private val memory =
         object : LinkedHashMap<PluginBrowseCacheKey, PluginBrowseCacheSnapshot>(16, 0.75f, true) {
@@ -65,7 +66,7 @@ class PluginBrowseRepository(
         }
 
     suspend fun readFirstPage(key: PluginBrowseCacheKey): PluginBrowseCacheSnapshot? =
-        withContext(Dispatchers.IO) { readInternal(key) }
+        lockFor(key.pluginId).withLock { withContext(Dispatchers.IO) { readInternal(key) } }
 
     fun isFresh(snapshot: PluginBrowseCacheSnapshot): Boolean = isFresh(snapshot.fetchedAtMs)
 
@@ -82,12 +83,10 @@ class PluginBrowseRepository(
         require(request.feedId == key.feedId && request.filters == key.filters) {
             "Browse request does not match its cache key"
         }
-        val mutex = entryLocks[(key.hashCode() and Int.MAX_VALUE) % entryLocks.size]
-        mutex.lock()
-        try {
+        return lockFor(key.pluginId).withLock {
             val current = withContext(Dispatchers.IO) { readInternal(key) }
-            if (current != null && current.revision != expectedRevision) return current
-            if (!force && current != null && isFresh(current)) return current
+            if (current != null && current.revision != expectedRevision) return@withLock current
+            if (!force && current != null && isFresh(current)) return@withLock current
 
             val refreshed =
                 PluginBrowseCacheSnapshot(
@@ -96,9 +95,7 @@ class PluginBrowseRepository(
                     revision = UUID.randomUUID().toString(),
                 )
             withContext(Dispatchers.IO) { writeInternal(key, refreshed) }
-            return refreshed
-        } finally {
-            mutex.unlock()
+            refreshed
         }
     }
 
@@ -113,26 +110,31 @@ class PluginBrowseRepository(
      * hashes; reading at most 64 envelopes is acceptable for this infrequent operation.
      */
     suspend fun clear(pluginId: String) {
-        withContext(Dispatchers.IO) {
-            synchronized(memoryLock) {
-                memory.keys.filter { it.pluginId == pluginId }.forEach { memory.remove(it) }
-            }
-            cacheDirectory
-                .listFiles { file -> file.isFile && file.extension == "json" }
-                ?.forEach { file ->
-                    val envelope =
-                        runCatching {
-                                json.decodeFromString(
-                                    BrowseCacheEnvelope.serializer(),
-                                    file.readText(StandardCharsets.UTF_8),
-                                )
-                            }
-                            .getOrNull()
-                    // Corrupt cache entries have no value and can be removed at the same time.
-                    if (envelope == null || envelope.pluginId == pluginId) file.delete()
+        lockFor(pluginId).withLock {
+            withContext(Dispatchers.IO) {
+                synchronized(memoryLock) {
+                    memory.keys.filter { it.pluginId == pluginId }.forEach { memory.remove(it) }
                 }
+                cacheDirectory
+                    .listFiles { file -> file.isFile && file.extension == "json" }
+                    ?.forEach { file ->
+                        val envelope =
+                            runCatching {
+                                    json.decodeFromString(
+                                        BrowseCacheEnvelope.serializer(),
+                                        file.readText(StandardCharsets.UTF_8),
+                                    )
+                                }
+                                .getOrNull()
+                        // Corrupt cache entries have no value and can be removed at the same time.
+                        if (envelope == null || envelope.pluginId == pluginId) file.delete()
+                    }
+            }
         }
     }
+
+    private fun lockFor(pluginId: String): Mutex =
+        pluginLocks[(pluginId.hashCode() and Int.MAX_VALUE) % pluginLocks.size]
 
     private fun readInternal(key: PluginBrowseCacheKey): PluginBrowseCacheSnapshot? {
         synchronized(memoryLock) { memory[key] }

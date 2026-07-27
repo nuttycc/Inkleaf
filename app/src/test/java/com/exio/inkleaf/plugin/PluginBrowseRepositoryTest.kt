@@ -2,6 +2,7 @@ package com.exio.inkleaf.plugin
 
 import java.nio.file.Files
 import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
@@ -190,6 +191,39 @@ class PluginBrowseRepositoryTest {
 
             assertEquals(results[0].revision, results[1].revision)
             assertEquals(2, calls.get())
+        }
+    }
+
+    @Test
+    fun `clear waits for an in-flight refresh before deleting its result`() = runBlocking {
+        withCacheDirectory { directory ->
+            val remoteStarted = CompletableDeferred<Unit>()
+            val finishRemote = CompletableDeferred<Unit>()
+            val clearStarted = CompletableDeferred<Unit>()
+            val repository =
+                PluginBrowseRepository(
+                    directory,
+                    { _, _ ->
+                        remoteStarted.complete(Unit)
+                        finishRemote.await()
+                        page("comic-1")
+                    },
+                )
+            val refresh =
+                async { repository.refreshFirstPage(KEY, REQUEST, expectedRevision = null) }
+            remoteStarted.await()
+            val clear =
+                async {
+                    clearStarted.complete(Unit)
+                    repository.clear(KEY.pluginId)
+                }
+            clearStarted.await()
+
+            finishRemote.complete(Unit)
+            refresh.await()
+            clear.await()
+
+            assertNull(repository.readFirstPage(KEY))
         }
     }
 
