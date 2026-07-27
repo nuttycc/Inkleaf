@@ -59,6 +59,7 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
         val nextCursor: String?,
         val firstPageFetchedAtMs: Long,
         val firstPageRevision: String,
+        val cacheGeneration: Long,
     )
 
     private data class FeedLoadResult(
@@ -305,7 +306,10 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
         val feed = _feeds.value.firstOrNull { it.key == feedKey }
         val filters = feed?.selectedFilters().orEmpty()
         val key = feed?.cacheKey(filters)
-        if (key != null && key == currentBrowseKey) return
+        if (key != null && key == currentBrowseKey) {
+            ensureCurrentBrowseFresh(repository)
+            return
+        }
 
         _selectedFeedKey.value = feedKey
         activateBrowseTarget(repository, key, filters)
@@ -352,13 +356,20 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun togglePluginSelection(pluginId: String, availablePluginIds: List<String>) {
-        val current = _selectedPluginIds.value ?: availablePluginIds.toSet()
+        val available = availablePluginIds.toSet()
+        val current = (_selectedPluginIds.value ?: available).intersect(available)
         _selectedPluginIds.value =
             if (pluginId in current) current - pluginId else current + pluginId
     }
 
     fun selectAllPlugins(availablePluginIds: List<String>) {
         _selectedPluginIds.value = availablePluginIds.toSet()
+    }
+
+    fun retainAvailablePluginSelections(availablePluginIds: Set<String>) {
+        val current = _selectedPluginIds.value ?: return
+        val retained = current.intersect(availablePluginIds)
+        if (retained != current) _selectedPluginIds.value = retained
     }
 
     fun performSearch(catalog: PluginCatalog, availablePlugins: List<InstalledPlugin>) {
@@ -435,7 +446,13 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
         _isBrowsing.value = false
         browseFailure = null
 
-        val session = key?.let(browseSessions::get)
+        val session =
+            key?.let { resolvedKey ->
+                browseSessions[resolvedKey]?.takeIf {
+                    it.cacheGeneration == repository.cacheGeneration(resolvedKey.pluginId)
+                }
+            }
+        if (key != null && session == null) browseSessions.remove(key)
         _browseItems.value = session?.items.orEmpty()
         _browseNextCursor.value = session?.nextCursor
         if (
@@ -449,8 +466,13 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun ensureCurrentBrowseFresh(repository: PluginBrowseRepository) {
         if (_isBrowsing.value || currentBrowseKey == null) return
-        val session = currentBrowseKey?.let(browseSessions::get)
-        if (session == null || !repository.isFresh(session.firstPageFetchedAtMs)) {
+        val key = currentBrowseKey ?: return
+        val session = browseSessions[key]
+        if (
+            session == null ||
+                session.cacheGeneration != repository.cacheGeneration(key.pluginId) ||
+                !repository.isFresh(session.firstPageFetchedAtMs)
+        ) {
             loadBrowseFirstPage(repository, force = false)
         }
     }
@@ -474,11 +496,18 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
             _browseError.value = null
             browseFailure = null
             try {
-                val cached = repository.readFirstPage(key)
+                val cached =
+                    repository.readFirstPage(key)?.takeIf {
+                        it.cacheGeneration == repository.cacheGeneration(key.pluginId)
+                    }
                 if (generation != browseGeneration || key != currentBrowseKey) return@launch
 
                 val session = browseSessions[key]
-                if (cached != null && cached.revision != session?.firstPageRevision) {
+                if (
+                    cached != null &&
+                        (cached.revision != session?.firstPageRevision ||
+                            cached.cacheGeneration != session?.cacheGeneration)
+                ) {
                     publishFirstPage(key, cached)
                 }
                 if (!force && cached != null && repository.isFresh(cached)) return@launch
@@ -491,7 +520,11 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
                         expectedRevision = cached?.revision,
                         force = force,
                     )
-                if (generation == browseGeneration && key == currentBrowseKey) {
+                if (
+                    generation == browseGeneration &&
+                        key == currentBrowseKey &&
+                        refreshed.cacheGeneration == repository.cacheGeneration(key.pluginId)
+                ) {
                     publishFirstPage(key, refreshed)
                 }
             } catch (error: CancellationException) {
@@ -517,6 +550,7 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
         val key = currentBrowseKey ?: return
         val cursor = _browseNextCursor.value ?: return
         val filters = _browseFilters.value
+        val cacheGeneration = repository.cacheGeneration(key.pluginId)
         val generation = ++browseGeneration
         browseJob?.cancel()
         browseJob = viewModelScope.launch {
@@ -533,7 +567,11 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
                             filters = filters,
                         ),
                     )
-                if (generation == browseGeneration && key == currentBrowseKey) {
+                if (
+                    generation == browseGeneration &&
+                        key == currentBrowseKey &&
+                        cacheGeneration == repository.cacheGeneration(key.pluginId)
+                ) {
                     _browseItems.value =
                         (_browseItems.value + page.items).distinctBy { it.sourceId }
                     _browseNextCursor.value = page.nextCursor
@@ -545,6 +583,7 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
                             nextCursor = page.nextCursor,
                             firstPageFetchedAtMs = firstPageFetchedAt,
                             firstPageRevision = firstPageRevision,
+                            cacheGeneration = cacheGeneration,
                         )
                 }
             } catch (error: CancellationException) {
@@ -571,6 +610,7 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
                 nextCursor = snapshot.page.nextCursor,
                 firstPageFetchedAtMs = snapshot.fetchedAtMs,
                 firstPageRevision = snapshot.revision,
+                cacheGeneration = snapshot.cacheGeneration,
             )
     }
 

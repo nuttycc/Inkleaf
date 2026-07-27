@@ -142,6 +142,9 @@ fun PluginDiscoverScreen(
             activeHealthyPlugins.map { "${it.state.pluginId}:${it.state.activeVersion}" }
         }
     LaunchedEffect(activePluginSignature) {
+        viewModel.retainAvailablePluginSelections(
+            activeHealthyPlugins.mapTo(linkedSetOf()) { it.state.pluginId }
+        )
         viewModel.loadFeeds(
             application.pluginCatalog,
             application.pluginBrowseRepository,
@@ -153,7 +156,10 @@ fun PluginDiscoverScreen(
         remember(activeHealthyPlugins) {
             activeHealthyPlugins.map { it.state.pluginId }.toSet()
         }
-    val currentSelectedIds = selectedPluginIds ?: defaultSelectedPluginIds
+    val currentSelectedIds =
+        remember(selectedPluginIds, defaultSelectedPluginIds) {
+            (selectedPluginIds ?: defaultSelectedPluginIds).intersect(defaultSelectedPluginIds)
+        }
     val visibleResults =
         remember(results, currentSelectedIds) {
             results.filter { it.pluginId in currentSelectedIds }

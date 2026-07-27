@@ -220,9 +220,10 @@ class PluginBrowseRepositoryTest {
             clearStarted.await()
 
             finishRemote.complete(Unit)
-            refresh.await()
+            val refreshed = refresh.await()
             clear.await()
 
+            assertTrue(repository.cacheGeneration(KEY.pluginId) > refreshed.cacheGeneration)
             assertNull(repository.readFirstPage(KEY))
         }
     }

@@ -39,6 +39,7 @@ data class PluginBrowseCacheSnapshot(
     val page: PluginSearchPage,
     val fetchedAtMs: Long,
     val revision: String,
+    val cacheGeneration: Long = 0L,
 )
 
 /**
@@ -58,6 +59,8 @@ class PluginBrowseRepository(
     private val json = Json { ignoreUnknownKeys = true }
     private val pluginLocks = Array(LOCK_STRIPE_COUNT) { Mutex() }
     private val memoryLock = Any()
+    private val generationLock = Any()
+    private val cacheGenerations = mutableMapOf<String, Long>()
     private val memory =
         object : LinkedHashMap<PluginBrowseCacheKey, PluginBrowseCacheSnapshot>(16, 0.75f, true) {
             override fun removeEldestEntry(
@@ -71,6 +74,9 @@ class PluginBrowseRepository(
     fun isFresh(snapshot: PluginBrowseCacheSnapshot): Boolean = isFresh(snapshot.fetchedAtMs)
 
     fun isFresh(fetchedAtMs: Long): Boolean = clockMs() - fetchedAtMs in 0 until ttlMs
+
+    internal fun cacheGeneration(pluginId: String): Long =
+        synchronized(generationLock) { cacheGenerations[pluginId] ?: 0L }
 
     /** Refreshes a first page once for all callers that observed the same cache generation. */
     suspend fun refreshFirstPage(
@@ -93,6 +99,7 @@ class PluginBrowseRepository(
                     page = remoteBrowse(key.pluginId, request),
                     fetchedAtMs = clockMs(),
                     revision = UUID.randomUUID().toString(),
+                    cacheGeneration = cacheGeneration(key.pluginId),
                 )
             withContext(Dispatchers.IO) { writeInternal(key, refreshed) }
             refreshed
@@ -111,6 +118,9 @@ class PluginBrowseRepository(
      */
     suspend fun clear(pluginId: String) {
         lockFor(pluginId).withLock {
+            synchronized(generationLock) {
+                cacheGenerations[pluginId] = (cacheGenerations[pluginId] ?: 0L) + 1L
+            }
             withContext(Dispatchers.IO) {
                 synchronized(memoryLock) {
                     memory.keys.filter { it.pluginId == pluginId }.forEach { memory.remove(it) }
@@ -127,7 +137,9 @@ class PluginBrowseRepository(
                                 }
                                 .getOrNull()
                         // Corrupt cache entries have no value and can be removed at the same time.
-                        if (envelope == null || envelope.pluginId == pluginId) file.delete()
+                        if (envelope == null || envelope.pluginId == pluginId) {
+                            file.delete()
+                        }
                     }
             }
         }
@@ -137,10 +149,13 @@ class PluginBrowseRepository(
         pluginLocks[(pluginId.hashCode() and Int.MAX_VALUE) % pluginLocks.size]
 
     private fun readInternal(key: PluginBrowseCacheKey): PluginBrowseCacheSnapshot? {
-        synchronized(memoryLock) { memory[key] }
-            ?.let {
-                return it
+        val generation = cacheGeneration(key.pluginId)
+        synchronized(memoryLock) {
+            memory[key]?.let { cached ->
+                if (cached.cacheGeneration == generation) return cached
+                memory.remove(key)
             }
+        }
         val file = fileFor(key)
         if (!file.isFile) return null
 
@@ -155,6 +170,7 @@ class PluginBrowseRepository(
         if (
             envelope == null ||
                 envelope.schemaVersion != CACHE_SCHEMA_VERSION ||
+                envelope.cacheGeneration != generation ||
                 !envelope.matches(key)
         ) {
             file.delete()
@@ -162,7 +178,12 @@ class PluginBrowseRepository(
         }
 
         val snapshot =
-            PluginBrowseCacheSnapshot(envelope.page, envelope.fetchedAtMs, envelope.revision)
+            PluginBrowseCacheSnapshot(
+                envelope.page,
+                envelope.fetchedAtMs,
+                envelope.revision,
+                generation,
+            )
         synchronized(memoryLock) { memory[key] = snapshot }
         return snapshot
     }
@@ -181,6 +202,7 @@ class PluginBrowseRepository(
                     filters = key.filters.toSortedMap(),
                     fetchedAtMs = snapshot.fetchedAtMs,
                     revision = snapshot.revision,
+                    cacheGeneration = snapshot.cacheGeneration,
                     page = snapshot.page,
                 )
             writeAtomically(
@@ -235,6 +257,7 @@ class PluginBrowseRepository(
         val filters: Map<String, String>,
         val fetchedAtMs: Long,
         val revision: String,
+        val cacheGeneration: Long = 0L,
         val page: PluginSearchPage,
     ) {
         fun matches(key: PluginBrowseCacheKey): Boolean =
