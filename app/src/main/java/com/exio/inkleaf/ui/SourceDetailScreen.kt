@@ -6,11 +6,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -18,8 +20,10 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
@@ -30,6 +34,7 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -51,6 +56,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
@@ -65,8 +71,7 @@ import com.exio.inkleaf.plugin.PluginSettingDescriptor
 /**
  * Shows one comic source's settings, actions, status, and uninstall controls.
  *
- * Plugins declare settings through describe(); the host only maps descriptors to controls and
- * remains unaware of site-specific behavior.
+ * Implements Scheme A: Card-Grouped & Status-First layout using Material 3 Expressive cards.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -129,14 +134,15 @@ fun SourceDetailScreen(
     ) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(bottom = 32.dp),
+            contentPadding = PaddingValues(top = 12.dp, bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             if (busy) {
                 item { LinearProgressIndicator(Modifier.fillMaxWidth().height(4.dp)) }
             }
 
             item {
-                SourceIdentityHeader(
+                SourceIdentityCard(
                     plugin = plugin,
                     pluginId = pluginId,
                     busy = busy,
@@ -147,16 +153,15 @@ fun SourceDetailScreen(
 
             if (settings.isNotEmpty()) {
                 settingSections.forEach { (section, group) ->
-                    item(key = "setting_section_${section.orEmpty()}") {
+                    item(key = "setting_header_${section.orEmpty()}") {
                         SectionHeader(section ?: "设置")
                     }
-                    items(group.size, key = { "setting_${group[it].id}" }) { index ->
-                        val descriptor = group[index]
-                        SettingControl(
-                            descriptor = descriptor,
-                            value = values[descriptor.id] ?: descriptor.defaultValue.orEmpty(),
+                    item(key = "setting_card_${section.orEmpty()}") {
+                        SettingGroupCard(
+                            descriptors = group,
+                            values = values,
                             enabled = !busy,
-                            onValueChange = { viewModel.setValue(descriptor.id, it) },
+                            onValueChange = { id, value -> viewModel.setValue(id, value) },
                         )
                     }
                 }
@@ -165,44 +170,41 @@ fun SourceDetailScreen(
             describeError?.let { error ->
                 item { SectionHeader("设置") }
                 item {
-                    Text(
-                        text = "无法读取该源的设置项：$error",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                    )
+                    OutlinedCard(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                        colors =
+                            CardDefaults.outlinedCardColors(
+                                containerColor =
+                                    MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.15f)
+                            ),
+                    ) {
+                        Text(
+                            text = "无法读取该源的设置项：$error",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(16.dp),
+                        )
+                    }
                 }
             }
 
             if (actions.isNotEmpty()) {
                 item { SectionHeader("操作") }
-                items(actions.size, key = { "action_${actions[it].id}" }) { index ->
-                    val action = actions[index]
-                    ActionRow(
-                        action = action,
-                        enabled = !busy && action.enabled,
-                        onClick = { viewModel.invokeAction(action) },
+                item {
+                    ActionGroupCard(
+                        actions = actions,
+                        enabled = !busy,
+                        onActionClick = { action -> viewModel.invokeAction(action) },
                     )
                 }
             }
 
+            item { SectionHeader("危险区域") }
             item {
-                HorizontalDivider(Modifier.padding(vertical = 16.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.Center,
-                ) {
-                    OutlinedButton(
-                        onClick = { showUninstallConfirm = true },
-                        enabled = !busy,
-                        colors =
-                            ButtonDefaults.outlinedButtonColors(
-                                contentColor = MaterialTheme.colorScheme.error
-                            ),
-                    ) {
-                        Text("卸载此漫画源")
-                    }
-                }
+                DangerZoneCard(
+                    busy = busy,
+                    onUninstallClick = { showUninstallConfirm = true },
+                )
             }
         }
     }
@@ -238,14 +240,14 @@ fun SourceDetailScreen(
 private fun SectionHeader(text: String) {
     Text(
         text = text,
-        style = MaterialTheme.typography.labelLarge,
+        style = MaterialTheme.typography.titleSmall,
         color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 4.dp),
+        modifier = Modifier.padding(start = 24.dp, end = 16.dp, top = 8.dp),
     )
 }
 
 @Composable
-private fun SourceIdentityHeader(
+private fun SourceIdentityCard(
     plugin: InstalledPlugin?,
     pluginId: String,
     busy: Boolean,
@@ -253,30 +255,26 @@ private fun SourceIdentityHeader(
     onRecover: () -> Unit,
 ) {
     val state = plugin?.state
-    Column {
-        ListItem(
-            supportingContent = {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        text = "id: $pluginId · v${state?.activeVersion ?: "未启用"}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    plugin?.manifest?.description?.takeIf { it.isNotBlank() }?.let {
-                        Text(
-                            text = it,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    state?.let { HealthStatusBadge(pluginState = it) }
-                }
-            },
-            leadingContent = {
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+        shape = MaterialTheme.shapes.large,
+        colors =
+            CardDefaults.elevatedCardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+            ),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Surface(
                     shape = CircleShape,
                     color = MaterialTheme.colorScheme.primaryContainer,
-                    modifier = Modifier.size(40.dp),
+                    modifier = Modifier.size(48.dp),
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
@@ -287,28 +285,152 @@ private fun SourceIdentityHeader(
                                 ),
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(24.dp),
                         )
                     }
                 }
-            },
-            trailingContent = {
+                Column(
+                    modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = plugin?.manifest?.name ?: pluginId,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = "id: $pluginId · v${state?.activeVersion ?: "未启用"}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 Switch(
                     checked = state?.disabled == false && state.activeVersion != null,
                     onCheckedChange = onToggle,
                     enabled = !busy && state?.activeVersion != null,
                 )
-            },
-            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        ) {
-            Text(plugin?.manifest?.name ?: pluginId)
-        }
+            }
 
-        if (state?.health == PluginHealth.RUNTIME_UNHEALTHY) {
+            plugin?.manifest?.description?.takeIf { it.isNotBlank() }?.let { description ->
+                Text(
+                    text = description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.End,
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                FilledTonalButton(onClick = onRecover, enabled = !busy) { Text("恢复运行") }
+                state?.let { HealthStatusBadge(pluginState = it) }
+                if (state?.health == PluginHealth.RUNTIME_UNHEALTHY) {
+                    FilledTonalButton(onClick = onRecover, enabled = !busy) { Text("恢复运行") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingGroupCard(
+    descriptors: List<PluginSettingDescriptor>,
+    values: Map<String, String>,
+    enabled: Boolean,
+    onValueChange: (String, String) -> Unit,
+) {
+    OutlinedCard(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+        shape = MaterialTheme.shapes.large,
+        colors =
+            CardDefaults.outlinedCardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+            ),
+    ) {
+        Column {
+            descriptors.forEachIndexed { index, descriptor ->
+                SettingControl(
+                    descriptor = descriptor,
+                    value = values[descriptor.id] ?: descriptor.defaultValue.orEmpty(),
+                    enabled = enabled,
+                    onValueChange = { onValueChange(descriptor.id, it) },
+                )
+                if (index < descriptors.lastIndex) {
+                    HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActionGroupCard(
+    actions: List<PluginActionDescriptor>,
+    enabled: Boolean,
+    onActionClick: (PluginActionDescriptor) -> Unit,
+) {
+    OutlinedCard(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+        shape = MaterialTheme.shapes.large,
+        colors =
+            CardDefaults.outlinedCardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+            ),
+    ) {
+        Column {
+            actions.forEachIndexed { index, action ->
+                ActionRow(
+                    action = action,
+                    enabled = enabled && action.enabled,
+                    onClick = { onActionClick(action) },
+                )
+                if (index < actions.lastIndex) {
+                    HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DangerZoneCard(
+    busy: Boolean,
+    onUninstallClick: () -> Unit,
+) {
+    OutlinedCard(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+        shape = MaterialTheme.shapes.large,
+        colors =
+            CardDefaults.outlinedCardColors(
+                containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.12f)
+            ),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = "卸载此漫画源后，配置、缓存与日志将被删除，保留书签及历史记录。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedButton(
+                onClick = onUninstallClick,
+                enabled = !busy,
+                modifier = Modifier.fillMaxWidth(),
+                colors =
+                    ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    ),
+            ) {
+                Text("卸载此漫画源")
             }
         }
     }
@@ -407,7 +529,7 @@ private fun SettingControl(
                     } else null,
                 modifier =
                     Modifier.fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
                         .onFocusChanged { focus ->
                             if (!focus.isFocused && draft != value) onValueChange(draft)
                         },
