@@ -8,6 +8,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.exio.inkleaf.InkleafApplication
 import com.exio.inkleaf.data.BookmarkRepository
 import com.exio.inkleaf.data.BookmarkResolution
 import com.exio.inkleaf.data.db.BookmarkEntity
@@ -49,7 +50,7 @@ internal sealed interface SavedEvent {
 class SavedViewModel(app: Application) : AndroidViewModel(app) {
     private val repository = BookmarkRepository(app)
     private val onlineRepository =
-        (app as com.exio.inkleaf.InkleafApplication).onlineContentRepository
+        (app as? InkleafApplication)?.onlineContentRepository
     private val hiddenBookmarkIds = MutableStateFlow<Set<Long>>(emptySet())
     internal val thumbnailStates = mutableStateMapOf<Long, BookmarkThumbnailState>()
     private val repositoryBookmarks =
@@ -162,9 +163,14 @@ class SavedViewModel(app: Application) : AndroidViewModel(app) {
         onlineRefreshJob?.cancel()
         onlineRefreshJob = viewModelScope.launch {
             try {
+                val repo = onlineRepository ?: run {
+                    onlineBookmarks = emptyList()
+                    onlineFavorites = emptyList()
+                    return@launch
+                }
                 val (bookmarks, favorites) =
                     withContext(Dispatchers.IO) {
-                        val records = onlineRepository.list()
+                        val records = repo.list()
                         val bookmarkItems =
                             records
                                 .flatMap { record ->
@@ -209,7 +215,7 @@ class SavedViewModel(app: Application) : AndroidViewModel(app) {
                                             addedAtMs = favorite.addedAtMs,
                                             snapshotFile =
                                                 runCatching {
-                                                        onlineRepository
+                                                        repo
                                                             .resolvePageFavoriteSnapshot(favorite)
                                                     }
                                                     .getOrNull()
@@ -240,8 +246,12 @@ class SavedViewModel(app: Application) : AndroidViewModel(app) {
     internal fun removeOnlineBookmark(item: OnlineSavedBookmarkUi) {
         viewModelScope.launch {
             try {
+                val repo = onlineRepository ?: run {
+                    eventChannel.send(SavedEvent.Message("在线内容仓库不可用"))
+                    return@launch
+                }
                 withContext(Dispatchers.IO) {
-                    check(onlineRepository.removePageBookmark(item.stored.location.identity))
+                    check(repo.removePageBookmark(item.stored.location.identity))
                 }
                 refreshOnlineRecords()
                 eventChannel.send(SavedEvent.OnlineBookmarkRemoved(item.stored))
@@ -258,8 +268,12 @@ class SavedViewModel(app: Application) : AndroidViewModel(app) {
     fun restoreOnlineBookmark(bookmark: OnlinePageBookmark) {
         viewModelScope.launch {
             try {
+                val repo = onlineRepository ?: run {
+                    eventChannel.send(SavedEvent.Message("在线内容仓库不可用"))
+                    return@launch
+                }
                 withContext(Dispatchers.IO) {
-                    onlineRepository.addPageBookmark(
+                    repo.addPageBookmark(
                         bookmark.location,
                         bookmark.chapterTitleSnapshot,
                     )
@@ -278,8 +292,12 @@ class SavedViewModel(app: Application) : AndroidViewModel(app) {
     internal fun removeOnlineFavorite(item: OnlineSavedFavoriteUi) {
         viewModelScope.launch {
             try {
+                val repo = onlineRepository ?: run {
+                    eventChannel.send(SavedEvent.Message("在线内容仓库不可用"))
+                    return@launch
+                }
                 withContext(Dispatchers.IO) {
-                    check(onlineRepository.removePageFavorite(item.stored.location.identity))
+                    check(repo.removePageFavorite(item.stored.location.identity))
                 }
                 refreshOnlineRecords()
                 eventChannel.send(SavedEvent.Message("已取消收藏"))

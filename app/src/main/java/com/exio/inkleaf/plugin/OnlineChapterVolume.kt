@@ -3,6 +3,7 @@ package com.exio.inkleaf.plugin
 import com.exio.inkleaf.data.ChapterProgress
 import com.exio.inkleaf.data.ComicOpenException
 import com.exio.inkleaf.data.ComicVolume
+import java.net.InetAddress
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
@@ -10,6 +11,7 @@ import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.suspendCancellableCoroutine
 import okhttp3.Call
 import okhttp3.Callback
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -69,6 +71,7 @@ internal class OnlineChapterVolume(
     override suspend fun loadPageBytes(globalPage: Int): ByteArray {
         check(!closed.get()) { "Online volume is closed" }
         val page = pages[requirePage(globalPage)]
+        validatePageUrl(page.url)
         val request =
             Request.Builder()
                 .url(page.url)
@@ -92,6 +95,28 @@ internal class OnlineChapterVolume(
     private fun requirePage(globalPage: Int): Int {
         require(globalPage in pages.indices) { "Page index is out of bounds" }
         return globalPage
+    }
+
+    private fun validatePageUrl(url: String) {
+        val httpUrl = url.toHttpUrlOrNull() ?: throw ComicOpenException("无效的页面 URL")
+        val host = httpUrl.host
+        try {
+            val addresses = InetAddress.getAllByName(host)
+            for (addr in addresses) {
+                if (
+                    addr.isLoopbackAddress ||
+                        addr.isLinkLocalAddress ||
+                        addr.isSiteLocalAddress ||
+                        addr.isAnyLocalAddress
+                ) {
+                    throw ComicOpenException("页面 URL 指向非公共地址")
+                }
+            }
+        } catch (e: ComicOpenException) {
+            throw e
+        } catch (e: Exception) {
+            throw ComicOpenException("无法解析页面 URL 主机名")
+        }
     }
 
     private suspend fun execute(request: Request): ByteArray =
@@ -128,7 +153,15 @@ internal class OnlineChapterVolume(
                                 if (!it.isSuccessful) {
                                     throw ComicOpenException("页面请求失败（HTTP ${it.code}）")
                                 }
-                                it.body?.bytes() ?: throw ComicOpenException("页面响应为空")
+                                val contentLength = it.body?.contentLength() ?: -1L
+                                if (contentLength > MAX_PAGE_IMAGE_BYTES) {
+                                    throw ComicOpenException("页面图片超过大小限制")
+                                }
+                                val bytes = it.body?.bytes() ?: throw ComicOpenException("页面响应为空")
+                                if (bytes.size > MAX_PAGE_IMAGE_BYTES) {
+                                    throw ComicOpenException("页面图片超过大小限制")
+                                }
+                                bytes
                             }
                         }
                         result.fold(
@@ -143,6 +176,10 @@ internal class OnlineChapterVolume(
                 }
             )
         }
+
+    private companion object {
+        const val MAX_PAGE_IMAGE_BYTES = 50L * 1024L * 1024L // 50 MB
+    }
 }
 
 /** Resolves a revision without ever treating a remote image URL as durable identity. */

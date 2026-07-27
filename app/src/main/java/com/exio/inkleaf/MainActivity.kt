@@ -162,6 +162,14 @@ private fun <T> navSpec() = tween<T>(NAV_TRANSITION_MS, easing = NavEasing)
 
 private fun <T> tabNavSpec() = tween<T>(TAB_TRANSITION_MS)
 
+private const val MAX_OPAQUE_CONTEXT_JSON_BYTES = 64 * 1024
+
+private fun boundOpaqueContextJson(json: String?): String? {
+    if (json == null) return null
+    val bytes = json.toByteArray(Charsets.UTF_8)
+    return if (bytes.size <= MAX_OPAQUE_CONTEXT_JSON_BYTES) json else null
+}
+
 private fun <T : Any> NavHostController.navigateTopLevel(route: T) {
     navigate(route) {
         popUpTo(graph.findStartDestination().id) {
@@ -565,7 +573,9 @@ class MainActivity : AppCompatActivity() {
                                                         pluginId = pluginId,
                                                         sourceId = comic.sourceId,
                                                         opaqueContextJson =
-                                                            comic.opaqueContext?.toString(),
+                                                            boundOpaqueContextJson(
+                                                                comic.opaqueContext?.toString()
+                                                            ),
                                                     )
                                                 )
                                             },
@@ -669,7 +679,8 @@ class MainActivity : AppCompatActivity() {
                                             sourceId = route.sourceId,
                                             chapterId = chapter.chapterId,
                                             chapterRevision = chapter.revision,
-                                            opaqueContextJson = effectiveContext?.toString(),
+                                            opaqueContextJson =
+                                                boundOpaqueContextJson(effectiveContext?.toString()),
                                         )
                                     )
                                 },

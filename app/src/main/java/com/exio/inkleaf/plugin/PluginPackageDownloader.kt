@@ -31,8 +31,8 @@ class PluginPackageDownloader(
     ): File =
         withContext(Dispatchers.IO) {
             val url = source.url.trim()
-            require(url.startsWith("https://") || url.startsWith("http://")) {
-                "Only HTTP(S) plugin URLs are supported"
+            require(url.startsWith("https://")) {
+                "Only HTTPS plugin URLs are supported"
             }
             if (url.length > 8192) throw IOException("Plugin URL is too long")
             if (!cacheDirectory.mkdirs() && !cacheDirectory.isDirectory)

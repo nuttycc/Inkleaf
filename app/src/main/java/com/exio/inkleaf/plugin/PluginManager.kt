@@ -27,10 +27,14 @@ class PluginManager(
 
     suspend fun installUri(uri: Uri, activate: Boolean = false): PluginInstallResult {
         val staged = copyUriToCache(uri)
-        return runtimeManager.install(staged, activate).also { result ->
-            if (activate && result.status != PluginInstallStatus.REJECTED && result.activatable) {
-                result.pluginId?.let { markAvailable(it) }
+        return try {
+            runtimeManager.install(staged, activate).also { result ->
+                if (activate && result.status != PluginInstallStatus.REJECTED && result.activatable) {
+                    result.pluginId?.let { markAvailable(it) }
+                }
             }
+        } finally {
+            staged.delete()
         }
     }
 
@@ -40,10 +44,19 @@ class PluginManager(
         onProgress: (PluginDownloadProgress) -> Unit = {},
     ): PluginInstallResult {
         val downloaded = downloader.download(source, onProgress)
-        return runtimeManager.install(downloaded, activate).also { result ->
-            if (activate && result.status != PluginInstallStatus.REJECTED && result.activatable) {
-                result.pluginId?.let { markAvailable(it) }
+        return try {
+            runtimeManager.install(downloaded, activate).also { result ->
+                if (
+                    result.status == PluginInstallStatus.INSTALLED &&
+                        activate &&
+                        result.activatable
+                ) {
+                    result.pluginId?.let { markAvailable(it) }
+                    downloaded.delete()
+                }
             }
+        } finally {
+            if (downloaded.exists()) downloaded.delete()
         }
     }
 

@@ -93,7 +93,7 @@ sealed interface HistoryEvent {
 class HistoryViewModel(app: Application) : AndroidViewModel(app) {
     private val sessionRepo = ReadingSessionRepository.getInstance(app)
     private val comicRepo = ComicRepository(app)
-    private val onlineRepository = (app as InkleafApplication).onlineContentRepository
+    private val onlineRepository = (app as? InkleafApplication)?.onlineContentRepository
     private val clock = SystemReadingClock()
     private val eventChannel = Channel<HistoryEvent>(Channel.BUFFERED)
     private val todayRefresh = MutableStateFlow(0)
@@ -171,9 +171,13 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
         onlineRefreshJob?.cancel()
         onlineRefreshJob = viewModelScope.launch {
             try {
+                val repo = onlineRepository ?: run {
+                    onlineSessions = emptyList()
+                    return@launch
+                }
                 onlineSessions =
                     withContext(Dispatchers.IO) {
-                        onlineRepository
+                        repo
                             .list()
                             .flatMap(OnlineComicRecord::toOnlineHistorySessions)
                             .sortedWith(
@@ -307,9 +311,13 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
     internal fun deleteOnlineSession(session: OnlineHistorySessionUi) {
         viewModelScope.launch {
             try {
+                val repo = onlineRepository ?: run {
+                    eventChannel.send(HistoryEvent.Message("在线内容仓库不可用"))
+                    return@launch
+                }
                 withContext(Dispatchers.IO) {
                     check(
-                        onlineRepository.removeReadingSession(
+                        repo.removeReadingSession(
                             session.stored.content,
                             session.stored.sessionId,
                         )
@@ -328,7 +336,11 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
     fun restoreOnlineSession(snapshot: OnlineReadingSessionRecord) {
         viewModelScope.launch {
             try {
-                withContext(Dispatchers.IO) { onlineRepository.recordReadingSession(snapshot) }
+                val repo = onlineRepository ?: run {
+                    eventChannel.send(HistoryEvent.Message("在线内容仓库不可用"))
+                    return@launch
+                }
+                withContext(Dispatchers.IO) { repo.recordReadingSession(snapshot) }
                 refreshOnlineSessions()
             } catch (error: CancellationException) {
                 throw error
@@ -349,12 +361,14 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
             } catch (_: Exception) {
                 localFailed = true
             }
-            try {
-                withContext(Dispatchers.IO) { onlineRepository.clearReadingSessions() }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (_: Exception) {
-                onlineFailed = true
+            onlineRepository?.let { repo ->
+                try {
+                    withContext(Dispatchers.IO) { repo.clearReadingSessions() }
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (_: Exception) {
+                    onlineFailed = true
+                }
             }
             refreshOnlineSessions()
             eventChannel.send(

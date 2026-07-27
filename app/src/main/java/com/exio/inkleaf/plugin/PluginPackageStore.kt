@@ -167,7 +167,11 @@ class PluginPackageStore(
                 .orEmpty()
                 .filter { it.isDirectory && PluginIds.isValid(it.name) }
                 .mapNotNull { directory ->
-                    readState(directory)?.let { installedPlugin(directory, it) }
+                    try {
+                        readState(directory)?.let { installedPlugin(directory, it) }
+                    } catch (error: PluginInstallException) {
+                        null
+                    }
                 }
                 .sortedBy { it.state.pluginId }
         }

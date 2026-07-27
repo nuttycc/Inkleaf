@@ -47,6 +47,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okhttp3.ResponseBody
 import okio.Buffer
+import java.net.InetAddress
 
 @Serializable
 data class PluginHttpRequest(
@@ -226,6 +227,7 @@ class PluginHostSession(
         if (url.scheme != "http" && url.scheme != "https") {
             throw invalidArgumentError("Only http and https URLs are allowed")
         }
+        validateHttpUrl(url)
         if (
             request.method.length !in 1..16 ||
                 !request.method.all { it in 'A'..'Z' || it in 'a'..'z' }
@@ -274,6 +276,27 @@ class PluginHostSession(
                     }
                 executeHttp(client, builder.build())
             }
+        }
+    }
+
+    private fun validateHttpUrl(url: HttpUrl) {
+        val host = url.host
+        try {
+            val addresses = InetAddress.getAllByName(host)
+            for (addr in addresses) {
+                if (
+                    addr.isLoopbackAddress ||
+                        addr.isLinkLocalAddress ||
+                        addr.isSiteLocalAddress ||
+                        addr.isAnyLocalAddress
+                ) {
+                    throw invalidArgumentError("HTTP URL resolves to a non-public address")
+                }
+            }
+        } catch (error: PluginRpcException) {
+            throw error
+        } catch (error: Exception) {
+            throw invalidArgumentError("Unable to resolve HTTP URL hostname", error)
         }
     }
 

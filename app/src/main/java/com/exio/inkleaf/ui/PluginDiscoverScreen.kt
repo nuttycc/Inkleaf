@@ -792,7 +792,7 @@ private fun LazyGridScope.searchContent(
             return@forEach
         }
 
-        val comics = result.page?.items.orEmpty()
+        val comics = result.page?.items.orEmpty().distinctBy { it.sourceId }
         if (comics.isEmpty()) {
             item(span = { GridItemSpan(maxLineSpan) }, key = "empty_${result.pluginId}") {
                 Text(

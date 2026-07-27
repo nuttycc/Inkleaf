@@ -483,7 +483,7 @@ fun OnlineComicScreen(
                     )
                 }
 
-                itemsIndexed(chapters, key = { index, chapter -> "${chapter.chapterId}_$index" }) {
+                itemsIndexed(chapters, key = { _, chapter -> chapter.chapterId }) {
                     _,
                     chapter ->
                     OutlinedButton(
@@ -493,7 +493,7 @@ fun OnlineComicScreen(
                                 chapter.opaqueContext ?: detail?.opaqueContext ?: opaqueContext,
                             )
                         },
-                        enabled = !loading && chapter.available && errorMessage == null,
+                        enabled = !loading && chapter.available,
                         shape = RoundedCornerShape(8.dp),
                         contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
                         modifier = Modifier.fillMaxWidth().height(38.dp),

@@ -19,7 +19,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.jsonPrimitiveOrNull
 
 /** Coordinates plugin-declared settings, actions, status, and uninstall state for one source. */
 data class SourceDetailFeedback(val text: String, val copyDetails: String? = null)
@@ -131,7 +131,7 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
             // Only a top-level message has a defined UI representation.
             _message.value =
                 SourceDetailFeedback(
-                    (result as? JsonObject)?.get("message")?.jsonPrimitive?.contentOrNull
+                    (result as? JsonObject)?.get("message")?.jsonPrimitiveOrNull?.contentOrNull
                         ?: "${action.title}：操作完成"
                 )
             // An action may alter plugin-owned state, so invalidate runtime-derived data now.
