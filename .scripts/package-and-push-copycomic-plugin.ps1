@@ -141,6 +141,42 @@ function Select-AdbDevice([string] $Adb, [string] $PreferredSerial) {
     return $ready[0].Serial
 }
 
+function Test-AdbInstallReceiver {
+    param(
+        [Parameter(Mandatory)] [string] $Adb,
+        [Parameter(Mandatory)] [string] $Device,
+        [Parameter(Mandatory)] [string] $AppId
+    )
+
+    $component = "$AppId/com.exio.inkleaf.plugin.AdbPluginInstallReceiver"
+    $output = @(
+        & $Adb -s $Device shell cmd package query-receivers --brief --components -n $component 2>&1
+    )
+    return $LASTEXITCODE -eq 0 -and @($output | Where-Object { $_.Trim() -eq $component }).Count -gt 0
+}
+
+function Assert-AdbInstallReceiver {
+    param(
+        [Parameter(Mandatory)] [string] $Adb,
+        [Parameter(Mandatory)] [string] $Device,
+        [Parameter(Mandatory)] [string] $AppId
+    )
+
+    $packagePath = @(& $Adb -s $Device shell pm path $AppId 2>&1)
+    if ($LASTEXITCODE -ne 0 -or -not ($packagePath -match '^package:')) {
+        throw "Inkleaf package is not installed on the device: $AppId"
+    }
+    if (Test-AdbInstallReceiver -Adb $Adb -Device $Device -AppId $AppId) { return }
+
+    $hint = " Install a current Inkleaf build before deploying plugins."
+    $debugAppId = "com.exio.inkleaf.debug"
+    if ($AppId -ne $debugAppId -and
+        (Test-AdbInstallReceiver -Adb $Adb -Device $Device -AppId $debugAppId)) {
+        $hint += " The debug app is ready; rerun with -PackageId $debugAppId."
+    }
+    throw "Installed Inkleaf package '$AppId' does not expose the ADB plugin install receiver.$hint"
+}
+
 function Invoke-InstallBroadcast {
     param(
         [Parameter(Mandatory)] [string] $Adb,
@@ -235,16 +271,12 @@ $deviceFile = "copycomic-plugin-v$($manifest.version).zip"
 $devicePath = "$($DeviceDirectory.TrimEnd('/'))/$deviceFile"
 
 Write-Info "Using ADB device $device"
+Assert-AdbInstallReceiver -Adb $adb -Device $device -AppId $PackageId
 & $adb -s $device shell mkdir -p $DeviceDirectory
 if ($LASTEXITCODE -ne 0) { throw "Unable to create device directory: $DeviceDirectory" }
 
 & $adb -s $device push $localPackage $devicePath
 if ($LASTEXITCODE -ne 0) { throw "adb push failed: $devicePath" }
-
-$packagePath = @(& $adb -s $device shell pm path $PackageId 2>&1)
-if ($LASTEXITCODE -ne 0 -or -not ($packagePath -match '^package:')) {
-    throw "Inkleaf package is not installed on the device: $PackageId"
-}
 
 # Small chunks avoid the Windows command-line limit and remain well below Binder's transaction cap.
 $session = [Guid]::NewGuid().ToString("N")
