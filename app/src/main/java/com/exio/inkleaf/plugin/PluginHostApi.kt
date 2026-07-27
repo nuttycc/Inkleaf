@@ -287,16 +287,16 @@ class PluginHostSession(
             try {
                 call.enqueue(
                     object : Callback {
-                        override fun onFailure(call: Call, error: IOException) {
+                        override fun onFailure(call: Call, e: IOException) {
                             if (continuation.isActive) {
                                 continuation.resumeWithException(
                                     PluginRpcException(
                                         PluginRpcError(
                                             PluginErrorCode.NETWORK,
-                                            error.message ?: "HTTP request failed",
+                                            e.message ?: "HTTP request failed",
                                             retryable = true,
                                         ),
-                                        error,
+                                        e,
                                     )
                                 )
                             }

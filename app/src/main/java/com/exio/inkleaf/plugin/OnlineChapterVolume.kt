@@ -116,10 +116,10 @@ internal class OnlineChapterVolume(
             }
             call.enqueue(
                 object : Callback {
-                    override fun onFailure(call: Call, error: java.io.IOException) {
+                    override fun onFailure(call: Call, e: java.io.IOException) {
                         calls -= call
                         continuation.resumeWithException(
-                            ComicOpenException(error.message ?: "页面下载失败")
+                            ComicOpenException(e.message ?: "页面下载失败")
                         )
                     }
 
