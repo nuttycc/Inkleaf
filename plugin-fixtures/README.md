@@ -21,8 +21,8 @@ that file from the debug plugin diagnostics activity, enable it, then use
 
 `copycomic` is an independent implementation of the public CopyComic-compatible
 API behavior. It does not copy source code from `Breeze-plugin-copyComic`, whose
-repository does not declare a license. The first slice intentionally implements
-only online search, detail, chapter listing, and reading.
+repository does not declare a license. It implements online search, browse
+feeds, detail, chapter listing, reading, source settings, and route health checks.
 
 Create its installable archive from the repository root:
 
@@ -33,6 +33,17 @@ Create its installable archive from the repository root:
 The script writes `plugin-fixtures/dist/copycomic-plugin.zip`. Import and
 enable it from the debug plugin diagnostics activity, then search for a comic in
 the normal online-source UI and open a chapter to exercise the complete chain.
+
+To package, push, install, and activate the plugin on the only connected ADB
+device:
+
+```powershell
+.\.scripts\package-and-push-copycomic-plugin.ps1
+```
+
+Pass `-Serial <device-id>` when multiple devices are connected, or
+`-PackageId com.exio.inkleaf.debug` to target the debug app. The versioned ZIP
+is also retained under `/sdcard/Download/Inkleaf/` for manual inspection.
 
 Its dependency-free transformation and host-body tests can be run separately:
 
