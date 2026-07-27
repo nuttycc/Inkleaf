@@ -503,8 +503,14 @@ private fun ComicPager(
         remember(chapterProgress, volume, chapterLayoutVersion) {
             volume.chapterTitle(chapterProgress.chapterIndex)
         }
-    val readerChapters = chapterNavigation?.chapters ?: volumeChapters
-    val readerChapterCount = chapterNavigation?.chapters?.size ?: volume.chapterCount
+    val readerChapters =
+        if (chapterNavigation != null) chapterNavigation.chapters else volumeChapters
+    val readerChapterCount =
+        if (chapterNavigation != null) {
+            chapterNavigation.chapters?.size ?: (chapterNavigation.currentChapterIndex + 1)
+        } else {
+            volume.chapterCount
+        }
     val currentReaderChapterIndex =
         chapterNavigation?.currentChapterIndex ?: chapterProgress.chapterIndex
     val currentReaderChapterTitle =

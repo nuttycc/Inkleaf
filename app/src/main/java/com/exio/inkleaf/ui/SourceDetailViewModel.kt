@@ -51,6 +51,7 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
     val message: StateFlow<SourceDetailFeedback?> = _message.asStateFlow()
 
     private var pluginId: String? = null
+    @Volatile
     private var settingsDirty = false
 
     fun load(pluginId: String) {
@@ -91,7 +92,7 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setValue(settingId: String, value: String) {
-        val id = pluginId ?: return
+        if (pluginId == null) return
         // Update optimistically so controls do not bounce while DataStore catches up.
         _values.value = _values.value + (settingId to value)
         settingsDirty = true
@@ -105,13 +106,13 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun flushSettingsChange() {
         if (!settingsDirty) return
-        settingsDirty = false
         val id = pluginId ?: return
         val app = app()
         val values = _values.value
         app.applicationScope.launch {
             try {
                 applySettingsChange(app, id, values)
+                settingsDirty = false
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Throwable) {

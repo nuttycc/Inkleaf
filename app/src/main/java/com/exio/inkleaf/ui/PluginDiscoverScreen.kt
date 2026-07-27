@@ -78,7 +78,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
-import coil.request.ImageRequest
 import com.composables.icons.materialsymbols.outlined.R as MaterialSymbolsOutlinedR
 import com.exio.inkleaf.InkleafApplication
 import com.exio.inkleaf.R
@@ -150,11 +149,11 @@ fun PluginDiscoverScreen(
         )
     }
 
-    val currentSelectedIds =
-        selectedPluginIds
-            ?: remember(activeHealthyPlugins) {
-                activeHealthyPlugins.map { it.state.pluginId }.toSet()
-            }
+    val defaultSelectedPluginIds =
+        remember(activeHealthyPlugins) {
+            activeHealthyPlugins.map { it.state.pluginId }.toSet()
+        }
+    val currentSelectedIds = selectedPluginIds ?: defaultSelectedPluginIds
     val visibleResults =
         remember(results, currentSelectedIds) {
             results.filter { it.pluginId in currentSelectedIds }
@@ -594,7 +593,8 @@ private fun SourceFilterChips(
         modifier = Modifier.fillMaxWidth(),
     ) {
         item {
-            val isAllSelected = selectedIds.size == plugins.size
+            val isAllSelected =
+                plugins.isNotEmpty() && plugins.all { it.state.pluginId in selectedIds }
             FilterChip(
                 selected = isAllSelected,
                 onClick = onSelectAll,
@@ -969,16 +969,7 @@ private fun ComicCover(
     }
 
     val imageRequest =
-        remember(cover) {
-            ImageRequest.Builder(context)
-                .data(cover.url)
-                .apply {
-                    cover.headers.forEach { (name, value) -> setHeader(name, value) }
-                    cover.referer?.let { setHeader("Referer", it) }
-                }
-                .crossfade(150)
-                .build()
-        }
+        remember(cover) { cover.toImageRequest(context, crossfadeMillis = 150) }
     AsyncImage(
         model = imageRequest,
         contentDescription = contentDescription,

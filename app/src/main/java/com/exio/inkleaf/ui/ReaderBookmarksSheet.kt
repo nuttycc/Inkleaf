@@ -81,9 +81,7 @@ internal fun ColumnScope.ReaderBookmarksPanelContent(
                     val globalPage = item.globalPage
                     ReaderBookmarkRow(
                         bookmark = item,
-                        globalPage = globalPage,
                         thumbnail = thumbnails[globalPage],
-                        stale = item.stale,
                         removalInFlight = item.key in removalsInFlight,
                         onNeedThumbnail = onNeedThumbnail,
                         onClick = {
@@ -130,16 +128,14 @@ internal fun ColumnScope.ReaderBookmarksPanelContent(
 @Composable
 private fun ReaderBookmarkRow(
     bookmark: ReaderBookmarkItem,
-    globalPage: Int,
     thumbnail: ImageBitmap?,
-    stale: Boolean,
     removalInFlight: Boolean,
     onNeedThumbnail: (Int) -> Unit,
     onClick: () -> Unit,
     onRemove: (() -> Unit)?,
 ) {
-    if (!stale && thumbnail == null) {
-        LaunchedEffect(globalPage) { onNeedThumbnail(globalPage) }
+    if (!bookmark.stale && thumbnail == null) {
+        LaunchedEffect(bookmark.globalPage) { onNeedThumbnail(bookmark.globalPage) }
     }
 
     Surface(
@@ -163,10 +159,10 @@ private fun ReaderBookmarkRow(
                         .clip(RoundedCornerShape(8.dp))
                         .background(MaterialTheme.colorScheme.surfaceContainerHighest),
             ) {
-                if (!stale && thumbnail != null) {
+                if (!bookmark.stale && thumbnail != null) {
                     Image(
                         bitmap = thumbnail,
-                        contentDescription = "全书第 ${globalPage + 1} 页缩略图",
+                        contentDescription = "全书第 ${bookmark.globalPage + 1} 页缩略图",
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize(),
                     )
@@ -196,14 +192,16 @@ private fun ReaderBookmarkRow(
                 )
 
                 Text(
-                    text = "全书第 ${globalPage + 1} 页 · 章节第 ${bookmark.pageIndex + 1} 页",
+                    text =
+                        "全书第 ${bookmark.globalPage + 1} 页 · " +
+                            "章节第 ${bookmark.pageIndex + 1} 页",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
 
-                if (stale) {
+                if (bookmark.stale) {
                     Text(
                         text = "源内容已变化，当前页码为近似位置",
                         style = MaterialTheme.typography.labelSmall,
@@ -213,16 +211,18 @@ private fun ReaderBookmarkRow(
                 }
             }
 
-            IconButton(
-                onClick = { onRemove?.invoke() },
-                enabled = !removalInFlight && onRemove != null,
-            ) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_bookmark),
-                    contentDescription = "移除书签",
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(20.dp),
-                )
+            if (onRemove != null) {
+                IconButton(
+                    onClick = onRemove,
+                    enabled = !removalInFlight,
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_bookmark),
+                        contentDescription = "移除书签",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
             }
         }
     }

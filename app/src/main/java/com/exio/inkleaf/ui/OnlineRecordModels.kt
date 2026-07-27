@@ -23,6 +23,7 @@ internal data class OnlineSavedBookmarkUi(
     val key: String,
     val title: String,
     val chapterTitle: String,
+    val chapterIndex: Int?,
     val pageIndex: Int,
     val addedAtMs: Long,
     val cover: PageImage?,

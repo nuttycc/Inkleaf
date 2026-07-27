@@ -180,6 +180,13 @@ class SavedViewModel(app: Application) : AndroidViewModel(app) {
                                             chapterTitle =
                                                 bookmark.chapterTitleSnapshot
                                                     ?: record.chapterTitle(location),
+                                            chapterIndex =
+                                                record.chapters
+                                                    .indexOfFirst {
+                                                        it.chapterId ==
+                                                            location.identity.chapter.chapterId
+                                                    }
+                                                    .takeIf { it >= 0 },
                                             pageIndex = location.pageIndex,
                                             addedAtMs = bookmark.addedAtMs,
                                             cover = record.detail?.cover,
@@ -259,10 +266,7 @@ class SavedViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) {
-                    onlineRepository.addPageBookmark(
-                        bookmark.location,
-                        bookmark.chapterTitleSnapshot,
-                    )
+                    onlineRepository.restorePageBookmark(bookmark)
                 }
                 refreshOnlineRecords()
             } catch (error: CancellationException) {

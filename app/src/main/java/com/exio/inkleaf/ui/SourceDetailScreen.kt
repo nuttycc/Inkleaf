@@ -52,6 +52,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -435,18 +436,20 @@ private fun SettingGroupCard(
     ) {
         Column {
             descriptors.forEachIndexed { index, descriptor ->
-                SettingControl(
-                    descriptor = descriptor,
-                    value = values[descriptor.id] ?: descriptor.defaultValue.orEmpty(),
-                    enabled = enabled,
-                    onValueChange = { onValueChange(descriptor.id, it) },
-                    onEditProtectedSetting = { onEditProtectedSetting(descriptor) },
-                )
-                if (index < descriptors.lastIndex) {
-                    HorizontalDivider(
-                        modifier = Modifier.padding(horizontal = 16.dp),
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                key(descriptor.id) {
+                    SettingControl(
+                        descriptor = descriptor,
+                        value = values[descriptor.id] ?: descriptor.defaultValue.orEmpty(),
+                        enabled = enabled,
+                        onValueChange = { onValueChange(descriptor.id, it) },
+                        onEditProtectedSetting = { onEditProtectedSetting(descriptor) },
                     )
+                    if (index < descriptors.lastIndex) {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                        )
+                    }
                 }
             }
         }
@@ -513,8 +516,6 @@ private fun SettingControl(
             var expanded by remember { mutableStateOf(false) }
             val selectedTitle =
                 descriptor.options.firstOrNull { it.id == value }?.title
-                    ?: descriptor.options.firstOrNull { it.id == descriptor.defaultValue }?.title
-                    ?: descriptor.options.firstOrNull()?.title
                     ?: "未选择"
             Box {
                 ListItem(

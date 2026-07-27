@@ -40,8 +40,10 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarVisuals
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -76,6 +78,19 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+private enum class SourcesFeedbackKind {
+    INFO,
+    ERROR,
+}
+
+private data class SourcesSnackbarVisuals(
+    override val message: String,
+    val kind: SourcesFeedbackKind,
+    override val actionLabel: String? = null,
+    override val withDismissAction: Boolean = false,
+    override val duration: SnackbarDuration = SnackbarDuration.Short,
+) : SnackbarVisuals
+
 /** Secondary screen for plugin source installation and lifecycle management. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -90,7 +105,7 @@ fun SourcesScreen(
     val snackbarHostState = remember { SnackbarHostState() }
 
     var plugins by remember { mutableStateOf<List<InstalledPlugin>>(emptyList()) }
-    var url by remember { mutableStateOf("") }
+    var url by rememberSaveable { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var showImportSheet by rememberSaveable { mutableStateOf(false) }
 
@@ -112,13 +127,20 @@ fun SourcesScreen(
                         "已安装 $pluginName$versionText，但当前版本不兼容，未激活"
                     }
                 scope.launch {
-                    snackbarHostState.showSnackbar(message)
+                    snackbarHostState.showSnackbar(
+                        SourcesSnackbarVisuals(message, SourcesFeedbackKind.INFO)
+                    )
                 }
             }
             PluginInstallStatus.REJECTED -> {
                 val err = result.errorMessage ?: result.errorCode?.name ?: "安装被拒绝"
                 scope.launch {
-                    snackbarHostState.showSnackbar("安装失败: $err")
+                    snackbarHostState.showSnackbar(
+                        SourcesSnackbarVisuals(
+                            message = "安装失败: $err",
+                            kind = SourcesFeedbackKind.ERROR,
+                        )
+                    )
                 }
             }
         }
@@ -135,7 +157,12 @@ fun SourcesScreen(
                 throw error
             } catch (error: Throwable) {
                 val message = error.message ?: "操作失败"
-                snackbarHostState.showSnackbar("操作失败: $message")
+                snackbarHostState.showSnackbar(
+                    SourcesSnackbarVisuals(
+                        message = "操作失败: $message",
+                        kind = SourcesFeedbackKind.ERROR,
+                    )
+                )
                 try {
                     refresh()
                 } catch (refreshError: CancellationException) {
@@ -157,18 +184,14 @@ fun SourcesScreen(
             }
         }
 
-    LaunchedEffect(Unit) { refresh() }
+    LaunchedEffect(Unit) { launchOperation {} }
 
     Scaffold(
         modifier = modifier,
         snackbarHost = {
             SnackbarHost(snackbarHostState) { data ->
                 val isError =
-                    data.visuals.message.startsWith("安装失败") ||
-                        data.visuals.message.startsWith("操作失败") ||
-                        data.visuals.message.contains("失败") ||
-                        data.visuals.message.contains("拒绝") ||
-                        data.visuals.message.contains("错误")
+                    (data.visuals as? SourcesSnackbarVisuals)?.kind == SourcesFeedbackKind.ERROR
                 if (isError) {
                     Snackbar(
                         snackbarData = data,

@@ -58,7 +58,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
-import coil.request.ImageRequest
 import com.exio.inkleaf.InkleafApplication
 import com.exio.inkleaf.R
 import com.exio.inkleaf.plugin.ChapterSummary
@@ -71,6 +70,8 @@ import com.exio.inkleaf.plugin.PluginRpcException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
 
@@ -102,19 +103,26 @@ fun OnlineComicScreen(
     var reload by remember { mutableIntStateOf(0) }
     var isBookmarked by remember { mutableStateOf(false) }
     var sourceName by remember { mutableStateOf(pluginId) }
+    val bookmarkMutationMutex = remember { Mutex() }
+    var bookmarkMutationVersion by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(pluginId, sourceId, opaqueContext, reload) {
         loading = true
         errorMessage = null
         detail = null
         chapters = emptyList()
-        withContext(Dispatchers.IO) {
-            val installed = application.pluginManager.installed()
-            sourceName =
-                installed.firstOrNull { it.state.pluginId == pluginId }?.manifest?.name ?: pluginId
-            val initialRecord = application.onlineContentRepository.get(pluginId, sourceId)
-            isBookmarked = initialRecord?.references?.contains(OnlineUserReference.BOOKMARK) == true
-        }
+        val (loadedSourceName, initiallyBookmarked) =
+            withContext(Dispatchers.IO) {
+                val installed = application.pluginManager.installed()
+                val name =
+                    installed.firstOrNull { it.state.pluginId == pluginId }?.manifest?.name
+                        ?: pluginId
+                val initialRecord = application.onlineContentRepository.get(pluginId, sourceId)
+                name to
+                    (initialRecord?.references?.contains(OnlineUserReference.BOOKMARK) == true)
+            }
+        sourceName = loadedSourceName
+        isBookmarked = initiallyBookmarked
         try {
             val loadedDetail =
                 application.pluginCatalog.detail(
@@ -123,11 +131,13 @@ fun OnlineComicScreen(
                 )
             detail = loadedDetail
             try {
-                withContext(Dispatchers.IO) {
-                    val record =
-                        application.onlineContentRepository.recordDetail(pluginId, loadedDetail)
-                    isBookmarked = record.references.contains(OnlineUserReference.BOOKMARK)
-                }
+                val storedBookmarkState =
+                    withContext(Dispatchers.IO) {
+                        val record =
+                            application.onlineContentRepository.recordDetail(pluginId, loadedDetail)
+                        record.references.contains(OnlineUserReference.BOOKMARK)
+                    }
+                isBookmarked = storedBookmarkState
             } catch (storageError: CancellationException) {
                 throw storageError
             } catch (_: Exception) {
@@ -183,19 +193,27 @@ fun OnlineComicScreen(
         val previousState = isBookmarked
         val nextState = !previousState
         isBookmarked = nextState
-        coroutineScope.launch(Dispatchers.IO) {
+        bookmarkMutationVersion += 1
+        val mutationVersion = bookmarkMutationVersion
+        coroutineScope.launch {
             try {
-                application.onlineContentRepository.setReference(
-                    pluginId = pluginId,
-                    sourceId = sourceId,
-                    reference = OnlineUserReference.BOOKMARK,
-                    present = nextState,
-                )
+                bookmarkMutationMutex.withLock {
+                    if (mutationVersion != bookmarkMutationVersion) return@withLock
+                    withContext(Dispatchers.IO) {
+                        application.onlineContentRepository.setReference(
+                            pluginId = pluginId,
+                            sourceId = sourceId,
+                            reference = OnlineUserReference.BOOKMARK,
+                            present = nextState,
+                        )
+                    }
+                }
             } catch (e: CancellationException) {
                 throw e
-            } catch (_: Exception) {
-                withContext(Dispatchers.Main) {
+            } catch (error: Exception) {
+                if (mutationVersion == bookmarkMutationVersion) {
                     isBookmarked = previousState
+                    errorMessage = error.message?.let { "追漫状态保存失败：$it" } ?: "追漫状态保存失败"
                 }
             }
         }
@@ -247,16 +265,10 @@ fun OnlineComicScreen(
                             comic.cover?.let { cover ->
                                 val request =
                                     remember(cover) {
-                                        ImageRequest.Builder(application)
-                                            .data(cover.url)
-                                            .apply {
-                                                cover.headers.forEach { (name, value) ->
-                                                    setHeader(name, value)
-                                                }
-                                                cover.referer?.let { setHeader("Referer", it) }
-                                            }
-                                            .crossfade(150)
-                                            .build()
+                                        cover.toImageRequest(
+                                            application,
+                                            crossfadeMillis = 150,
+                                        )
                                     }
                                 AsyncImage(
                                     model = request,

@@ -460,8 +460,12 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
         force: Boolean,
         manual: Boolean = false,
     ) {
-        val feed = selectedFeed() ?: return
-        val key = currentBrowseKey ?: return
+        val feed = selectedFeed()
+        val key = currentBrowseKey
+        if (feed == null || key == null) {
+            if (manual) _isRefreshing.value = false
+            return
+        }
         val filters = _browseFilters.value
         val generation = ++browseGeneration
         browseJob?.cancel()

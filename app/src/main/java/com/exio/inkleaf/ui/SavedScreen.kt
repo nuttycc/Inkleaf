@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
@@ -29,6 +28,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
@@ -63,7 +63,6 @@ import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
-import coil.request.ImageRequest
 import com.exio.inkleaf.R
 import com.exio.inkleaf.data.BookmarkResolution
 import com.exio.inkleaf.data.db.BookmarkEntity
@@ -86,6 +85,26 @@ internal data class OnlineSavedBookmarkGroup(
     val latestAddedAt: Long,
     val bookmarks: List<OnlineSavedBookmarkUi>,
 )
+
+private val onlineBookmarkComparator =
+    Comparator<OnlineSavedBookmarkUi> { left, right ->
+        val chapterOrder =
+            when {
+                left.chapterIndex != null && right.chapterIndex != null ->
+                    left.chapterIndex.compareTo(right.chapterIndex)
+                left.chapterIndex != null -> -1
+                right.chapterIndex != null -> 1
+                else -> right.addedAtMs.compareTo(left.addedAtMs)
+            }
+        if (chapterOrder != 0) return@Comparator chapterOrder
+
+        val chapterIdOrder = left.target.chapterId.compareTo(right.target.chapterId)
+        if (chapterIdOrder != 0) return@Comparator chapterIdOrder
+
+        val pageOrder = left.pageIndex.compareTo(right.pageIndex)
+        if (pageOrder != 0) return@Comparator pageOrder
+        left.key.compareTo(right.key)
+    }
 
 internal fun groupAndSortBookmarks(bookmarks: List<BookmarkWithComic>): List<SavedBookmarkGroup> =
     bookmarks
@@ -119,12 +138,7 @@ internal fun groupAndSortOnlineBookmarks(
                 key = key,
                 title = sourceBookmarks.first().title,
                 latestAddedAt = sourceBookmarks.maxOf { it.addedAtMs },
-                bookmarks =
-                    sourceBookmarks.sortedWith(
-                        compareBy<OnlineSavedBookmarkUi> { it.target.chapterId }
-                            .thenBy { it.pageIndex }
-                            .thenBy { it.key }
-                    ),
+                bookmarks = sourceBookmarks.sortedWith(onlineBookmarkComparator),
             )
         }
         .sortedByDescending { it.latestAddedAt }
@@ -442,17 +456,17 @@ private fun OnlineBookmarkRow(
             }
         }
         Box(modifier = Modifier.align(Alignment.Bottom)) {
-            Icon(
-                imageVector = Icons.Filled.MoreVert,
-                contentDescription = "书签操作",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier =
-                    Modifier.offset(x = 8.dp, y = 2.dp)
-                        .clip(CircleShape)
-                        .clickable { showMenu = true }
-                        .padding(4.dp)
-                        .size(16.dp),
-            )
+            IconButton(
+                onClick = { showMenu = true },
+                modifier = Modifier.offset(x = 8.dp, y = 2.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.MoreVert,
+                    contentDescription = "书签操作",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
             DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                 DropdownMenuItem(
                     text = { Text("跳转到此页") },
@@ -483,15 +497,7 @@ private fun OnlineBookmarkThumbnail(
     val context = LocalContext.current
     val request =
         remember(item.cover) {
-            item.cover?.let { cover ->
-                ImageRequest.Builder(context)
-                    .data(cover.url)
-                    .apply {
-                        cover.headers.forEach { (name, value) -> setHeader(name, value) }
-                        cover.referer?.let { setHeader("Referer", it) }
-                    }
-                    .build()
-            }
+            item.cover?.toImageRequest(context)
         }
     Box(
         contentAlignment = Alignment.Center,
@@ -592,17 +598,17 @@ private fun BookmarkRow(
             )
         }
         Box(modifier = Modifier.align(Alignment.Bottom)) {
-            Icon(
-                imageVector = Icons.Filled.MoreVert,
-                contentDescription = "书签操作",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier =
-                    Modifier.offset(x = 8.dp, y = 2.dp)
-                        .clip(CircleShape)
-                        .clickable { showMenu = true }
-                        .padding(4.dp)
-                        .size(16.dp),
-            )
+            IconButton(
+                onClick = { showMenu = true },
+                modifier = Modifier.offset(x = 8.dp, y = 2.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.MoreVert,
+                    contentDescription = "书签操作",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
             DropdownMenu(
                 expanded = showMenu,
                 onDismissRequest = { showMenu = false },

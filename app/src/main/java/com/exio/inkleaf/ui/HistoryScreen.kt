@@ -64,7 +64,6 @@ import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.compose.itemKey
 import coil.compose.AsyncImage
-import coil.request.ImageRequest
 import com.exio.inkleaf.R
 import java.io.File
 
@@ -414,15 +413,7 @@ private fun OnlineHistoryCover(
     val context = LocalContext.current
     val request =
         remember(session.cover) {
-            session.cover?.let { cover ->
-                ImageRequest.Builder(context)
-                    .data(cover.url)
-                    .apply {
-                        cover.headers.forEach { (name, value) -> setHeader(name, value) }
-                        cover.referer?.let { setHeader("Referer", it) }
-                    }
-                    .build()
-            }
+            session.cover?.toImageRequest(context)
         }
     Box(
         modifier =
