@@ -246,21 +246,21 @@ function Start-AppProcess {
         [Parameter(Mandatory)] [string] $AppId
     )
 
-    # The install receiver only answers when the app process is already alive. Some OEM ROMs
-    # (ColorOS among them) refuse to cold-start a process for this broadcast even with
-    # --include-stopped-packages, and the failure is silent: the broadcast is enqueued, nothing
-    # runs, and `am` reports result=0 with no data, which reads like a rejection by Inkleaf.
-    if (Get-AppProcessId -Adb $Adb -Device $Device -AppId $AppId) { return }
-
-    Write-Info "Starting $AppId so it can receive the install broadcast"
+    # A PID is not enough to prove that a manifest receiver can run. Android may freeze a cached
+    # process, and ColorOS then skips explicit shell broadcasts with result=0 and no result data.
+    # Starting the launcher activity also thaws an existing process before the transfer begins.
+    Write-Info "Waking $AppId so it can receive the install broadcast"
     $resolved = @(& $Adb -s $Device shell cmd package resolve-activity --brief $AppId 2>&1)
     $component =
         @($resolved | Where-Object { $_ -match "^$([regex]::Escape($AppId))/" }) |
             Select-Object -First 1
     if ($component) {
-        & $Adb -s $Device shell am start -n $component.Trim() | Out-Null
+        & $Adb -s $Device shell am start -W -n $component.Trim() | Out-Null
     } else {
         & $Adb -s $Device shell monkey -p $AppId -c android.intent.category.LAUNCHER 1 | Out-Null
+    }
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to launch $AppId on the device."
     }
 
     for ($attempt = 0; $attempt -lt 20; $attempt += 1) {
@@ -300,7 +300,9 @@ function Invoke-InstallBroadcast {
     }
     if ($completion.Groups["code"].Value -ne "-1") {
         $detail = $completion.Groups["data"].Value
-        if (-not $detail) { $detail = $text }
+        if (-not $detail) {
+            throw "The install receiver did not execute or return a result: $text"
+        }
         throw "Inkleaf rejected the plugin deployment: $detail"
     }
     return $completion.Groups["data"].Value
