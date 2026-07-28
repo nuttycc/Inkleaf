@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-07-15T18:59:46.0367955+08:00",
+  "generatedAt": "2026-07-28T14:06:31+08:00",
   "title": "Design System: Inkleaf",
   "extensions": {
     "colorMeta": {
@@ -93,6 +93,36 @@
           "#DDDDDD",
           "#FFFFFF"
         ]
+      },
+      "ocr-signal-cyan": {
+        "role": "tertiary",
+        "displayName": "OCR Signal Cyan",
+        "canonical": "#00E5FF",
+        "tonalRamp": [
+          "#00272C",
+          "#004751",
+          "#006678",
+          "#00889F",
+          "#00AAC6",
+          "#00E5FF",
+          "#7FF0FF",
+          "#D8FAFF"
+        ]
+      },
+      "ocr-signal-glow": {
+        "role": "tertiary",
+        "displayName": "OCR Signal Glow",
+        "canonical": "#00B0FF",
+        "tonalRamp": [
+          "#001E2C",
+          "#003951",
+          "#005478",
+          "#00719F",
+          "#008FC6",
+          "#00B0FF",
+          "#7FD5FF",
+          "#D8F1FF"
+        ]
       }
     },
     "typographyMeta": {
@@ -103,9 +133,19 @@
     },
     "shadows": [
       {
+        "name": "stage-float",
+        "value": "tonal elevation 8dp + shadow elevation 12dp",
+        "purpose": "The reader dock, which hovers free of every screen edge over arbitrary artwork."
+      },
+      {
+        "name": "stage-panel",
+        "value": "tonal elevation 6dp + shadow elevation 8dp",
+        "purpose": "Reader panels that slide over the page."
+      },
+      {
         "name": "material-overlay-only",
         "value": "Material 3 component elevation",
-        "purpose": "Dialogs, sheets, menus, and other true overlays only; resting content stays tonal and flat."
+        "purpose": "Dialogs, sheets, and menus; resting content in the Study and Workbench stays tonal and flat."
       }
     ],
     "motion": [
@@ -118,6 +158,11 @@
         "name": "directional-navigation",
         "value": "Material shared-axis or directional slide",
         "purpose": "Preserve spatial direction when entering and leaving reading surfaces."
+      },
+      {
+        "name": "tab-crossfade",
+        "value": "200ms crossfade, shorter than outer navigation",
+        "purpose": "Top-level tab switches, kept distinct from the outer push transition."
       },
       {
         "name": "reduced-motion",
@@ -149,7 +194,7 @@
       "name": "Outlined Field",
       "kind": "input",
       "refersTo": "outlined-field",
-      "description": "Material-style text input for names and hexadecimal colors.",
+      "description": "Outlined text input for exact values such as hexadecimal colors and numeric limits.",
       "html": "<label class=\"ds-field\"><span>Color</span><input value=\"#2B2B2E\" /></label>",
       "css": ".ds-field { display: grid; gap: 4px; color: #444448; font: 500 12px/16px system-ui, sans-serif; } .ds-field input { min-height: 48px; padding: 0 16px; border: 1px solid #7E7E84; border-radius: 8px; background: transparent; color: #2B2B2E; font: 400 16px/24px system-ui, sans-serif; } .ds-field input:hover { border-color: #444448; } .ds-field input:focus-visible { border: 2px solid #2B2B2E; outline: none; }"
     },
@@ -165,9 +210,17 @@
       "name": "Comic Card",
       "kind": "card",
       "refersTo": "comic-card",
-      "description": "Image-led, flat library item with restrained metadata.",
+      "description": "Image-led, flat comic entry with restrained metadata. Identical for local files and comic sources; only density differs per surface.",
       "html": "<article class=\"ds-comic-card\"><div class=\"ds-comic-cover\"></div><strong>Comic title</strong><small>24 pages</small></article>",
       "css": ".ds-comic-card { width: 152px; color: #2B2B2E; font-family: system-ui, sans-serif; } .ds-comic-cover { aspect-ratio: 2 / 3; border-radius: 8px; background: #C7C7CC; } .ds-comic-card strong { display: block; margin-top: 4px; font-size: 14px; line-height: 20px; } .ds-comic-card small { color: #606065; font-size: 12px; line-height: 16px; } .ds-comic-card:focus-within .ds-comic-cover { outline: 3px solid #1685A9; outline-offset: 2px; }"
+    },
+    {
+      "name": "Reader Dock",
+      "kind": "nav",
+      "refersTo": "reader-dock",
+      "description": "The floating reading dock: one near-opaque black surface that hovers over the page and collects every reading tool.",
+      "html": "<div class=\"ds-stage\"><nav class=\"ds-reader-dock\"><button class=\"ds-dock-item ds-dock-item-active\">页码</button><button class=\"ds-dock-item\">章节</button><button class=\"ds-dock-item\">书签</button><button class=\"ds-dock-item\">工具</button></nav></div>",
+      "css": ".ds-stage { display: grid; place-items: end stretch; width: 320px; height: 180px; padding: 4px 16px 12px; background: #000000; } .ds-reader-dock { display: flex; align-items: center; height: 60px; padding: 4px 6px; border-radius: 28px; background: rgba(0,0,0,.95); box-shadow: 0 6px 20px rgba(0,0,0,.55); } .ds-dock-item { flex: 1; height: 48px; border: 0; border-radius: 9999px; background: transparent; color: rgba(255,255,255,.7); font: 500 12px/16px system-ui, sans-serif; transition: background 180ms cubic-bezier(.2,0,0,1), color 180ms cubic-bezier(.2,0,0,1); } .ds-dock-item-active { background: rgba(22,133,169,.28); color: #FFFFFF; } .ds-dock-item:focus-visible { outline: 2px solid #FFFFFF; outline-offset: 2px; }"
     },
     {
       "name": "Reader Overlay",
@@ -184,17 +237,25 @@
       "description": "Directional page thumbnail with a restrained accent selection state.",
       "html": "<button class=\"ds-reader-thumb\" aria-label=\"Page 12\"></button>",
       "css": ".ds-reader-thumb { width: 56px; height: 80px; border: 1px solid #1685A9; border-radius: 4px; background: #303030; transform: scale(1.15); transform-origin: bottom center; transition: transform 180ms cubic-bezier(.2,0,0,1); } .ds-reader-thumb:hover { filter: brightness(1.15); } .ds-reader-thumb:focus-visible { outline: 3px solid #FFFFFF; outline-offset: 3px; } .ds-reader-thumb:active { transform: scale(1.1); }"
+    },
+    {
+      "name": "OCR Region Mark",
+      "kind": "custom",
+      "refersTo": "ocr-region-selected",
+      "description": "A mark drawn on artwork rather than chrome on black: fixed high-contrast signal colors, visible only while OCR selection is active.",
+      "html": "<div class=\"ds-ocr-canvas\"><span class=\"ds-ocr-region\">セリフ</span></div>",
+      "css": ".ds-ocr-canvas { display: grid; place-items: center; width: 240px; height: 140px; background: #494949; } .ds-ocr-region { padding: 6px 12px; border: 1.8px solid #00E5FF; border-radius: 4px; background: rgba(0,229,255,.38); box-shadow: 0 0 18px rgba(0,176,255,.26), inset 0 0 0 1.2px rgba(255,255,255,.88); color: #FFFFFF; font: 500 14px/20px system-ui, sans-serif; }"
     }
   ],
   "narrative": {
     "northStar": "Ink in Motion",
-    "overview": "Inkleaf should feel like ink moving only when the reader asks it to move. The interface is quiet at rest, then becomes expressive through page changes, gestures, selection feedback, and transitions that preserve spatial continuity. Material 3 Expressive supplies the shape and motion vocabulary, but the comic remains visually dominant. The system is content-first, moderately spacious, and familiar to an Android user. It rejects feature-heavy, visually noisy interfaces that fill the library with competing entry points, labels, recommendations, or decoration. Expressiveness must clarify state or movement; it must never become ambient spectacle.",
+    "overview": "Inkleaf should feel like ink moving only when the reader asks it to move. The interface is quiet at rest, then becomes expressive through page changes, gestures, selection feedback, and transitions that preserve spatial continuity. Material 3 Expressive supplies the shape and motion vocabulary, but the comic remains visually dominant. Every screen belongs to exactly one of three surfaces, and the surface decides the rules: the Stage is the comic itself and anything drawn over it, pure black and unthemed; the Study is where the user browses and chooses, fully themed, flat, image-led, and shared by local files and online sources alike; the Workbench is where the user configures, denser and more verbose but still flat and themed. The direction is normative and the numbers are where the direction currently lands; when a value and a rule disagree, the rule wins.",
     "keyCharacteristics": [
       "Dynamic Material color derived from a user-selected seed or Android wallpaper.",
-      "Tonal, flat-at-rest surfaces with elevation reserved for true overlays.",
+      "Tonal, flat-at-rest surfaces with elevation reserved for things that truly float.",
       "A compact 4dp-based rhythm with 12–16dp content spacing.",
       "Familiar Material controls with restrained Expressive shape and motion.",
-      "A dedicated black reading stage that isolates comic pages from app chrome."
+      "One reading Stage, black and unthemed, shared by local files and online sources alike."
     ],
     "rules": [
       {
@@ -209,7 +270,12 @@
       },
       {
         "name": "The Comic Owns the Stage Rule",
-        "body": "In the reader, the page and black stage dominate. Theme color appears only as a controlled accent for selection, progress, and actionable state.",
+        "body": "On the Stage, the page dominates. Theme color appears only as a controlled accent for selection, progress, and actionable state.",
+        "section": "colors"
+      },
+      {
+        "name": "The Chrome and the Mark Rule",
+        "body": "Stage chrome sits on known black, so it may use the theme accent with a luminance guard. A mark drawn on top of the artwork sits on unknown imagery, where no theme-derived color can be trusted to stay legible, so it uses a fixed high-contrast signal instead. Signal colors are permitted only for marks on artwork, only while their tool is active, and never as ambient decoration.",
         "section": "colors"
       },
       {
@@ -223,6 +289,11 @@
         "section": "typography"
       },
       {
+        "name": "The Metadata Stays Small Rule",
+        "body": "Everything a source supplies about a comic — author, update time, tags, chapter counts, availability — is label-weight supporting text. A title is a title whether it came from a file name or from a plugin; metadata never grows to compete with it.",
+        "section": "typography"
+      },
+      {
         "name": "The Tonal First Rule",
         "body": "Use Material surface roles before adding shadow. If a resting card needs a wide decorative shadow to read as a card, the hierarchy is wrong.",
         "section": "elevation"
@@ -231,22 +302,32 @@
         "name": "The Overlay Earns Elevation Rule",
         "body": "Only an element that interrupts or overlays the current plane may use visible elevation.",
         "section": "elevation"
+      },
+      {
+        "name": "The Outline Groups, The Shadow Floats Rule",
+        "body": "In the Workbench, related settings are grouped with an outline, a tonal container, or a divider — never by lifting a resting card off the page. Shadow means 'this is above the plane you were on', and a settings group is not.",
+        "section": "elevation"
       }
     ],
     "dos": [
+      "Do name a screen's surface — Stage, Study, or Workbench — before deciding how it should look.",
       "Do keep the comic visually dominant and reveal controls in response to reader intent.",
-      "Do use MaterialTheme.colorScheme roles for app surfaces and generate them from the selected seed or Android wallpaper.",
+      "Do use MaterialTheme.colorScheme roles for Study and Workbench surfaces, generated from the selected seed or Android wallpaper.",
+      "Do give local and online comics the same entry vocabulary, and let density differ per surface because the task differs.",
       "Do build spacing from 4, 8, 12, 16, 24, and 32dp, using 12–16dp for most content layout.",
       "Do use standard Material 3 Expressive components and state behavior before creating custom controls.",
       "Do preserve at least 48×48dp touch targets even when the visible icon or swatch is smaller.",
-      "Do use motion to explain page direction, selection, entry, exit, and transient control state."
+      "Do use motion to explain page direction, selection, entry, exit, and transient control state.",
+      "Do show source, plugin, and cache state as plain text where the user is already looking."
     ],
     "donts": [
-      "Don't create feature-heavy, visually noisy interfaces that fill the library with competing entry points, labels, recommendations, or decoration.",
-      "Don't let secondary tools distract from choosing a comic and reading it.",
+      "Don't build recommendation surfaces Inkleaf invents for itself: house-curated rankings, editorial slots, promotional banners, achievement badges, or any entry point that competes with the user's own comics for attention. Presenting a source's declared content flows is legitimate; dressing them up as Inkleaf's own merchandising is not.",
+      "Don't create feature-heavy, visually noisy interfaces, and don't let secondary tools distract from choosing a comic and reading it.",
+      "Don't style an online comic differently from a local one. Availability may show; origin may not.",
+      "Don't interrupt reading for a failure that can be recovered or degraded silently.",
       "Don't use Expressive motion, shape, or color as ambient decoration; every expressive choice must communicate state or movement.",
-      "Don't hard-code app surface colors when a Material color role exists.",
-      "Don't add decorative shadows to resting comic cards or pair a thin border with a wide soft shadow.",
+      "Don't hard-code app surface colors when a Material color role exists, and don't use a signal color anywhere except as a mark on artwork.",
+      "Don't add decorative shadows to resting cards or pair a thin border with a wide soft shadow.",
       "Don't add nested cards, oversized corner radii, gradient text, glassmorphism, decorative grids, or striped backgrounds.",
       "Don't port iOS navigation, dialogs, switches, or back behavior into the Android interface."
     ]

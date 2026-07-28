@@ -1,7 +1,7 @@
 ---
 version: alpha
 name: Inkleaf
-description: A quiet, expressive Android reading space for locally stored comics.
+description: A quiet Android reading space where local files and online comic sources share one reader.
 colors:
   soft-charcoal-ink: "#2B2B2E"
   rouge-seed: "#9D2933"
@@ -9,6 +9,8 @@ colors:
   amber-seed: "#CA6924"
   reader-black: "#000000"
   reader-white: "#FFFFFF"
+  ocr-signal-cyan: "#00E5FF"
+  ocr-signal-glow: "#00B0FF"
 typography:
   body-large:
     fontFamily: "Roboto, Android system sans-serif"
@@ -20,6 +22,8 @@ rounded:
   thumbnail: "4px"
   content: "8px"
   overlay: "12px"
+  panel: "24px"
+  dock: "28px"
   full: "9999px"
 spacing:
   micro: "4px"
@@ -37,10 +41,22 @@ components:
     textColor: "{colors.reader-white}"
     rounded: "{rounded.overlay}"
     padding: "4px 12px"
+  reader-dock:
+    backgroundColor: "{colors.reader-black}"
+    textColor: "{colors.reader-white}"
+    rounded: "{rounded.dock}"
+    height: "60px"
+    padding: "4px 6px"
+  reader-panel:
+    rounded: "{rounded.panel}"
+    padding: "6px 12px"
   bottom-navigation-item:
     height: "48px"
     rounded: "{rounded.full}"
-    padding: "8px 16px"
+  bottom-navigation-indicator:
+    width: "56px"
+    height: "32px"
+    rounded: "{rounded.full}"
   color-seed-swatch:
     width: "44px"
     height: "44px"
@@ -58,23 +74,39 @@ rest, then becomes expressive through page changes, gestures, selection feedback
 that preserve spatial continuity. Material 3 Expressive supplies the shape and motion vocabulary,
 but the comic remains visually dominant.
 
-The system is content-first, moderately spacious, and familiar to an Android user. It rejects
-feature-heavy, visually noisy interfaces that fill the library with competing entry points, labels,
-recommendations, or decoration. Expressiveness must clarify state or movement; it must never become
-ambient spectacle.
+### The three surfaces
+
+Every screen in Inkleaf belongs to exactly one of three surfaces, and the surface decides the rules.
+This is the spine of the system: when a new screen, sheet, or control needs a decision, name its
+surface first and most of the answer follows.
+
+- **The Stage** (舞台) — the comic itself and anything drawn directly over it: the reader, the
+  favorite-page viewer, the reader dock and its panels, the OCR overlay. Pure black, no app theme,
+  no decoration. Content is the only thing that belongs here by default.
+- **The Study** (书房) — where the user browses and chooses: shelf, history, favorites, saved
+  albums, and source browsing. Fully themed, flat, image-led. Local and online content are neighbors
+  here, not strangers.
+- **The Workbench** (工作台) — where the user configures: settings, theme editor, source and plugin
+  management, OCR model downloads. Denser and more verbose than the Study, still flat, still themed.
+
+**How to use this document.** The direction is normative; the numbers are where the direction
+currently lands. When a value and a rule disagree, the rule wins and the value gets corrected. When
+something genuinely new appears, derive it from the surface it lives on rather than inventing a
+parallel vocabulary for it.
 
 **Key Characteristics:**
 
 - Dynamic Material color derived from a user-selected seed or Android wallpaper.
-- Tonal, flat-at-rest surfaces with elevation reserved for true overlays.
+- Tonal, flat-at-rest surfaces with elevation reserved for things that truly float.
 - A compact 4dp-based rhythm with 12–16dp content spacing.
 - Familiar Material controls with restrained Expressive shape and motion.
-- A dedicated black reading stage that isolates comic pages from app chrome.
+- One reading Stage, black and unthemed, shared by local files and online sources alike.
 
 ## Colors
 
 The palette begins with Soft Charcoal Ink and expands through Material 3 tonal roles at runtime;
-alternate seeds provide personality without changing the semantic color system.
+alternate seeds provide personality without changing the semantic color system. Which colors a
+component may use is decided by its surface, not by taste.
 
 ### Primary
 
@@ -89,11 +121,16 @@ alternate seeds provide personality without changing the semantic color system.
 
 ### Neutral
 
-- **Reader Black:** The fixed immersive reading background. It is not replaced by the app theme.
-- **Reader White:** The fixed high-contrast foreground for reader controls and critical messages.
-- Runtime backgrounds, surfaces, containers, outlines, and on-colors must come from
-  `MaterialTheme.colorScheme`; raw colors are forbidden outside deliberately fixed reader media
-  surfaces and seed previews.
+- **Reader Black:** The fixed Stage background. It is not replaced by the app theme, light or dark.
+- **Reader White:** The fixed high-contrast foreground for Stage controls and critical messages.
+- In the Study and the Workbench, every background, surface, container, outline, and on-color comes
+  from `MaterialTheme.colorScheme`. Raw color values are forbidden there.
+
+### Tertiary
+
+- **OCR Signal Cyan** and its glow: the fixed high-chroma pair that marks recognized and selected
+  text regions on the Stage. It is a signal, not an accent, and appears only while OCR selection is
+  active.
 
 ### Named Rules
 
@@ -103,8 +140,15 @@ scheme at runtime through Material Kolor or Android Dynamic Color.
 **The Neutral Ink Rule.** Soft Charcoal Ink always uses the Neutral palette style. Never allow a
 chromatic generator to turn it into purple-gray.
 
-**The Comic Owns the Stage Rule.** In the reader, the page and black stage dominate. Theme color
-appears only as a controlled accent for selection, progress, and actionable state.
+**The Comic Owns the Stage Rule.** On the Stage, the page dominates. Theme color appears only as a
+controlled accent for selection, progress, and actionable state.
+
+**The Chrome and the Mark Rule.** This is why the Stage has two color systems, and it resolves every
+future question of the same shape. Stage *chrome* sits on known black, so it may use the theme
+accent with a luminance guard: dock progress, thumbnail selection, slider fill. A *mark* drawn on
+top of the artwork sits on unknown imagery, where no theme-derived color can be trusted to stay
+legible, so it uses a fixed high-contrast signal instead. Signal colors are permitted only for marks
+on artwork, only while their tool is active, and never as ambient decoration.
 
 ## Typography
 
@@ -124,8 +168,8 @@ predictable and lets comic artwork carry the visual personality.
 - **Title:** Use Material title roles for top app bars, sheets, dialog headings, and item titles.
 - **Body:** `bodyLarge` is explicitly set to regular 16sp with 24sp line height and 0.5sp tracking;
   use body roles for instructions, settings descriptions, and supporting content.
-- **Label:** Use Material label roles for actions, metadata, page counts, and compact status text.
-  Preserve sentence case in Chinese and localized UI strings.
+- **Label:** Use Material label roles for actions, metadata, page counts, source names, plugin
+  status, and compact status text. Preserve sentence case in Chinese and localized UI strings.
 
 ### Named Rules
 
@@ -135,12 +179,23 @@ text size to make one screen feel more dramatic.
 **The Comic Is the Display Face Rule.** App typography must not compete with cover art or page
 imagery. No decorative display fonts in navigation, buttons, labels, or reader controls.
 
+**The Metadata Stays Small Rule.** Everything a source supplies about a comic — author, update time,
+tags, chapter counts, availability — is label-weight supporting text. A title is a title whether it
+came from a file name or from a plugin; metadata never grows to compete with it.
+
 ## Elevation
 
 Inkleaf is tonal and flat by default. Depth comes from `surface`, `surfaceVariant`, and container
-roles, plus spacing and occlusion. Shadows belong only to components that genuinely float above
-content, including modal sheets, dialogs, menus, and transient system surfaces; ordinary comic cards
-remain flat.
+roles, plus spacing and occlusion. The surface a component lives on decides whether it may cast a
+shadow at all: the Study and the Workbench are flat planes, and only the Stage's floating chrome,
+along with genuine modals anywhere (dialogs, bottom sheets, menus), leaves the plane.
+
+### Shadow Vocabulary
+
+- **Stage float** (tonal 8dp + shadow 12dp): the reader dock, which hovers free of every screen edge
+  over arbitrary artwork and needs unambiguous separation from it.
+- **Stage panel** (tonal 6dp + shadow 8dp): reader panels that slide over the page.
+- **Everything at rest** (no shadow): comic cards, list rows, grouped settings containers.
 
 ### Named Rules
 
@@ -150,46 +205,76 @@ wide decorative shadow to read as a card, the hierarchy is wrong.
 **The Overlay Earns Elevation Rule.** Only an element that interrupts or overlays the current plane
 may use visible elevation.
 
+**The Outline Groups, The Shadow Floats Rule.** In the Workbench, related settings are grouped with
+an outline, a tonal container, or a divider — never by lifting a resting card off the page. Shadow
+means "this is above the plane you were on", and a settings group is not.
+
 ## Components
 
 Components are quietly expressive: recognizably Material, responsive to touch and state, but never
 louder than the comic content.
+
+### Shape
+
+Corner radius is derived, not chosen: it grows with the component's distance from the artwork.
+Something clipped tight to an image takes the smallest radius (thumbnails, 4dp); a container that
+holds content in the Study takes the content radius (comic cards, 8dp); a small utility surface
+floating over the page takes the overlay radius (12dp); a panel sliding over content takes the panel
+radius (24dp); the dock, which floats free of every edge, takes the largest (28dp). Radii that are
+geometric consequences rather than choices — a 7dp corner on a 14dp-tall progress bar, which is
+simply half its height — are not exceptions to the scale. Anything else is drift and should converge
+to the nearest step.
+
+### Comic entries
+
+- **One vocabulary, two densities.** A comic entry looks the same whether it came from a library
+  directory or from a comic source: flat image-led container, content radius (8dp), 4dp gap before
+  metadata, no border-and-shadow pairing. What legitimately differs is *density*, because the tasks
+  differ — the shelf is for picking from what you already have, and source browsing is for scanning
+  hundreds of results. Density is therefore a user setting per surface (grid columns, cover aspect,
+  crop, grid-versus-list), and the two surfaces share the same setting vocabulary while storing
+  their own values.
+- **Availability, not origin.** Online entries may show that content is unavailable, cached, or
+  stale. They must not advertise which plugin produced them as a visual style; source identity is
+  text, never a different card shape, border, or accent.
+- **Thumbnails:** Reader thumbnails use 4dp corners, an exact 1dp accent outline when selected, and
+  restrained scale feedback contained by the list spacing.
 
 ### Buttons
 
 - **Shape:** Use the active Material 3 Expressive theme shapes; keep custom compact controls on the
   established 8–12dp content radius scale.
 - **Primary:** Filled buttons are reserved for the single clearest next action, such as granting
-  access or recovering from a reader failure.
+  directory access, installing a source plugin, or recovering from a reader failure.
 - **Focus / Pressed / Disabled:** Use Material-provided state layers and semantics. Do not invent
   decorative hover behavior for a touch-first Android interface.
 - **Secondary:** Use outlined or text buttons for reversible, secondary, and dialog actions.
 
-### Segmented Controls
+### Chips and segmented controls
 
-- **Style:** Use Material segmented buttons for mutually exclusive layout, aspect-ratio, theme-mode,
-  and palette-style choices.
+- **Filter chips** carry source-declared filter values and content-flow selection. A chip shows what
+  the source offers; it is not an editorial recommendation and must not be styled as one.
+- **Segmented buttons** carry mutually exclusive layout, aspect-ratio, theme-mode, and palette-style
+  choices.
 - **State:** Selection must be visible through the Material container, content color, and selected
   icon treatment; never rely on color alone when the component already supports an icon.
 
 ### Cards / Containers
 
-- **Comic cards:** Flat, image-led containers with 8dp corners, a 4dp gap before metadata, and no
-  decorative border-shadow pairing.
-- **Thumbnails:** Reader thumbnails use 4dp corners, an exact 1dp accent outline when selected, and
-  restrained scale feedback contained by the list spacing.
-- **Reader overlays:** Black translucent utility surfaces use 12dp corners and compact 4dp
-  vertical / 12dp horizontal padding.
-- **Internal padding:** Use the established scale: 4dp for micro-labels, 8dp for compact controls,
-  12dp for grids and compact groups, 16dp for standard screen/sheet content, and 24–32dp only for
+- **Study containers:** flat, themed, image-led. Radius by the shape rule.
+- **Workbench containers:** outlined or tonal groups, flat at rest, standard 16dp internal content
+  padding.
+- **Internal padding:** Use the established scale — 4dp for micro-labels, 8dp for compact controls,
+  12dp for grids and compact groups, 16dp for standard screen and sheet content, 24–32dp only for
   spacious states.
 
 ### Inputs / Fields
 
-- **Style:** Use Material outlined text fields for names and hexadecimal color input. Keep labels,
-  helper text, error state, keyboard action, and enabled state in the component API.
-- **Focus / Error / Disabled:** Use Material semantic colors and indicators. Never replace
-  validation with a raw red border or color-only message.
+- **Style:** Filled fields for human-readable names and labels; outlined fields for exact values
+  such as hexadecimal colors and numeric limits. Keep labels, helper text, error state, keyboard
+  action, and enabled state in the component API.
+- **Focus / Error / Disabled:** Use Material semantic colors and indicators. Never replace validation
+  with a raw red border or a color-only message.
 
 ### Navigation
 
@@ -204,9 +289,17 @@ louder than the comic content.
 
 ### Reader Stage
 
-- **Surface:** Pure black behind comic pages, independent of light or dark app theme.
-- **Controls:** Controls appear as transient chrome with high-contrast white content and a
-  theme-derived accent whose luminance remains visible on black.
+- **Surface:** Pure black behind comic pages, independent of light or dark app theme, and identical
+  for local files and online chapters.
+- **Dock:** Reading controls collect in one floating dock (28dp radius, near-opaque black, 60dp
+  tall) that hovers over the page rather than docking to an edge. Its destinations are reading
+  tools — pages, chapters, bookmarks, tools — and the chapter destination appears only when the
+  comic actually has chapters to navigate.
+- **Controls:** Transient chrome with high-contrast white content and a theme-derived accent whose
+  luminance remains visible on black.
+- **Failure:** Online reading fails in ways local files never do. Recover or degrade on the Stage
+  without leaving it: keep the page and controls in place, show the failure where the missing
+  content would be, and reserve dialogs for failures that genuinely end the reading session.
 - **Motion:** Page, control, and thumbnail motion must preserve cause and spatial direction. Honor
   the system animation preference with reduced or immediate alternatives.
 
@@ -222,29 +315,51 @@ louder than the comic content.
 - **Splash:** The foreground mark and Soft Charcoal Ink icon background are supplied separately to
   the splash theme, preventing adaptive-icon recropping on Android 10 and 11.
 
+### Known deviations
+
+Current implementation points where the code and the direction disagree. They are recorded, not
+endorsed; converge them when the surrounding code is next touched.
+
+- **Source browsing cards** use a 12dp Material `Card` while shelf cards are flat 8dp containers.
+  The density difference between the two surfaces is intentional; this shape and container
+  difference is not.
+- **Source detail** groups settings with `ElevatedCard` alongside `OutlinedCard`, against the
+  Outline Groups rule. `OutlinedCard` is the direction.
+- **Stray radii** (2.5dp, 6dp, 16dp, 20dp) sit off the scale without a geometric reason.
+
 ## Do's and Don'ts
 
 ### Do:
 
+- **Do** name a screen's surface — Stage, Study, or Workbench — before deciding how it should look.
 - **Do** keep the comic visually dominant and reveal controls in response to reader intent.
-- **Do** use `MaterialTheme.colorScheme` roles for app surfaces and generate them from the selected
-  seed or Android wallpaper.
+- **Do** use `MaterialTheme.colorScheme` roles for Study and Workbench surfaces, generated from the
+  selected seed or Android wallpaper.
+- **Do** give local and online comics the same entry vocabulary, and let density differ per surface
+  because the task differs.
 - **Do** build spacing from 4, 8, 12, 16, 24, and 32dp, using 12–16dp for most content layout.
 - **Do** use standard Material 3 Expressive components and state behavior before creating custom
   controls.
 - **Do** preserve at least 48×48dp touch targets even when the visible icon or swatch is smaller.
 - **Do** use motion to explain page direction, selection, entry, exit, and transient control state.
+- **Do** show source, plugin, and cache state as plain text where the user is already looking.
 
 ### Don't:
 
-- **Don't** create feature-heavy, visually noisy interfaces that fill the library with competing
-  entry points, labels, recommendations, or decoration.
-- **Don't** let secondary tools distract from choosing a comic and reading it.
+- **Don't** build recommendation surfaces Inkleaf invents for itself: house-curated rankings,
+  editorial slots, promotional banners, achievement badges, or any entry point that competes with
+  the user's own comics for attention. Presenting a source's declared content flows is legitimate;
+  dressing them up as Inkleaf's own merchandising is not.
+- **Don't** create feature-heavy, visually noisy interfaces, and don't let secondary tools distract
+  from choosing a comic and reading it.
+- **Don't** style an online comic differently from a local one. Availability may show; origin may
+  not.
+- **Don't** interrupt reading for a failure that can be recovered or degraded silently.
 - **Don't** use Expressive motion, shape, or color as ambient decoration; every expressive choice
   must communicate state or movement.
-- **Don't** hard-code app surface colors when a Material color role exists.
-- **Don't** add decorative shadows to resting comic cards or pair a thin border with a wide soft
-  shadow.
+- **Don't** hard-code app surface colors when a Material color role exists, and don't use a signal
+  color anywhere except as a mark on artwork.
+- **Don't** add decorative shadows to resting cards or pair a thin border with a wide soft shadow.
 - **Don't** add nested cards, oversized corner radii, gradient text, glassmorphism, decorative
   grids, or striped backgrounds.
 - **Don't** port iOS navigation, dialogs, switches, or back behavior into the Android interface.
