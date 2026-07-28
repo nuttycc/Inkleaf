@@ -471,7 +471,7 @@ private fun DiscoverBrowseTopBar(
                 Icon(
                     painter =
                         painterResource(
-                            MaterialSymbolsOutlinedR.drawable.materialsymbols_ic_extension_outlined
+                            MaterialSymbolsOutlinedR.drawable.materialsymbols_ic_handyman_outlined
                         ),
                     contentDescription = "漫画源管理",
                 )
