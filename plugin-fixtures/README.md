@@ -41,6 +41,13 @@ device:
 .\.scripts\deploy-plugin.ps1 -Plugin copycomic
 ```
 
+For manual deployment, omit the parameters to choose the plugin, target app,
+and (when needed) ADB device from an interactive menu:
+
+```powershell
+.\.scripts\deploy-plugin.ps1
+```
+
 Pass `-Serial <device-id>` when multiple devices are connected, or
 `-PackageId com.exio.inkleaf.debug` to target the debug app. The versioned ZIP
 is also retained under `/sdcard/Download/Inkleaf/` for manual inspection.

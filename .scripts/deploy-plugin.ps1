@@ -13,8 +13,12 @@
   The resulting ZIP is copied to /sdcard/Download/Inkleaf and sent to Inkleaf's
   DUMP-protected ADB install receiver in command-line-safe chunks.
 
+  Run without -Plugin to use the interactive deployment menu. Supplying -Plugin
+  keeps the command non-interactive, which is suitable for automation.
+
 .PARAMETER Plugin
-  Directory name under plugin-fixtures, e.g. zaimanhua or copycomic.
+  Directory name under plugin-fixtures, e.g. zaimanhua or copycomic. When omitted,
+  the script lists the plugins that have a supported packaging route.
 
 .PARAMETER Serial
   ADB device serial. Required when more than one ready device is connected.
@@ -29,6 +33,9 @@
   Installed Inkleaf application id. Use com.exio.inkleaf.debug for the debug app.
 
 .EXAMPLE
+  .\.scripts\deploy-plugin.ps1
+
+.EXAMPLE
   .\.scripts\deploy-plugin.ps1 -Plugin zaimanhua
 
 .EXAMPLE
@@ -36,7 +43,7 @@
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)] [string] $Plugin,
+    [string] $Plugin = "",
     [string] $Serial = "",
     [string] $DeviceDirectory = "/sdcard/Download/Inkleaf",
     [string] $OutputPath = "",
@@ -49,6 +56,43 @@ $ErrorActionPreference = "Stop"
 
 function Write-Info([string] $Message) { Write-Host "[info] $Message" -ForegroundColor Cyan }
 function Write-Ok([string] $Message) { Write-Host "[ok]   $Message" -ForegroundColor Green }
+
+function Select-NumberedValue {
+    param(
+        [Parameter(Mandatory)] [string] $Prompt,
+        [Parameter(Mandatory)] [object[]] $Options,
+        [Parameter(Mandatory)] [scriptblock] $Label,
+        [int] $DefaultIndex = 0
+    )
+
+    if ($Options.Count -eq 0) { throw "No options are available for: $Prompt" }
+
+    Write-Host ""
+    Write-Host $Prompt -ForegroundColor Yellow
+    for ($index = 0; $index -lt $Options.Count; $index += 1) {
+        $defaultMarker = if ($index -eq $DefaultIndex) { " (default)" } else { "" }
+        Write-Host "  $($index + 1). $(& $Label $Options[$index])$defaultMarker"
+    }
+
+    while ($true) {
+        $answer = (Read-Host "Select [1-$($Options.Count)]").Trim()
+        if (-not $answer) { return $Options[$DefaultIndex] }
+
+        $selection = 0
+        if ([int]::TryParse($answer, [ref] $selection) -and
+            $selection -ge 1 -and $selection -le $Options.Count) {
+            return $Options[$selection - 1]
+        }
+        Write-Host "Enter a number from 1 to $($Options.Count)." -ForegroundColor Yellow
+    }
+}
+
+function Confirm-Deployment([string] $Message) {
+    Write-Host ""
+    Write-Host $Message -ForegroundColor Cyan
+    $answer = (Read-Host "Continue? [Y/n]").Trim()
+    return -not $answer -or $answer -match '^(?i:y|yes)$'
+}
 
 function Resolve-AdbPath {
     $fromPath = Get-Command adb -ErrorAction SilentlyContinue
@@ -88,7 +132,7 @@ function Resolve-AdbPath {
     throw "adb not found. Install Android platform-tools or configure the Android SDK path."
 }
 
-function Select-AdbDevice([string] $Adb, [string] $PreferredSerial) {
+function Select-AdbDevice([string] $Adb, [string] $PreferredSerial, [bool] $AllowPrompt) {
     & $Adb start-server | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Unable to start the adb server." }
 
@@ -121,9 +165,30 @@ function Select-AdbDevice([string] $Adb, [string] $PreferredSerial) {
         throw "No ready ADB device. Seen devices: $seen"
     }
     if ($ready.Count -gt 1) {
+        if ($AllowPrompt) {
+            $selectedDevice = Select-NumberedValue -Prompt "Choose an ADB device:" `
+                -Options $ready -Label { param($item) "$($item.Serial)" }
+            return $selectedDevice.Serial
+        }
         throw "Multiple ADB devices are ready. Re-run with -Serial. Devices: $($ready.Serial -join ', ')"
     }
     return $ready[0].Serial
+}
+
+function Get-DeployablePlugins([string] $RepoRoot) {
+    $fixturesRoot = Join-Path $RepoRoot "plugin-fixtures"
+    return @(
+        Get-ChildItem -LiteralPath $fixturesRoot -Directory |
+            Where-Object {
+                $manifest = Join-Path $_.FullName "manifest.json"
+                $source = Join-Path $_.FullName "source.js"
+                $packageScript = Join-Path $PSScriptRoot "package-$($_.Name)-plugin.ps1"
+                (Test-Path -LiteralPath $manifest) -and
+                    ((Test-Path -LiteralPath $source) -or (Test-Path -LiteralPath $packageScript))
+            } |
+            Sort-Object Name |
+            Select-Object -ExpandProperty Name
+    )
 }
 
 function Test-AdbInstallReceiver {
@@ -241,11 +306,28 @@ function Invoke-InstallBroadcast {
     return $completion.Groups["data"].Value
 }
 
+$script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$interactive = -not $PSBoundParameters.ContainsKey("Plugin")
+if ($interactive) {
+    $plugins = @(Get-DeployablePlugins -RepoRoot $script:RepoRoot)
+    $Plugin = Select-NumberedValue -Prompt "Choose a plugin to deploy:" -Options $plugins `
+        -Label { param($item) "$item" }
+
+    if (-not $PSBoundParameters.ContainsKey("PackageId")) {
+        $appTargets = @(
+            [pscustomobject]@{ Label = "Release app (com.exio.inkleaf)"; Id = "com.exio.inkleaf" }
+            [pscustomobject]@{ Label = "Debug app (com.exio.inkleaf.debug)"; Id = "com.exio.inkleaf.debug" }
+        )
+        $target = Select-NumberedValue -Prompt "Choose the target app:" -Options $appTargets `
+            -Label { param($item) $item.Label }
+        $PackageId = $target.Id
+    }
+}
+
 if ($Plugin -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*\z') {
     throw "Plugin must be a simple directory name: $Plugin"
 }
 
-$script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $pluginRoot = Join-Path $script:RepoRoot "plugin-fixtures\$Plugin"
 if (-not (Test-Path -LiteralPath $pluginRoot)) {
     throw "Plugin directory not found: $pluginRoot"
@@ -293,16 +375,22 @@ if ($unsafeSegments.Count -gt 0) {
     throw "DeviceDirectory cannot contain empty, current-directory, or parent-directory segments."
 }
 
+$adb = Resolve-AdbPath
+$device = Select-AdbDevice -Adb $adb -PreferredSerial $Serial -AllowPrompt $interactive
+$deviceFile = "$Plugin-plugin-v$($manifest.version).zip"
+$devicePath = "$($DeviceDirectory.TrimEnd('/'))/$deviceFile"
+
+if ($interactive -and -not (Confirm-Deployment `
+    "Deploy $($manifest.id)@$($manifest.version) to $PackageId on $device?")) {
+    Write-Info "Deployment cancelled."
+    return
+}
+
 Write-Info "Packaging $($manifest.id)@$($manifest.version)"
 & $packageScript @packageArguments -OutputPath $OutputPath
 if (-not (Test-Path -LiteralPath $localPackage)) {
     throw "Packaging failed: $localPackage was not produced."
 }
-
-$adb = Resolve-AdbPath
-$device = Select-AdbDevice -Adb $adb -PreferredSerial $Serial
-$deviceFile = "$Plugin-plugin-v$($manifest.version).zip"
-$devicePath = "$($DeviceDirectory.TrimEnd('/'))/$deviceFile"
 
 Write-Info "Using ADB device $device"
 Assert-AdbInstallReceiver -Adb $adb -Device $device -AppId $PackageId
