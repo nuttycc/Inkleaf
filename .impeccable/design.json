@@ -249,11 +249,11 @@
   ],
   "narrative": {
     "northStar": "Ink in Motion",
-    "overview": "Inkleaf should feel like ink moving only when the reader asks it to move. The interface is quiet at rest, then becomes expressive through page changes, gestures, selection feedback, and transitions that preserve spatial continuity. Material 3 Expressive supplies the shape and motion vocabulary, but the comic remains visually dominant. Every screen belongs to exactly one of three surfaces, and the surface decides the rules: the Stage is the comic itself and anything drawn over it, pure black and unthemed; the Study is where the user browses and chooses, fully themed, flat, image-led, and shared by local files and online sources alike; the Workbench is where the user configures, denser and more verbose but still flat and themed. The direction is normative and the numbers are where the direction currently lands; when a value and a rule disagree, the rule wins.",
+    "overview": "Inkleaf should feel like ink moving only when the reader asks it to move. The interface is quiet at rest, then becomes expressive through page changes, gestures, selection feedback, and transitions that preserve spatial continuity. Material 3 Expressive supplies the shape and motion vocabulary, but the comic remains visually dominant. Every screen belongs to exactly one of three surfaces, and the surface decides the rules: the Stage is the comic itself and anything drawn over it, pure black and unthemed; the Study is where the user browses and chooses, fully themed, flat, image-led, and shared by local files and online sources alike; the Workbench is where the user configures, denser and more verbose but still flat and themed. The prose of this system is direction and deliberately carries no measurements: exact values live in the token block and in the code, because sizes will keep changing while the direction should not. Colors are the exception, because the seeds are identity rather than implementation.",
     "keyCharacteristics": [
       "Dynamic Material color derived from a user-selected seed or Android wallpaper.",
       "Tonal, flat-at-rest surfaces with elevation reserved for things that truly float.",
-      "A compact 4dp-based rhythm with 12–16dp content spacing.",
+      "A compact, consistent spacing rhythm that stays tight through content areas.",
       "Familiar Material controls with restrained Expressive shape and motion.",
       "One reading Stage, black and unthemed, shared by local files and online sources alike."
     ],
@@ -314,9 +314,9 @@
       "Do keep the comic visually dominant and reveal controls in response to reader intent.",
       "Do use MaterialTheme.colorScheme roles for Study and Workbench surfaces, generated from the selected seed or Android wallpaper.",
       "Do give local and online comics the same entry vocabulary, and let density differ per surface because the task differs.",
-      "Do build spacing from 4, 8, 12, 16, 24, and 32dp, using 12–16dp for most content layout.",
+      "Do build spacing from the one shared scale, staying in its tighter steps for most content.",
       "Do use standard Material 3 Expressive components and state behavior before creating custom controls.",
-      "Do preserve at least 48×48dp touch targets even when the visible icon or swatch is smaller.",
+      "Do preserve the platform's minimum touch target even when the visible icon or swatch is smaller.",
       "Do use motion to explain page direction, selection, entry, exit, and transient control state.",
       "Do show source, plugin, and cache state as plain text where the user is already looking."
     ],

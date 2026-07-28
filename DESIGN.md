@@ -89,16 +89,25 @@ surface first and most of the answer follows.
 - **The Workbench** (工作台) — where the user configures: settings, theme editor, source and plugin
   management, OCR model downloads. Denser and more verbose than the Study, still flat, still themed.
 
-**How to use this document.** The direction is normative; the numbers are where the direction
-currently lands. When a value and a rule disagree, the rule wins and the value gets corrected. When
-something genuinely new appears, derive it from the surface it lives on rather than inventing a
-parallel vocabulary for it.
+### How to use this document
+
+**The prose is direction; it deliberately carries no measurements.** Every rule below is written so
+it can be applied without looking a number up, because sizes, radii, and spacing will keep changing
+while the direction should not. Exact values live in two places instead: the token block at the top
+of this file, and the code itself. Colors are the exception, because the seeds are identity rather
+than implementation.
+
+When a rule and an implementation disagree, the rule wins and the implementation gets corrected.
+When something genuinely new appears, derive it from the surface it lives on rather than inventing a
+parallel vocabulary for it. When editing this document, do not reintroduce measurements into the
+prose; if a number feels necessary to make a rule decidable, the rule is not yet written well
+enough.
 
 **Key Characteristics:**
 
 - Dynamic Material color derived from a user-selected seed or Android wallpaper.
 - Tonal, flat-at-rest surfaces with elevation reserved for things that truly float.
-- A compact 4dp-based rhythm with 12–16dp content spacing.
+- A compact, consistent spacing rhythm that stays tight through content areas.
 - Familiar Material controls with restrained Expressive shape and motion.
 - One reading Stage, black and unthemed, shared by local files and online sources alike.
 
@@ -166,8 +175,8 @@ predictable and lets comic artwork carry the visual personality.
 - **Headline:** Use Material headline roles for prominent counts or focused empty-state messages,
   not decorative hero text.
 - **Title:** Use Material title roles for top app bars, sheets, dialog headings, and item titles.
-- **Body:** `bodyLarge` is explicitly set to regular 16sp with 24sp line height and 0.5sp tracking;
-  use body roles for instructions, settings descriptions, and supporting content.
+- **Body:** Use body roles for instructions, settings descriptions, and supporting content.
+  `bodyLarge` is the one role Inkleaf sets explicitly instead of inheriting.
 - **Label:** Use Material label roles for actions, metadata, page counts, source names, plugin
   status, and compact status text. Preserve sentence case in Chinese and localized UI strings.
 
@@ -185,17 +194,20 @@ came from a file name or from a plugin; metadata never grows to compete with it.
 
 ## Elevation
 
-Inkleaf is tonal and flat by default. Depth comes from `surface`, `surfaceVariant`, and container
-roles, plus spacing and occlusion. The surface a component lives on decides whether it may cast a
-shadow at all: the Study and the Workbench are flat planes, and only the Stage's floating chrome,
-along with genuine modals anywhere (dialogs, bottom sheets, menus), leaves the plane.
+Inkleaf is tonal and flat by default. Depth comes from Material surface and container roles, plus
+spacing and occlusion. The surface a component lives on decides whether it may cast a shadow at all:
+the Study and the Workbench are flat planes, and only the Stage's floating chrome, along with
+genuine modals anywhere (dialogs, bottom sheets, menus), leaves the plane.
 
 ### Shadow Vocabulary
 
-- **Stage float** (tonal 8dp + shadow 12dp): the reader dock, which hovers free of every screen edge
-  over arbitrary artwork and needs unambiguous separation from it.
-- **Stage panel** (tonal 6dp + shadow 8dp): reader panels that slide over the page.
-- **Everything at rest** (no shadow): comic cards, list rows, grouped settings containers.
+- **Stage float:** the strongest separation in the system, reserved for the reader dock, which
+  hovers free of every screen edge over arbitrary artwork and must never be mistaken for part of the
+  page.
+- **Stage panel:** a lighter lift for panels that slide over the page — clearly above the content,
+  clearly below the dock.
+- **Everything at rest:** no shadow at all. Comic cards, list rows, and grouped settings containers
+  stay on the plane.
 
 ### Named Rules
 
@@ -217,33 +229,32 @@ louder than the comic content.
 ### Shape
 
 Corner radius is derived, not chosen: it grows with the component's distance from the artwork.
-Something clipped tight to an image takes the smallest radius (thumbnails, 4dp); a container that
-holds content in the Study takes the content radius (comic cards, 8dp); a small utility surface
-floating over the page takes the overlay radius (12dp); a panel sliding over content takes the panel
-radius (24dp); the dock, which floats free of every edge, takes the largest (28dp). Radii that are
-geometric consequences rather than choices — a 7dp corner on a 14dp-tall progress bar, which is
-simply half its height — are not exceptions to the scale. Anything else is drift and should converge
-to the nearest step.
+Something clipped tight to an image takes the smallest radius; a container that holds content in the
+Study takes the next step up; a small utility surface floating over the page takes more; a panel
+sliding over content more still; and the dock, which floats free of every edge, takes the largest.
+Radii that are geometric consequences rather than choices — the corner of a pill-shaped progress bar
+is simply half its height — are not exceptions to the scale. A radius that sits between steps for no
+reason is drift, and should move to the nearest step.
 
 ### Comic entries
 
 - **One vocabulary, two densities.** A comic entry looks the same whether it came from a library
-  directory or from a comic source: flat image-led container, content radius (8dp), 4dp gap before
-  metadata, no border-and-shadow pairing. What legitimately differs is *density*, because the tasks
-  differ — the shelf is for picking from what you already have, and source browsing is for scanning
-  hundreds of results. Density is therefore a user setting per surface (grid columns, cover aspect,
-  crop, grid-versus-list), and the two surfaces share the same setting vocabulary while storing
-  their own values.
+  directory or from a comic source: a flat, image-led container on the content radius, a small gap
+  before its metadata, and no border-and-shadow pairing. What legitimately differs is *density*,
+  because the tasks differ — the shelf is for picking from what you already have, and source
+  browsing is for scanning many results. Density is therefore a user setting per surface (grid
+  columns, cover aspect, crop, grid-versus-list), and the two surfaces share the same setting
+  vocabulary while storing their own values.
 - **Availability, not origin.** Online entries may show that content is unavailable, cached, or
   stale. They must not advertise which plugin produced them as a visual style; source identity is
   text, never a different card shape, border, or accent.
-- **Thumbnails:** Reader thumbnails use 4dp corners, an exact 1dp accent outline when selected, and
-  restrained scale feedback contained by the list spacing.
+- **Thumbnails:** Reader thumbnails take the smallest radius, a hairline accent outline when
+  selected, and restrained scale feedback contained by the list spacing.
 
 ### Buttons
 
 - **Shape:** Use the active Material 3 Expressive theme shapes; keep custom compact controls on the
-  established 8–12dp content radius scale.
+  established content radius steps rather than inventing their own.
 - **Primary:** Filled buttons are reserved for the single clearest next action, such as granting
   directory access, installing a source plugin, or recovering from a reader failure.
 - **Focus / Pressed / Disabled:** Use Material-provided state layers and semantics. Do not invent
@@ -262,11 +273,11 @@ to the nearest step.
 ### Cards / Containers
 
 - **Study containers:** flat, themed, image-led. Radius by the shape rule.
-- **Workbench containers:** outlined or tonal groups, flat at rest, standard 16dp internal content
-  padding.
-- **Internal padding:** Use the established scale — 4dp for micro-labels, 8dp for compact controls,
-  12dp for grids and compact groups, 16dp for standard screen and sheet content, 24–32dp only for
-  spacious states.
+- **Workbench containers:** outlined or tonal groups, flat at rest, on the standard content padding
+  step.
+- **Internal padding** steps with the density of what it holds: tightest around micro-labels, tight
+  around compact controls, moderate in grids and compact groups, standard for ordinary screen and
+  sheet content, and generous only in deliberately spacious states such as empty screens.
 
 ### Inputs / Fields
 
@@ -278,8 +289,9 @@ to the nearest step.
 
 ### Navigation
 
-- **Primary navigation:** The compact layout uses a 48dp-high bottom navigation surface with 56×32dp
-  pill selection indicators and 48dp minimum touch height.
+- **Primary navigation:** The compact layout uses a low bottom navigation surface with a pill
+  selection indicator that is smaller than the row it sits in, while the row itself stays at or
+  above the platform's minimum touch target.
 - **Screen context:** Use transparent Material top app bars so theme switches remain visually
   synchronized with the underlying background.
 - **Back behavior:** Every nested screen and immersive reader must honor Android system Back and
@@ -291,10 +303,10 @@ to the nearest step.
 
 - **Surface:** Pure black behind comic pages, independent of light or dark app theme, and identical
   for local files and online chapters.
-- **Dock:** Reading controls collect in one floating dock (28dp radius, near-opaque black, 60dp
-  tall) that hovers over the page rather than docking to an edge. Its destinations are reading
-  tools — pages, chapters, bookmarks, tools — and the chapter destination appears only when the
-  comic actually has chapters to navigate.
+- **Dock:** Reading controls collect in one floating dock — near-opaque black, on the system's
+  largest radius — that hovers over the page rather than docking to an edge. Its destinations are
+  reading tools, and a destination appears only when the comic actually needs it; a single-chapter
+  comic has no chapter navigation to offer.
 - **Controls:** Transient chrome with high-contrast white content and a theme-derived accent whose
   luminance remains visible on black.
 - **Failure:** Online reading fails in ways local files never do. Recover or degrade on the Stage
@@ -308,24 +320,13 @@ to the nearest step.
 - **Mark:** A white leaf drawn with a dark ink-like vein and a short Rouge stem. The leaf expresses
   both halves of the Inkleaf name without adding text or a generic reader badge.
 - **Background:** Soft Charcoal Ink fills the adaptive icon background layer.
-- **Adaptive bounds:** The complete mark stays inside Android's 66dp guaranteed safe zone on the
-  108dp adaptive icon canvas.
+- **Adaptive bounds:** The complete mark stays inside Android's guaranteed safe zone on the adaptive
+  icon canvas.
 - **Themed icon:** The monochrome layer simplifies the mark to the leaf silhouette, central ink cut,
   and stem so it remains legible when tinted by the launcher.
 - **Splash:** The foreground mark and Soft Charcoal Ink icon background are supplied separately to
-  the splash theme, preventing adaptive-icon recropping on Android 10 and 11.
-
-### Known deviations
-
-Current implementation points where the code and the direction disagree. They are recorded, not
-endorsed; converge them when the surrounding code is next touched.
-
-- **Source browsing cards** use a 12dp Material `Card` while shelf cards are flat 8dp containers.
-  The density difference between the two surfaces is intentional; this shape and container
-  difference is not.
-- **Source detail** groups settings with `ElevatedCard` alongside `OutlinedCard`, against the
-  Outline Groups rule. `OutlinedCard` is the direction.
-- **Stray radii** (2.5dp, 6dp, 16dp, 20dp) sit off the scale without a geometric reason.
+  the splash theme, preventing adaptive-icon recropping on the Android versions that would otherwise
+  recrop it.
 
 ## Do's and Don'ts
 
@@ -337,10 +338,11 @@ endorsed; converge them when the surrounding code is next touched.
   selected seed or Android wallpaper.
 - **Do** give local and online comics the same entry vocabulary, and let density differ per surface
   because the task differs.
-- **Do** build spacing from 4, 8, 12, 16, 24, and 32dp, using 12–16dp for most content layout.
+- **Do** build spacing from the one shared scale, staying in its tighter steps for most content.
 - **Do** use standard Material 3 Expressive components and state behavior before creating custom
   controls.
-- **Do** preserve at least 48×48dp touch targets even when the visible icon or swatch is smaller.
+- **Do** preserve the platform's minimum touch target even when the visible icon or swatch is
+  smaller.
 - **Do** use motion to explain page direction, selection, entry, exit, and transient control state.
 - **Do** show source, plugin, and cache state as plain text where the user is already looking.
 

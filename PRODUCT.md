@@ -30,8 +30,7 @@ feel natural and unobtrusive, even when reaching the reader takes an extra step.
 Consistency: where a comic came from must not change how it is read. The host owns the reading
 experience end to end, so the shared reader and the capabilities attached to it — chapter and page
 navigation, OCR, page favorites, bookmarks, and reading progress — belong to Inkleaf rather than to
-any source. Comic source plugins supply content and nothing else
-(`docs/adr/0001-host-owned-shared-reader.md`).
+any source. Comic source plugins supply content and nothing else.
 
 ## Positioning
 
