@@ -43,6 +43,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
+import com.composables.icons.materialsymbols.outlined.R as MaterialSymbolsOutlinedR
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
@@ -245,7 +246,10 @@ private fun InkleafBottomBar(
                 },
             ) { tint ->
                 Icon(
-                    painter = painterResource(R.drawable.ic_tune),
+                    painter =
+                        painterResource(
+                            MaterialSymbolsOutlinedR.drawable.materialsymbols_ic_extension_outlined
+                        ),
                     contentDescription = "发现",
                     tint = tint,
                 )
