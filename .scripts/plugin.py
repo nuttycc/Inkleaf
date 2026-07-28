@@ -20,7 +20,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
-from typing import Callable, Sequence, TypeVar
+from typing import Callable, Sequence
 import uuid
 import zipfile
 
@@ -31,6 +31,7 @@ DEBUG_PACKAGE_ID = "com.exio.inkleaf.debug"
 DEFAULT_DEVICE_DIRECTORY = "/sdcard/Download/Inkleaf"
 PLUGIN_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 PACKAGE_ID_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_.]*$")
+PACKAGE_VERSION_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]*$")
 BROADCAST_RESULT_PATTERN = re.compile(
     r'Broadcast completed: result=(?P<code>-?\d+)(?:, data="(?P<data>[^"]*)")?'
 )
@@ -39,10 +40,23 @@ SCRIPT_DIRECTORY = Path(__file__).resolve().parent
 REPOSITORY_ROOT = SCRIPT_DIRECTORY.parent
 FIXTURES_ROOT = REPOSITORY_ROOT / "plugin-fixtures"
 DIST_ROOT = FIXTURES_ROOT / "dist"
+INTERACTIVE_REQUIREMENTS = SCRIPT_DIRECTORY / "requirements.txt"
 
 
 class PluginToolError(RuntimeError):
     """Reports an expected validation, packaging, or deployment failure."""
+
+
+def load_questionary():
+    """Keeps non-interactive commands free of third-party dependencies."""
+    try:
+        import questionary
+    except ImportError as error:
+        raise PluginToolError(
+            "Interactive mode requires questionary. Install it with:\n"
+            f"  {sys.executable} -m pip install -r {INTERACTIVE_REQUIREMENTS}"
+        ) from error
+    return questionary
 
 
 @dataclass(frozen=True)
@@ -133,6 +147,10 @@ def load_plugin(directory: Path) -> Plugin:
     for field in ("id", "version"):
         if not isinstance(manifest.get(field), str) or not str(manifest[field]).strip():
             raise PluginToolError(f"Manifest must declare a non-empty string '{field}': {manifest_path}")
+    if not PACKAGE_VERSION_PATTERN.fullmatch(str(manifest["version"])):
+        raise PluginToolError(
+            f"Manifest version contains characters that are unsafe in a package filename: {manifest_path}"
+        )
     build_path = directory / "plugin.build.json"
     runtime: Path | None = None
     if build_path.exists():
@@ -161,7 +179,7 @@ def discover_plugins() -> list[Plugin]:
             continue
         try:
             plugins.append(load_plugin(directory))
-        except PluginToolError as error:
+        except (OSError, UnicodeError, PluginToolError, zipfile.BadZipFile) as error:
             failures.append(str(error))
     if failures:
         raise PluginToolError("Invalid plugin directories:\n  - " + "\n  - ".join(failures))
@@ -200,7 +218,11 @@ def ensure_safe_directory(path: Path, root: Path) -> None:
 
 
 def resolve_output_path(plugin: Plugin, value: str | None) -> Path:
-    candidate = Path(value) if value else Path("plugin-fixtures/dist") / f"{plugin.name}-plugin.zip"
+    candidate = (
+        Path(value)
+        if value
+        else Path("plugin-fixtures/dist") / versioned_package_name(plugin)
+    )
     if not candidate.is_absolute():
         candidate = REPOSITORY_ROOT / candidate
     candidate = Path(os.path.abspath(candidate))
@@ -217,6 +239,17 @@ def resolve_output_path(plugin: Plugin, value: str | None) -> Path:
     if candidate.exists() and (candidate.is_dir() or is_link(candidate)):
         raise PluginToolError(f"Output file must not be a directory or link: {candidate}")
     return candidate
+
+
+def versioned_package_name(plugin: Plugin) -> str:
+    return f"{plugin.name}-plugin-v{plugin.version}.zip"
+
+
+def output_path_in_directory(plugin: Plugin, directory: str) -> str:
+    output_directory = Path(directory)
+    if not output_directory.is_absolute():
+        output_directory = REPOSITORY_ROOT / output_directory
+    return str(output_directory / versioned_package_name(plugin))
 
 
 def copy_assets(source: Path, destination: Path) -> None:
@@ -284,6 +317,38 @@ def package_plugin(plugin: Plugin, output_value: str | None = None) -> Path:
     return output
 
 
+def package_plugins(
+    plugins: Sequence[Plugin],
+    *,
+    output: str | None = None,
+    output_directory: str | None = None,
+) -> list[Path]:
+    if not plugins:
+        raise PluginToolError("Select at least one plugin to package")
+    if output and len(plugins) != 1:
+        raise PluginToolError("--output can only be used when packaging one plugin")
+    if output_directory and len(plugins) == 1:
+        raise PluginToolError("--output-dir can only be used when packaging multiple plugins")
+
+    packages: list[Path] = []
+    failures: list[str] = []
+    for plugin in plugins:
+        plugin_output = output
+        if output_directory:
+            plugin_output = output_path_in_directory(plugin, output_directory)
+        try:
+            packages.append(package_plugin(plugin, plugin_output))
+        except (OSError, UnicodeError, PluginToolError, zipfile.BadZipFile) as error:
+            failures.append(f"{plugin.name}: {error}")
+    if failures:
+        summary = "\n  - ".join(failures)
+        succeeded = ", ".join(path.name for path in packages) or "none"
+        raise PluginToolError(
+            f"Some plugins failed to package (succeeded: {succeeded}):\n  - {summary}"
+        )
+    return packages
+
+
 def resolve_adb_path() -> Path:
     executable = shutil.which("adb")
     if executable:
@@ -341,7 +406,13 @@ def list_adb_devices(adb: Path) -> list[AdbDevice]:
     return devices
 
 
-def select_device(adb: Path, preferred: str | None, *, interactive: bool) -> str:
+def select_device(
+    adb: Path,
+    preferred: str | None,
+    *,
+    interactive: bool,
+    choose_ready: Callable[[Sequence[AdbDevice]], str] | None = None,
+) -> str:
     devices = list_adb_devices(adb)
     ready = [device for device in devices if device.state == "device"]
     if preferred:
@@ -354,8 +425,11 @@ def select_device(adb: Path, preferred: str | None, *, interactive: bool) -> str
         raise PluginToolError(f"No ready ADB device. Seen devices: {seen}")
     if len(ready) == 1:
         return ready[0].serial
-    if interactive:
-        return choose("Choose an ADB device:", ready, lambda device: device.serial).serial
+    if interactive and choose_ready:
+        selected = choose_ready(ready)
+        if selected is None:
+            raise KeyboardInterrupt
+        return selected
     serials = ", ".join(device.serial for device in ready)
     raise PluginToolError(f"Multiple ADB devices are ready. Re-run with --serial. Devices: {serials}")
 
@@ -496,42 +570,76 @@ def deploy_plugin(
     print(f"[ok] Plugin installed and activated: {result}")
 
 
-T = TypeVar("T")
-
-
-def choose(prompt: str, options: Sequence[T], label: Callable[[T], str]) -> T:
-    if not options:
-        raise PluginToolError(f"No options are available for: {prompt}")
-    print(f"\n{prompt}")
-    for index, option in enumerate(options, start=1):
-        print(f"  {index}. {label(option)}")
-    while True:
-        answer = input(f"Select [1-{len(options)}]: ").strip()
-        if answer.isdigit() and 1 <= int(answer) <= len(options):
-            return options[int(answer) - 1]
-        print(f"Enter a number from 1 to {len(options)}.")
-
-
 def run_interactive() -> None:
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
+        raise PluginToolError(
+            "Interactive mode requires a terminal. Use package/deploy arguments in automation."
+        )
+    questionary = load_questionary()
     plugins = discover_plugins()
-    action = choose("Choose an action:", ["package", "deploy"], str)
-    plugin = choose(
-        "Choose a plugin:",
-        plugins,
-        lambda item: f"{item.name} ({item.plugin_id}@{item.version}; {item.build_strategy})",
-    )
+    action = questionary.select(
+        "Choose an action:",
+        choices=[
+            questionary.Choice("Package plugins", value="package"),
+            questionary.Choice("Deploy a plugin", value="deploy"),
+        ],
+    ).ask()
+    if action is None:
+        raise KeyboardInterrupt
+
     if action == "package":
-        package_plugin(plugin)
+        selected = questionary.checkbox(
+            "Select plugins to package:",
+            choices=[
+                questionary.Choice(
+                    f"{plugin.name} ({plugin.plugin_id}@{plugin.version}; {plugin.build_strategy})",
+                    value=plugin,
+                )
+                for plugin in plugins
+            ],
+            validate=lambda values: True if values else "Select at least one plugin.",
+        ).ask()
+        if selected is None:
+            raise KeyboardInterrupt
+        package_plugins(selected)
         return
 
+    plugin = questionary.select(
+        "Choose a plugin:",
+        choices=[
+            questionary.Choice(
+                f"{item.name} ({item.plugin_id}@{item.version}; {item.build_strategy})",
+                value=item,
+            )
+            for item in plugins
+        ],
+    ).ask()
+    if plugin is None:
+        raise KeyboardInterrupt
     targets = [("Release app", DEFAULT_PACKAGE_ID), ("Debug app", DEBUG_PACKAGE_ID)]
-    target = choose("Choose the target app:", targets, lambda item: f"{item[0]} ({item[1]})")
+    target = questionary.select(
+        "Choose the target app:",
+        choices=[questionary.Choice(f"{label} ({app_id})", value=app_id) for label, app_id in targets],
+    ).ask()
+    if target is None:
+        raise KeyboardInterrupt
     adb = resolve_adb_path()
-    device = select_device(adb, None, interactive=True)
-    answer = input(
-        f"\nDeploy {plugin.plugin_id}@{plugin.version} to {target[1]} on {device}?\nContinue? [Y/n]: "
-    ).strip().lower()
-    if answer and answer not in {"y", "yes"}:
+    device = select_device(
+        adb,
+        None,
+        interactive=True,
+        choose_ready=lambda ready: questionary.select(
+            "Choose an ADB device:",
+            choices=[questionary.Choice(item.serial, value=item.serial) for item in ready],
+        ).ask(),
+    )
+    confirmed = questionary.confirm(
+        f"Deploy {plugin.plugin_id}@{plugin.version} to {target} on {device}?",
+        default=True,
+    ).ask()
+    if confirmed is None:
+        raise KeyboardInterrupt
+    if not confirmed:
         print("[info] Deployment cancelled.")
         return
     deploy_plugin(
@@ -539,7 +647,7 @@ def run_interactive() -> None:
         serial=device,
         device_directory=DEFAULT_DEVICE_DIRECTORY,
         output=None,
-        package_id=target[1],
+        package_id=target,
         interactive=True,
     )
 
@@ -551,8 +659,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="action", required=True)
     package_parser = subparsers.add_parser("package", help="Build an installable plugin ZIP.")
-    package_parser.add_argument("plugin", help="Directory name below plugin-fixtures.")
-    package_parser.add_argument("--output", help="ZIP path below plugin-fixtures/dist.")
+    package_parser.add_argument(
+        "plugins", nargs="*", metavar="plugin", help="Directory names below plugin-fixtures."
+    )
+    package_parser.add_argument("--all", action="store_true", help="Package every discovered plugin.")
+    output_group = package_parser.add_mutually_exclusive_group()
+    output_group.add_argument("--output", help="ZIP path for a single plugin below plugin-fixtures/dist.")
+    output_group.add_argument(
+        "--output-dir",
+        help="Output directory for multiple versioned ZIPs below plugin-fixtures/dist.",
+    )
 
     deploy_parser = subparsers.add_parser(
         "deploy", help="Package, push, install, and activate a plugin over ADB."
@@ -573,10 +689,24 @@ def main(arguments: list[str]) -> int:
         run_interactive()
         return 0
     options = build_parser().parse_args(arguments)
-    plugin = find_plugin(options.plugin)
     if options.action == "package":
-        package_plugin(plugin, options.output)
+        available = discover_plugins()
+        if options.all and options.plugins:
+            raise PluginToolError("Plugin names and --all cannot be used together")
+        if not options.all and not options.plugins:
+            raise PluginToolError("Specify one or more plugins, or use --all")
+        if options.all:
+            selected = available
+        else:
+            selected = []
+            seen: set[str] = set()
+            for name in options.plugins:
+                if name not in seen:
+                    selected.append(find_plugin(name, available))
+                    seen.add(name)
+        package_plugins(selected, output=options.output, output_directory=options.output_dir)
     else:
+        plugin = find_plugin(options.plugin)
         deploy_plugin(
             plugin,
             serial=options.serial,

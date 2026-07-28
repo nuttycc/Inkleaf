@@ -1,8 +1,21 @@
 # Inkleaf plugin fixtures
 
-The cross-platform plugin tool requires Python 3.10 or newer and uses only the
-Python standard library. Run it without arguments for the interactive package
-and deployment menu:
+The cross-platform plugin tool requires Python 3.10 or newer. Non-interactive
+commands use only the Python standard library. Install the interactive terminal
+dependency once to enable arrow-key menus and checkbox selection:
+
+```powershell
+# Windows
+python -m pip install -r .scripts/requirements.txt
+```
+
+```bash
+# macOS and Linux
+python3 -m pip install -r .scripts/requirements.txt
+```
+
+Run the tool without arguments for the interactive package and deployment menu.
+Use the arrow keys to move, Space to toggle plugins, and Enter to confirm:
 
 ```powershell
 # Windows
@@ -14,10 +27,13 @@ python .scripts/plugin.py
 python3 .scripts/plugin.py
 ```
 
-For non-interactive use, select an action and plugin explicitly:
+For non-interactive use, select actions and plugins explicitly:
 
 ```powershell
 python .scripts/plugin.py package copycomic
+python .scripts/plugin.py package copycomic zaimanhua
+python .scripts/plugin.py package --all
+python .scripts/plugin.py package --all --output-dir plugin-fixtures/dist/release
 python .scripts/plugin.py deploy copycomic
 python .scripts/plugin.py deploy zaimanhua --serial emulator-5554 `
   --package-id com.exio.inkleaf.debug
@@ -25,7 +41,8 @@ python .scripts/plugin.py deploy zaimanhua --serial emulator-5554 `
 
 Non-interactive commands never prompt. When several ADB devices are ready,
 `deploy` requires `--serial`. Use `--help`, `package --help`, or `deploy --help`
-for the complete command reference.
+for the complete command reference. `--output` is available for one plugin;
+`--output-dir` is available when packaging multiple plugins.
 
 ## Source and package layout
 
@@ -51,8 +68,9 @@ main.js
 assets/                     # optional
 ```
 
-Packages are written below `plugin-fixtures/dist/`. The tool rebuilds each
-staging directory from scratch so removed assets cannot remain in a later ZIP.
+Packages are written below `plugin-fixtures/dist/` as
+`<plugin>-plugin-v<manifest.version>.zip`. The tool rebuilds each staging
+directory from scratch so removed assets cannot remain in a later ZIP.
 
 ## Deterministic fixture
 
