@@ -381,7 +381,7 @@ $deviceFile = "$Plugin-plugin-v$($manifest.version).zip"
 $devicePath = "$($DeviceDirectory.TrimEnd('/'))/$deviceFile"
 
 if ($interactive -and -not (Confirm-Deployment `
-    "Deploy $($manifest.id)@$($manifest.version) to $PackageId on $device?")) {
+    "Deploy $($manifest.id)@$($manifest.version) to $PackageId on $($device)?")) {
     Write-Info "Deployment cancelled."
     return
 }
