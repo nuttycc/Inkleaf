@@ -86,8 +86,13 @@ surface first and most of the answer follows.
 - **The Study** (书房) — where the user browses and chooses: shelf, history, favorites, saved
   albums, and source browsing. Fully themed, flat, image-led. Local and online content are neighbors
   here, not strangers.
-- **The Workbench** (工作台) — where the user configures: settings, theme editor, source and plugin
-  management, OCR model downloads. Denser and more verbose than the Study, still flat, still themed.
+- **The Workbench** (工作台) — where the user configures things that have no single place to be
+  seen: the app theme, sources and plugins, storage and caching. Denser and more verbose than the
+  Study, still flat, still themed.
+
+The surfaces describe what the user is doing, not where controls are allowed to live. Adjustment is
+not confined to the Workbench; see the Adjustment rules under Components for where a control belongs
+and how it is expected to rest.
 
 ### How to use this document
 
@@ -110,6 +115,7 @@ enough.
 - A compact, consistent spacing rhythm that stays tight through content areas.
 - Familiar Material controls with restrained Expressive shape and motion.
 - One reading Stage, black and unthemed, shared by local files and online sources alike.
+- Deep configurability that is reachable from anywhere and resident nowhere.
 
 ## Colors
 
@@ -217,7 +223,7 @@ wide decorative shadow to read as a card, the hierarchy is wrong.
 **The Overlay Earns Elevation Rule.** Only an element that interrupts or overlays the current plane
 may use visible elevation.
 
-**The Outline Groups, The Shadow Floats Rule.** In the Workbench, related settings are grouped with
+**The Outline Groups, The Shadow Floats Rule.** Wherever settings are grouped, they are grouped with
 an outline, a tonal container, or a divider — never by lifting a resting card off the page. Shadow
 means "this is above the plane you were on", and a settings group is not.
 
@@ -225,6 +231,26 @@ means "this is above the plane you were on", and a settings group is not.
 
 Components are quietly expressive: recognizably Material, responsive to touch and state, but never
 louder than the comic content.
+
+### Adjustment
+
+Inkleaf is meant to be taken apart, and no surface is off-limits to a control. What keeps that from
+becoming noise is not where a control lives but how it rests.
+
+**The Adjust Where You See It Rule.** A control belongs where its effect is visible. Something that
+changes the whole app belongs where the whole app is the subject; something that changes how a page
+is read belongs in the reader; something that changes how a grid reflows belongs on that grid. Do
+not exile a control to a settings screen only because it is a setting, and do not scatter one
+concern across several screens because each felt convenient at the time.
+
+**The Rest State Rule.** Depth is reached, not displayed. A resting screen shows what the moment
+needs; controls arrive when summoned and leave when finished. A control that must stay visible in
+order to be usable has been put in the wrong place, not given the wrong size.
+
+**The Default Is a Design Rule.** Every default is a designed state that someone should be able to
+live in without opening anything, and a first run must be usable without a detour through
+configuration. Defaults are never placeholders waiting for the user to make the app work. An option
+exists to let a reader disagree with a good decision, not to avoid making one.
 
 ### Shape
 
@@ -334,6 +360,8 @@ reason is drift, and should move to the nearest step.
 
 - **Do** name a screen's surface — Stage, Study, or Workbench — before deciding how it should look.
 - **Do** keep the comic visually dominant and reveal controls in response to reader intent.
+- **Do** put a control where its effect is visible, and let it leave when it is not in use.
+- **Do** treat every default as a state someone will live in without ever changing it.
 - **Do** use `MaterialTheme.colorScheme` roles for Study and Workbench surfaces, generated from the
   selected seed or Android wallpaper.
 - **Do** give local and online comics the same entry vocabulary, and let density differ per surface
@@ -352,8 +380,11 @@ reason is drift, and should move to the nearest step.
   editorial slots, promotional banners, achievement badges, or any entry point that competes with
   the user's own comics for attention. Presenting a source's declared content flows is legitimate;
   dressing them up as Inkleaf's own merchandising is not.
-- **Don't** create feature-heavy, visually noisy interfaces, and don't let secondary tools distract
-  from choosing a comic and reading it.
+- **Don't** spend attention the user never offered. A panel dense with controls someone deliberately
+  opened is welcome; anything that occupies a resting screen unasked is not.
+- **Don't** leave a control resident on a resting screen just because it is useful, and don't let
+  secondary tools distract from choosing a comic and reading it.
+- **Don't** ship a default that only makes sense after the user has configured something.
 - **Don't** style an online comic differently from a local one. Availability may show; origin may
   not.
 - **Don't** interrupt reading for a failure that can be recovered or degraded silently.
