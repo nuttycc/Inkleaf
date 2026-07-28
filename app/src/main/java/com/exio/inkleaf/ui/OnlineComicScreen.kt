@@ -1,5 +1,6 @@
 package com.exio.inkleaf.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -103,6 +104,7 @@ fun OnlineComicScreen(
     var reload by remember { mutableIntStateOf(0) }
     var isBookmarked by remember { mutableStateOf(false) }
     var persistedBookmarkState by remember { mutableStateOf(false) }
+    var isDescriptionExpanded by remember { mutableStateOf(false) }
     var sourceName by remember { mutableStateOf(pluginId) }
     val bookmarkMutationMutex = remember { Mutex() }
     var bookmarkMutationVersion by remember { mutableIntStateOf(0) }
@@ -256,7 +258,7 @@ fun OnlineComicScreen(
             }
 
             detail?.let { comic ->
-                // Large Hero Cover Header
+                // Compact Horizontal Header Card
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     Card(
                         shape = RoundedCornerShape(16.dp),
@@ -266,7 +268,11 @@ fun OnlineComicScreen(
                             ),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Column {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            // Left: Compact Thumbnail Cover (90.dp x 120.dp)
                             comic.cover?.let { cover ->
                                 val request =
                                     remember(cover) {
@@ -280,20 +286,18 @@ fun OnlineComicScreen(
                                     contentDescription = comic.title,
                                     contentScale = ContentScale.Crop,
                                     modifier =
-                                        Modifier.fillMaxWidth()
-                                            .height(280.dp)
-                                            .clip(
-                                                RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
-                                            ),
+                                        Modifier
+                                            .width(90.dp)
+                                            .height(120.dp)
+                                            .clip(RoundedCornerShape(10.dp)),
                                 )
                             }
                                 ?: Box(
                                     modifier =
-                                        Modifier.fillMaxWidth()
-                                            .height(200.dp)
-                                            .clip(
-                                                RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
-                                            ),
+                                        Modifier
+                                            .width(90.dp)
+                                            .height(120.dp)
+                                            .clip(RoundedCornerShape(10.dp)),
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     Icon(
@@ -303,90 +307,92 @@ fun OnlineComicScreen(
                                             MaterialTheme.colorScheme.onSurfaceVariant.copy(
                                                 alpha = 0.5f
                                             ),
-                                        modifier = Modifier.size(48.dp),
+                                        modifier = Modifier.size(36.dp),
                                     )
                                 }
 
+                            // Right: Title, Author, Source & Bookmark Action
                             Column(
-                                modifier = Modifier.padding(16.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.weight(1f).height(120.dp),
+                                verticalArrangement = Arrangement.SpaceBetween,
                             ) {
-                                Text(
-                                    text = comic.title,
-                                    style = MaterialTheme.typography.headlineSmall,
-                                    fontWeight = FontWeight.Bold,
-                                )
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text(
+                                        text = comic.title,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+
+                                    comic.subtitle
+                                        ?.takeIf { it.isNotBlank() }
+                                        ?.let { author ->
+                                            Text(
+                                                text = author,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        }
+                                }
 
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    Column(
-                                        modifier = Modifier.weight(1f).padding(end = 8.dp),
-                                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.primaryContainer,
+                                        contentColor =
+                                            MaterialTheme.colorScheme.onPrimaryContainer,
+                                        shape = RoundedCornerShape(6.dp),
                                     ) {
-                                        comic.subtitle
-                                            ?.takeIf { it.isNotBlank() }
-                                            ?.let { author ->
-                                                Text(
-                                                    text = author,
-                                                    style = MaterialTheme.typography.titleMedium,
-                                                    color =
-                                                        MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis,
-                                                )
-                                            }
-                                        Surface(
-                                            color = MaterialTheme.colorScheme.primaryContainer,
-                                            contentColor =
-                                                MaterialTheme.colorScheme.onPrimaryContainer,
-                                            shape = RoundedCornerShape(6.dp),
-                                        ) {
-                                            Text(
-                                                text = sourceName,
-                                                style = MaterialTheme.typography.labelMedium,
-                                                modifier =
-                                                    Modifier.padding(
-                                                        horizontal = 8.dp,
-                                                        vertical = 4.dp,
-                                                    ),
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
-                                        }
+                                        Text(
+                                            text = sourceName,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            modifier =
+                                                Modifier.padding(
+                                                    horizontal = 8.dp,
+                                                    vertical = 4.dp,
+                                                ),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
                                     }
 
-                                    // Quick Bookmark/Save Action
+                                    // Quick Bookmark Action
                                     if (isBookmarked) {
                                         FilledTonalButton(
                                             onClick = toggleBookmark,
                                             contentPadding =
-                                                PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                                                PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                            modifier = Modifier.height(34.dp),
                                         ) {
                                             Icon(
                                                 painter = painterResource(R.drawable.ic_bookmark),
                                                 contentDescription = "已追漫",
-                                                modifier = Modifier.size(18.dp),
+                                                modifier = Modifier.size(16.dp),
                                             )
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text("已追漫")
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("已追漫", style = MaterialTheme.typography.labelMedium)
                                         }
                                     } else {
                                         OutlinedButton(
                                             onClick = toggleBookmark,
                                             contentPadding =
-                                                PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                                                PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                            modifier = Modifier.height(34.dp),
                                         ) {
                                             Icon(
                                                 painter =
                                                     painterResource(R.drawable.ic_bookmark_border),
                                                 contentDescription = "追漫",
-                                                modifier = Modifier.size(18.dp),
+                                                modifier = Modifier.size(16.dp),
                                             )
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text("追漫")
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("追漫", style = MaterialTheme.typography.labelMedium)
                                         }
                                     }
                                 }
@@ -431,7 +437,7 @@ fun OnlineComicScreen(
                     }
                 }
 
-                // Description
+                // Description (Clickable expand/collapse, max 2 lines default)
                 comic.description
                     ?.takeIf { it.isNotBlank() }
                     ?.let { desc ->
@@ -440,7 +446,14 @@ fun OnlineComicScreen(
                                 text = desc,
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(vertical = 4.dp),
+                                maxLines = if (isDescriptionExpanded) Int.MAX_VALUE else 2,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier =
+                                    Modifier.fillMaxWidth()
+                                        .clickable {
+                                            isDescriptionExpanded = !isDescriptionExpanded
+                                        }
+                                        .padding(vertical = 2.dp),
                             )
                         }
                     }
