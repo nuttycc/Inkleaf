@@ -149,6 +149,7 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
             // An action may alter plugin-owned state, so invalidate runtime-derived data now.
             app().pluginRuntimeManager.reload(id)
             app().pluginBrowseRepository.clear(id)
+            app().onlineContentRepository.invalidateMetadata(id)
         }
     }
 
@@ -179,6 +180,7 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
                 val revision = settingsRevision.incrementAndGet()
                 app().pluginRuntimeManager.reload(id)
                 app().pluginBrowseRepository.clear(id)
+                app().onlineContentRepository.invalidateMetadata(id)
                 persistedSettingsRevision.set(revision)
             }
             _message.value = SourceDetailFeedback("已重置为默认设置")
@@ -219,6 +221,7 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
         app.pluginSettingsRepository.setValues(pluginId, values, settingIds)
         app.pluginRuntimeManager.reload(pluginId)
         app.pluginBrowseRepository.clear(pluginId)
+        app.onlineContentRepository.invalidateMetadata(pluginId)
     }
 
     private fun hasPendingSettings(): Boolean =

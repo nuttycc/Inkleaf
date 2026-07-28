@@ -65,6 +65,32 @@ class OnlineContentRepositoryTest {
     }
 
     @Test
+    fun `metadata invalidation keeps snapshots and user records`() {
+        val root = Files.createTempDirectory("inkleaf-online-invalidation").toFile()
+        try {
+            val repository = OnlineContentRepository(root.resolve("state.json"), clockMs = { 42L })
+            repository.recordDetail(PLUGIN_ID, ComicDetail(SOURCE_ID, "Comic"), "1.0.0")
+            repository.recordChapters(
+                PLUGIN_ID,
+                PluginChaptersResponse(SOURCE_ID, chapters = emptyList()),
+                "1.0.0",
+            )
+            repository.setComicFollow(PLUGIN_ID, SOURCE_ID, present = true)
+
+            repository.invalidateMetadata(PLUGIN_ID)
+
+            val record = requireNotNull(repository.get(PLUGIN_ID, SOURCE_ID))
+            assertEquals("Comic", record.detail?.title)
+            assertTrue(record.chapters.isEmpty())
+            assertEquals(0L, record.detailFetchedAtMs)
+            assertEquals(0L, record.chaptersFetchedAtMs)
+            assertTrue(OnlineUserReference.BOOKMARK in record.references)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun `favorite snapshot publication rejects a file allocated for another page`() {
         val root = Files.createTempDirectory("inkleaf-online-snapshot-identity").toFile()
         try {

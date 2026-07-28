@@ -447,6 +447,25 @@ class OnlineContentRepository(
             write(next)
         }
 
+    /** Keeps the last readable snapshot while forcing the next detail visit to refresh it. */
+    fun invalidateMetadata(pluginId: String) =
+        synchronized(lock) {
+            require(PluginIds.isValid(pluginId)) { "Invalid plugin id" }
+            val state = read()
+            val next =
+                state.records.map { record ->
+                    if (record.key.pluginId == pluginId) {
+                        record.copy(
+                            detailFetchedAtMs = 0L,
+                            chaptersFetchedAtMs = 0L,
+                        )
+                    } else {
+                        record
+                    }
+                }
+            if (next != state.records) write(state.copy(records = next))
+        }
+
     /** Comic-level follow state. This never adds or removes a page bookmark. */
     fun setComicFollow(pluginId: String, sourceId: String, present: Boolean): OnlineComicRecord =
         setReference(pluginId, sourceId, OnlineUserReference.BOOKMARK, present)
