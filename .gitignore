@@ -24,8 +24,9 @@ __pycache__/
 .gemini/
 .claude/
 .junie/
-
 .kotlin/
+
+skills-lock.json
 
 .wiki/
 .docs/
@@ -35,9 +36,7 @@ AGENTS.md
 CLAUDE.md
 CONTEXT.md
 
-skills-lock.json
-
-.scripts/install-debug.ps1
+.impeccable/
 
 # impeccable-ignore-start
 # Ephemeral output, runtime state, and per-dev overrides.
