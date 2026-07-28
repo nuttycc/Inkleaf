@@ -108,8 +108,12 @@ data class OnlineReadingSessionRecord(
 data class OnlineComicRecord(
     val key: OnlineContentKey,
     val detail: ComicDetail? = null,
+    val detailFetchedAtMs: Long = 0L,
+    val detailPluginVersion: String? = null,
     val chapters: List<ChapterSummary> = emptyList(),
     val chaptersRevision: String? = null,
+    val chaptersFetchedAtMs: Long = 0L,
+    val chaptersPluginVersion: String? = null,
     val position: OnlineReadingPosition? = null,
     val availability: OnlineAvailability = OnlineAvailability.AVAILABLE,
     val references: Set<OnlineUserReference> = emptySet(),
@@ -347,25 +351,37 @@ class OnlineContentRepository(
             removedCount
         }
 
-    fun recordDetail(pluginId: String, detail: ComicDetail): OnlineComicRecord =
+    fun recordDetail(
+        pluginId: String,
+        detail: ComicDetail,
+        pluginVersion: String? = null,
+    ): OnlineComicRecord =
         synchronized(lock) {
             val key = key(pluginId, detail.sourceId)
             update(key) { current ->
                 current.copy(
                     detail = detail,
+                    detailFetchedAtMs = clockMs(),
+                    detailPluginVersion = pluginVersion,
                     availability = OnlineAvailability.AVAILABLE,
                     lastSeenAtMs = clockMs(),
                 )
             }
         }
 
-    fun recordChapters(pluginId: String, response: PluginChaptersResponse): OnlineComicRecord =
+    fun recordChapters(
+        pluginId: String,
+        response: PluginChaptersResponse,
+        pluginVersion: String? = null,
+    ): OnlineComicRecord =
         synchronized(lock) {
             val key = key(pluginId, response.sourceId)
             update(key) { current ->
                 current.copy(
                     chapters = response.chapters,
                     chaptersRevision = response.revision,
+                    chaptersFetchedAtMs = clockMs(),
+                    chaptersPluginVersion = pluginVersion,
                     availability = OnlineAvailability.AVAILABLE,
                     lastSeenAtMs = clockMs(),
                 )

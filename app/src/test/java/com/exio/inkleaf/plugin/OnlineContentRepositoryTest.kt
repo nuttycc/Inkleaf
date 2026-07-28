@@ -19,7 +19,11 @@ class OnlineContentRepositoryTest {
         val file = root.resolve("state.json")
         try {
             val repository = OnlineContentRepository(file, clockMs = { 42L })
-            repository.recordDetail(PLUGIN_ID, ComicDetail(SOURCE_ID, "Comic"))
+            repository.recordDetail(
+                PLUGIN_ID,
+                ComicDetail(SOURCE_ID, "Comic"),
+                pluginVersion = "1.0.0",
+            )
             repository.recordChapters(
                 PLUGIN_ID,
                 PluginChaptersResponse(
@@ -27,12 +31,17 @@ class OnlineContentRepositoryTest {
                     revision = "r1",
                     chapters = listOf(ChapterSummary("chapter-1", "Chapter 1", revision = "c1")),
                 ),
+                pluginVersion = "1.0.0",
             )
             repository.recordPosition(PLUGIN_ID, SOURCE_ID, "chapter-1", "page-2", 1, "c1")
 
             val restored = requireNotNull(OnlineContentRepository(file).get(PLUGIN_ID, SOURCE_ID))
             assertEquals("Comic", restored.detail?.title)
+            assertEquals(42L, restored.detailFetchedAtMs)
+            assertEquals("1.0.0", restored.detailPluginVersion)
             assertEquals("chapter-1", restored.chapters.single().chapterId)
+            assertEquals(42L, restored.chaptersFetchedAtMs)
+            assertEquals("1.0.0", restored.chaptersPluginVersion)
             assertEquals(1, restored.position?.pageIndex)
             assertTrue(OnlineUserReference.HISTORY in restored.references)
         } finally {
@@ -304,6 +313,10 @@ class OnlineContentRepositoryTest {
             assertTrue(record.pageBookmarks.isEmpty())
             assertTrue(record.pageFavorites.isEmpty())
             assertTrue(record.readingSessions.isEmpty())
+            assertEquals(0L, record.detailFetchedAtMs)
+            assertEquals(0L, record.chaptersFetchedAtMs)
+            assertEquals(null, record.detailPluginVersion)
+            assertEquals(null, record.chaptersPluginVersion)
         } finally {
             root.deleteRecursively()
         }
