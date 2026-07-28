@@ -10,6 +10,7 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.viewModelScope
+import com.exio.inkleaf.InkleafApplication
 import com.exio.inkleaf.data.AddComicOutcome
 import com.exio.inkleaf.data.AddFolderOutcome
 import com.exio.inkleaf.data.AddSeriesFolderOutcome
@@ -30,14 +31,20 @@ import com.exio.inkleaf.data.db.ComicEntity
 import com.exio.inkleaf.data.db.FolderWithCount
 import com.exio.inkleaf.data.db.GroupWithCount
 import com.exio.inkleaf.data.db.LibraryFolderType
+import com.exio.inkleaf.plugin.OnlineComicRecord
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** 扫描状态：进行中（区分用户手动发起）/ 一次性提示消息（展示后清空）。 isManual 决定 UI 表现：手动刷新有下拉指示器和结果反馈，自动扫描全静默 */
 data class ScanState(
@@ -47,6 +54,7 @@ data class ScanState(
     val seriesConfirmations: List<SeriesScanConfirmation> = emptyList(),
 )
 
+@OptIn(FlowPreview::class)
 class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycleObserver {
     private val repo = ComicRepository(app)
     private val albumExporter = AlbumExporter(app)
@@ -70,6 +78,15 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycle
 
     val folders: StateFlow<List<FolderWithCount>?> =
         repo.observeFolders().stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    private val onlineRepo = (app as InkleafApplication).onlineContentRepository
+
+    /** 在线追漫列表：revision 变化时重新读取文件存储。null = 尚未首次加载 */
+    val onlineBookmarked: StateFlow<List<OnlineComicRecord>?> =
+        onlineRepo.revision
+            .debounce(300)
+            .map { withContext(Dispatchers.IO) { onlineRepo.listBookmarked() } }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     val selectedGroup: StateFlow<ShelfGroupSelection> =
         settingsRepo.selectedGroup.stateIn(

@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
@@ -94,6 +95,7 @@ import com.exio.inkleaf.data.ShelfLayoutSettings
 import com.exio.inkleaf.data.db.BookSourceType
 import com.exio.inkleaf.data.db.ComicEntity
 import com.exio.inkleaf.data.db.GroupWithCount
+import com.exio.inkleaf.plugin.OnlineComicRecord
 import java.io.File
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.delay
@@ -133,6 +135,7 @@ internal fun buildFolderPickerInitialUri(lastPickedFolder: String?): Uri? {
 @Composable
 fun ShelfScreen(
     onOpenComic: (Long) -> Unit,
+    onOpenOnlineComic: (OnlineComicRecord) -> Unit,
     onCreateAlbum: () -> Unit,
     onEditAlbum: (Long) -> Unit,
     onOpenSettings: () -> Unit,
@@ -141,6 +144,7 @@ fun ShelfScreen(
 ) {
     val context = LocalContext.current
     val comics by viewModel.comics.collectAsStateWithLifecycle()
+    val onlineBookmarked by viewModel.onlineBookmarked.collectAsStateWithLifecycle()
     val groups by viewModel.groups.collectAsStateWithLifecycle()
     val selectedGroup by viewModel.selectedGroup.collectAsStateWithLifecycle()
     val scanState by viewModel.scanState.collectAsStateWithLifecycle()
@@ -310,7 +314,7 @@ fun ShelfScreen(
             val phase =
                 when {
                     list == null -> ShelfPhase.LOADING
-                    list.isEmpty() -> ShelfPhase.EMPTY
+                    list.isEmpty() && onlineBookmarked.orEmpty().isEmpty() -> ShelfPhase.EMPTY
                     else -> ShelfPhase.CONTENT
                 }
             Crossfade(
@@ -351,6 +355,32 @@ fun ShelfScreen(
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                             verticalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
+                            // 在线追读分区：追漫的在线系列，点击进入漫画详情页
+                            val onlineList = onlineBookmarked.orEmpty()
+                            if (onlineList.isNotEmpty()) {
+                                item(
+                                    key = "online_section_header",
+                                    span = { GridItemSpan(maxLineSpan) },
+                                ) {
+                                    Text(
+                                        text = "在线追读",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(top = 4.dp, bottom = 2.dp),
+                                    )
+                                }
+                                items(
+                                    onlineList,
+                                    key = { "online:${it.key.pluginId}:${it.key.sourceId}" },
+                                ) { record ->
+                                    OnlineBookmarkedCard(
+                                        record = record,
+                                        aspect = layout.aspect.ratio,
+                                        onClick = { onOpenOnlineComic(record) },
+                                    )
+                                }
+                            }
+
                             // 渐变期间旧分支仍在组合，list 可能已退回空——orEmpty 兜底
                             items(list.orEmpty(), key = { it.id }) { comic ->
                                 ComicCard(
@@ -1117,6 +1147,65 @@ private fun ComicCard(
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.alpha(contentAlpha),
+        )
+    }
+}
+
+/** 在线追读卡片的视觉与本地 ComicCard 保持一致：封面 + 标题 + 来源名 */
+@Composable
+private fun OnlineBookmarkedCard(
+    record: OnlineComicRecord,
+    aspect: Float,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val title = record.detail?.title ?: record.key.sourceId
+    val coverUrl = record.detail?.cover?.url
+
+    Column(
+        modifier =
+            modifier
+                .clip(RoundedCornerShape(8.dp))
+                .clickable(onClick = onClick)
+    ) {
+        Box(
+            modifier =
+                Modifier.fillMaxWidth()
+                    .aspectRatio(aspect)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (coverUrl != null) {
+                AsyncImage(
+                    model = coverUrl,
+                    contentDescription = title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                Text(
+                    text = title.take(1),
+                    style = MaterialTheme.typography.headlineLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = title,
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text =
+                record.position?.let { "第 ${it.pageIndex + 1} 页" }
+                    ?: record.key.pluginId.substringAfterLast('.'),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }

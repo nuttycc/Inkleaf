@@ -520,6 +520,16 @@ class MainActivity : AppCompatActivity() {
                                             onOpenComic = { id ->
                                                 outerNavController.navigate(ReaderRoute(id))
                                             },
+                                            onOpenOnlineComic = { record ->
+                                                outerNavController.navigate(
+                                                    OnlineComicRoute(
+                                                        pluginId = record.key.pluginId,
+                                                        sourceId = record.key.sourceId,
+                                                        opaqueContextJson =
+                                                            record.detail?.opaqueContext?.toString(),
+                                                    )
+                                                )
+                                            },
                                             onCreateAlbum = {
                                                 outerNavController.navigate(AlbumEditorRoute())
                                             },
@@ -683,6 +693,18 @@ class MainActivity : AppCompatActivity() {
                                             chapterId = chapter.chapterId,
                                             chapterRevision = chapter.revision,
                                             opaqueContextJson = effectiveContext?.toString(),
+                                        )
+                                    )
+                                },
+                                onContinueReading = { position ->
+                                    outerNavController.navigate(
+                                        OnlineReaderRoute(
+                                            pluginId = route.pluginId,
+                                            sourceId = route.sourceId,
+                                            chapterId = position.chapterId,
+                                            chapterRevision = position.chapterRevision,
+                                            initialPageId = position.pageId,
+                                            initialPageIndex = position.pageIndex,
                                         )
                                     )
                                 },

@@ -9,6 +9,7 @@ import com.exio.inkleaf.plugin.ComicDetail
 import com.exio.inkleaf.plugin.ComicSummary
 import com.exio.inkleaf.plugin.OnlineAvailability
 import com.exio.inkleaf.plugin.OnlineComicRecord
+import com.exio.inkleaf.plugin.OnlineReadingPosition
 import com.exio.inkleaf.plugin.OnlineUserReference
 import com.exio.inkleaf.plugin.PluginChapterRequest
 import com.exio.inkleaf.plugin.PluginContentCodec
@@ -38,6 +39,7 @@ internal data class OnlineComicUiState(
     val isRefreshing: Boolean = false,
     val isStale: Boolean = false,
     val isBookmarked: Boolean = false,
+    val position: OnlineReadingPosition? = null,
     val errorMessage: String? = null,
 )
 
@@ -214,6 +216,7 @@ internal class OnlineComicViewModel(
                 hasLoadedChapters = record?.chaptersFetchedAtMs?.let { it > 0L } == true,
                 isInitialLoading = record?.detail == null && _state.value.detail == null,
                 isBookmarked = if (mayPublishBookmark) bookmarked else _state.value.isBookmarked,
+                position = record?.position ?: _state.value.position,
             )
     }
 

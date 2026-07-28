@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -63,6 +64,7 @@ import coil.compose.AsyncImage
 import com.exio.inkleaf.InkleafApplication
 import com.exio.inkleaf.R
 import com.exio.inkleaf.plugin.ChapterSummary
+import com.exio.inkleaf.plugin.OnlineReadingPosition
 import kotlinx.serialization.json.JsonElement
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -74,6 +76,7 @@ fun OnlineComicScreen(
     summaryJson: String?,
     onBack: () -> Unit,
     onOpenChapter: (ChapterSummary, JsonElement?) -> Unit,
+    onContinueReading: ((OnlineReadingPosition) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val application = LocalContext.current.applicationContext as InkleafApplication
@@ -274,6 +277,28 @@ fun OnlineComicScreen(
                                         }
                                     }
                                 }
+                            }
+                        }
+                    }
+
+                    // 继续阅读：有阅读位置时显示，点击直接跳到上次阅读的章节和页码
+                    val position = state.position
+                    if (position != null && onContinueReading != null) {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            val chapterTitle =
+                                chapters.firstOrNull { it.chapterId == position.chapterId }?.title
+                            val label =
+                                buildString {
+                                    append("继续阅读")
+                                    if (chapterTitle != null) append(" · $chapterTitle")
+                                    append(" · 第 ${position.pageIndex + 1} 页")
+                                }
+                            Button(
+                                onClick = { onContinueReading(position) },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(10.dp),
+                            ) {
+                                Text(text = label, style = MaterialTheme.typography.labelLarge)
                             }
                         }
                     }

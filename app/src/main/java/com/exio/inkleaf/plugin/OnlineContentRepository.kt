@@ -12,6 +12,9 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.util.UUID
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -138,6 +141,10 @@ class OnlineContentRepository(
     private val lock = Any()
     private val snapshotDirectory = file.resolveSibling("page-favorites")
 
+    /** 每次写入递增；外部 observe 此 flow 即可感知存储变化，无需轮询 */
+    private val _revision = MutableStateFlow(0)
+    val revision: StateFlow<Int> = _revision.asStateFlow()
+
     init {
         require(file.isAbsolute) { "Online content state path must be absolute" }
     }
@@ -148,6 +155,12 @@ class OnlineContentRepository(
         }
 
     fun list(): List<OnlineComicRecord> = synchronized(lock) { read().records }
+
+    /** 用户标记了"追漫"的系列级记录 */
+    fun listBookmarked(): List<OnlineComicRecord> =
+        synchronized(lock) {
+            read().records.filter { OnlineUserReference.BOOKMARK in it.references }
+        }
 
     fun listPageBookmarks(): List<OnlinePageBookmark> =
         synchronized(lock) {
@@ -632,6 +645,7 @@ class OnlineContentRepository(
         } finally {
             if (temp.exists()) temp.delete()
         }
+        _revision.value++
     }
 
     private companion object {
