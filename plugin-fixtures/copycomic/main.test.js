@@ -69,7 +69,7 @@ global.inkleaf = {
   }
 };
 
-const sourcePath = path.join(__dirname, "main.js");
+const sourcePath = path.join(__dirname, "src", "main.js");
 vm.runInThisContext(fs.readFileSync(sourcePath, "utf8"), { filename: sourcePath });
 
 async function run() {

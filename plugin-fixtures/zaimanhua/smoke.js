@@ -85,7 +85,7 @@ const runtimeSource = fs.readFileSync(
   path.join(__dirname, "..", "shared", "runtime.js"),
   "utf8"
 );
-const pluginSource = fs.readFileSync(path.join(__dirname, "source.js"), "utf8");
+const pluginSource = fs.readFileSync(path.join(__dirname, "src", "main.js"), "utf8");
 vm.runInNewContext('(function () { "use strict";\n' + runtimeSource + "\n" + pluginSource + "\n})();", sandbox, {
   filename: "zaimanhua-bundle.js",
 });

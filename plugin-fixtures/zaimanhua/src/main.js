@@ -4,8 +4,8 @@
 // document first -- it records what two independent implementations agreed on and where they did
 // not, which is the only reason we know which parts of this file are load-bearing.
 //
-// This file is concatenated with plugin-fixtures/shared/runtime.js by .scripts/build-plugin.ps1,
-// so helpers such as text(), asObject(), requestText() and pluginError() are already in scope.
+// plugin.build.json asks .scripts/plugin.py to prepend the shared runtime while packaging, so
+// helpers such as text(), asObject(), requestText() and pluginError() are already in scope.
 
 const DEFAULT_API_BASE = "https://v4api.zaimanhua.com/app/v1";
 

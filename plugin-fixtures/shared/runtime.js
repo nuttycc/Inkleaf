@@ -1,6 +1,6 @@
 // Shared helpers for Inkleaf source plugins.
 //
-// This file is NOT a module and NOT a standalone script. The build script concatenates it with a
+// This file is NOT a module and NOT a standalone script. The plugin tool concatenates it with a
 // source's own file and wraps the result in one IIFE, because a plugin package may contain exactly
 // one main.js -- the archive validator rejects any other entry at the root. So everything here is
 // a bare function declaration that the source file can call directly.

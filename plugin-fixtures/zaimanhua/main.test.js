@@ -14,7 +14,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 const runtimeSource = fs.readFileSync(path.join(__dirname, "..", "shared", "runtime.js"), "utf8");
-const pluginSource = fs.readFileSync(path.join(__dirname, "source.js"), "utf8");
+const pluginSource = fs.readFileSync(path.join(__dirname, "src", "main.js"), "utf8");
 
 function fixture(name) {
   return JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", name), "utf8"));
