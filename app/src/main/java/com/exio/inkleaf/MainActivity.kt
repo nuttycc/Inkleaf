@@ -60,6 +60,7 @@ import androidx.navigation.toRoute
 import com.exio.inkleaf.data.ComicRepository
 import com.exio.inkleaf.data.ThemeSettings
 import com.exio.inkleaf.data.ThemeSettingsRepository
+import com.exio.inkleaf.plugin.PluginContentCodec
 import com.exio.inkleaf.ui.AlbumEditorScreen
 import com.exio.inkleaf.ui.FavoriteViewerScreen
 import com.exio.inkleaf.ui.HistoryScreen
@@ -76,6 +77,7 @@ import com.exio.inkleaf.ui.SourceDetailScreen
 import com.exio.inkleaf.ui.SourcesScreen
 import com.exio.inkleaf.ui.ThemeSettingsScreen
 import com.exio.inkleaf.ui.theme.InkleafTheme
+import com.exio.inkleaf.ui.toRouteSeed
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
@@ -83,6 +85,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
 
 /** 类型安全路由：路由就是普通数据类（类比 react-router 的 path + params， 但参数有编译期类型保障）。@Serializable 让编译器生成参数的编解码器。 */
 @Serializable data object ShellRoute
@@ -116,6 +119,7 @@ data class OnlineComicRoute(
     val pluginId: String,
     val sourceId: String,
     val opaqueContextJson: String? = null,
+    val summaryJson: String? = null,
 )
 
 @Serializable
@@ -570,6 +574,10 @@ class MainActivity : AppCompatActivity() {
                                                         sourceId = comic.sourceId,
                                                         opaqueContextJson =
                                                             comic.opaqueContext?.toString(),
+                                                        summaryJson =
+                                                            PluginContentCodec.json.encodeToString(
+                                                                comic.toRouteSeed()
+                                                            ),
                                                     )
                                                 )
                                             },
@@ -665,6 +673,7 @@ class MainActivity : AppCompatActivity() {
                                 pluginId = route.pluginId,
                                 sourceId = route.sourceId,
                                 opaqueContextJson = route.opaqueContextJson,
+                                summaryJson = route.summaryJson,
                                 onBack = { outerNavController.popBackStack() },
                                 onOpenChapter = { chapter, effectiveContext ->
                                     outerNavController.navigate(
