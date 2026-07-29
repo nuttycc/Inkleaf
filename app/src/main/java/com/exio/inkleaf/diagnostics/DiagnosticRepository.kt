@@ -245,7 +245,7 @@ class DiagnosticRepository private constructor(private val context: Context) {
         restoreDiagnosticJournal(
             journal = eventsFile(),
             previous = File(directory(), PREVIOUS_EVENTS_FILE_NAME),
-            readEvents = ::readEvents,
+            readStrictEvents = ::readStrictDiagnosticEvents,
         )
     }
 
@@ -371,6 +371,17 @@ class DiagnosticRepository private constructor(private val context: Context) {
     }
 }
 
+internal fun readStrictDiagnosticEvents(file: File): List<DiagnosticEvent>? =
+    file.takeIf(File::isFile)?.useLines { lines ->
+        val events = mutableListOf<DiagnosticEvent>()
+        for (line in lines) {
+            if (line.isBlank()) continue
+            val event = runCatching { diagnosticEventFromJson(line) }.getOrNull() ?: return@useLines null
+            events += event
+        }
+        events
+    }
+
 /**
  * Recovers the complete previous journal after a power loss between staging and replacement.
  * A readable current journal always wins, because it is newer than the staged backup.
@@ -378,14 +389,15 @@ class DiagnosticRepository private constructor(private val context: Context) {
 internal fun restoreDiagnosticJournal(
     journal: File,
     previous: File,
-    readEvents: (File) -> List<DiagnosticEvent>,
+    readStrictEvents: (File) -> List<DiagnosticEvent>?,
 ): Boolean {
     if (!previous.isFile) return false
-    if (journal.isFile && readEvents(journal).isNotEmpty()) {
+    val currentEvents = journal.takeIf(File::isFile)?.let(readStrictEvents)
+    if (!currentEvents.isNullOrEmpty()) {
         previous.delete()
         return false
     }
-    if (readEvents(previous).isEmpty()) return false
+    if (readStrictEvents(previous).isNullOrEmpty()) return false
     if (journal.exists() && !journal.delete()) return false
     return previous.renameTo(journal)
 }
@@ -396,8 +408,12 @@ internal fun retainDiagnosticEvents(events: List<DiagnosticEvent>): List<Diagnos
         newestFirst
             .filter { it.type == DiagnosticEventType.CRASH || it.type == DiagnosticEventType.EXIT }
             .take(MAX_RETAINED_CRITICAL)
+    val recentBreadcrumbs =
+        newestFirst.filter { it.type == DiagnosticEventType.BREADCRUMB }.take(MAX_RETAINED_BREADCRUMBS)
     val remainder =
-        newestFirst.filterNot { event -> event in critical }
+        newestFirst.filterNot { event ->
+            event.type == DiagnosticEventType.BREADCRUMB || event in critical
+        }
     val retained = linkedSetOf<DiagnosticEvent>()
     var bytes = 0
     fun add(event: DiagnosticEvent) {
@@ -408,6 +424,7 @@ internal fun retainDiagnosticEvents(events: List<DiagnosticEvent>): List<Diagnos
         }
     }
     critical.forEach(::add)
+    recentBreadcrumbs.forEach(::add)
     remainder.forEach(::add)
     return retained.sortedBy { it.timestamp }
 }
@@ -454,6 +471,8 @@ private fun DiagnosticEvent.toJsonLine(): String =
         put("read", read)
         put("metadata", JsonObject(metadata.mapValues { JsonPrimitive(it.value) }))
     }.toString()
+
+internal fun diagnosticEventJsonLine(event: DiagnosticEvent): String = event.toJsonLine()
 
 private fun addZipFile(zip: ZipOutputStream, file: File, entryName: String) {
     if (!file.isFile) return
@@ -557,3 +576,4 @@ private fun diagnosticEventFromJson(line: String): DiagnosticEvent {
 private const val MAX_RETAINED_EVENTS = 1_000
 private const val MAX_RETAINED_BYTES = 10 * 1024 * 1024
 private const val MAX_RETAINED_CRITICAL = 20
+private const val MAX_RETAINED_BREADCRUMBS = 50

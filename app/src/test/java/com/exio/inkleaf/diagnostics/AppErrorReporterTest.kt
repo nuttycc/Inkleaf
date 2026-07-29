@@ -81,6 +81,17 @@ class AppErrorReporterTest {
     }
 
     @Test
+    fun `retention keeps only the newest fifty breadcrumbs`() {
+        val events = (0..50).map { index -> testEvent(index, DiagnosticEventType.BREADCRUMB) }
+
+        val retained = retainDiagnosticEvents(events)
+
+        assertEquals(50, retained.size)
+        assertFalse(retained.any { it.id == "0" })
+        assertTrue(retained.any { it.id == "50" })
+    }
+
+    @Test
     fun `redaction removes credential values and URL queries`() {
         assertEquals("[redacted]", redactDiagnosticValue("Authorization", "Bearer secret"))
         assertEquals("https://example.test/path", redactDiagnosticValue("url", "https://example.test/path?token=secret"))
@@ -159,6 +170,29 @@ class AppErrorReporterTest {
 
             assertFalse(restored)
             assertEquals("current", journal.readText())
+            assertFalse(previous.exists())
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `journal recovery rejects current journal containing a malformed non-empty line`() {
+        val directory = createTempDir(prefix = "inkleaf-diagnostics-")
+        try {
+            val validLine = diagnosticEventJsonLine(testEvent(1, DiagnosticEventType.ERROR))
+            val journal = File(directory, "events.jsonl").apply { writeText("$validLine\nnot-json\n") }
+            val previous = File(directory, ".events.previous").apply { writeText("$validLine\n") }
+
+            val restored =
+                restoreDiagnosticJournal(
+                    journal = journal,
+                    previous = previous,
+                    readStrictEvents = ::readStrictDiagnosticEvents,
+                )
+
+            assertTrue(restored)
+            assertEquals(listOf("1"), readStrictDiagnosticEvents(journal)?.map { it.id })
             assertFalse(previous.exists())
         } finally {
             directory.deleteRecursively()
