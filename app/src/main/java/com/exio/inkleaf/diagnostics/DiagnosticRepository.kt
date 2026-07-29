@@ -28,7 +28,6 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.content
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -173,7 +172,7 @@ class DiagnosticRepository private constructor(private val context: Context) {
                     addZipEvents(zip, events, "exits.jsonl") { it.type == DiagnosticEventType.EXIT }
                     addZipEvents(zip, events, "breadcrumbs.jsonl") { it.type == DiagnosticEventType.BREADCRUMB }
                     addZipEvents(zip, events, "network.jsonl") { it.type == DiagnosticEventType.NETWORK }
-                    emergencyDirectory().listFiles()?.sortedBy(File::name)?.forEach { file ->
+                    emergencyDirectory().listFiles()?.sortedBy { it.name }?.forEach { file ->
                         addZipFile(zip, file, "emergency/${file.name}")
                     }
                     addPluginLogFiles(zip)
@@ -261,12 +260,12 @@ class DiagnosticRepository private constructor(private val context: Context) {
     }
 
     private fun readEvents(file: File): List<DiagnosticEvent> =
-        file.takeIf(File::isFile)?.useLines { lines ->
+        file.takeIf { it.isFile }?.useLines { lines ->
             lines.mapNotNull { line -> runCatching { diagnosticEventFromJson(line) }.getOrNull() }.toList()
         }.orEmpty()
 
     private fun importEmergencyFilesLocked() {
-        emergencyDirectory().listFiles { file -> file.extension == "json" }?.sortedBy(File::name)?.forEach { file ->
+        emergencyDirectory().listFiles { file -> file.extension == "json" }?.sortedBy { it.name }?.forEach { file ->
             val event = runCatching { diagnosticEventFromJson(file.readText()) }.getOrNull() ?: return@forEach
             val current = readEventsLocked()
             if (current.none { it.id == event.id }) rewriteLocked(retainDiagnosticEvents(current + event))

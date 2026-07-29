@@ -6,6 +6,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 import java.time.Instant
+import kotlin.io.path.createTempDirectory
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -138,7 +139,7 @@ class AppErrorReporterTest {
 
     @Test
     fun `journal recovery restores valid previous journal when current is invalid`() {
-        val directory = createTempDir(prefix = "inkleaf-diagnostics-")
+        val directory = createTempDirectory("inkleaf-diagnostics-").toFile()
         try {
             val journal = File(directory, "events.jsonl").apply { writeText("broken") }
             val previous = File(directory, ".events.previous").apply { writeText("valid") }
@@ -158,7 +159,7 @@ class AppErrorReporterTest {
 
     @Test
     fun `journal recovery keeps valid current journal and deletes previous backup`() {
-        val directory = createTempDir(prefix = "inkleaf-diagnostics-")
+        val directory = createTempDirectory("inkleaf-diagnostics-").toFile()
         try {
             val journal = File(directory, "events.jsonl").apply { writeText("current") }
             val previous = File(directory, ".events.previous").apply { writeText("previous") }
@@ -178,7 +179,7 @@ class AppErrorReporterTest {
 
     @Test
     fun `journal recovery rejects current journal containing a malformed non-empty line`() {
-        val directory = createTempDir(prefix = "inkleaf-diagnostics-")
+        val directory = createTempDirectory("inkleaf-diagnostics-").toFile()
         try {
             val validLine = diagnosticEventJsonLine(testEvent(1, DiagnosticEventType.ERROR))
             val journal = File(directory, "events.jsonl").apply { writeText("$validLine\nnot-json\n") }
