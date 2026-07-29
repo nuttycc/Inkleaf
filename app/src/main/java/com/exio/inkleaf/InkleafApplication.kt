@@ -11,7 +11,6 @@ import com.exio.inkleaf.data.ComicRepository
 import com.exio.inkleaf.data.ReaderCache
 import com.exio.inkleaf.diagnostics.DiagnosticEventType
 import com.exio.inkleaf.diagnostics.DiagnosticRepository
-import com.exio.inkleaf.diagnostics.StrictModeDiagnosticInstaller
 import com.exio.inkleaf.diagnostics.awaitReported
 import com.exio.inkleaf.plugin.OnlineContentRepository
 import com.exio.inkleaf.plugin.PluginBrowseRepository
@@ -100,7 +99,6 @@ class InkleafApplication : Application(), ImageLoaderFactory {
 
     override fun onCreate() {
         super.onCreate()
-        StrictModeDiagnosticInstaller.install(this)
         installUncaughtExceptionHandler()
         applicationScope.launch { DiagnosticRepository.get(this@InkleafApplication).initialize() }
 
