@@ -13,6 +13,8 @@ import java.util.UUID
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -144,6 +146,8 @@ class DiagnosticRepository private constructor(private val context: Context) {
         withContext(Dispatchers.IO) {
             writeMutex.withLock {
                 eventsFile().delete()
+                File(directory(), PREVIOUS_EVENTS_FILE_NAME).delete()
+                File(directory(), TEMPORARY_EVENTS_FILE_NAME).delete()
                 emergencyDirectory().listFiles()?.forEach(File::delete)
                 breadcrumbs.clear()
                 publish(emptyList())
@@ -188,11 +192,13 @@ class DiagnosticRepository private constructor(private val context: Context) {
 
     private fun rewriteLocked(events: List<DiagnosticEvent>) {
         directory().mkdirs()
-        val temporary = File(directory(), ".events.tmp")
-        FileOutputStream(temporary).bufferedWriter(Charsets.UTF_8).use { writer ->
+        val temporary = File(directory(), TEMPORARY_EVENTS_FILE_NAME)
+        FileOutputStream(temporary).use { stream ->
             events.forEach { event ->
-                writer.appendLine(event.toJsonLine())
+                stream.write(event.toJsonLine().toByteArray(Charsets.UTF_8))
+                stream.write(NEWLINE_BYTES)
             }
+            stream.fd.sync()
         }
         val journal = eventsFile()
         val backup = File(directory(), ".events.previous")
@@ -219,14 +225,27 @@ class DiagnosticRepository private constructor(private val context: Context) {
         publish(loaded)
     }
 
+    private fun restorePreviousJournalLocked() {
+        restoreDiagnosticJournal(
+            journal = eventsFile(),
+            previous = File(directory(), PREVIOUS_EVENTS_FILE_NAME),
+            readEvents = ::readEvents,
+        )
+    }
+
     private fun publish(events: List<DiagnosticEvent>) {
         _events.value = events.sortedByDescending { it.timestamp }
         _unreadCriticalCount.value =
             events.count { !it.read && (it.type == DiagnosticEventType.CRASH || it.type == DiagnosticEventType.EXIT) }
     }
 
-    private fun readEventsLocked(): List<DiagnosticEvent> =
-        eventsFile().takeIf(File::isFile)?.useLines { lines ->
+    private fun readEventsLocked(): List<DiagnosticEvent> {
+        restorePreviousJournalLocked()
+        return readEvents(eventsFile())
+    }
+
+    private fun readEvents(file: File): List<DiagnosticEvent> =
+        file.takeIf(File::isFile)?.useLines { lines ->
             lines.mapNotNull { line -> runCatching { diagnosticEventFromJson(line) }.getOrNull() }.toList()
         }.orEmpty()
 
@@ -296,11 +315,14 @@ class DiagnosticRepository private constructor(private val context: Context) {
         private const val DIRECTORY_NAME = "diagnostics"
         private const val EMERGENCY_DIRECTORY_NAME = "emergency"
         private const val EVENTS_FILE_NAME = "events.jsonl"
+        private const val PREVIOUS_EVENTS_FILE_NAME = ".events.previous"
+        private const val TEMPORARY_EVENTS_FILE_NAME = ".events.tmp"
         private const val EXIT_KEY = "exitKey"
         private const val MAX_BREADCRUMBS = 50
         private const val MAX_EXIT_REASONS = 50
         private const val MAX_TEXT_CHARS = 4_096
         private const val MAX_TRACE_CHARS = 32 * 1024
+        private val NEWLINE_BYTES = byteArrayOf('\n'.code.toByte())
 
         @Volatile private var instance: DiagnosticRepository? = null
 
@@ -309,6 +331,25 @@ class DiagnosticRepository private constructor(private val context: Context) {
                 instance ?: DiagnosticRepository(context.applicationContext).also { instance = it }
             }
     }
+}
+
+/**
+ * Recovers the complete previous journal after a power loss between staging and replacement.
+ * A readable current journal always wins, because it is newer than the staged backup.
+ */
+internal fun restoreDiagnosticJournal(
+    journal: File,
+    previous: File,
+    readEvents: (File) -> List<DiagnosticEvent>,
+): Boolean {
+    if (!previous.isFile) return false
+    if (journal.isFile && readEvents(journal).isNotEmpty()) {
+        previous.delete()
+        return false
+    }
+    if (readEvents(previous).isEmpty()) return false
+    if (journal.exists() && !journal.delete()) return false
+    return previous.renameTo(journal)
 }
 
 internal fun retainDiagnosticEvents(events: List<DiagnosticEvent>): List<DiagnosticEvent> {
@@ -340,6 +381,29 @@ internal fun redactDiagnosticValue(key: String, value: String): String {
     }
     return value.substringBefore('?')
 }
+
+/**
+ * Reports failures exposed by an async boundary, where CoroutineExceptionHandler cannot observe
+ * them. The original error remains visible to the awaiting caller for its normal fallback path.
+ */
+suspend fun <T> Deferred<T>.awaitReported(
+    context: Context,
+    operation: String,
+    metadata: Map<String, String> = emptyMap(),
+): T =
+    try {
+        await()
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Throwable) {
+        DiagnosticRepository.get(context).record(
+            type = DiagnosticEventType.ERROR,
+            title = operation,
+            error = error,
+            metadata = metadata,
+        )
+        throw error
+    }
 
 private fun DiagnosticEvent.toJsonLine(): String =
     buildJsonObject {

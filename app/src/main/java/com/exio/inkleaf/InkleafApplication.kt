@@ -1,6 +1,7 @@
 package com.exio.inkleaf
 
 import android.app.Application
+import android.os.Process
 import android.util.Log
 import coil.ImageLoader
 import coil.ImageLoaderFactory
@@ -10,6 +11,7 @@ import com.exio.inkleaf.data.ComicRepository
 import com.exio.inkleaf.data.ReaderCache
 import com.exio.inkleaf.diagnostics.DiagnosticEventType
 import com.exio.inkleaf.diagnostics.DiagnosticRepository
+import com.exio.inkleaf.diagnostics.awaitReported
 import com.exio.inkleaf.plugin.OnlineContentRepository
 import com.exio.inkleaf.plugin.PluginBrowseRepository
 import com.exio.inkleaf.plugin.PluginCatalog
@@ -31,6 +33,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import okhttp3.Call
 import okhttp3.OkHttpClient
+import kotlin.system.exitProcess
 
 class InkleafApplication : Application(), ImageLoaderFactory {
     private val coroutineErrorHandler =
@@ -107,20 +110,12 @@ class InkleafApplication : Application(), ImageLoaderFactory {
             AlbumExporter.cleanupOnColdStart(this@InkleafApplication)
         }
         shelfWarmup = applicationScope.async {
-            // Room open runs here on cold start. Uncaught dispatcher exceptions kill the
-            // process on Android — keep warmup best-effort and let the UI load empty.
-            try {
-                ComicRepository(this@InkleafApplication).observeAll().first()
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Exception) {
-                Log.w(TAG, "Shelf warmup failed", error)
-            }
+            ComicRepository(this@InkleafApplication).observeAll().first()
         }
     }
 
     suspend fun awaitShelfWarmup() {
-        shelfWarmup.await()
+        shelfWarmup.awaitReported(this, "Warm shelf cache")
     }
 
     /** Remove generated storage owned exclusively by the retired enhancement feature. */
@@ -148,7 +143,12 @@ class InkleafApplication : Application(), ImageLoaderFactory {
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, error ->
             DiagnosticRepository.get(this).recordEmergencyCrash(thread, error)
-            previous?.uncaughtException(thread, error)
+            if (previous != null) {
+                previous.uncaughtException(thread, error)
+            } else {
+                Process.killProcess(Process.myPid())
+                exitProcess(10)
+            }
         }
     }
 

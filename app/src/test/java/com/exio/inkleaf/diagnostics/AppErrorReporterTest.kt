@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 import java.time.Instant
 
 class AppErrorReporterTest {
@@ -82,6 +83,46 @@ class AppErrorReporterTest {
         assertEquals("[redacted]", redactDiagnosticValue("Authorization", "Bearer secret"))
         assertEquals("https://example.test/path", redactDiagnosticValue("url", "https://example.test/path?token=secret"))
         assertEquals("value", redactDiagnosticValue("pluginId", "value"))
+    }
+
+    @Test
+    fun `journal recovery restores valid previous journal when current is invalid`() {
+        val directory = createTempDir(prefix = "inkleaf-diagnostics-")
+        try {
+            val journal = File(directory, "events.jsonl").apply { writeText("broken") }
+            val previous = File(directory, ".events.previous").apply { writeText("valid") }
+
+            val restored =
+                restoreDiagnosticJournal(journal, previous) { file ->
+                    if (file.readText() == "valid") listOf(testEvent(1, DiagnosticEventType.ERROR)) else emptyList()
+                }
+
+            assertTrue(restored)
+            assertEquals("valid", journal.readText())
+            assertFalse(previous.exists())
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `journal recovery keeps valid current journal and deletes previous backup`() {
+        val directory = createTempDir(prefix = "inkleaf-diagnostics-")
+        try {
+            val journal = File(directory, "events.jsonl").apply { writeText("current") }
+            val previous = File(directory, ".events.previous").apply { writeText("previous") }
+
+            val restored =
+                restoreDiagnosticJournal(journal, previous) { file ->
+                    if (file.readText().isNotEmpty()) listOf(testEvent(1, DiagnosticEventType.ERROR)) else emptyList()
+                }
+
+            assertFalse(restored)
+            assertEquals("current", journal.readText())
+            assertFalse(previous.exists())
+        } finally {
+            directory.deleteRecursively()
+        }
     }
 
     private fun testEvent(index: Int, type: DiagnosticEventType): DiagnosticEvent =
