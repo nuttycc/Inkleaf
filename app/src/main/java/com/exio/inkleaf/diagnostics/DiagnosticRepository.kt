@@ -22,6 +22,8 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -149,6 +151,7 @@ class DiagnosticRepository private constructor(private val context: Context) {
                 File(directory(), PREVIOUS_EVENTS_FILE_NAME).delete()
                 File(directory(), TEMPORARY_EVENTS_FILE_NAME).delete()
                 emergencyDirectory().listFiles()?.forEach(File::delete)
+                clearPluginLogFiles()
                 breadcrumbs.clear()
                 publish(emptyList())
             }
@@ -324,11 +327,23 @@ class DiagnosticRepository private constructor(private val context: Context) {
     private fun addPluginLogFiles(zip: ZipOutputStream) {
         val pluginsDirectory = File(appContext.filesDir, "plugins")
         if (!pluginsDirectory.isDirectory) return
-        pluginsDirectory.walkTopDown().filter { file ->
-            file.isFile && file.toRelativeString(pluginsDirectory).split(File.separatorChar).contains("logs")
-        }.forEach { file ->
-            addZipFile(zip, file, "plugins/${file.toRelativeString(pluginsDirectory).replace(File.separatorChar, '/')}")
+        pluginLogFiles(pluginsDirectory).forEach { file ->
+            val lines = file.useLines { lines -> lines.mapNotNull(::sanitizePluginLogLine).toList() }
+            if (lines.isEmpty()) return@forEach
+            val relativePath = file.toRelativeString(pluginsDirectory).replace(File.separatorChar, '/')
+            zip.putNextEntry(ZipEntry("plugins/$relativePath"))
+            lines.forEach { line ->
+                zip.write(line.toByteArray(Charsets.UTF_8))
+                zip.write('\n'.code)
+            }
+            zip.closeEntry()
         }
+    }
+
+    private fun clearPluginLogFiles() {
+        val pluginsDirectory = File(appContext.filesDir, "plugins")
+        if (!pluginsDirectory.isDirectory) return
+        pluginLogFiles(pluginsDirectory).forEach(File::delete)
     }
 
     companion object {
@@ -396,8 +411,7 @@ internal fun retainDiagnosticEvents(events: List<DiagnosticEvent>): List<Diagnos
 }
 
 internal fun redactDiagnosticValue(key: String, value: String): String {
-    val normalized = key.lowercase()
-    if (listOf("token", "cookie", "authorization", "password", "secret", "apikey", "api_key").any(normalized::contains)) {
+    if (isSensitiveDiagnosticKey(key)) {
         return "[redacted]"
     }
     return value.substringBefore('?')
@@ -458,6 +472,48 @@ private fun addZipEvents(
         zip.write('\n'.code)
     }
     zip.closeEntry()
+}
+
+private fun pluginLogFiles(pluginsDirectory: File): Sequence<File> =
+    pluginsDirectory.walkTopDown().filter { file ->
+        file.isFile && file.toRelativeString(pluginsDirectory).split(File.separatorChar).contains("logs")
+    }
+
+/**
+ * Rewrites plugin JSONL into an export-only summary. Plugin messages are unstructured text and may
+ * contain credentials, so no original message is exported. Field values are redacted recursively
+ * whenever their key is sensitive.
+ */
+internal fun sanitizePluginLogLine(line: String): String? =
+    runCatching {
+        val source = Json.parseToJsonElement(line).jsonObject
+        buildJsonObject {
+            source["pluginId"]?.let { put("pluginId", it) }
+            source["timestampMs"]?.let { put("timestampMs", it) }
+            source["level"]?.let { put("level", it) }
+            put("message", "[omitted from diagnostic export]")
+            source["fields"]?.let { put("fields", redactPluginLogElement(it)) }
+        }.toString()
+    }.getOrNull()
+
+private fun redactPluginLogElement(element: JsonElement): JsonElement =
+    when (element) {
+        is JsonObject ->
+            JsonObject(
+                element.mapValues { (key, value) ->
+                    if (isSensitiveDiagnosticKey(key)) JsonPrimitive("[redacted]")
+                    else redactPluginLogElement(value)
+                }
+            )
+
+        is JsonArray -> JsonArray(element.map(::redactPluginLogElement))
+        else -> element
+    }
+
+private fun isSensitiveDiagnosticKey(key: String): Boolean {
+    val normalized = key.lowercase()
+    return listOf("token", "cookie", "authorization", "password", "secret", "apikey", "api_key")
+        .any(normalized::contains)
 }
 
 private fun diagnosticEventFromJson(line: String): DiagnosticEvent {

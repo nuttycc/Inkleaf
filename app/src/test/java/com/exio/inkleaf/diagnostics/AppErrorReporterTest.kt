@@ -6,6 +6,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 import java.time.Instant
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 class AppErrorReporterTest {
     @Test
@@ -83,6 +85,27 @@ class AppErrorReporterTest {
         assertEquals("[redacted]", redactDiagnosticValue("Authorization", "Bearer secret"))
         assertEquals("https://example.test/path", redactDiagnosticValue("url", "https://example.test/path?token=secret"))
         assertEquals("value", redactDiagnosticValue("pluginId", "value"))
+    }
+
+    @Test
+    fun `plugin log export omits unstructured messages and redacts nested sensitive fields`() {
+        val sanitized =
+            requireNotNull(
+                sanitizePluginLogLine(
+                    """{"pluginId":"fixture","timestampMs":1,"level":"warn","message":"Bearer raw-token","fields":{"url":"https://example.test/path","nested":{"apiToken":"raw-token"}}}"""
+                )
+            )
+        val json = kotlinx.serialization.json.Json.parseToJsonElement(sanitized).jsonObject
+
+        assertEquals("[omitted from diagnostic export]", json["message"]?.jsonPrimitive?.content)
+        assertFalse(sanitized.contains("raw-token"))
+        assertEquals("[redacted]", json["fields"]?.jsonObject?.get("nested")?.jsonObject?.get("apiToken")?.jsonPrimitive?.content)
+        assertEquals("https://example.test/path", json["fields"]?.jsonObject?.get("url")?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `malformed plugin log line is skipped from export`() {
+        assertEquals(null, sanitizePluginLogLine("not json"))
     }
 
     @Test

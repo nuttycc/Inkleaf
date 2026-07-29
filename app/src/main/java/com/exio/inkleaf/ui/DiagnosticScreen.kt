@@ -151,7 +151,7 @@ fun DiagnosticScreen(
     if (showClearConfirmation) {
         ConfirmDialog(
             title = "清空诊断记录？",
-            text = "这会移除设备上的诊断事件与尚未导出的应急记录。",
+            text = "这会移除设备上的诊断事件、应急记录和插件日志。",
             confirmLabel = "清空",
             onConfirm = {
                 showClearConfirmation = false
