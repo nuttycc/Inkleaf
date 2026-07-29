@@ -30,7 +30,6 @@ import com.exio.inkleaf.data.ShelfSettingsRepository
 import com.exio.inkleaf.data.db.ComicEntity
 import com.exio.inkleaf.data.db.FolderWithCount
 import com.exio.inkleaf.data.db.GroupWithCount
-import com.exio.inkleaf.data.db.LibraryFolderType
 import com.exio.inkleaf.plugin.OnlineComicRecord
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
@@ -418,14 +417,6 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycle
                 showMessage(e.message?.let { "保存失败：$it" } ?: "保存失败")
             }
         }
-    }
-
-    /** 判断一本漫画是否来自 PDF 章节目录（用于删除对话框的提示文案）。 直接读已缓存的 folders 列表，避免为弹窗再启动异步查询。 */
-    fun isSeriesComic(comic: ComicEntity): Boolean {
-        val folderId = comic.folderId ?: return false
-        return folders.value?.any {
-            it.folder.id == folderId && it.folder.type == LibraryFolderType.SERIES
-        } == true
     }
 
     fun selectGroup(selection: ShelfGroupSelection) {

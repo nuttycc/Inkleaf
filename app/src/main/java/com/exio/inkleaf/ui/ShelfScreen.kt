@@ -562,9 +562,9 @@ fun ShelfScreen(
         val rescanHint =
             when {
                 isAlbum -> ""
-                comic.folderId == null || comic.isMissing -> ""
-                viewModel.isSeriesComic(comic) -> "\n注意：移除后将停止同步该 PDF 章节目录。"
-                else -> "\n注意：该漫画来自库目录，重新扫描后会再次出现。"
+                comic.sourceType == BookSourceType.PDF_SERIES ->
+                    "\n注意：移除后将停止同步该 PDF 章节目录。"
+                else -> "\n移除后目录扫描不会自动恢复；再次手动添加可恢复。"
             }
         ConfirmDialog(
             title = if (isAlbum) "删除图册" else "从书架移除",

@@ -12,6 +12,7 @@ import androidx.room.RoomDatabase
             ComicEntity::class,
             ChapterEntity::class,
             LibraryFolderEntity::class,
+            LibraryExclusionEntity::class,
             FavoritePageEntity::class,
             ComicGroupEntity::class,
             AlbumPageEntity::class,
@@ -20,8 +21,8 @@ import androidx.room.RoomDatabase
         ],
     // v13+: reading activity history schema. No data migration — destructive rebuild is intentional
     // (#15).
-    // v16 removes the retired enhancement schema; local data may be rebuilt on upgrade.
-    version = 16,
+    // v17 persists comics explicitly excluded from directory scans.
+    version = 17,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -30,6 +31,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun chapterDao(): ChapterDao
 
     abstract fun libraryFolderDao(): LibraryFolderDao
+
+    abstract fun libraryExclusionDao(): LibraryExclusionDao
 
     abstract fun favoriteDao(): FavoriteDao
 

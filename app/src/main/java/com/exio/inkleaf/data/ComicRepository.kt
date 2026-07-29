@@ -12,6 +12,7 @@ import com.exio.inkleaf.data.db.ComicEntity
 import com.exio.inkleaf.data.db.ComicGroupEntity
 import com.exio.inkleaf.data.db.FolderWithCount
 import com.exio.inkleaf.data.db.GroupWithCount
+import com.exio.inkleaf.data.db.LibraryExclusionEntity
 import com.exio.inkleaf.data.db.LibraryFolderEntity
 import com.exio.inkleaf.data.db.LibraryFolderType
 import java.io.File
@@ -109,6 +110,7 @@ class ComicRepository(context: Context) {
     private val db = AppDatabase.getInstance(appContext)
     private val dao = db.comicDao()
     private val folderDao = db.libraryFolderDao()
+    private val exclusionDao = db.libraryExclusionDao()
     private val groupDao = db.comicGroupDao()
     private val scanner = LibraryScanner(appContext)
 
@@ -212,42 +214,44 @@ class ComicRepository(context: Context) {
      * takePersistableUriPermission 把 SAF 的"本次会话可读"升级为 "重启后仍可读"。个别文档提供方不支持持久化授权，失败也不阻断添加。
      */
     suspend fun addOrGetComic(uri: Uri): AddComicOutcome {
-        runCatching {
-            appContext.contentResolver.takePersistableUriPermission(
-                uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION,
-            )
-        }
-
         val uriString = uri.toString()
-        val fileKey = withContext(Dispatchers.IO) { ComicIdentity.fileKey(appContext, uri) }
         return syncMutex.withLock {
-            dao.getByFileKey(fileKey)?.let {
-                return@withLock existingComicOutcome(it)
-            }
-            dao.getByUri(uriString)?.let {
-                return@withLock existingComicOutcome(it)
-            }
-
-            val now = System.currentTimeMillis()
-            val id =
-                dao.insert(
-                    ComicEntity(
-                        uri = uriString,
-                        fileKey = fileKey,
-                        title = guessTitle(uri),
-                        addedAt = now,
-                        lastReadAt = now,
-                    )
+            runCatching {
+                appContext.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
                 )
-            if (id != -1L) {
-                AddComicOutcome.Added(dao.getById(id)!!)
-            } else {
-                val existing =
-                    dao.getByFileKey(fileKey)
-                        ?: dao.getByUri(uriString)
-                        ?: error("Comic insert conflicted but no existing row was found")
-                existingComicOutcome(existing)
+            }
+            val fileKey = withContext(Dispatchers.IO) { ComicIdentity.fileKey(appContext, uri) }
+            db.withTransaction {
+                exclusionDao.deleteByFileKey(fileKey)
+                dao.getByFileKey(fileKey)?.let {
+                    return@withTransaction existingComicOutcome(it)
+                }
+                dao.getByUri(uriString)?.let {
+                    return@withTransaction existingComicOutcome(it)
+                }
+
+                val now = System.currentTimeMillis()
+                val id =
+                    dao.insert(
+                        ComicEntity(
+                            uri = uriString,
+                            fileKey = fileKey,
+                            title = guessTitle(uri),
+                            addedAt = now,
+                            lastReadAt = now,
+                        )
+                    )
+                if (id != -1L) {
+                    AddComicOutcome.Added(dao.getById(id)!!)
+                } else {
+                    val existing =
+                        dao.getByFileKey(fileKey)
+                            ?: dao.getByUri(uriString)
+                            ?: error("Comic insert conflicted but no existing row was found")
+                    existingComicOutcome(existing)
+                }
             }
         }
     }
@@ -342,7 +346,7 @@ class ComicRepository(context: Context) {
         }
     }
 
-    /** 从书架移除单本：删记录 + 删派生文件 + 释放权限（不动用户的原文件） */
+    /** Removes one shelf entry without deleting the user's source file. */
     suspend fun deleteComic(comic: ComicEntity) {
         if (comic.sourceType == BookSourceType.CREATED_ALBUM) {
             albumFileMutex.withLock {
@@ -351,25 +355,32 @@ class ComicRepository(context: Context) {
             }
             return
         }
-        dao.deleteById(comic.id)
-        deleteComicArtifacts(comic)
-        // PDF 章节目录的书被移除时，一并移除目录记录，避免自动同步把它又加回来
-        comic.folderId?.let { folderId ->
-            folderDao
-                .getAll()
-                .find { it.id == folderId }
-                ?.let { folder ->
-                    if (folder.type == LibraryFolderType.SERIES) {
-                        folderDao.deleteById(folder.id)
+        syncMutex.withLock {
+            db.withTransaction {
+                if (shouldPersistLibraryExclusion(comic.sourceType)) {
+                    exclusionDao.upsert(
+                        LibraryExclusionEntity(
+                            fileKey = comic.fileKey,
+                            excludedAt = System.currentTimeMillis(),
+                        )
+                    )
+                } else if (comic.sourceType == BookSourceType.PDF_SERIES) {
+                    comic.folderId?.let { folderId ->
+                        if (folderDao.getById(folderId)?.type == LibraryFolderType.SERIES) {
+                            folderDao.deleteById(folderId)
+                        }
                     }
                 }
+                dao.deleteById(comic.id)
+            }
+            runCatching {
+                appContext.contentResolver.releasePersistableUriPermission(
+                    comic.uri.toUri(),
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }
         }
-        runCatching {
-            appContext.contentResolver.releasePersistableUriPermission(
-                comic.uri.toUri(),
-                Intent.FLAG_GRANT_READ_URI_PERMISSION,
-            )
-        }
+        deleteComicArtifacts(comic)
     }
 
     // ===== 漫画库目录 =====
@@ -380,23 +391,27 @@ class ComicRepository(context: Context) {
     suspend fun addFolder(
         treeUri: Uri,
         type: LibraryFolderType = LibraryFolderType.LIBRARY,
-    ): Boolean {
+    ): Boolean = syncMutex.withLock {
         appContext.contentResolver.takePersistableUriPermission(
             treeUri,
             Intent.FLAG_GRANT_READ_URI_PERMISSION,
         )
-        if (folderDao.getByTreeUri(treeUri.toString()) != null) return false
+        val treeUriString = treeUri.toString()
+        if (folderDao.getByTreeUri(treeUriString) != null) return@withLock false
 
         val name = DocumentFile.fromTreeUri(appContext, treeUri)?.name ?: "未命名目录"
-        folderDao.insert(
-            LibraryFolderEntity(
-                treeUri = treeUri.toString(),
-                displayName = name,
-                addedAt = System.currentTimeMillis(),
-                type = type,
+        db.withTransaction {
+            if (folderDao.getByTreeUri(treeUriString) != null) return@withTransaction false
+            folderDao.insert(
+                LibraryFolderEntity(
+                    treeUri = treeUriString,
+                    displayName = name,
+                    addedAt = System.currentTimeMillis(),
+                    type = type,
+                )
             )
-        )
-        return true
+            true
+        }
     }
 
     /**
@@ -404,15 +419,23 @@ class ComicRepository(context: Context) {
      * （树授权覆盖整棵子树）。手动添加的条目（folderId=null）不受影响。
      */
     suspend fun removeFolder(folder: LibraryFolderEntity) {
-        dao.getByFolderId(folder.id).forEach { deleteComicArtifacts(it) }
-        dao.deleteByFolderId(folder.id)
-        folderDao.deleteById(folder.id)
-        runCatching {
-            appContext.contentResolver.releasePersistableUriPermission(
-                folder.treeUri.toUri(),
-                Intent.FLAG_GRANT_READ_URI_PERMISSION,
-            )
+        val removedComics = syncMutex.withLock {
+            val comics =
+                db.withTransaction {
+                    val existing = dao.getByFolderId(folder.id)
+                    dao.deleteByFolderId(folder.id)
+                    folderDao.deleteById(folder.id)
+                    existing
+                }
+            runCatching {
+                appContext.contentResolver.releasePersistableUriPermission(
+                    folder.treeUri.toUri(),
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }
+            comics
         }
+        removedComics.forEach(::deleteComicArtifacts)
     }
 
     /**
@@ -492,16 +515,15 @@ class ComicRepository(context: Context) {
             return AddSeriesFolderOutcome.Overlap(overlap.first, overlap.second)
         }
 
-        // Persist only after the user has approved the final scan size and validation succeeded.
-        appContext.contentResolver.takePersistableUriPermission(
-            treeUri,
-            Intent.FLAG_GRANT_READ_URI_PERMISSION,
-        )
-
         val outcome = syncMutex.withLock {
             if (folderDao.getByTreeUri(treeUri.toString()) != null) {
                 return@withLock AddSeriesFolderOutcome.Duplicate
             }
+            // Persist only after the user has approved the final scan size and validation succeeded.
+            appContext.contentResolver.takePersistableUriPermission(
+                treeUri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION,
+            )
             db.withTransaction {
                 val metrics = scan.metrics.takeIf { approvedLargeScan }
                 val issue = seriesScanIssue(displayName, 0, scan.skippedVirtualPdfCount)
@@ -607,58 +629,69 @@ class ComicRepository(context: Context) {
                 return ScanResult(0, 0, 0, 0, emptyList())
             }
 
-        var added = 0
-        var markedMissing = 0
-        var restored = 0
-        var alreadyInLibrary = 0
+        return db.withTransaction {
+            var added = 0
+            var markedMissing = 0
+            var restored = 0
+            var alreadyInLibrary = 0
 
-        val existing = dao.getByFolderId(folder.id)
-        val scannedKeys = scanned.map { it.fileKey }.toSet()
-        val existingKeys = existing.map { it.fileKey }.toSet()
+            val existing = dao.getByFolderId(folder.id)
+            val scannedKeys = scanned.map { it.fileKey }.toSet()
+            val existingKeys = existing.map { it.fileKey }.toSet()
+            val excludedKeys = getExcludedFileKeys(scannedKeys)
 
-        // 1) 目录里有、库里没有 → 新书入库
-        val candidateFiles = scanned.filter { it.fileKey !in existingKeys }
-        val knownComics = getComicsByFileKeys(candidateFiles.map { it.fileKey })
-        val knownKeys = knownComics.map { it.fileKey }.toSet()
-        val knownMissingIds = knownComics.filter { it.isMissing }.map { it.id }
-        if (knownMissingIds.isNotEmpty()) {
-            dao.setMissing(knownMissingIds, false)
-            restored += knownMissingIds.size
-        }
-        val newFiles = candidateFiles.filter { it.fileKey !in knownKeys }
-        alreadyInLibrary += candidateFiles.size - newFiles.size
-        if (newFiles.isNotEmpty()) {
-            val now = System.currentTimeMillis()
-            val insertedIds =
-                dao.insertAll(
-                    newFiles.map {
-                        ComicEntity(
-                            uri = it.uri,
-                            fileKey = it.fileKey,
-                            title = titleFromFileName(it.displayName),
-                            folderId = folder.id,
-                            addedAt = now,
-                        )
-                    }
+            // 1) 目录里有、库里没有 → 新书入库
+            val candidateKeys =
+                discoverableLibraryFileKeys(
+                    scannedKeys = scannedKeys,
+                    existingKeys = existingKeys,
+                    excludedKeys = excludedKeys,
                 )
-            added += insertedIds.count { it != -1L }
-        }
+            val candidateFiles = scanned.filter { it.fileKey in candidateKeys }
+            val knownComics = getComicsByFileKeys(candidateFiles.map { it.fileKey })
+            val knownKeys = knownComics.map { it.fileKey }.toSet()
+            val knownMissingIds = knownComics.filter { it.isMissing }.map { it.id }
+            if (knownMissingIds.isNotEmpty()) {
+                dao.setMissing(knownMissingIds, false)
+                restored += knownMissingIds.size
+            }
+            val newFiles = candidateFiles.filter { it.fileKey !in knownKeys }
+            alreadyInLibrary += candidateFiles.size - newFiles.size
+            if (newFiles.isNotEmpty()) {
+                val now = System.currentTimeMillis()
+                val insertedIds =
+                    dao.insertAll(
+                        newFiles.map {
+                            ComicEntity(
+                                uri = it.uri,
+                                fileKey = it.fileKey,
+                                title = titleFromFileName(it.displayName),
+                                folderId = folder.id,
+                                addedAt = now,
+                            )
+                        }
+                    )
+                added += insertedIds.count { it != -1L }
+            }
 
-        // 2) 库里有、目录里没有 → 标记失效（保留进度，文件回来可恢复）
-        val toMiss = existing.filter { !it.isMissing && it.fileKey !in scannedKeys }.map { it.id }
-        if (toMiss.isNotEmpty()) {
-            dao.setMissing(toMiss, true)
-            markedMissing += toMiss.size
-        }
+            // 2) 库里有、目录里没有 → 标记失效（保留进度，文件回来可恢复）
+            val toMiss =
+                existing.filter { !it.isMissing && it.fileKey !in scannedKeys }.map { it.id }
+            if (toMiss.isNotEmpty()) {
+                dao.setMissing(toMiss, true)
+                markedMissing += toMiss.size
+            }
 
-        // 3) 之前失效、现在又扫到了 → 恢复
-        val toRestore = existing.filter { it.isMissing && it.fileKey in scannedKeys }.map { it.id }
-        if (toRestore.isNotEmpty()) {
-            dao.setMissing(toRestore, false)
-            restored += toRestore.size
-        }
+            // 3) 之前失效、现在又扫到了 → 恢复
+            val toRestore =
+                existing.filter { it.isMissing && it.fileKey in scannedKeys }.map { it.id }
+            if (toRestore.isNotEmpty()) {
+                dao.setMissing(toRestore, false)
+                restored += toRestore.size
+            }
 
-        return ScanResult(added, markedMissing, restored, alreadyInLibrary, emptyList())
+            ScanResult(added, markedMissing, restored, alreadyInLibrary, emptyList())
+        }
     }
 
     private suspend fun syncSeriesFolder(
@@ -1022,6 +1055,15 @@ class ComicRepository(context: Context) {
         val distinctKeys = fileKeys.distinct()
         if (distinctKeys.isEmpty()) return emptyList()
         return distinctKeys.chunked(SQLITE_MAX_VARIABLES).flatMap { dao.getByFileKeys(it) }
+    }
+
+    private suspend fun getExcludedFileKeys(fileKeys: Collection<String>): Set<String> {
+        val distinctKeys = fileKeys.distinct()
+        if (distinctKeys.isEmpty()) return emptySet()
+        return distinctKeys
+            .chunked(SQLITE_MAX_VARIABLES)
+            .flatMap { exclusionDao.getExcludedFileKeys(it) }
+            .toSet()
     }
 
     private fun normalizeGroupName(name: String): String? = name.trim().takeIf { it.isNotEmpty() }
