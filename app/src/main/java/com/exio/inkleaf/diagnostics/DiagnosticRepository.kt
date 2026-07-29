@@ -8,6 +8,7 @@ import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.io.OutputStream
+import java.net.URI
 import java.time.Instant
 import java.util.UUID
 import java.util.zip.ZipEntry
@@ -32,6 +33,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 enum class DiagnosticEventType {
     ERROR,
@@ -502,6 +504,9 @@ private fun redactPluginLogElement(element: JsonElement): JsonElement =
             JsonObject(
                 element.mapValues { (key, value) ->
                     if (isSensitiveDiagnosticKey(key)) JsonPrimitive("[redacted]")
+                    else if (isUrlDiagnosticKey(key) && value is JsonPrimitive && value.isString) {
+                        JsonPrimitive(redactDiagnosticUrl(value.content))
+                    }
                     else redactPluginLogElement(value)
                 }
             )
@@ -514,6 +519,22 @@ private fun isSensitiveDiagnosticKey(key: String): Boolean {
     val normalized = key.lowercase()
     return listOf("token", "cookie", "authorization", "password", "secret", "apikey", "api_key")
         .any(normalized::contains)
+}
+
+private fun isUrlDiagnosticKey(key: String): Boolean {
+    val normalized = key.lowercase()
+    return normalized == "url" || normalized == "uri" || normalized.endsWith("url") || normalized.endsWith("uri")
+}
+
+internal fun redactDiagnosticUrl(value: String): String {
+    value.toHttpUrlOrNull()?.let { url ->
+        return url.newBuilder().query(null).fragment(null).build().toString()
+    }
+    return runCatching {
+        URI(value).let { uri ->
+            URI(uri.scheme, uri.authority, uri.path, null, null).toString()
+        }
+    }.getOrElse { value.substringBefore('?').substringBefore('#') }
 }
 
 private fun diagnosticEventFromJson(line: String): DiagnosticEvent {

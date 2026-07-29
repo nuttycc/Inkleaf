@@ -104,6 +104,23 @@ class AppErrorReporterTest {
     }
 
     @Test
+    fun `plugin log URL fields retain only their base path`() {
+        val sanitized =
+            requireNotNull(
+                sanitizePluginLogLine(
+                    """{"fields":{"requestURL":"https://example.test/path?token=raw-token#fragment-token","deep":{"resourceUri":"https://example.test/child?secret=raw-secret#fragment-secret"}}}"""
+                )
+            )
+
+        assertTrue(sanitized.contains("https://example.test/path"))
+        assertTrue(sanitized.contains("https://example.test/child"))
+        assertFalse(sanitized.contains("raw-token"))
+        assertFalse(sanitized.contains("fragment-token"))
+        assertFalse(sanitized.contains("raw-secret"))
+        assertFalse(sanitized.contains("fragment-secret"))
+    }
+
+    @Test
     fun `malformed plugin log line is skipped from export`() {
         assertEquals(null, sanitizePluginLogLine("not json"))
     }
