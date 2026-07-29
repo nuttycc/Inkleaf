@@ -148,6 +148,8 @@ class PluginHostSession(
             networkContext,
             httpClientDelegate.value,
             followSslRedirects = true,
+            diagnosticSource = "plugin_http",
+            pluginId = pluginId,
         )
     }
     private val httpClient: OkHttpClient

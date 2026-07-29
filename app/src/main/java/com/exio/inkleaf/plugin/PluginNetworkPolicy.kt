@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
+import com.exio.inkleaf.diagnostics.NetworkDiagnosticReporter
 import java.io.IOException
 import java.net.Inet4Address
 import java.net.Inet6Address
@@ -31,11 +32,22 @@ internal object PluginNetworkPolicy {
         context: Context?,
         client: OkHttpClient,
         followSslRedirects: Boolean,
+        diagnosticSource: String? = null,
+        pluginId: String? = null,
     ): Call.Factory {
-        val policyClient =
+        val builder =
             client
                 .newBuilder()
                 .dns(strictDns)
+        if (context != null && diagnosticSource != null) {
+            // Observe before validation so blocked requests are visible too; this interceptor
+            // neither reads sensitive request data nor changes policy outcomes.
+            builder.addInterceptor(
+                NetworkDiagnosticReporter.interceptor(context, diagnosticSource, pluginId)
+            )
+        }
+        val policyClient =
+            builder
                 .addInterceptor(hostValidationInterceptor())
                 .proxy(null)
                 .proxySelector(validatingProxySelector())
