@@ -4,22 +4,20 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.util.Log
-import java.io.File
 import java.time.Instant
 import java.util.Collections
 import java.util.IdentityHashMap
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
 
 data class AppErrorReport(val summary: String, val details: String)
 
-/** Records a complete error while returning concise feedback that the UI can present and copy. */
+/**
+ * Compatibility facade for UI code that needs a copyable error report.
+ *
+ * New diagnostics remain structured in [DiagnosticRepository], while this API deliberately keeps
+ * the existing concise Chinese feedback and plain-text details expected by source action screens.
+ */
 object AppErrorReporter {
-    private val logMutex = Mutex()
-
     suspend fun report(
         context: Context,
         operation: String,
@@ -35,27 +33,25 @@ object AppErrorReporter {
                 appVersion = context.appVersionNameOrUnknown(),
             )
         Log.e(TAG, "$operation failed", error)
-        withContext(Dispatchers.IO) {
-            try {
-                logMutex.withLock {
-                    val logFile = File(context.applicationContext.filesDir, LOG_FILE_NAME)
-                    val existing = if (logFile.isFile) logFile.readText() else ""
-                    logFile.writeText(retainErrorLogEntries(existing, report.details))
-                }
-            } catch (logError: CancellationException) {
-                throw logError
-            } catch (logError: Throwable) {
-                Log.e(TAG, "Unable to persist app error", logError)
-            }
+        try {
+            DiagnosticRepository.get(context).record(
+                type = DiagnosticEventType.ERROR,
+                title = operation,
+                error = error,
+                metadata = metadata,
+            )
+        } catch (writeError: CancellationException) {
+            throw writeError
+        } catch (writeError: Throwable) {
+            Log.e(TAG, "Unable to persist app error", writeError)
         }
         return report
     }
 
     private const val TAG = "AppErrorReporter"
-    private const val LOG_FILE_NAME = "errors.log"
 }
 
-private fun Context.appVersionNameOrUnknown(): String =
+internal fun Context.appVersionNameOrUnknown(): String =
     runCatching {
             val packageInfo =
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -113,15 +109,13 @@ private fun Throwable.causeChain(): List<Throwable> {
     return causes
 }
 
+/** Retained for compatibility with old on-device reports and focused JVM tests. */
 internal fun retainErrorLogEntries(existing: String, newEntry: String): String {
-    val existingEntries =
-        existing.split(ERROR_LOG_SEPARATOR).map { it.trim() }.filter { it.isNotEmpty() }
-    val safeNewEntry = newEntry.trim().replace(ERROR_LOG_SEPARATOR, ESCAPED_ERROR_LOG_SEPARATOR)
-    val entries = (existingEntries + safeNewEntry).takeLast(MAX_ERROR_LOG_ENTRIES)
-    return entries.joinToString(ERROR_LOG_SEPARATOR, postfix = "\n")
+    val separator = "\n\n=== Inkleaf error ===\n\n"
+    val escaped = "\n\n=== Inkleaf error marker ===\n\n"
+    val entries = existing.split(separator).map { it.trim() }.filter { it.isNotEmpty() }
+    val safeNewEntry = newEntry.trim().replace(separator, escaped)
+    return (entries + safeNewEntry).takeLast(100).joinToString(separator, postfix = "\n")
 }
 
-private const val ERROR_LOG_SEPARATOR = "\n\n=== Inkleaf error ===\n\n"
-private const val ESCAPED_ERROR_LOG_SEPARATOR = "\n\n=== Inkleaf error marker ===\n\n"
-private const val MAX_ERROR_LOG_ENTRIES = 100
 private const val MAX_ERROR_SUMMARY_CHARS = 160

@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.Instant
 
 class AppErrorReporterTest {
     @Test
@@ -59,4 +60,36 @@ class AppErrorReporterTest {
         assertTrue(log.contains("before"))
         assertTrue(log.contains("after"))
     }
+
+    @Test
+    fun `retention keeps recent critical events before ordinary event quota`() {
+        val events =
+            buildList {
+                repeat(1_005) { index -> add(testEvent(index, DiagnosticEventType.ERROR)) }
+                repeat(25) { index -> add(testEvent(2_000 + index, DiagnosticEventType.CRASH)) }
+            }
+
+        val retained = retainDiagnosticEvents(events)
+
+        assertEquals(1_000, retained.size)
+        assertEquals(25, retained.count { it.type == DiagnosticEventType.CRASH })
+        assertTrue(retained.any { it.id == "2024" })
+        assertFalse(retained.any { it.id == "0" })
+    }
+
+    @Test
+    fun `redaction removes credential values and URL queries`() {
+        assertEquals("[redacted]", redactDiagnosticValue("Authorization", "Bearer secret"))
+        assertEquals("https://example.test/path", redactDiagnosticValue("url", "https://example.test/path?token=secret"))
+        assertEquals("value", redactDiagnosticValue("pluginId", "value"))
+    }
+
+    private fun testEvent(index: Int, type: DiagnosticEventType): DiagnosticEvent =
+        DiagnosticEvent(
+            id = index.toString(),
+            timestamp = Instant.ofEpochSecond(index.toLong()).toString(),
+            sessionId = "test",
+            type = type,
+            title = "event-$index",
+        )
 }

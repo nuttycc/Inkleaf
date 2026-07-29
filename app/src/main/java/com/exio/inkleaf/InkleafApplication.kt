@@ -8,6 +8,8 @@ import com.exio.inkleaf.data.AlbumExporter
 import com.exio.inkleaf.data.AlbumRepository
 import com.exio.inkleaf.data.ComicRepository
 import com.exio.inkleaf.data.ReaderCache
+import com.exio.inkleaf.diagnostics.DiagnosticEventType
+import com.exio.inkleaf.diagnostics.DiagnosticRepository
 import com.exio.inkleaf.plugin.OnlineContentRepository
 import com.exio.inkleaf.plugin.PluginBrowseRepository
 import com.exio.inkleaf.plugin.PluginCatalog
@@ -19,6 +21,7 @@ import com.exio.inkleaf.plugin.PluginSettingsRepository
 import java.io.File
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -30,7 +33,18 @@ import okhttp3.Call
 import okhttp3.OkHttpClient
 
 class InkleafApplication : Application(), ImageLoaderFactory {
-    internal val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val coroutineErrorHandler =
+        CoroutineExceptionHandler { context, error ->
+            if (error is CancellationException) return@CoroutineExceptionHandler
+            DiagnosticRepository.get(this).recordEmergency(
+                type = DiagnosticEventType.ERROR,
+                title = "Uncaught application coroutine",
+                thread = Thread.currentThread(),
+                error = error,
+            )
+            Log.e(TAG, "Uncaught application coroutine: $context", error)
+        }
+    internal val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO + coroutineErrorHandler)
     private val pluginPackageStore: PluginPackageStore by lazy {
         PluginPackageStore(File(filesDir, "plugins"))
     }
@@ -81,6 +95,8 @@ class InkleafApplication : Application(), ImageLoaderFactory {
 
     override fun onCreate() {
         super.onCreate()
+        installUncaughtExceptionHandler()
+        applicationScope.launch { DiagnosticRepository.get(this@InkleafApplication).initialize() }
 
         // Process-owned startup work must survive the short-lived Activity used to synchronize
         // a stored night mode on cold start.
@@ -126,6 +142,14 @@ class InkleafApplication : Application(), ImageLoaderFactory {
                         Log.w(TAG, "Retired storage cleanup failed: ${directory.name}", error)
                     }
             }
+    }
+
+    private fun installUncaughtExceptionHandler() {
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+            DiagnosticRepository.get(this).recordEmergencyCrash(thread, error)
+            previous?.uncaughtException(thread, error)
+        }
     }
 
     private companion object {
