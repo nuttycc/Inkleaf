@@ -12,6 +12,60 @@ import kotlinx.serialization.json.jsonPrimitive
 
 class AppErrorReporterTest {
     @Test
+    fun `diagnostic severity distinguishes actionable failures from information`() {
+        assertEquals(
+            DiagnosticSeverity.FATAL,
+            defaultDiagnosticSeverity(DiagnosticEventType.CRASH),
+        )
+        assertEquals(
+            DiagnosticSeverity.WARNING,
+            defaultDiagnosticSeverity(DiagnosticEventType.STRICT_MODE),
+        )
+        assertEquals(
+            DiagnosticSeverity.INFO,
+            defaultDiagnosticSeverity(
+                DiagnosticEventType.NETWORK,
+                mapOf("status" to "200"),
+            ),
+        )
+        assertEquals(
+            DiagnosticSeverity.WARNING,
+            defaultDiagnosticSeverity(
+                DiagnosticEventType.NETWORK,
+                mapOf("status" to "503"),
+            ),
+        )
+        assertEquals(
+            DiagnosticSeverity.ERROR,
+            defaultDiagnosticSeverity(
+                DiagnosticEventType.EXIT,
+                mapOf("reason" to "6"),
+            ),
+        )
+        assertEquals(
+            DiagnosticSeverity.INFO,
+            defaultDiagnosticSeverity(
+                DiagnosticEventType.EXIT,
+                mapOf("reason" to "10"),
+            ),
+        )
+    }
+
+    @Test
+    fun `critical count excludes warnings information and read failures`() {
+        val events =
+            listOf(
+                testEvent(1, DiagnosticEventType.ERROR),
+                testEvent(2, DiagnosticEventType.CRASH),
+                testEvent(3, DiagnosticEventType.STRICT_MODE),
+                testEvent(4, DiagnosticEventType.EXIT),
+                testEvent(5, DiagnosticEventType.ERROR).copy(read = true),
+            )
+
+        assertEquals(2, countUnreadCriticalDiagnostics(events))
+    }
+
+    @Test
     fun `report preserves exception type when message is absent`() {
         val error = IllegalStateException(null, IllegalArgumentException("bad input"))
 

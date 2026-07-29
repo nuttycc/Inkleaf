@@ -2,6 +2,7 @@ package com.exio.inkleaf.ui
 
 import com.exio.inkleaf.diagnostics.DiagnosticEvent
 import com.exio.inkleaf.diagnostics.DiagnosticEventType
+import com.exio.inkleaf.diagnostics.DiagnosticSeverity
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -16,8 +17,26 @@ class DiagnosticUiLogicTest {
 
     @Test
     fun `filter retains only the requested diagnostic type`() {
-        assertEquals(events, diagnosticEventsForFilter(events, null))
-        assertEquals(listOf(events[1]), diagnosticEventsForFilter(events, DiagnosticEventType.NETWORK))
+        assertEquals(events, diagnosticEventsForFilter(events, null, null))
+        assertEquals(
+            listOf(events[1]),
+            diagnosticEventsForFilter(events, DiagnosticEventType.NETWORK, null),
+        )
+    }
+
+    @Test
+    fun `filter combines type and severity`() {
+        val warningNetwork = events[1].copy(severity = DiagnosticSeverity.WARNING)
+        val candidates = events + warningNetwork
+
+        assertEquals(
+            listOf(warningNetwork),
+            diagnosticEventsForFilter(
+                candidates,
+                DiagnosticEventType.NETWORK,
+                DiagnosticSeverity.WARNING,
+            ),
+        )
     }
 
     @Test
@@ -28,6 +47,7 @@ class DiagnosticUiLogicTest {
                 .copyText()
 
         assertTrue(text.contains("错误 · event-error"))
+        assertTrue(text.contains("级别: 错误"))
         assertTrue(text.contains("operation: open"))
         assertTrue(text.contains("Unable to load"))
     }
@@ -44,6 +64,12 @@ class DiagnosticUiLogicTest {
             timestamp = "2026-07-29T12:00:00Z",
             sessionId = "session",
             type = type,
+            severity =
+                when (type) {
+                    DiagnosticEventType.CRASH -> DiagnosticSeverity.FATAL
+                    DiagnosticEventType.NETWORK -> DiagnosticSeverity.INFO
+                    else -> DiagnosticSeverity.ERROR
+                },
             title = "event-$id",
         )
 }

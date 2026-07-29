@@ -8,8 +8,10 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -19,13 +21,14 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -37,10 +40,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.exio.inkleaf.diagnostics.DiagnosticEvent
+import com.exio.inkleaf.diagnostics.DiagnosticSeverity
 import com.exio.inkleaf.diagnostics.DiagnosticEventType
 import com.exio.inkleaf.diagnostics.DiagnosticRepository
 import kotlinx.coroutines.launch
@@ -56,7 +61,8 @@ fun DiagnosticScreen(
     val events by repository.events.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
-    var filter by remember { mutableStateOf<DiagnosticEventType?>(null) }
+    var typeFilter by remember { mutableStateOf<DiagnosticEventType?>(null) }
+    var severityFilter by remember { mutableStateOf<DiagnosticSeverity?>(null) }
     var selectedEvent by remember { mutableStateOf<DiagnosticEvent?>(null) }
     var showClearConfirmation by remember { mutableStateOf(false) }
     var exporting by remember { mutableStateOf(false) }
@@ -79,7 +85,7 @@ fun DiagnosticScreen(
         }
 
     LaunchedEffect(Unit) { repository.markAllRead() }
-    val visibleEvents = diagnosticEventsForFilter(events, filter)
+    val visibleEvents = diagnosticEventsForFilter(events, typeFilter, severityFilter)
 
     Scaffold(
         modifier = modifier,
@@ -116,9 +122,12 @@ fun DiagnosticScreen(
         ) {
             item {
                 DiagnosticFilters(
-                    selected = filter,
-                    available = events.map { it.type }.distinct(),
-                    onSelected = { filter = it },
+                    selectedType = typeFilter,
+                    availableTypes = events.map { it.type }.distinct(),
+                    selectedSeverity = severityFilter,
+                    availableSeverities = events.map { it.severity }.distinct(),
+                    onTypeSelected = { typeFilter = it },
+                    onSeveritySelected = { severityFilter = it },
                 )
             }
             if (visibleEvents.isEmpty()) {
@@ -168,24 +177,59 @@ fun DiagnosticScreen(
 
 @Composable
 private fun DiagnosticFilters(
-    selected: DiagnosticEventType?,
-    available: List<DiagnosticEventType>,
-    onSelected: (DiagnosticEventType?) -> Unit,
+    selectedType: DiagnosticEventType?,
+    availableTypes: List<DiagnosticEventType>,
+    selectedSeverity: DiagnosticSeverity?,
+    availableSeverities: List<DiagnosticSeverity>,
+    onTypeSelected: (DiagnosticEventType?) -> Unit,
+    onSeveritySelected: (DiagnosticSeverity?) -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(bottom = 8.dp)) {
-        AssistChip(
-            onClick = { onSelected(null) },
-            label = { Text("全部") },
-            leadingIcon = if (selected == null) ({ Text("✓") }) else null,
-        )
-        available.forEach { type ->
-            AssistChip(
-                onClick = { onSelected(type) },
-                label = { Text(type.diagnosticLabel()) },
-                leadingIcon = if (selected == type) ({ Text("✓") }) else null,
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 8.dp)) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+        ) {
+            DiagnosticFilterChip(
+                label = "全部类型",
+                selected = selectedType == null,
+                onClick = { onTypeSelected(null) },
             )
+            availableTypes.forEach { type ->
+                DiagnosticFilterChip(
+                    label = type.diagnosticLabel(),
+                    selected = selectedType == type,
+                    onClick = { onTypeSelected(type) },
+                )
+            }
+        }
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+        ) {
+            DiagnosticFilterChip(
+                label = "全部级别",
+                selected = selectedSeverity == null,
+                onClick = { onSeveritySelected(null) },
+            )
+            availableSeverities.sortedByDescending { it.ordinal }.forEach { severity ->
+                DiagnosticFilterChip(
+                    label = severity.diagnosticLabel(),
+                    selected = selectedSeverity == severity,
+                    onClick = { onSeveritySelected(severity) },
+                )
+            }
         }
     }
+}
+
+@Composable
+private fun DiagnosticFilterChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(label) },
+        leadingIcon = if (selected) ({ Text("✓") }) else null,
+    )
 }
 
 @Composable
@@ -193,8 +237,38 @@ private fun DiagnosticEventRow(event: DiagnosticEvent, onClick: () -> Unit) {
     InkleafActionListItem(
         headline = event.displayTitle(),
         supporting = listOfNotNull(event.message, event.timestamp.substringBefore('.').replace('T', ' ')).joinToString("\n"),
+        leadingContent = { DiagnosticSeverityBadge(event.severity) },
         onClick = onClick,
     )
+}
+
+@Composable
+private fun DiagnosticSeverityBadge(severity: DiagnosticSeverity) {
+    val containerColor =
+        when (severity) {
+            DiagnosticSeverity.FATAL,
+            DiagnosticSeverity.ERROR -> MaterialTheme.colorScheme.errorContainer
+            DiagnosticSeverity.WARNING -> WARNING_YELLOW
+            DiagnosticSeverity.INFO -> MaterialTheme.colorScheme.surfaceVariant
+        }
+    val contentColor =
+        when (severity) {
+            DiagnosticSeverity.FATAL,
+            DiagnosticSeverity.ERROR -> MaterialTheme.colorScheme.onErrorContainer
+            DiagnosticSeverity.WARNING -> Color.Black
+            DiagnosticSeverity.INFO -> MaterialTheme.colorScheme.onSurfaceVariant
+        }
+    Surface(
+        shape = MaterialTheme.shapes.small,
+        color = containerColor,
+        contentColor = contentColor,
+    ) {
+        Text(
+            text = severity.diagnosticLabel(),
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+        )
+    }
 }
 
 @Composable
@@ -222,3 +296,5 @@ private fun Context.copyDiagnosticText(value: String) {
     getSystemService(ClipboardManager::class.java)
         ?.setPrimaryClip(ClipData.newPlainText("Inkleaf diagnostics", value))
 }
+
+private val WARNING_YELLOW = Color(0xFFFFC107)

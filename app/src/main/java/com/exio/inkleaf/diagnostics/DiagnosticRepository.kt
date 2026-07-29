@@ -44,11 +44,19 @@ enum class DiagnosticEventType {
     STRICT_MODE,
 }
 
+enum class DiagnosticSeverity {
+    INFO,
+    WARNING,
+    ERROR,
+    FATAL,
+}
+
 data class DiagnosticEvent(
     val id: String,
     val timestamp: String,
     val sessionId: String,
     val type: DiagnosticEventType,
+    val severity: DiagnosticSeverity = defaultDiagnosticSeverity(type),
     val title: String,
     val message: String? = null,
     val stackTrace: String? = null,
@@ -250,8 +258,7 @@ class DiagnosticRepository private constructor(private val context: Context) {
 
     private fun publish(events: List<DiagnosticEvent>) {
         _events.value = events.sortedByDescending { it.timestamp }
-        _unreadCriticalCount.value =
-            events.count { !it.read && (it.type == DiagnosticEventType.CRASH || it.type == DiagnosticEventType.EXIT) }
+        _unreadCriticalCount.value = countUnreadCriticalDiagnostics(events)
     }
 
     private fun readEventsLocked(): List<DiagnosticEvent> {
@@ -315,6 +322,7 @@ class DiagnosticRepository private constructor(private val context: Context) {
             timestamp = Instant.now().toString(),
             sessionId = sessionId,
             type = type,
+            severity = defaultDiagnosticSeverity(type, metadata),
             title = title.take(MAX_TEXT_CHARS),
             message = (message ?: error?.message)?.take(MAX_TEXT_CHARS),
             stackTrace = (stackTrace ?: error?.stackTraceToString())?.take(MAX_TRACE_CHARS),
@@ -428,6 +436,40 @@ internal fun retainDiagnosticEvents(events: List<DiagnosticEvent>): List<Diagnos
     return retained.sortedBy { it.timestamp }
 }
 
+internal fun defaultDiagnosticSeverity(
+    type: DiagnosticEventType,
+    metadata: Map<String, String> = emptyMap(),
+): DiagnosticSeverity =
+    when (type) {
+        DiagnosticEventType.CRASH -> DiagnosticSeverity.FATAL
+        DiagnosticEventType.ERROR -> DiagnosticSeverity.ERROR
+        DiagnosticEventType.STRICT_MODE -> DiagnosticSeverity.WARNING
+        DiagnosticEventType.NETWORK -> {
+            val status = metadata["status"]?.toIntOrNull()
+            if (metadata["failureType"] != null || (status != null && status >= 400)) {
+                DiagnosticSeverity.WARNING
+            } else {
+                DiagnosticSeverity.INFO
+            }
+        }
+        DiagnosticEventType.EXIT -> exitDiagnosticSeverity(metadata["reason"]?.toIntOrNull())
+        DiagnosticEventType.BREADCRUMB,
+        DiagnosticEventType.PLUGIN -> DiagnosticSeverity.INFO
+    }
+
+internal fun countUnreadCriticalDiagnostics(events: List<DiagnosticEvent>): Int =
+    events.count { event ->
+        !event.read &&
+            (event.severity == DiagnosticSeverity.ERROR || event.severity == DiagnosticSeverity.FATAL)
+    }
+
+private fun exitDiagnosticSeverity(reason: Int?): DiagnosticSeverity =
+    when (reason) {
+        4, 5, 6, 7 -> DiagnosticSeverity.ERROR
+        0, 2, 3, 9, 12, 13 -> DiagnosticSeverity.WARNING
+        else -> DiagnosticSeverity.INFO
+    }
+
 internal fun redactDiagnosticValue(key: String, value: String): String {
     if (isSensitiveDiagnosticKey(key)) {
         return "[redacted]"
@@ -464,6 +506,7 @@ private fun DiagnosticEvent.toJsonLine(): String =
         put("timestamp", timestamp)
         put("sessionId", sessionId)
         put("type", type.name)
+        put("severity", severity.name)
         put("title", title)
         message?.let { put("message", it) }
         stackTrace?.let { put("stackTrace", it) }
@@ -564,6 +607,13 @@ private fun diagnosticEventFromJson(line: String): DiagnosticEvent {
         timestamp = text("timestamp"),
         sessionId = text("sessionId"),
         type = DiagnosticEventType.valueOf(text("type")),
+        severity =
+            json["severity"]?.jsonPrimitive?.contentOrNull
+                ?.let { runCatching { DiagnosticSeverity.valueOf(it) }.getOrNull() }
+                ?: defaultDiagnosticSeverity(
+                    type = DiagnosticEventType.valueOf(text("type")),
+                    metadata = metadata,
+                ),
         title = text("title"),
         message = json["message"]?.jsonPrimitive?.contentOrNull,
         stackTrace = json["stackTrace"]?.jsonPrimitive?.contentOrNull,
