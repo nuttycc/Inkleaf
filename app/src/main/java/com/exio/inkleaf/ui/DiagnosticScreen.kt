@@ -3,8 +3,7 @@ package com.exio.inkleaf.ui
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -42,8 +41,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.composables.icons.materialsymbols.outlined.R as MaterialSymbolsOutlinedR
 import com.exio.inkleaf.diagnostics.DiagnosticEvent
 import com.exio.inkleaf.diagnostics.DiagnosticSeverity
 import com.exio.inkleaf.diagnostics.DiagnosticEventType
@@ -66,23 +67,30 @@ fun DiagnosticScreen(
     var selectedEvent by remember { mutableStateOf<DiagnosticEvent?>(null) }
     var showClearConfirmation by remember { mutableStateOf(false) }
     var exporting by remember { mutableStateOf(false) }
-    val outputLauncher =
-        rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
-            if (uri == null) return@rememberLauncherForActivityResult
-            scope.launch {
-                exporting = true
-                runCatching {
-                    // exportZip owns and closes this SAF stream.
-                    val output = requireNotNull(context.contentResolver.openOutputStream(uri))
-                    repository.exportZip(output)
-                }.onSuccess {
-                    snackbarHostState.showSnackbar("诊断包已导出")
-                }.onFailure {
-                    snackbarHostState.showSnackbar("导出失败")
-                }
-                exporting = false
-            }
+
+    // 分享：写 cacheDir 临时文件 → FileProvider → 系统分享面板（微信/邮件/Telegram/Nearby Share 直发电脑）
+    fun share() {
+        if (exporting) return
+        scope.launch {
+            exporting = true
+            runCatching { repository.createShareIntent(context) }
+                .onSuccess { intent -> context.startActivity(intent) }
+                .onFailure { snackbarHostState.showSnackbar("导出失败") }
+            exporting = false
         }
+    }
+
+    // 直写 Downloads：MediaStore → Download/Inkleaf/ 下，USB 拉取或网盘自动同步
+    fun saveToDownloads() {
+        if (exporting) return
+        scope.launch {
+            exporting = true
+            runCatching { repository.saveToDownloads(context) }
+                .onSuccess { snackbarHostState.showSnackbar("已保存到下载目录的 Inkleaf 文件夹") }
+                .onFailure { snackbarHostState.showSnackbar("导出失败") }
+            exporting = false
+        }
+    }
 
     LaunchedEffect(Unit) { repository.markAllRead() }
     val visibleEvents = diagnosticEventsForFilter(events, typeFilter, severityFilter)
@@ -99,10 +107,22 @@ fun DiagnosticScreen(
                 },
                 actions = {
                     IconButton(
-                        onClick = { outputLauncher.launch(diagnosticExportFileName(System.currentTimeMillis())) },
+                        onClick = { share() },
                         enabled = !exporting,
                     ) {
-                        Icon(Icons.Filled.Share, contentDescription = "导出诊断包")
+                        Icon(Icons.Filled.Share, contentDescription = "分享诊断包")
+                    }
+                    IconButton(
+                        onClick = { saveToDownloads() },
+                        enabled = !exporting,
+                    ) {
+                        Icon(
+                            painter =
+                                painterResource(
+                                    MaterialSymbolsOutlinedR.drawable.materialsymbols_ic_download_outlined
+                                ),
+                            contentDescription = "保存到下载目录",
+                        )
                     }
                     IconButton(
                         onClick = { showClearConfirmation = true },
@@ -236,7 +256,7 @@ private fun DiagnosticFilterChip(label: String, selected: Boolean, onClick: () -
 private fun DiagnosticEventRow(event: DiagnosticEvent, onClick: () -> Unit) {
     InkleafActionListItem(
         headline = event.displayTitle(),
-        supporting = listOfNotNull(event.message, event.timestamp.substringBefore('.').replace('T', ' ')).joinToString("\n"),
+        supporting = listOfNotNull(event.message, event.displayTimestamp()).joinToString("\n"),
         leadingContent = { DiagnosticSeverityBadge(event.severity) },
         onClick = onClick,
     )

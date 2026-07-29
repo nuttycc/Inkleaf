@@ -1,12 +1,19 @@
 package com.exio.inkleaf.diagnostics
 
 import android.app.ActivityManager
+import android.content.ClipData
+import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
+import android.provider.MediaStore
 import android.util.Log
+import androidx.core.content.FileProvider
 import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.io.OutputStream
 import java.net.URI
 import java.time.Instant
@@ -202,6 +209,69 @@ class DiagnosticRepository private constructor(private val context: Context) {
             }
         }
     }
+
+    /**
+     * 写入 cacheDir 临时文件并构造系统分享 Intent。调用方负责 `startActivity(chooser)`。
+     *
+     * 不走 SAF：避免"先选目录再上传到电脑"两步操作。临时文件留在 cacheDir，系统可在低内存时回收。
+     */
+    suspend fun createShareIntent(context: Context): Intent =
+        withContext(Dispatchers.IO) {
+            val exportDir = File(context.cacheDir, "diagnostic-exports").apply { mkdirs() }
+            val exportFile = File(exportDir, "inkleaf-diagnostics-${System.currentTimeMillis()}.zip")
+            FileOutputStream(exportFile).use { exportZip(it) }
+
+            val contentUri =
+                FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    exportFile,
+                )
+            val sendIntent =
+                Intent(Intent.ACTION_SEND).apply {
+                    type = "application/zip"
+                    putExtra(Intent.EXTRA_STREAM, contentUri)
+                    clipData = ClipData.newUri(context.contentResolver, exportFile.name, contentUri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+            Intent.createChooser(sendIntent, "分享诊断包").apply {
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+        }
+
+    /**
+     * 通过 MediaStore 写入公共 Downloads 目录。返回最终 Uri。
+     *
+     * minSdk=29，可直接用 `MediaStore.Downloads` collection + `RELATIVE_PATH`，
+     * 应用写入自己 scope 内的 Downloads 不需要 WRITE_EXTERNAL_STORAGE 权限。
+     * 写入完成后立即可被 USB 拉取 / 网盘同步 / 文件管理器查看。
+     */
+    suspend fun saveToDownloads(context: Context): Uri =
+        withContext(Dispatchers.IO) {
+            val fileName = "inkleaf-diagnostics-${System.currentTimeMillis()}.zip"
+            val values =
+                ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+                    put(MediaStore.Downloads.MIME_TYPE, "application/zip")
+                    // 相对路径：Downloads 根目录下的 Inkleaf 子目录，便于用户查找
+                    put(MediaStore.Downloads.RELATIVE_PATH, "Download/Inkleaf")
+                    put(MediaStore.Downloads.IS_PENDING, 1)
+                }
+            val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+            val resolver = context.contentResolver
+            val uri = resolver.insert(collection, values) ?: throw IOException("无法创建下载条目")
+            try {
+                resolver.openOutputStream(uri)?.use { exportZip(it) }
+                    ?: throw IOException("无法打开输出流")
+                values.clear()
+                values.put(MediaStore.Downloads.IS_PENDING, 0)
+                resolver.update(uri, values, null, null)
+            } catch (error: Throwable) {
+                runCatching { resolver.delete(uri, null, null) }
+                throw error
+            }
+            uri
+        }
 
     private fun appendLocked(event: DiagnosticEvent): DiagnosticEvent {
         val retained = retainDiagnosticEvents(readEventsLocked() + event)

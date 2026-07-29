@@ -42,6 +42,10 @@ internal object DebugStrictModeDiagnosticInstaller {
     }
 
     private fun report(context: Context, title: String, violation: Throwable) {
+        // 过滤系统框架噪声：栈里不含 com.exio.inkleaf 的违规来自系统/厂商代码
+        // （OnePlus OplusUIFirstManager / OplusBinderProxyManager / Android ContextImpl 等），
+        // 应用层改不了，留在诊断里只会淹没真实信号。
+        if (!violation.stackTraceToString().contains("com.exio.inkleaf")) return
         if (!reporting.compareAndSet(false, true)) return
         reporterScope.launch {
             try {

@@ -58,6 +58,8 @@ fun SettingsScreen(
 ) {
     val cacheLimit by viewModel.cacheLimit.collectAsStateWithLifecycle()
     val cacheUsage by viewModel.cacheUsageBytes.collectAsStateWithLifecycle()
+    val cacheBudgetBytes by viewModel.cacheBudgetBytes.collectAsStateWithLifecycle()
+    val autoCacheBudgetBytes by viewModel.autoCacheBudgetBytes.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val unreadDiagnostics by
         remember(context) { DiagnosticRepository.get(context).unreadCriticalCount }
@@ -67,8 +69,6 @@ fun SettingsScreen(
             .collectAsStateWithLifecycle(
                 initialValue = com.exio.inkleaf.data.ocr.OcrModelVariant.SMALL
             )
-    val cacheBudgetBytes = remember(cacheLimit, context) { cacheLimit.bytes(context) }
-    val autoCacheBudgetBytes = remember(context) { CacheLimit.AUTO.bytes(context) }
     var showCacheLimitSheet by remember { mutableStateOf(false) }
     var showAboutSheet by remember { mutableStateOf(false) }
     var showLicensesSheet by remember { mutableStateOf(false) }
