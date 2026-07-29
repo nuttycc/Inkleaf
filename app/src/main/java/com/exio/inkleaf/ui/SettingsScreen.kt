@@ -41,6 +41,7 @@ import com.exio.inkleaf.data.CacheLimit
 import com.exio.inkleaf.data.ThemeSettings
 import com.exio.inkleaf.data.ocr.OcrModelSettingsRepository
 import com.exio.inkleaf.data.ocr.isOcrModelReady
+import com.exio.inkleaf.diagnostics.DiagnosticRepository
 
 /** General settings. Theme editing lives on its own route with an explicit apply boundary. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -50,6 +51,7 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onOpenThemeSettings: () -> Unit,
     onOpenOcrModelDownload: () -> Unit = {},
+    onOpenDiagnostics: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: SettingsViewModel = viewModel(),
     foldersViewModel: FoldersViewModel = viewModel(),
@@ -57,6 +59,9 @@ fun SettingsScreen(
     val cacheLimit by viewModel.cacheLimit.collectAsStateWithLifecycle()
     val cacheUsage by viewModel.cacheUsageBytes.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val unreadDiagnostics by
+        remember(context) { DiagnosticRepository.get(context).unreadCriticalCount }
+            .collectAsStateWithLifecycle()
     val activeOcrVariant by
         remember(context) { OcrModelSettingsRepository(context).activeVariant }
             .collectAsStateWithLifecycle(
@@ -135,6 +140,19 @@ fun SettingsScreen(
                         "${activeOcrVariant.displayName} · 未下载"
                     },
                 onClick = onOpenOcrModelDownload,
+                trailingContent = { ForwardIcon() },
+            )
+
+            SectionLabel("开发者")
+            InkleafActionListItem(
+                headline = "诊断",
+                supporting =
+                    if (unreadDiagnostics > 0) {
+                        "$unreadDiagnostics 条新的崩溃或异常退出"
+                    } else {
+                        "崩溃、错误与本地诊断包"
+                    },
+                onClick = onOpenDiagnostics,
                 trailingContent = { ForwardIcon() },
             )
 

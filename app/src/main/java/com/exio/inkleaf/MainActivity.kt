@@ -32,11 +32,15 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -60,8 +64,10 @@ import androidx.navigation.toRoute
 import com.exio.inkleaf.data.ComicRepository
 import com.exio.inkleaf.data.ThemeSettings
 import com.exio.inkleaf.data.ThemeSettingsRepository
+import com.exio.inkleaf.diagnostics.DiagnosticRepository
 import com.exio.inkleaf.plugin.PluginContentCodec
 import com.exio.inkleaf.ui.AlbumEditorScreen
+import com.exio.inkleaf.ui.DiagnosticScreen
 import com.exio.inkleaf.ui.FavoriteViewerScreen
 import com.exio.inkleaf.ui.HistoryScreen
 import com.exio.inkleaf.ui.OcrModelDownloadScreen
@@ -103,6 +109,8 @@ import kotlinx.serialization.encodeToString
 @Serializable data class FavoriteViewerRoute(val favoriteId: Long)
 
 @Serializable data object SettingsRoute
+
+@Serializable data object DiagnosticRoute
 
 @Serializable data object ThemeSettingsRoute
 
@@ -419,6 +427,22 @@ class MainActivity : AppCompatActivity() {
                 // 外层：壳 ↔ 二级；内层 Tab NavController 建在 Shell 目的地里
                 val outerNavController = rememberNavController()
                 val pendingExternalOpen = externalOpenRequest
+                val diagnostics = remember { DiagnosticRepository.get(this@MainActivity) }
+                val unreadCriticalDiagnostics by diagnostics.unreadCriticalCount.collectAsStateWithLifecycle()
+                val snackbarHostState = remember { SnackbarHostState() }
+
+                LaunchedEffect(unreadCriticalDiagnostics) {
+                    if (unreadCriticalDiagnostics <= 0) return@LaunchedEffect
+                    val result =
+                        snackbarHostState.showSnackbar(
+                            message = "发现 $unreadCriticalDiagnostics 条新的崩溃或异常退出",
+                            actionLabel = "查看",
+                            withDismissAction = true,
+                        )
+                    if (result == SnackbarResult.ActionPerformed) {
+                        outerNavController.navigate(DiagnosticRoute) { launchSingleTop = true }
+                    }
+                }
 
                 LaunchedEffect(pendingExternalOpen) {
                     val request = pendingExternalOpen ?: return@LaunchedEffect
@@ -445,10 +469,8 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
 
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background,
-                ) {
+                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                    Box(modifier = Modifier.fillMaxSize()) {
                     // 外层转场：全宽水平推入——前进时新页从右侧整页滑入，
                     // 旧页同步整页滑出；返回相反。刻意不加 fade。
                     // 底栏在壳内、内层 Tab NavHost 外，Tab 切换时不参与此外层动画；
@@ -643,7 +665,13 @@ class MainActivity : AppCompatActivity() {
                                 onOpenOcrModelDownload = {
                                     outerNavController.navigate(OcrModelDownloadRoute)
                                 },
+                                onOpenDiagnostics = {
+                                    outerNavController.navigate(DiagnosticRoute)
+                                },
                             )
+                        }
+                        composable<DiagnosticRoute> {
+                            DiagnosticScreen(onBack = { outerNavController.popBackStack() })
                         }
                         composable<ThemeSettingsRoute> {
                             ThemeSettingsScreen(
@@ -726,6 +754,11 @@ class MainActivity : AppCompatActivity() {
                                 },
                             )
                         }
+                    }
+                    SnackbarHost(
+                        hostState = snackbarHostState,
+                        modifier = Modifier.align(Alignment.BottomCenter),
+                    )
                     }
                 }
             }

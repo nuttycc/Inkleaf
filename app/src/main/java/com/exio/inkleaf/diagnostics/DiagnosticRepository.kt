@@ -155,21 +155,32 @@ class DiagnosticRepository private constructor(private val context: Context) {
         }
     }
 
-    /** Exports only diagnostic data. Callers can add optional app-specific attachments to another ZIP. */
+    /**
+     * Exports the complete local diagnostic bundle. This method closes [output] after finishing the
+     * ZIP, which is the expected ownership model for a SAF output stream.
+     */
     suspend fun exportZip(output: OutputStream) {
         withContext(Dispatchers.IO) {
             writeMutex.withLock {
                 ZipOutputStream(BufferedOutputStream(output)).use { zip ->
                     addZipFile(zip, eventsFile(), "events.jsonl")
+                    val events = readEventsLocked()
+                    addZipEvents(zip, events, "exits.jsonl") { it.type == DiagnosticEventType.EXIT }
+                    addZipEvents(zip, events, "breadcrumbs.jsonl") { it.type == DiagnosticEventType.BREADCRUMB }
+                    addZipEvents(zip, events, "network.jsonl") { it.type == DiagnosticEventType.NETWORK }
                     emergencyDirectory().listFiles()?.sortedBy(File::name)?.forEach { file ->
                         addZipFile(zip, file, "emergency/${file.name}")
                     }
+                    addPluginLogFiles(zip)
                     val summary =
                         buildJsonObject {
                             put("sessionId", sessionId)
                             put("packageName", appContext.packageName)
                             put("appVersion", appContext.appVersionNameOrUnknown())
                             put("sdkInt", Build.VERSION.SDK_INT)
+                            put("deviceManufacturer", Build.MANUFACTURER)
+                            put("deviceModel", Build.MODEL)
+                            put("deviceFingerprint", Build.FINGERPRINT)
                             put("exportedAt", Instant.now().toString())
                         }
                     zip.putNextEntry(ZipEntry("manifest.json"))
@@ -310,6 +321,16 @@ class DiagnosticRepository private constructor(private val context: Context) {
     private fun emergencyDirectory(): File = File(directory(), EMERGENCY_DIRECTORY_NAME)
     private fun eventsFile(): File = File(directory(), EVENTS_FILE_NAME)
 
+    private fun addPluginLogFiles(zip: ZipOutputStream) {
+        val pluginsDirectory = File(appContext.filesDir, "plugins")
+        if (!pluginsDirectory.isDirectory) return
+        pluginsDirectory.walkTopDown().filter { file ->
+            file.isFile && file.toRelativeString(pluginsDirectory).split(File.separatorChar).contains("logs")
+        }.forEach { file ->
+            addZipFile(zip, file, "plugins/${file.toRelativeString(pluginsDirectory).replace(File.separatorChar, '/')}")
+        }
+    }
+
     companion object {
         private const val TAG = "Diagnostics"
         private const val DIRECTORY_NAME = "diagnostics"
@@ -422,6 +443,20 @@ private fun addZipFile(zip: ZipOutputStream, file: File, entryName: String) {
     if (!file.isFile) return
     zip.putNextEntry(ZipEntry(entryName))
     file.inputStream().use { input -> input.copyTo(zip) }
+    zip.closeEntry()
+}
+
+private fun addZipEvents(
+    zip: ZipOutputStream,
+    events: List<DiagnosticEvent>,
+    entryName: String,
+    predicate: (DiagnosticEvent) -> Boolean,
+) {
+    zip.putNextEntry(ZipEntry(entryName))
+    events.filter(predicate).forEach { event ->
+        zip.write(event.toJsonLine().toByteArray(Charsets.UTF_8))
+        zip.write('\n'.code)
+    }
     zip.closeEntry()
 }
 
