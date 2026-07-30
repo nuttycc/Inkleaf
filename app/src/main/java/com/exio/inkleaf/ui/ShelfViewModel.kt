@@ -32,14 +32,12 @@ import com.exio.inkleaf.data.db.FolderWithCount
 import com.exio.inkleaf.data.db.GroupWithCount
 import com.exio.inkleaf.plugin.OnlineComicRecord
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -53,24 +51,10 @@ data class ScanState(
     val seriesConfirmations: List<SeriesScanConfirmation> = emptyList(),
 )
 
-@OptIn(FlowPreview::class)
 class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycleObserver {
     private val repo = ComicRepository(app)
     private val albumExporter = AlbumExporter(app)
     private val settingsRepo = ShelfSettingsRepository(app)
-
-    /**
-     * 书架列表：数据库一变自动推送。 null = Room 尚未发射首批数据；空列表 = 书架确实为空。 不能拿 emptyList() 当初始值——那会让 UI
-     * 在数据到达前先闪一帧空状态。 WhileSubscribed：阅读页盖住书架时停止收集上游，翻页进度写库不再 驱动无人观看的重查与重过滤；已缓存的列表保留，返回书架不闪加载态
-     */
-    val comics: StateFlow<List<ComicEntity>?> =
-        combine(
-                repo.observeAll(),
-                settingsRepo.selectedGroup,
-            ) { comics, selection ->
-                filterComics(comics, selection)
-            }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     val groups: StateFlow<List<GroupWithCount>?> =
         repo.observeGroups().stateIn(viewModelScope, SharingStarted.Eagerly, null)
@@ -80,11 +64,20 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycle
 
     private val onlineRepo = (app as InkleafApplication).onlineContentRepository
 
-    /** 在线追漫列表：revision 变化时重新读取文件存储。null = 尚未首次加载 */
-    val onlineBookmarked: StateFlow<List<OnlineComicRecord>?> =
+    private val onlineBookmarked =
         onlineRepo.revision
-            .debounce(300)
             .map { withContext(Dispatchers.IO) { onlineRepo.listBookmarked() } }
+
+    /** One presentation state gates the first frame on both stores and keeps ordering stable. */
+    val shelfState: StateFlow<ShelfUiState?> =
+        combine(
+                repo.observeAll(),
+                repo.observeAllChapters(),
+                onlineBookmarked,
+                settingsRepo.selectedGroup,
+            ) { comics, chapters, online, selection ->
+                ShelfUiState(buildShelfEntries(comics, chapters, online, selection))
+            }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     val selectedGroup: StateFlow<ShelfGroupSelection> =
@@ -378,6 +371,12 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycle
         viewModelScope.launch { repo.deleteComic(comic) }
     }
 
+    fun removeOnlineComic(record: OnlineComicRecord) {
+        viewModelScope.launch(Dispatchers.IO) {
+            onlineRepo.setComicFollow(record.key.pluginId, record.key.sourceId, false)
+        }
+    }
+
     fun shareAlbum(comic: ComicEntity, onReady: (Intent) -> Unit) {
         if (albumExportJob?.isActive == true) {
             showMessage("已有图册正在导出")
@@ -479,16 +478,6 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycle
             }
         }
     }
-
-    private fun filterComics(
-        comics: List<ComicEntity>,
-        selection: ShelfGroupSelection,
-    ): List<ComicEntity> =
-        when (selection.kind) {
-            ShelfGroupFilterKind.ALL -> comics
-            ShelfGroupFilterKind.UNGROUPED -> comics.filter { it.groupId == null }
-            ShelfGroupFilterKind.GROUP -> comics.filter { it.groupId == selection.groupId }
-        }
 
     fun showMessage(message: String) {
         _scanState.value = _scanState.value.copy(message = message)

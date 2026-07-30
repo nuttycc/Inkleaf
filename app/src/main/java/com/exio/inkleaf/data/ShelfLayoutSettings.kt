@@ -43,6 +43,8 @@ data class ShelfLayoutSettings(
 
 enum class ShelfGroupFilterKind {
     ALL,
+    LOCAL,
+    ONLINE,
     UNGROUPED,
     GROUP,
 }

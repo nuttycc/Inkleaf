@@ -10,6 +10,9 @@ import com.exio.inkleaf.data.ChapterDiff
 
 @Dao
 abstract class ChapterDao {
+    @Query("SELECT * FROM chapters ORDER BY comicId, chapterIndex")
+    abstract fun observeAll(): kotlinx.coroutines.flow.Flow<List<ChapterEntity>>
+
     @Query("SELECT * FROM chapters WHERE comicId = :comicId ORDER BY chapterIndex")
     abstract suspend fun getByComicId(comicId: Long): List<ChapterEntity>
 

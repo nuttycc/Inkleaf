@@ -28,7 +28,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
@@ -143,8 +142,7 @@ fun ShelfScreen(
     viewModel: ShelfViewModel = viewModel(),
 ) {
     val context = LocalContext.current
-    val comics by viewModel.comics.collectAsStateWithLifecycle()
-    val onlineBookmarked by viewModel.onlineBookmarked.collectAsStateWithLifecycle()
+    val shelfState by viewModel.shelfState.collectAsStateWithLifecycle()
     val groups by viewModel.groups.collectAsStateWithLifecycle()
     val selectedGroup by viewModel.selectedGroup.collectAsStateWithLifecycle()
     val scanState by viewModel.scanState.collectAsStateWithLifecycle()
@@ -152,6 +150,7 @@ fun ShelfScreen(
     val lastPickedFolder by viewModel.lastPickedFolder.collectAsStateWithLifecycle()
 
     var pendingDelete by remember { mutableStateOf<ComicEntity?>(null) }
+    var pendingOnlineDelete by remember { mutableStateOf<OnlineComicRecord?>(null) }
     var pendingAction by remember { mutableStateOf<ComicEntity?>(null) }
     var pendingGroupAssignment by remember { mutableStateOf<ComicEntity?>(null) }
     var pendingGroupDelete by remember { mutableStateOf<GroupWithCount?>(null) }
@@ -307,14 +306,14 @@ fun ShelfScreen(
             onRefresh = { viewModel.refresh(manual = true) },
             modifier = Modifier.fillMaxSize().padding(innerPadding),
         ) {
-            val list = comics
+            val entries = shelfState?.entries
             // Crossfade 的 key 用三态枚举而不是列表本身：扫描中增删条目
             // 不触发动画（LazyGrid 自己按 item key 处理），只有
             // 加载中/空/有内容 之间的切换才淡入淡出
             val phase =
                 when {
-                    list == null -> ShelfPhase.LOADING
-                    list.isEmpty() && onlineBookmarked.orEmpty().isEmpty() -> ShelfPhase.EMPTY
+                    entries == null -> ShelfPhase.LOADING
+                    entries.isEmpty() -> ShelfPhase.EMPTY
                     else -> ShelfPhase.CONTENT
                 }
             Crossfade(
@@ -355,41 +354,25 @@ fun ShelfScreen(
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                             verticalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
-                            // 在线追读分区：追漫的在线系列，点击进入漫画详情页
-                            val onlineList = onlineBookmarked.orEmpty()
-                            if (onlineList.isNotEmpty()) {
-                                item(
-                                    key = "online_section_header",
-                                    span = { GridItemSpan(maxLineSpan) },
-                                ) {
-                                    Text(
-                                        text = "在线追读",
-                                        style = MaterialTheme.typography.titleSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(top = 4.dp, bottom = 2.dp),
-                                    )
+                            items(entries.orEmpty(), key = ShelfEntry::key) { entry ->
+                                when (entry) {
+                                    is ShelfEntry.Local ->
+                                        ComicCard(
+                                            comic = entry.comic,
+                                            progress = entry.progress,
+                                            aspect = layout.aspect.ratio,
+                                            crop = layout.crop,
+                                            onClick = { onOpenComic(entry.comic.id) },
+                                            onLongClick = { pendingAction = entry.comic },
+                                        )
+                                    is ShelfEntry.Online ->
+                                        OnlineBookmarkedCard(
+                                            record = entry.record,
+                                            aspect = layout.aspect.ratio,
+                                            onClick = { onOpenOnlineComic(entry.record) },
+                                            onLongClick = { pendingOnlineDelete = entry.record },
+                                        )
                                 }
-                                items(
-                                    onlineList,
-                                    key = { "online:${it.key.pluginId}:${it.key.sourceId}" },
-                                ) { record ->
-                                    OnlineBookmarkedCard(
-                                        record = record,
-                                        aspect = layout.aspect.ratio,
-                                        onClick = { onOpenOnlineComic(record) },
-                                    )
-                                }
-                            }
-
-                            // 渐变期间旧分支仍在组合，list 可能已退回空——orEmpty 兜底
-                            items(list.orEmpty(), key = { it.id }) { comic ->
-                                ComicCard(
-                                    comic = comic,
-                                    aspect = layout.aspect.ratio,
-                                    crop = layout.crop,
-                                    onClick = { onOpenComic(comic.id) },
-                                    onLongClick = { pendingAction = comic },
-                                )
                             }
                         }
                 }
@@ -582,6 +565,20 @@ fun ShelfScreen(
             onDismiss = { pendingDelete = null },
         )
     }
+
+    pendingOnlineDelete?.let { record ->
+        val title = record.detail?.title ?: record.key.sourceId
+        ConfirmDialog(
+            title = "从书架移除",
+            text = "移除《$title》？\n在线阅读进度、书签和历史记录仍会保留。",
+            confirmLabel = "移除",
+            onConfirm = {
+                viewModel.removeOnlineComic(record)
+                pendingOnlineDelete = null
+            },
+            onDismiss = { pendingOnlineDelete = null },
+        )
+    }
 }
 
 @Composable
@@ -600,6 +597,16 @@ private fun GroupPickerSheetContent(
             title = "全部",
             selected = selected.kind == ShelfGroupFilterKind.ALL,
             onClick = { onSelect(ShelfGroupSelection()) },
+        )
+        GroupFilterRow(
+            title = "本地",
+            selected = selected.kind == ShelfGroupFilterKind.LOCAL,
+            onClick = { onSelect(ShelfGroupSelection(ShelfGroupFilterKind.LOCAL)) },
+        )
+        GroupFilterRow(
+            title = "在线",
+            selected = selected.kind == ShelfGroupFilterKind.ONLINE,
+            onClick = { onSelect(ShelfGroupSelection(ShelfGroupFilterKind.ONLINE)) },
         )
         GroupFilterRow(
             title = "未分组",
@@ -799,6 +806,8 @@ private fun groupTitle(
 ): String =
     when (selected.kind) {
         ShelfGroupFilterKind.ALL -> "全部"
+        ShelfGroupFilterKind.LOCAL -> "本地"
+        ShelfGroupFilterKind.ONLINE -> "在线"
         ShelfGroupFilterKind.UNGROUPED -> "未分组"
         ShelfGroupFilterKind.GROUP ->
             groups?.firstOrNull { it.group.id == selected.groupId }?.group?.name ?: "全部"
@@ -851,6 +860,8 @@ private fun ShelfEmptyState(
         } else {
             val title =
                 when (selection.kind) {
+                    ShelfGroupFilterKind.LOCAL -> "还没有本地漫画"
+                    ShelfGroupFilterKind.ONLINE -> "还没有在线追读"
                     ShelfGroupFilterKind.UNGROUPED -> "没有未分组的漫画"
                     ShelfGroupFilterKind.GROUP -> "这个分组里还没有漫画"
                     ShelfGroupFilterKind.ALL -> error("library-empty branch handles ALL")
@@ -1046,6 +1057,7 @@ private fun LayoutSheetContent(
 @Composable
 private fun ComicCard(
     comic: ComicEntity,
+    progress: ShelfProgress?,
     aspect: Float,
     crop: CoverCrop,
     onClick: () -> Unit,
@@ -1139,8 +1151,8 @@ private fun ComicCard(
         )
         Text(
             text =
-                if (comic.pageCount > 0) {
-                    "${comic.lastReadPage + 1} / ${comic.pageCount}"
+                if (progress != null) {
+                    "${progress.currentPage} / ${progress.totalPages}"
                 } else {
                     "未读"
                 },
@@ -1152,11 +1164,13 @@ private fun ComicCard(
 }
 
 /** 在线追读卡片的视觉与本地 ComicCard 保持一致：封面 + 标题 + 来源名 */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun OnlineBookmarkedCard(
     record: OnlineComicRecord,
     aspect: Float,
     onClick: () -> Unit,
+    onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val title = record.detail?.title ?: record.key.sourceId
@@ -1166,7 +1180,11 @@ private fun OnlineBookmarkedCard(
         modifier =
             modifier
                 .clip(RoundedCornerShape(8.dp))
-                .clickable(onClick = onClick)
+                .combinedClickable(
+                    onClick = onClick,
+                    onLongClickLabel = "打开在线漫画操作",
+                    onLongClick = onLongClick,
+                )
     ) {
         Box(
             modifier =

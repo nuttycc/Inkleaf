@@ -10,6 +10,7 @@ import com.exio.inkleaf.data.db.AppDatabase
 import com.exio.inkleaf.data.db.BookSourceType
 import com.exio.inkleaf.data.db.ComicEntity
 import com.exio.inkleaf.data.db.ComicGroupEntity
+import com.exio.inkleaf.data.db.ChapterEntity
 import com.exio.inkleaf.data.db.FolderWithCount
 import com.exio.inkleaf.data.db.GroupWithCount
 import com.exio.inkleaf.data.db.LibraryExclusionEntity
@@ -128,6 +129,8 @@ class ComicRepository(context: Context) {
     // ===== 漫画条目 =====
 
     fun observeAll(): Flow<List<ComicEntity>> = dao.observeAll()
+
+    fun observeAllChapters(): Flow<List<ChapterEntity>> = db.chapterDao().observeAll()
 
     suspend fun getComic(id: Long): ComicEntity? = dao.getById(id)
 
