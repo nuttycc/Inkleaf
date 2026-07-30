@@ -446,6 +446,10 @@ internal class OnlineReaderViewModel(
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
+            if (!committed) {
+                chapterReady = volume != null
+                resumeActiveSegmentIfProcessResumed()
+            }
             readerMessage =
                 error.message?.let { "无法进入下一章：$it，再次翻页可重试" }
                     ?: "无法进入下一章，再次翻页可重试"

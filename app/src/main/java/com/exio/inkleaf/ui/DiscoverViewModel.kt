@@ -612,7 +612,8 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
     private fun publishFirstPage(key: PluginBrowseCacheKey, snapshot: PluginBrowseCacheSnapshot) {
         val previous = browseSessions[key]
         val changed =
-            previous?.firstPageRevision != snapshot.revision ||
+            previous == null ||
+                previous.firstPageRevision != snapshot.revision ||
                 previous.cacheGeneration != snapshot.cacheGeneration
         _browseItems.value = snapshot.page.items
         _browseNextCursor.value = snapshot.page.nextCursor
