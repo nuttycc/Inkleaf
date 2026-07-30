@@ -119,6 +119,13 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
     private val _browseError = MutableStateFlow<String?>(null)
     val browseError: StateFlow<String?> = _browseError.asStateFlow()
 
+    private val _browseTargetRevision = MutableStateFlow(0L)
+    val browseTargetRevision: StateFlow<Long> = _browseTargetRevision.asStateFlow()
+
+    private val _browseFirstPageCommitRevision = MutableStateFlow(0L)
+    val browseFirstPageCommitRevision: StateFlow<Long> =
+        _browseFirstPageCommitRevision.asStateFlow()
+
     private val _query = MutableStateFlow("")
     val query: StateFlow<String> = _query.asStateFlow()
 
@@ -438,9 +445,11 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
         key: PluginBrowseCacheKey?,
         filters: Map<String, String>,
     ) {
+        val targetChanged = key != currentBrowseKey
         browseGeneration += 1
         browseJob?.cancel()
         currentBrowseKey = key
+        if (targetChanged && key != null) _browseTargetRevision.value += 1
         _browseFilters.value = filters
         _browseError.value = null
         _isBrowsing.value = false
@@ -601,6 +610,10 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun publishFirstPage(key: PluginBrowseCacheKey, snapshot: PluginBrowseCacheSnapshot) {
+        val previous = browseSessions[key]
+        val changed =
+            previous?.firstPageRevision != snapshot.revision ||
+                previous.cacheGeneration != snapshot.cacheGeneration
         _browseItems.value = snapshot.page.items
         _browseNextCursor.value = snapshot.page.nextCursor
         browseSessions[key] =
@@ -611,6 +624,7 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
                 firstPageRevision = snapshot.revision,
                 cacheGeneration = snapshot.cacheGeneration,
             )
+        if (changed) _browseFirstPageCommitRevision.value += 1
     }
 
     private fun selectedFeed(): Feed? =

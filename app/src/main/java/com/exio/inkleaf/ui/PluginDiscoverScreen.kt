@@ -1,5 +1,7 @@
 package com.exio.inkleaf.ui
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -65,6 +67,7 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
@@ -119,6 +122,8 @@ fun PluginDiscoverScreen(
     val isBrowsing by viewModel.isBrowsing.collectAsStateWithLifecycle()
     val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
     val browseError by viewModel.browseError.collectAsStateWithLifecycle()
+    val browseTargetRevision by viewModel.browseTargetRevision.collectAsStateWithLifecycle()
+    val browseCommitRevision by viewModel.browseFirstPageCommitRevision.collectAsStateWithLifecycle()
     val query by viewModel.query.collectAsStateWithLifecycle()
     val selectedPluginIds by viewModel.selectedPluginIds.collectAsStateWithLifecycle()
     val results by viewModel.results.collectAsStateWithLifecycle()
@@ -182,8 +187,22 @@ fun PluginDiscoverScreen(
         }
 
     val gridState = rememberLazyGridState()
+    val contentAlpha = remember { Animatable(1f) }
     val isListLayout = layoutSettings.layout == DiscoverLayoutMode.LIST
     var showLayoutSheet by remember { mutableStateOf(false) }
+
+    LaunchedEffect(mode, browseTargetRevision) {
+        if (mode == DiscoverViewModel.Mode.BROWSE && browseTargetRevision > 0) {
+            gridState.scrollToItem(0)
+        }
+    }
+
+    LaunchedEffect(mode, browseCommitRevision) {
+        if (mode == DiscoverViewModel.Mode.BROWSE && browseCommitRevision > 0) {
+            contentAlpha.snapTo(0.92f)
+            contentAlpha.animateTo(1f, animationSpec = tween(durationMillis = 160))
+        }
+    }
 
     // 触底预取。derivedStateOf 让滚动的每一帧都不触发重组，只有跨过阈值那一刻才发信号
     val reachedPrefetchEdge by remember {
@@ -314,7 +333,8 @@ fun PluginDiscoverScreen(
                             ?: GridCells.Adaptive(minSize = GridDefaults.AdaptiveMinCellWidth)
                     },
                 state = gridState,
-                modifier = Modifier.fillMaxSize(),
+                modifier =
+                    Modifier.fillMaxSize().graphicsLayer { alpha = contentAlpha.value },
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(if (isListLayout) 0.dp else 12.dp),
