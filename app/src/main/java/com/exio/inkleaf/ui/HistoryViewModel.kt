@@ -32,6 +32,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -105,6 +106,7 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
     private val eventChannel = Channel<HistoryEvent>(Channel.BUFFERED)
     private val todayRefresh = MutableStateFlow(0)
     private val sourceFilter = MutableStateFlow(HistorySourceFilter.ALL)
+    private val onlineHistory = MutableStateFlow<List<OnlineHistorySessionUi>?>(null)
     private var lastRefreshDate: LocalDate? = null
 
     /** Session id currently resolving for continue-reading; null when idle. */
@@ -117,27 +119,39 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
 
     val events = eventChannel.receiveAsFlow()
 
+    init {
+        viewModelScope.launch {
+            onlineRepository.revision.collectLatest {
+                try {
+                    onlineHistory.value =
+                        withContext(Dispatchers.IO) {
+                            onlineRepository
+                                .list()
+                                .flatMap(OnlineComicRecord::toOnlineHistorySessions)
+                        }
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (_: Exception) {
+                    eventChannel.send(HistoryEvent.Message("加载在线阅读历史失败"))
+                }
+            }
+        }
+    }
+
     val timeline: StateFlow<List<HistoryListItem>?> =
         combine(
                 sessionRepo.recentHistory(),
-                onlineRepository.revision,
+                onlineHistory,
                 sourceFilter,
                 todayRefresh,
-            ) { local, _, filter, _ ->
+            ) { local, online, filter, _ ->
                 val today =
                     Instant.ofEpochMilli(clock.nowMillis())
                         .atZone(ZoneId.systemDefault())
                         .toLocalDate()
-                val online =
-                    withContext(Dispatchers.IO) {
-                        runCatching {
-                                onlineRepository
-                                    .list()
-                                    .flatMap(OnlineComicRecord::toOnlineHistorySessions)
-                            }
-                            .getOrDefault(emptyList())
-                    }
-                buildHistoryTimeline(local, online, filter, today, Locale.getDefault())
+                online?.let {
+                    buildHistoryTimeline(local, it, filter, today, Locale.getDefault())
+                }
             }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 

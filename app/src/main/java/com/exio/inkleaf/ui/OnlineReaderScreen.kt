@@ -46,6 +46,8 @@ fun OnlineReaderScreen(
             onToggleFavorite = viewModel::toggleFavorite,
             onSetCover = null,
             onPageChanged = viewModel::saveProgress,
+            onVolumeDisposed = viewModel::releaseInactiveVolume,
+            isVolumeActive = viewModel::isActiveVolume,
             onNavigateToModelDownload = onNavigateToModelDownload,
             readerMessage = viewModel.readerMessage,
             onReaderMessageConsumed = viewModel::consumeReaderMessage,

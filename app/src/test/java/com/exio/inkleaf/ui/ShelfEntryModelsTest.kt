@@ -26,6 +26,30 @@ class ShelfEntryModelsTest {
     }
 
     @Test
+    fun `missing preceding chapter contributes zero pages`() {
+        val comic = comic(pageCount = 20, chapterIndex = 1, page = 2)
+        val progress =
+            wholeComicProgress(
+                comic,
+                listOf(chapter(0, 10, isMissing = true), chapter(1, 20)),
+            )
+
+        assertEquals(ShelfProgress(currentPage = 3, totalPages = 20), progress)
+    }
+
+    @Test
+    fun `missing current chapter hides progress`() {
+        val comic = comic(pageCount = 20, chapterIndex = 1, page = 2)
+
+        assertNull(
+            wholeComicProgress(
+                comic,
+                listOf(chapter(0, 20), chapter(1, 10, isMissing = true)),
+            )
+        )
+    }
+
+    @Test
     fun `local filter excludes online entries`() {
         val entries =
             buildShelfEntries(
@@ -55,7 +79,7 @@ class ShelfEntryModelsTest {
             sourceType = BookSourceType.PDF_SERIES,
         )
 
-    private fun chapter(index: Int, pageCount: Int) =
+    private fun chapter(index: Int, pageCount: Int, isMissing: Boolean = false) =
         ChapterEntity(
             id = index.toLong() + 1,
             comicId = 1,
@@ -64,5 +88,6 @@ class ShelfEntryModelsTest {
             fileKey = "chapter-$index",
             title = "Chapter $index",
             pageCount = pageCount,
+            isMissing = isMissing,
         )
 }

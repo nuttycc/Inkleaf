@@ -150,24 +150,25 @@ internal class OnlineReaderViewModel(
         val chapter =
             selectableOnlineChapter(chapterSummaries, currentChapterIndex, index) ?: return
         if (chapterLoadJob?.isActive == true) return
-        chapterLoadJob = viewModelScope.launch {
-            prepareChapterSwitch(chapter, index)
-            loadActiveChapter()
-        }
+        chapterLoadJob = viewModelScope.launch { prepareAndCommitChapter(chapter, index) }
     }
 
     fun continueToNextChapter() {
         val next = nextReadableOnlineChapter(chapterSummaries, currentChapterIndex) ?: return
         if (chapterLoadJob?.isActive == true) return
-        chapterLoadJob = viewModelScope.launch { prepareAndCommitNextChapter(next.first, next.second) }
+        chapterLoadJob =
+            viewModelScope.launch {
+                prepareAndCommitChapter(next.first, next.second, isContinuation = true)
+            }
     }
 
     fun requestThumbnail(page: Int) {
         launchThumbnailJob { loadThumbnail(page) }
     }
 
-    fun saveProgress(page: Int) {
+    fun saveProgress(source: ComicVolume, page: Int) {
         val opened = volume ?: return
+        if (source !== opened) return
         if (page !in 0 until opened.totalPageCount) return
         currentPage = page
         lastPageByChapterId[activeChapterId] = page
@@ -192,6 +193,12 @@ internal class OnlineReaderViewModel(
             }
         }
     }
+
+    fun releaseInactiveVolume(disposed: ComicVolume) {
+        if (disposed !== volume) disposed.close()
+    }
+
+    fun isActiveVolume(candidate: ComicVolume): Boolean = candidate === volume
 
     fun toggleBookmark(page: Int) {
         val location = locationForOrNull(page) ?: return
@@ -371,12 +378,23 @@ internal class OnlineReaderViewModel(
         }
     }
 
-    private suspend fun prepareAndCommitNextChapter(chapter: ChapterSummary, index: Int) {
+    private suspend fun prepareAndCommitChapter(
+        chapter: ChapterSummary,
+        index: Int,
+        isContinuation: Boolean = false,
+    ) {
         val previousChapterId = activeChapterId
         val previousRevision = currentRevision
+        val savedPosition =
+            if (isContinuation) null
+            else {
+                withContext(Dispatchers.IO) {
+                    runCatching { repository.get(pluginId, sourceId)?.position }.getOrNull()
+                }
+            }
         var prepared: OnlineChapterVolume? = null
         var committed = false
-        readerMessage = "正在进入下一章"
+        readerMessage = if (isContinuation) "正在进入下一章" else "正在切换章节"
         try {
             val response =
                 application.pluginCatalog.pages(
@@ -388,7 +406,7 @@ internal class OnlineReaderViewModel(
                         opaqueContext = chapter.opaqueContext ?: contentOpaqueContext,
                     ),
                 )
-            if (response.pages.isEmpty()) throw ComicOpenException("下一章没有可阅读页面")
+            if (response.pages.isEmpty()) throw ComicOpenException("目标章节没有可阅读页面")
             val revision =
                 resolveOnlineChapterRevision(chapter.chapterId, chapter.revision, response)
             val candidate =
@@ -399,6 +417,12 @@ internal class OnlineReaderViewModel(
                     pages = response.pages,
                     client = application.onlineImageCallFactory,
                 )
+            val startPage =
+                if (isContinuation) {
+                    0
+                } else {
+                    restorePageForChapter(chapter.chapterId, revision, savedPosition, candidate)
+                }
             prepared = candidate
             if (activeChapterId != previousChapterId || currentRevision != previousRevision) {
                 candidate.close()
@@ -411,7 +435,6 @@ internal class OnlineReaderViewModel(
             flushCurrentProgress()
             lastPageByChapterId[activeChapterId] = currentPage
             cancelThumbnailJobs()
-            val previous = volume
             clearChapterPresentation()
             activeChapterId = chapter.chapterId
             activeRequestedRevision = chapter.revision
@@ -420,21 +443,20 @@ internal class OnlineReaderViewModel(
             currentChapterIndex = index
             currentRevision = revision
             volume = candidate
-            currentPage = 0
-            lastPageByChapterId[activeChapterId] = 0
-            sessionLatestLocation = locationFor(0)
+            currentPage = startPage
+            lastPageByChapterId[activeChapterId] = startPage
+            sessionLatestLocation = locationFor(startPage)
             state =
                 ReaderPresentationState.Ready(
                     volume = candidate,
-                    startPage = 0,
+                    startPage = startPage,
                     title = currentTitle,
                     cacheKeyPrefix = cacheKeyPrefix(revision),
                 )
-            previous?.close()
             committed = true
             chapterReady = true
             resumeActiveSegmentIfProcessResumed()
-            prewarmThumbnails(candidate, 0)
+            prewarmThumbnails(candidate, startPage)
             try {
                 refreshUserRecords()
             } catch (error: CancellationException) {
@@ -451,8 +473,12 @@ internal class OnlineReaderViewModel(
                 resumeActiveSegmentIfProcessResumed()
             }
             readerMessage =
-                error.message?.let { "无法进入下一章：$it，再次翻页可重试" }
-                    ?: "无法进入下一章，再次翻页可重试"
+                if (isContinuation) {
+                    error.message?.let { "无法进入下一章：$it，再次翻页可重试" }
+                        ?: "无法进入下一章，再次翻页可重试"
+                } else {
+                    error.message?.let { "无法切换章节：$it" } ?: "无法切换章节"
+                }
         } finally {
             if (!committed) prepared?.close()
         }
@@ -472,24 +498,6 @@ internal class OnlineReaderViewModel(
         if (activeOpaqueContext == null) {
             activeOpaqueContext = chapter?.opaqueContext ?: contentOpaqueContext
         }
-    }
-
-    private suspend fun prepareChapterSwitch(chapter: ChapterSummary, index: Int) {
-        pauseActiveSegment()
-        chapterReady = false
-        flushCurrentProgress()
-        lastPageByChapterId[activeChapterId] = currentPage
-        cancelThumbnailJobs()
-        volume?.close()
-        volume = null
-        clearChapterPresentation()
-        activeChapterId = chapter.chapterId
-        activeRequestedRevision = chapter.revision
-        activeOpaqueContext = chapter.opaqueContext
-        currentChapterTitle = chapter.title.takeIf(String::isNotBlank) ?: chapter.chapterId
-        currentChapterIndex = index
-        currentRevision = chapter.revision
-        state = ReaderPresentationState.Loading
     }
 
     private suspend fun flushCurrentProgress() {
@@ -572,6 +580,27 @@ internal class OnlineReaderViewModel(
                 saved.chapterRevision == currentRevision && it in opened.pages.indices
             } ?: 0
         return RestoredOnlinePage(restored, stale = false)
+    }
+
+    private fun restorePageForChapter(
+        chapterId: String,
+        revision: String,
+        saved: com.exio.inkleaf.plugin.OnlineReadingPosition?,
+        opened: OnlineChapterVolume,
+    ): Int {
+        lastPageByChapterId[chapterId]
+            ?.takeIf { it in opened.pages.indices }
+            ?.let { return it }
+        if (saved?.chapterId != chapterId) return 0
+        saved.pageId?.let { pageId ->
+            opened.pages
+                .indexOfFirst { it.pageId == pageId }
+                .takeIf { it >= 0 }
+                ?.let { return it }
+        }
+        return saved.pageIndex.takeIf {
+            saved.chapterRevision == revision && it in opened.pages.indices
+        } ?: 0
     }
 
     private suspend fun refreshUserRecords() {

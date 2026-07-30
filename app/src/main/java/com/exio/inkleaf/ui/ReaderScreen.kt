@@ -201,7 +201,7 @@ fun ReaderScreen(
             },
             onToggleFavorite = viewModel::toggleFavorite,
             onSetCover = viewModel::setCurrentPageAsCover,
-            onPageChanged = viewModel::saveProgress,
+            onPageChanged = { _, page -> viewModel.saveProgress(page) },
             onNavigateToModelDownload = onNavigateToModelDownload,
             readerMessage = viewModel.readerMessage,
             onReaderMessageConsumed = viewModel::consumeReaderMessage,
@@ -319,6 +319,9 @@ private fun ComicPager(
     onToggleControls: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    DisposableEffect(volume) {
+        onDispose { actions.onVolumeDisposed(volume) }
+    }
     val context = LocalContext.current
     val activeOcrVariant by
         remember(context) { OcrModelSettingsRepository(context).activeVariant }
@@ -442,6 +445,7 @@ private fun ComicPager(
     }
 
     fun removeBookmark(bookmark: ReaderBookmarkItem) {
+        if (!actions.isVolumeActive(volume)) return
         val remove = actions.onRemoveBookmark ?: return
         if (!bookmarkRemovalsInFlight.add(bookmark.key)) return
         scope.launch {
@@ -518,19 +522,23 @@ private fun ComicPager(
 
     // 翻页统一走"前进/后退"抽象：将来日漫右→左模式只需反转点按区到 delta 的映射
     val turnPage: (Int) -> Unit = { delta ->
-        val requested = pagerState.currentPage + delta
-        if (requested >= volume.totalPageCount && delta > 0) {
-            chapterNavigation?.onForwardPastEnd?.invoke()
-        } else {
-            val target = requested.coerceIn(0, volume.totalPageCount - 1)
-            if (target != pagerState.currentPage) {
-                scope.launch { pagerState.animateScrollToPage(target) }
+        if (actions.isVolumeActive(volume)) {
+            val requested = pagerState.currentPage + delta
+            if (requested >= volume.totalPageCount && delta > 0) {
+                chapterNavigation?.onForwardPastEnd?.invoke()
+            } else {
+                val target = requested.coerceIn(0, volume.totalPageCount - 1)
+                if (target != pagerState.currentPage) {
+                    scope.launch { pagerState.animateScrollToPage(target) }
+                }
             }
         }
     }
 
     LaunchedEffect(pagerState) {
-        snapshotFlow { pagerState.currentPage }.collect { page -> actions.onPageChanged(page) }
+        snapshotFlow { pagerState.currentPage }.collect { page ->
+            actions.onPageChanged(volume, page)
+        }
     }
 
     val activeOcrResult =
@@ -739,7 +747,9 @@ private fun ComicPager(
             onBack = onBack,
             onToggleBookmark =
                 actions.onToggleBookmark?.let { toggle ->
-                    { toggle(pagerState.currentPage) }
+                    {
+                        if (actions.isVolumeActive(volume)) toggle(pagerState.currentPage)
+                    }
                 },
             onResetZoom = {
                 zoomResetPage = pagerState.currentPage
@@ -758,7 +768,9 @@ private fun ComicPager(
             chapterCount = readerChapterCount,
             thumbnails = features.thumbnails,
             bookmarkPages = features.bookmarkPages,
-            onNeedThumbnail = actions.onNeedThumbnail,
+            onNeedThumbnail = { page ->
+                if (actions.isVolumeActive(volume)) actions.onNeedThumbnail(page)
+            },
             onPagesSelected = { activePanel = null },
             onHeightChanged = { bottomControlsHeightPx = it },
             activePanel = activePanel,
@@ -773,14 +785,16 @@ private fun ComicPager(
                             currentChapterIndex = currentReaderChapterIndex,
                             onSelect = { chapterIndex ->
                                 activePanel = null
-                                val externalNavigation = chapterNavigation
-                                if (externalNavigation != null) {
-                                    externalNavigation.onSelectChapter(chapterIndex)
-                                } else {
-                                    scope.launch {
-                                        pagerState.scrollToPage(
-                                            volume.chapterPageToGlobal(chapterIndex, 0)
-                                        )
+                                if (actions.isVolumeActive(volume)) {
+                                    val externalNavigation = chapterNavigation
+                                    if (externalNavigation != null) {
+                                        externalNavigation.onSelectChapter(chapterIndex)
+                                    } else {
+                                        scope.launch {
+                                            pagerState.scrollToPage(
+                                                volume.chapterPageToGlobal(chapterIndex, 0)
+                                            )
+                                        }
                                     }
                                 }
                             },
@@ -789,7 +803,9 @@ private fun ComicPager(
                         ReaderBookmarksPanelContent(
                             bookmarks = features.bookmarks,
                             thumbnails = features.thumbnails,
-                            onNeedThumbnail = actions.onNeedThumbnail,
+                            onNeedThumbnail = { page ->
+                                if (actions.isVolumeActive(volume)) actions.onNeedThumbnail(page)
+                            },
                             onSelect = { page ->
                                 activePanel = null
                                 scope.launch { pagerState.scrollToPage(page) }
@@ -806,7 +822,9 @@ private fun ComicPager(
                                 actions.onToggleFavorite?.let { toggleFavorite ->
                                     {
                                         activePanel = null
-                                        toggleFavorite(pagerState.currentPage)
+                                        if (actions.isVolumeActive(volume)) {
+                                            toggleFavorite(pagerState.currentPage)
+                                        }
                                     }
                                 },
                             onRecognizePage = {
@@ -817,7 +835,9 @@ private fun ComicPager(
                                 actions.onSetCover?.let { setCover ->
                                     {
                                         activePanel = null
-                                        setCover(pagerState.currentPage)
+                                        if (actions.isVolumeActive(volume)) {
+                                            setCover(pagerState.currentPage)
+                                        }
                                     }
                                 },
                         )

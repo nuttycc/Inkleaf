@@ -10,6 +10,8 @@ import java.nio.file.StandardCopyOption
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /**
@@ -23,6 +25,7 @@ object ReaderCache {
     private const val BOOKS_DIR = "books"
     private const val THUMBS_DIR = "thumbs"
     private const val ONLINE_THUMBS_MAX_BYTES = 64L * 1024L * 1024L
+    private val onlineThumbnailWriteMutex = Mutex()
 
     /** 旧版固定文件名副本，升级后冷启动时清一次 */
     private const val LEGACY_CACHE_FILE = "current_comic.zip"
@@ -133,34 +136,36 @@ object ReaderCache {
         bitmap: Bitmap,
     ) {
         withContext(Dispatchers.IO) {
-            runCatching {
-                val destination = onlineThumbFile(context, namespace, page, pageIdentity)
-                destination.parentFile?.mkdirs()
-                val temporary =
-                    File(destination.parentFile, "${destination.name}.${UUID.randomUUID()}.tmp")
-                try {
-                    temporary.outputStream().use { output ->
-                        check(bitmap.compress(Bitmap.CompressFormat.JPEG, 85, output))
-                        output.flush()
-                    }
+            onlineThumbnailWriteMutex.withLock {
+                runCatching {
+                    val destination = onlineThumbFile(context, namespace, page, pageIdentity)
+                    destination.parentFile?.mkdirs()
+                    val temporary =
+                        File(destination.parentFile, "${destination.name}.${UUID.randomUUID()}.tmp")
                     try {
-                        Files.move(
-                            temporary.toPath(),
-                            destination.toPath(),
-                            StandardCopyOption.ATOMIC_MOVE,
-                            StandardCopyOption.REPLACE_EXISTING,
-                        )
-                    } catch (_: AtomicMoveNotSupportedException) {
-                        Files.move(
-                            temporary.toPath(),
-                            destination.toPath(),
-                            StandardCopyOption.REPLACE_EXISTING,
-                        )
+                        temporary.outputStream().use { output ->
+                            check(bitmap.compress(Bitmap.CompressFormat.JPEG, 85, output))
+                            output.flush()
+                        }
+                        try {
+                            Files.move(
+                                temporary.toPath(),
+                                destination.toPath(),
+                                StandardCopyOption.ATOMIC_MOVE,
+                                StandardCopyOption.REPLACE_EXISTING,
+                            )
+                        } catch (_: AtomicMoveNotSupportedException) {
+                            Files.move(
+                                temporary.toPath(),
+                                destination.toPath(),
+                                StandardCopyOption.REPLACE_EXISTING,
+                            )
+                        }
+                        destination.setLastModified(System.currentTimeMillis())
+                        enforceOnlineThumbnailBudget(context)
+                    } finally {
+                        temporary.delete()
                     }
-                    destination.setLastModified(System.currentTimeMillis())
-                    enforceOnlineThumbnailBudget(context)
-                } finally {
-                    temporary.delete()
                 }
             }
         }
@@ -174,7 +179,9 @@ object ReaderCache {
                 .asSequence()
                 .filter { it.isDirectory && it.name.startsWith("online-") }
                 .flatMap { it.listFiles().orEmpty().asSequence() }
-                .filter { it.isFile && it.name.endsWith(".jpg") }
+                .filter {
+                    it.isFile && (it.name.endsWith(".jpg") || it.name.endsWith(".tmp"))
+                }
                 .sortedBy(File::lastModified)
                 .toList()
         var total = files.sumOf(File::length)
@@ -225,5 +232,13 @@ object ReaderCache {
         booksDir(context).listFiles()?.forEach { f ->
             if (f.name.endsWith(".tmp") && f.lastModified() < staleBefore) f.delete()
         }
+        File(context.cacheDir, THUMBS_DIR)
+            .listFiles()
+            .orEmpty()
+            .asSequence()
+            .filter { it.isDirectory && it.name.startsWith("online-") }
+            .flatMap { it.listFiles().orEmpty().asSequence() }
+            .filter { it.isFile && it.name.endsWith(".tmp") && it.lastModified() < staleBefore }
+            .forEach(File::delete)
     }
 }

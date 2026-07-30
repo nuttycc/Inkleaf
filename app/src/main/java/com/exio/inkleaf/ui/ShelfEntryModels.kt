@@ -84,10 +84,15 @@ internal fun wholeComicProgress(
     val currentOffset = ordered.indexOfFirst { it.chapterIndex == comic.lastReadChapterIndex }
     if (currentOffset < 0) return null
     val preceding = ordered.take(currentOffset)
-    if (preceding.any { it.pageCount <= 0 }) return null
-    val currentChapterPages = ordered[currentOffset].pageCount
+    if (preceding.any { !it.isMissing && it.pageCount <= 0 }) return null
+    val currentChapter = ordered[currentOffset]
+    if (currentChapter.isMissing) return null
+    val currentChapterPages = currentChapter.pageCount
     if (currentChapterPages <= 0) return null
-    val current = preceding.sumOf(ChapterEntity::pageCount) + comic.lastReadPage + 1
+    val current =
+        preceding.sumOf { chapter -> if (chapter.isMissing) 0 else chapter.pageCount } +
+            comic.lastReadPage +
+            1
     return ShelfProgress(
         currentPage = current.coerceIn(1, comic.pageCount),
         totalPages = comic.pageCount,
