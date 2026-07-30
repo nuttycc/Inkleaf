@@ -26,6 +26,7 @@ internal data class ReaderChapterNavigation(
     val chapters: List<ReaderChapterItem>?,
     val currentChapterIndex: Int,
     val onSelectChapter: (Int) -> Unit,
+    val onForwardPastEnd: (() -> Unit)? = null,
 )
 
 internal data class ReaderBookmarkItem(

@@ -43,4 +43,12 @@ class OnlineReaderChapterNavigationTest {
             selectableOnlineChapter(chapters, currentChapterIndex = 1, targetChapterIndex = 0),
         )
     }
+
+    @Test
+    fun `next readable chapter skips unavailable entries`() {
+        assertNull(nextReadableOnlineChapter(chapters, currentChapterIndex = 1))
+        val fromFirst = nextReadableOnlineChapter(chapters, currentChapterIndex = 0)
+        assertSame(chapters[1], fromFirst?.first)
+        assertEquals(1, fromFirst?.second)
+    }
 }

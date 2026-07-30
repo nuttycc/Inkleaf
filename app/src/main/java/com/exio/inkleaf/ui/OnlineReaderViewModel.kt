@@ -156,6 +156,12 @@ internal class OnlineReaderViewModel(
         }
     }
 
+    fun continueToNextChapter() {
+        val next = nextReadableOnlineChapter(chapterSummaries, currentChapterIndex) ?: return
+        if (chapterLoadJob?.isActive == true) return
+        chapterLoadJob = viewModelScope.launch { prepareAndCommitNextChapter(next.first, next.second) }
+    }
+
     fun requestThumbnail(page: Int) {
         launchThumbnailJob { loadThumbnail(page) }
     }
@@ -362,6 +368,89 @@ internal class OnlineReaderViewModel(
                 }
             }
             state = ReaderPresentationState.Error(error.message ?: "加载页面失败")
+        }
+    }
+
+    private suspend fun prepareAndCommitNextChapter(chapter: ChapterSummary, index: Int) {
+        val previousChapterId = activeChapterId
+        val previousRevision = currentRevision
+        var prepared: OnlineChapterVolume? = null
+        var committed = false
+        readerMessage = "正在进入下一章"
+        try {
+            val response =
+                application.pluginCatalog.pages(
+                    pluginId,
+                    PluginPagesRequest(
+                        sourceId = sourceId,
+                        chapterId = chapter.chapterId,
+                        revision = chapter.revision,
+                        opaqueContext = chapter.opaqueContext ?: contentOpaqueContext,
+                    ),
+                )
+            if (response.pages.isEmpty()) throw ComicOpenException("下一章没有可阅读页面")
+            val revision =
+                resolveOnlineChapterRevision(chapter.chapterId, chapter.revision, response)
+            val candidate =
+                OnlineChapterVolume(
+                    chapterId = chapter.chapterId,
+                    title = chapter.title.takeIf(String::isNotBlank) ?: chapter.chapterId,
+                    sourceRevision = revision,
+                    pages = response.pages,
+                    client = application.onlineImageCallFactory,
+                )
+            prepared = candidate
+            if (activeChapterId != previousChapterId || currentRevision != previousRevision) {
+                candidate.close()
+                prepared = null
+                return
+            }
+
+            pauseActiveSegment()
+            chapterReady = false
+            flushCurrentProgress()
+            lastPageByChapterId[activeChapterId] = currentPage
+            cancelThumbnailJobs()
+            val previous = volume
+            clearChapterPresentation()
+            activeChapterId = chapter.chapterId
+            activeRequestedRevision = chapter.revision
+            activeOpaqueContext = chapter.opaqueContext ?: contentOpaqueContext
+            currentChapterTitle = chapter.title.takeIf(String::isNotBlank) ?: chapter.chapterId
+            currentChapterIndex = index
+            currentRevision = revision
+            volume = candidate
+            currentPage = 0
+            lastPageByChapterId[activeChapterId] = 0
+            sessionLatestLocation = locationFor(0)
+            state =
+                ReaderPresentationState.Ready(
+                    volume = candidate,
+                    startPage = 0,
+                    title = currentTitle,
+                    cacheKeyPrefix = cacheKeyPrefix(revision),
+                )
+            previous?.close()
+            committed = true
+            chapterReady = true
+            resumeActiveSegmentIfProcessResumed()
+            prewarmThumbnails(candidate, 0)
+            try {
+                refreshUserRecords()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                // User-record refresh never invalidates an otherwise readable prepared chapter.
+            }
+            readerMessage = null
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            readerMessage =
+                error.message?.let { "无法进入下一章：$it，再次翻页可重试" }
+                    ?: "无法进入下一章，再次翻页可重试"
+        } finally {
+            if (!committed) prepared?.close()
         }
     }
 
@@ -840,3 +929,13 @@ internal fun selectableOnlineChapter(
     chapters.getOrNull(targetChapterIndex)?.takeIf {
         targetChapterIndex != currentChapterIndex && it.available
     }
+
+internal fun nextReadableOnlineChapter(
+    chapters: List<ChapterSummary>,
+    currentChapterIndex: Int,
+): Pair<ChapterSummary, Int>? {
+    if (currentChapterIndex !in chapters.indices) return null
+    val index = (currentChapterIndex + 1 until chapters.size).firstOrNull { chapters[it].available }
+        ?: return null
+    return chapters[index] to index
+}

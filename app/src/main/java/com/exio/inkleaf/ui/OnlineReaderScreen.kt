@@ -60,6 +60,7 @@ fun OnlineReaderScreen(
                 chapters = viewModel.readerChapters,
                 currentChapterIndex = viewModel.currentChapterIndex,
                 onSelectChapter = viewModel::selectChapter,
+                onForwardPastEnd = viewModel::continueToNextChapter,
             ),
         onExit = {
             viewModel.endReadingSession()

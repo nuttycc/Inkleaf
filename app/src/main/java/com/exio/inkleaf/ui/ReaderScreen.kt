@@ -518,9 +518,14 @@ private fun ComicPager(
 
     // 翻页统一走"前进/后退"抽象：将来日漫右→左模式只需反转点按区到 delta 的映射
     val turnPage: (Int) -> Unit = { delta ->
-        val target = (pagerState.currentPage + delta).coerceIn(0, volume.totalPageCount - 1)
-        if (target != pagerState.currentPage) {
-            scope.launch { pagerState.animateScrollToPage(target) }
+        val requested = pagerState.currentPage + delta
+        if (requested >= volume.totalPageCount && delta > 0) {
+            chapterNavigation?.onForwardPastEnd?.invoke()
+        } else {
+            val target = requested.coerceIn(0, volume.totalPageCount - 1)
+            if (target != pagerState.currentPage) {
+                scope.launch { pagerState.animateScrollToPage(target) }
+            }
         }
     }
 
