@@ -39,7 +39,7 @@ internal object ReaderPageCacheKey {
         return "id-$token.jpg"
     }
 
-    private fun sha256Hex(bytes: ByteArray): String =
+    internal fun sha256Hex(bytes: ByteArray): String =
         hex(MessageDigest.getInstance("SHA-256").digest(bytes))
 
     private fun hex(bytes: ByteArray): String =

@@ -4,6 +4,10 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import java.io.File
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -18,6 +22,7 @@ import kotlinx.coroutines.withContext
 object ReaderCache {
     private const val BOOKS_DIR = "books"
     private const val THUMBS_DIR = "thumbs"
+    private const val ONLINE_THUMBS_MAX_BYTES = 64L * 1024L * 1024L
 
     /** 旧版固定文件名副本，升级后冷启动时清一次 */
     private const val LEGACY_CACHE_FILE = "current_comic.zip"
@@ -82,6 +87,102 @@ object ReaderCache {
                     bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
                 }
             }
+        }
+    }
+
+    private fun onlineThumbFile(
+        context: Context,
+        namespace: String,
+        page: Int,
+        pageIdentity: String,
+    ): File {
+        val namespaceToken =
+            ReaderPageCacheKey.sha256Hex(namespace.toByteArray(Charsets.UTF_8))
+        return File(
+            File(File(context.cacheDir, THUMBS_DIR), "online-$namespaceToken"),
+            ReaderPageCacheKey.thumbnailFileName(page, pageIdentity),
+        )
+    }
+
+    suspend fun readOnlineThumbnail(
+        context: Context,
+        namespace: String,
+        page: Int,
+        pageIdentity: String,
+    ): Bitmap? =
+        withContext(Dispatchers.IO) {
+            val file = onlineThumbFile(context, namespace, page, pageIdentity)
+            if (!file.exists()) return@withContext null
+            val decoded = BitmapFactory.decodeFile(
+                    file.absolutePath,
+                    BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.RGB_565 },
+                )
+            if (decoded == null) {
+                    file.delete()
+            } else {
+                file.setLastModified(System.currentTimeMillis())
+            }
+            decoded
+        }
+
+    suspend fun writeOnlineThumbnail(
+        context: Context,
+        namespace: String,
+        page: Int,
+        pageIdentity: String,
+        bitmap: Bitmap,
+    ) {
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val destination = onlineThumbFile(context, namespace, page, pageIdentity)
+                destination.parentFile?.mkdirs()
+                val temporary =
+                    File(destination.parentFile, "${destination.name}.${UUID.randomUUID()}.tmp")
+                try {
+                    temporary.outputStream().use { output ->
+                        check(bitmap.compress(Bitmap.CompressFormat.JPEG, 85, output))
+                        output.flush()
+                    }
+                    try {
+                        Files.move(
+                            temporary.toPath(),
+                            destination.toPath(),
+                            StandardCopyOption.ATOMIC_MOVE,
+                            StandardCopyOption.REPLACE_EXISTING,
+                        )
+                    } catch (_: AtomicMoveNotSupportedException) {
+                        Files.move(
+                            temporary.toPath(),
+                            destination.toPath(),
+                            StandardCopyOption.REPLACE_EXISTING,
+                        )
+                    }
+                    destination.setLastModified(System.currentTimeMillis())
+                    enforceOnlineThumbnailBudget(context)
+                } finally {
+                    temporary.delete()
+                }
+            }
+        }
+    }
+
+    private fun enforceOnlineThumbnailBudget(context: Context) {
+        val root = File(context.cacheDir, THUMBS_DIR)
+        val files =
+            root.listFiles()
+                .orEmpty()
+                .asSequence()
+                .filter { it.isDirectory && it.name.startsWith("online-") }
+                .flatMap { it.listFiles().orEmpty().asSequence() }
+                .filter { it.isFile && it.name.endsWith(".jpg") }
+                .sortedBy(File::lastModified)
+                .toList()
+        var total = files.sumOf(File::length)
+        for (file in files) {
+            if (total <= ONLINE_THUMBS_MAX_BYTES) break
+            total -= file.length()
+            file.delete()
+            file.parentFile?.takeIf { it.list().isNullOrEmpty() }?.delete()
         }
     }
 

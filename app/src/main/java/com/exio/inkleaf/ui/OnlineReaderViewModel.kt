@@ -10,6 +10,8 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
@@ -22,6 +24,7 @@ import com.exio.inkleaf.data.OnlineContentIdentity
 import com.exio.inkleaf.data.OnlinePageIdentity
 import com.exio.inkleaf.data.OnlinePageLocation
 import com.exio.inkleaf.data.ReadingSessionRules
+import com.exio.inkleaf.data.ReaderCache
 import com.exio.inkleaf.plugin.ChapterSummary
 import com.exio.inkleaf.plugin.OnlineAvailability
 import com.exio.inkleaf.plugin.OnlineChapterVolume
@@ -339,6 +342,7 @@ internal class OnlineReaderViewModel(
                 )
             chapterReady = true
             resumeActiveSegmentIfProcessResumed()
+            prewarmThumbnails(opened, startPage)
             if (restored.stale) {
                 readerMessage = "源内容已变化，已打开最接近的页面"
             }
@@ -588,16 +592,44 @@ internal class OnlineReaderViewModel(
             if (page in thumbnails || !thumbnailInFlight.add(page)) return
         }
         try {
-            withContext(Dispatchers.IO) {
+            val namespace = cacheKeyPrefix(opened.sourceRevision)
+            val pageIdentity = opened.pageIdentity(page)
+            val cached =
+                ReaderCache.readOnlineThumbnail(
+                    application,
+                    namespace,
+                    page,
+                    pageIdentity,
+                )
+            if (cached != null) {
+                thumbnails[page] = cached.asImageBitmap()
+                return
+            }
+            val rendered =
+                withContext(Dispatchers.IO) {
                     opened.renderThumbnail(page, THUMB_TARGET_WIDTH)
-                }
-                ?.let { thumbnails[page] = it }
+                } ?: return
+            thumbnails[page] = rendered
+            ReaderCache.writeOnlineThumbnail(
+                application,
+                namespace,
+                page,
+                pageIdentity,
+                rendered.asAndroidBitmap(),
+            )
         } catch (error: CancellationException) {
             throw error
         } catch (_: Exception) {
             // A failed thumbnail remains retryable and never blocks the full-size page.
         } finally {
             thumbnailMutex.withLock { thumbnailInFlight -= page }
+        }
+    }
+
+    private fun prewarmThumbnails(opened: OnlineChapterVolume, startPage: Int) {
+        val pages = thumbnailPrewarmOrder(startPage, opened.totalPageCount, THUMB_PREWARM_RADIUS)
+        launchThumbnailJob {
+            for (page in pages) loadThumbnail(page)
         }
     }
 
@@ -762,6 +794,7 @@ internal class OnlineReaderViewModel(
 
     private companion object {
         const val THUMB_TARGET_WIDTH = 168
+        const val THUMB_PREWARM_RADIUS = 2
         const val PROGRESS_WRITE_INTERVAL_MS = 500L
 
         fun snapshotExtension(mimeType: String): String =
