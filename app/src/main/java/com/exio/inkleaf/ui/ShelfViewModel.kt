@@ -69,7 +69,7 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycle
             .map { withContext(Dispatchers.IO) { onlineRepo.listBookmarked() } }
 
     /** One presentation state gates the first frame on both stores and keeps ordering stable. */
-    val shelfState: StateFlow<ShelfUiState?> =
+    internal val shelfState: StateFlow<ShelfUiState?> =
         combine(
                 repo.observeAll(),
                 repo.observeAllChapters(),

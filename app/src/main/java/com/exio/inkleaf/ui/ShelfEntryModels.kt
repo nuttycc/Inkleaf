@@ -67,6 +67,7 @@ internal fun buildShelfEntries(
                 .thenBy(String.CASE_INSENSITIVE_ORDER, ShelfEntry::title)
                 .thenBy(ShelfEntry::key)
         )
+        .toList()
 }
 
 internal fun wholeComicProgress(

@@ -38,7 +38,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-sealed interface HistoryListItem {
+internal sealed interface HistoryListItem {
     val stableKey: String
 
     data class DateHeader(
@@ -138,7 +138,7 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    val timeline: StateFlow<List<HistoryListItem>?> =
+    internal val timeline: StateFlow<List<HistoryListItem>?> =
         combine(
                 sessionRepo.recentHistory(),
                 onlineHistory,

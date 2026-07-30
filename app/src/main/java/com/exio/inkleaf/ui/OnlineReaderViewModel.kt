@@ -19,6 +19,7 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.viewModelScope
 import com.exio.inkleaf.InkleafApplication
 import com.exio.inkleaf.data.ComicOpenException
+import com.exio.inkleaf.data.ComicVolume
 import com.exio.inkleaf.data.OnlineChapterIdentity
 import com.exio.inkleaf.data.OnlineContentIdentity
 import com.exio.inkleaf.data.OnlinePageIdentity
