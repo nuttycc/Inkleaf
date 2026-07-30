@@ -30,6 +30,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -58,11 +61,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.paging.LoadState
-import androidx.paging.compose.LazyPagingItems
-import androidx.paging.compose.collectAsLazyPagingItems
-import androidx.paging.compose.itemKey
 import coil.compose.AsyncImage
 import com.exio.inkleaf.R
 import java.io.File
@@ -75,7 +75,8 @@ fun HistoryScreen(
     modifier: Modifier = Modifier,
     viewModel: HistoryViewModel = viewModel(),
 ) {
-    val items = viewModel.timeline.collectAsLazyPagingItems()
+    val items by viewModel.timeline.collectAsStateWithLifecycle()
+    val selectedSource by viewModel.selectedSource.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     var showClearConfirm by rememberSaveable { mutableStateOf(false) }
     var clearInProgress by remember { mutableStateOf(false) }
@@ -88,7 +89,6 @@ fun HistoryScreen(
 
     LifecycleResumeEffect(viewModel) {
         viewModel.refreshDateLabels()
-        viewModel.refreshOnlineSessions()
         onPauseOrDispose { viewModel.cancelPendingResolve() }
     }
 
@@ -113,7 +113,7 @@ fun HistoryScreen(
                 is HistoryEvent.OnlineSessionDeleted -> {
                     val result =
                         snackbarHostState.showSnackbar(
-                            message = "已删除在线阅读记录",
+                            message = "已删除阅读记录",
                             actionLabel = "撤销",
                             duration = SnackbarDuration.Long,
                         )
@@ -128,64 +128,58 @@ fun HistoryScreen(
         }
     }
 
-    val refresh = items.loadState.refresh
-    val onlineSessions = viewModel.onlineSessions
-    val hasItems = items.itemCount > 0 || onlineSessions.orEmpty().isNotEmpty()
-    val showEmpty = refresh is LoadState.NotLoading && !hasItems && onlineSessions != null
-    val showInitialSkeleton =
-        refresh is LoadState.Loading && items.itemCount == 0 && onlineSessions.isNullOrEmpty()
+    val hasItems = items.orEmpty().any { it !is HistoryListItem.DateHeader }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
         contentWindowInsets = WindowInsets(0),
         topBar = {
-            TopAppBar(
-                title = { Text("历史") },
-                actions = {
-                    if (hasItems) {
-                        var menuOpen by remember { mutableStateOf(false) }
-                        Box {
-                            IconButton(onClick = { menuOpen = true }) {
-                                Icon(Icons.Filled.MoreVert, contentDescription = "更多")
-                            }
-                            DropdownMenu(
-                                expanded = menuOpen,
-                                onDismissRequest = { menuOpen = false },
-                            ) {
-                                DropdownMenuItem(
-                                    text = { Text("清空历史") },
-                                    onClick = {
-                                        menuOpen = false
-                                        showClearConfirm = true
-                                    },
-                                )
+            Column {
+                TopAppBar(
+                    title = { Text("历史") },
+                    actions = {
+                        if (hasItems) {
+                            var menuOpen by remember { mutableStateOf(false) }
+                            Box {
+                                IconButton(onClick = { menuOpen = true }) {
+                                    Icon(Icons.Filled.MoreVert, contentDescription = "更多")
+                                }
+                                DropdownMenu(
+                                    expanded = menuOpen,
+                                    onDismissRequest = { menuOpen = false },
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("清空历史") },
+                                        onClick = {
+                                            menuOpen = false
+                                            showClearConfirm = true
+                                        },
+                                    )
+                                }
                             }
                         }
-                    }
-                },
-                colors =
-                    TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.background,
-                        scrolledContainerColor = MaterialTheme.colorScheme.background,
-                    ),
-            )
+                    },
+                    colors =
+                        TopAppBarDefaults.topAppBarColors(
+                            containerColor = MaterialTheme.colorScheme.background,
+                            scrolledContainerColor = MaterialTheme.colorScheme.background,
+                        ),
+                )
+                HistorySourceFilterBar(
+                    selected = selectedSource,
+                    onSelect = viewModel::selectSource,
+                )
+            }
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { innerPadding ->
         when {
-            showInitialSkeleton ->
+            items == null ->
                 HistorySkeletonList(modifier = Modifier.fillMaxSize().padding(innerPadding))
-            refresh is LoadState.Error && !hasItems && onlineSessions != null ->
-                HistoryError(
-                    message = "无法加载阅读历史",
-                    onRetry = { items.retry() },
-                    modifier = Modifier.fillMaxSize().padding(innerPadding),
-                )
-            showEmpty -> HistoryEmpty(modifier = Modifier.fillMaxSize().padding(innerPadding))
+            !hasItems -> HistoryEmpty(modifier = Modifier.fillMaxSize().padding(innerPadding))
             else ->
                 HistoryTimelineList(
-                    items = items,
-                    onlineSessions = onlineSessions.orEmpty(),
+                    items = items.orEmpty(),
                     resolvingSessionId = viewModel.resolvingSessionId,
                     onOpen = viewModel::continueReading,
                     onDelete = { viewModel.deleteSession(it.id) },
@@ -263,8 +257,7 @@ fun HistoryScreen(
 
 @Composable
 private fun HistoryTimelineList(
-    items: LazyPagingItems<HistoryListItem>,
-    onlineSessions: List<OnlineHistorySessionUi>,
+    items: List<HistoryListItem>,
     resolvingSessionId: String?,
     onOpen: (HistorySessionUi) -> Unit,
     onDelete: (HistorySessionUi) -> Unit,
@@ -273,25 +266,8 @@ private fun HistoryTimelineList(
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(modifier = modifier) {
-        if (onlineSessions.isNotEmpty()) {
-            item(key = "online-history-header") { HistoryDateHeader("在线漫画") }
-            items(onlineSessions, key = OnlineHistorySessionUi::key) { session ->
-                OnlineHistorySessionRow(
-                    session = session,
-                    onOpen = { onOpenOnline(session) },
-                    onDelete = { onDeleteOnline(session) },
-                )
-                HorizontalDivider(
-                    modifier = Modifier.padding(start = 84.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-                )
-            }
-        }
-        items(
-            count = items.itemCount,
-            key = items.itemKey { it.stableKey },
-        ) { index ->
-            when (val item = items[index]) {
+        items(items, key = HistoryListItem::stableKey) { item ->
+            when (item) {
                 is HistoryListItem.DateHeader -> HistoryDateHeader(item.label)
                 is HistoryListItem.Session -> {
                     HistorySessionRow(
@@ -305,40 +281,44 @@ private fun HistoryTimelineList(
                         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
                     )
                 }
-                null -> HistorySessionSkeletonRow()
-            }
-        }
-        when (items.loadState.refresh) {
-            is LoadState.Loading ->
-                if (items.itemCount == 0) {
-                    item(key = "refresh-skeleton") { HistorySessionSkeletonRow() }
-                }
-            is LoadState.Error ->
-                if (items.itemCount == 0) {
-                    item(key = "refresh-error") {
-                        HistoryError(
-                            message = "无法加载本地阅读历史",
-                            onRetry = { items.retry() },
-                            modifier = Modifier.fillMaxWidth().padding(16.dp),
-                        )
-                    }
-                }
-            else -> Unit
-        }
-        when (items.loadState.append) {
-            is LoadState.Loading ->
-                item(key = "append-skeleton") {
-                    HistorySessionSkeletonRow()
-                }
-            is LoadState.Error ->
-                item(key = "append-error") {
-                    HistoryError(
-                        message = "无法加载更多记录",
-                        onRetry = { items.retry() },
-                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                is HistoryListItem.OnlineSession -> {
+                    OnlineHistorySessionRow(
+                        session = item.row,
+                        onOpen = { onOpenOnline(item.row) },
+                        onDelete = { onDeleteOnline(item.row) },
+                    )
+                    HorizontalDivider(
+                        modifier = Modifier.padding(start = 84.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
                     )
                 }
-            else -> Unit
+            }
+        }
+    }
+}
+
+@Composable
+private fun HistorySourceFilterBar(
+    selected: HistorySourceFilter,
+    onSelect: (HistorySourceFilter) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val options = listOf(
+        HistorySourceFilter.ALL to "全部",
+        HistorySourceFilter.LOCAL to "本地",
+        HistorySourceFilter.ONLINE to "在线",
+    )
+    SingleChoiceSegmentedButtonRow(
+        modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        options.forEachIndexed { index, (value, label) ->
+            SegmentedButton(
+                selected = selected == value,
+                onClick = { onSelect(value) },
+                shape = SegmentedButtonDefaults.itemShape(index, options.size),
+            ) {
+                Text(label)
+            }
         }
     }
 }

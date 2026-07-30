@@ -6,10 +6,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import androidx.paging.PagingData
-import androidx.paging.cachedIn
-import androidx.paging.insertSeparators
-import androidx.paging.map
 import com.exio.inkleaf.InkleafApplication
 import com.exio.inkleaf.data.ComicRepository
 import com.exio.inkleaf.data.HistoryDateGrouping
@@ -30,14 +26,14 @@ import java.util.Locale
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -47,13 +43,25 @@ sealed interface HistoryListItem {
     data class DateHeader(
         val localDate: LocalDate,
         val label: String,
+        val anchorKey: String = "",
     ) : HistoryListItem {
-        override val stableKey: String = "date:${HistoryDateGrouping.dateKey(localDate)}"
+        override val stableKey: String =
+            "date:${HistoryDateGrouping.dateKey(localDate)}:$anchorKey"
     }
 
     data class Session(val row: HistorySessionUi) : HistoryListItem {
-        override val stableKey: String = "session:${row.id}"
+        override val stableKey: String = "local:${row.id}"
     }
+
+    data class OnlineSession(val row: OnlineHistorySessionUi) : HistoryListItem {
+        override val stableKey: String = row.key
+    }
+}
+
+enum class HistorySourceFilter {
+    ALL,
+    LOCAL,
+    ONLINE,
 }
 
 data class HistorySessionUi(
@@ -89,7 +97,6 @@ sealed interface HistoryEvent {
     ) : HistoryEvent
 }
 
-@OptIn(ExperimentalCoroutinesApi::class)
 class HistoryViewModel(app: Application) : AndroidViewModel(app) {
     private val sessionRepo = ReadingSessionRepository.getInstance(app)
     private val comicRepo = ComicRepository(app)
@@ -97,6 +104,7 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
     private val clock = SystemReadingClock()
     private val eventChannel = Channel<HistoryEvent>(Channel.BUFFERED)
     private val todayRefresh = MutableStateFlow(0)
+    private val sourceFilter = MutableStateFlow(HistorySourceFilter.ALL)
     private var lastRefreshDate: LocalDate? = null
 
     /** Session id currently resolving for continue-reading; null when idle. */
@@ -105,59 +113,37 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
 
     private var resolveGeneration = 0L
     private var resolveJob: Job? = null
-    private var onlineRefreshJob: Job? = null
-
-    internal var onlineSessions by mutableStateOf<List<OnlineHistorySessionUi>?>(null)
-        private set
+    val selectedSource: StateFlow<HistorySourceFilter> = sourceFilter
 
     val events = eventChannel.receiveAsFlow()
 
-    init {
-        refreshOnlineSessions()
-    }
-
-    val timeline: Flow<PagingData<HistoryListItem>> =
-        todayRefresh
-            .flatMapLatest {
+    val timeline: StateFlow<List<HistoryListItem>?> =
+        combine(
+                sessionRepo.recentHistory(),
+                onlineRepository.revision,
+                sourceFilter,
+                todayRefresh,
+            ) { local, _, filter, _ ->
                 val today =
                     Instant.ofEpochMilli(clock.nowMillis())
                         .atZone(ZoneId.systemDefault())
                         .toLocalDate()
-                sessionRepo.historyPaging().map { paging ->
-                    paging
-                        .map { row -> row.toHistoryListItem() }
-                        .insertSeparators { before, after ->
-                            val afterSession =
-                                after as? HistoryListItem.Session ?: return@insertSeparators null
-                            val afterDate =
-                                HistoryDateGrouping.sessionLocalDate(
-                                    afterSession.row.startedAt,
-                                    afterSession.row.timeZoneId,
-                                )
-                            val beforeDate =
-                                (before as? HistoryListItem.Session)?.let {
-                                    HistoryDateGrouping.sessionLocalDate(
-                                        it.row.startedAt,
-                                        it.row.timeZoneId,
-                                    )
-                                }
-                            if (beforeDate == afterDate) {
-                                null
-                            } else {
-                                HistoryListItem.DateHeader(
-                                    localDate = afterDate,
-                                    label =
-                                        HistoryDateGrouping.labelFor(
-                                            afterDate,
-                                            today,
-                                            Locale.getDefault(),
-                                        ),
-                                )
+                val online =
+                    withContext(Dispatchers.IO) {
+                        runCatching {
+                                onlineRepository
+                                    .list()
+                                    .flatMap(OnlineComicRecord::toOnlineHistorySessions)
                             }
-                        }
-                }
+                            .getOrDefault(emptyList())
+                    }
+                buildHistoryTimeline(local, online, filter, today, Locale.getDefault())
             }
-            .cachedIn(viewModelScope)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    fun selectSource(filter: HistorySourceFilter) {
+        sourceFilter.value = filter
+    }
 
     fun refreshDateLabels() {
         val today =
@@ -165,33 +151,6 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
         if (today == lastRefreshDate) return
         lastRefreshDate = today
         todayRefresh.value += 1
-    }
-
-    fun refreshOnlineSessions() {
-        onlineRefreshJob?.cancel()
-        onlineRefreshJob = viewModelScope.launch {
-            try {
-                onlineSessions =
-                    withContext(Dispatchers.IO) {
-                        onlineRepository
-                            .list()
-                            .flatMap(OnlineComicRecord::toOnlineHistorySessions)
-                            .sortedWith(
-                                compareByDescending<OnlineHistorySessionUi> {
-                                        it.stored.endedAtMs
-                                    }
-                                    .thenByDescending { it.key }
-                            )
-                    }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Exception) {
-                onlineSessions = emptyList()
-                eventChannel.send(
-                    HistoryEvent.Message(error.message?.let { "加载在线阅读历史失败：$it" } ?: "加载在线阅读历史失败")
-                )
-            }
-        }
     }
 
     fun continueReading(session: HistorySessionUi) {
@@ -315,7 +274,6 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
                         )
                     )
                 }
-                refreshOnlineSessions()
                 eventChannel.send(HistoryEvent.OnlineSessionDeleted(session.stored))
             } catch (error: CancellationException) {
                 throw error
@@ -329,7 +287,6 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) { onlineRepository.recordReadingSession(snapshot) }
-                refreshOnlineSessions()
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {
@@ -356,7 +313,6 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
             } catch (_: Exception) {
                 onlineFailed = true
             }
-            refreshOnlineSessions()
             eventChannel.send(
                 HistoryEvent.Message(
                     when {
@@ -406,6 +362,61 @@ private fun OnlineComicRecord.toOnlineHistorySessions(): List<OnlineHistorySessi
             stored = session,
         )
     }
+
+internal fun buildHistoryTimeline(
+    local: List<HistoryRowProjection>,
+    online: List<OnlineHistorySessionUi>,
+    filter: HistorySourceFilter,
+    today: LocalDate,
+    locale: Locale,
+): List<HistoryListItem> {
+    data class TimedItem(
+        val startedAt: Long,
+        val zoneId: String,
+        val stableKey: String,
+        val item: HistoryListItem,
+    )
+
+    val localItems =
+        if (filter != HistorySourceFilter.ONLINE) {
+            local.map { row ->
+                val item = row.toHistoryListItem()
+                TimedItem(row.startedAt, row.timeZoneId, item.stableKey, item)
+            }
+        } else {
+            emptyList()
+        }
+    val onlineItems =
+        if (filter != HistorySourceFilter.LOCAL) {
+            online.map { row ->
+                val item = HistoryListItem.OnlineSession(row)
+                TimedItem(row.stored.startedAtMs, row.stored.timeZoneId, item.stableKey, item)
+            }
+        } else {
+            emptyList()
+        }
+    val result = mutableListOf<HistoryListItem>()
+    var previousDate: LocalDate? = null
+    (localItems + onlineItems)
+        .sortedWith(
+            compareByDescending<TimedItem>(TimedItem::startedAt)
+                .thenByDescending(TimedItem::stableKey)
+        )
+        .forEach { timed ->
+            val date = HistoryDateGrouping.sessionLocalDate(timed.startedAt, timed.zoneId)
+            if (date != previousDate) {
+                result +=
+                    HistoryListItem.DateHeader(
+                        localDate = date,
+                        label = HistoryDateGrouping.labelFor(date, today, locale),
+                        anchorKey = timed.stableKey,
+                    )
+                previousDate = date
+            }
+            result += timed.item
+        }
+    return result
+}
 
 private fun HistoryRowProjection.toHistoryListItem(): HistoryListItem =
     HistoryListItem.Session(toUi())

@@ -1,9 +1,6 @@
 package com.exio.inkleaf.data
 
 import android.content.Context
-import androidx.paging.Pager
-import androidx.paging.PagingConfig
-import androidx.paging.PagingData
 import androidx.room.withTransaction
 import com.exio.inkleaf.data.db.AppDatabase
 import com.exio.inkleaf.data.db.HistoryRowProjection
@@ -40,19 +37,8 @@ private constructor(
     private val machine = ReadingSessionStateMachine(clock, idGenerator)
     private var hydrated = false
 
-    fun historyPaging(): Flow<PagingData<HistoryRowProjection>> =
-        Pager(
-                config =
-                    PagingConfig(
-                        pageSize = 50,
-                        initialLoadSize = 100,
-                        prefetchDistance = 15,
-                        enablePlaceholders = false,
-                        maxSize = 250,
-                    ),
-                pagingSourceFactory = { dao.observeHistoryPaging() },
-            )
-            .flow
+    fun recentHistory(limit: Int = 250): Flow<List<HistoryRowProjection>> =
+        dao.observeRecentHistory(limit)
 
     suspend fun deletePermanent(id: String): ReadingSessionEntity? = mutex.withLock {
         db.withTransaction {

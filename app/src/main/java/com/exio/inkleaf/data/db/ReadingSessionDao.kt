@@ -1,6 +1,5 @@
 package com.exio.inkleaf.data.db
 
-import androidx.paging.PagingSource
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
@@ -43,10 +42,6 @@ interface ReadingSessionDao {
     @Query("SELECT COUNT(*) FROM reading_sessions WHERE isPermanent = 1")
     suspend fun countPermanent(): Long
 
-    /**
-     * Permanent timeline, newest first. UUID [id] breaks same-millisecond ties. Shelf fields are
-     * left-joined by fileKey so deleted comics stay visible as unavailable history rows.
-     */
     @Query(
         """
         SELECT
@@ -75,7 +70,8 @@ interface ReadingSessionDao {
             ON c.fileKey = s.comicFileKey AND c.isDraft = 0
         WHERE s.isPermanent = 1
         ORDER BY s.startedAt DESC, s.id DESC
+        LIMIT :limit
         """
     )
-    fun observeHistoryPaging(): PagingSource<Int, HistoryRowProjection>
+    fun observeRecentHistory(limit: Int): kotlinx.coroutines.flow.Flow<List<HistoryRowProjection>>
 }
