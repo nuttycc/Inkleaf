@@ -18,12 +18,12 @@ class ReaderPageContentKeysTest {
     }
 
     @Test
-    fun `entering or leaving the current page restarts without resetting state`() {
+    fun `entering or leaving the current page does not restart the producer`() {
         val inactive = keys(isCurrentPage = false)
         val active = keys(isCurrentPage = true)
 
         assertEquals(inactive.stateReset, active.stateReset)
-        assertNotEquals(inactive.producerRestart, active.producerRestart)
+        assertEquals(inactive.producerRestart, active.producerRestart)
     }
 
     @Test
