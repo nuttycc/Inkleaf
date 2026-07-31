@@ -63,6 +63,19 @@ fun OnlineReaderScreen(
                 currentChapterIndex = viewModel.currentChapterIndex,
                 onSelectChapter = viewModel::selectChapter,
                 onForwardPastEnd = viewModel::continueToNextChapter,
+                onBackwardPastStart = viewModel::continueToPreviousChapter,
+                onReachedLastPage = viewModel::preloadNextChapter,
+                onReachedFirstPage = viewModel::preloadPreviousChapter,
+                transition = viewModel.chapterTransition,
+                onTransitionEntered = viewModel::onTransitionEntered,
+                onTransitionForward = {
+                    viewModel.continueFromTransition(ReaderTransitionDirection.NEXT)
+                },
+                onTransitionBackward = {
+                    viewModel.continueFromTransition(ReaderTransitionDirection.PREVIOUS)
+                },
+                onTransitionReturn = { viewModel.returnFromTransition() },
+                onRetryTransition = viewModel::retryTransition,
             ),
         onExit = {
             viewModel.endReadingSession()
