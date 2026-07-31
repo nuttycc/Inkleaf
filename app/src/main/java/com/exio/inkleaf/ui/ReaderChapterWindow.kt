@@ -228,6 +228,37 @@ internal fun readerPageTurnResult(
 
 internal fun canAdoptReaderChapterWindow(pagerIsScrolling: Boolean): Boolean = !pagerIsScrolling
 
+internal data class ReaderChapterWindowAdoption(
+    val targetIndex: Int,
+    val fallbackIndex: Int,
+    val anchoredToCurrentKey: Boolean,
+) {
+    val requiresExplicitScroll: Boolean = !anchoredToCurrentKey
+}
+
+internal fun <T> readerChapterWindowAdoption(
+    currentWindow: ReaderChapterWindow<T>,
+    currentIndex: Int,
+    nextWindow: ReaderChapterWindow<T>,
+    startPage: Int,
+): ReaderChapterWindowAdoption {
+    val fallbackIndex =
+        nextWindow.items.indexOfFirst { item ->
+            item is ReaderChapterWindowItem.Page<*> &&
+                item.chapter.chapterId == nextWindow.activeChapterId &&
+                item.pageIndex == startPage
+        }.takeIf { it >= 0 } ?: 0
+    val currentKey = currentWindow.items.getOrNull(currentIndex)?.stableKey
+    val anchoredIndex =
+        currentKey?.let { key -> nextWindow.items.indexOfFirst { it.stableKey == key } }
+            ?.takeIf { it >= 0 }
+    return ReaderChapterWindowAdoption(
+        targetIndex = anchoredIndex ?: fallbackIndex,
+        fallbackIndex = fallbackIndex,
+        anchoredToCurrentKey = anchoredIndex != null,
+    )
+}
+
 internal sealed interface ReaderSettledPageEffect {
     data class CommitChapter(
         val chapterId: String,

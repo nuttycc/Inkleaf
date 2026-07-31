@@ -219,6 +219,73 @@ class ReaderChapterWindowTest {
     }
 
     @Test
+    fun `forward chapter commit keeps the settled page as the only target`() {
+        val before =
+            buildReaderChapterWindow(
+                active = chapter("chapter-2", index = 1),
+                previous = null,
+                next = adjacent(ReaderTransitionDirection.NEXT, chapter("chapter-3", 2), true),
+            )
+        val after =
+            buildReaderChapterWindow(
+                active = chapter("chapter-3", index = 2),
+                previous = adjacent(ReaderTransitionDirection.PREVIOUS, chapter("chapter-2", 1), true),
+                next = null,
+            )
+
+        val result = readerChapterWindowAdoption(before, currentIndex = 3, after, startPage = 0)
+
+        assertEquals(3, result.targetIndex)
+        assertTrue(result.anchoredToCurrentKey)
+        assertEquals(false, result.requiresExplicitScroll)
+    }
+
+    @Test
+    fun `backward chapter commit keeps the settled page instead of applying stale start page`() {
+        val before =
+            buildReaderChapterWindow(
+                active = chapter("chapter-3", index = 2),
+                previous = adjacent(ReaderTransitionDirection.PREVIOUS, chapter("chapter-2", 1), true),
+                next = null,
+            )
+        val after =
+            buildReaderChapterWindow(
+                active = chapter("chapter-2", index = 1),
+                previous = null,
+                next = adjacent(ReaderTransitionDirection.NEXT, chapter("chapter-3", 2), true),
+            )
+
+        val result = readerChapterWindowAdoption(before, currentIndex = 1, after, startPage = 1)
+
+        assertEquals(1, result.targetIndex)
+        assertTrue(result.anchoredToCurrentKey)
+        assertEquals(false, result.requiresExplicitScroll)
+    }
+
+    @Test
+    fun `prepend shifts the settled key once and does not select the active start page`() {
+        val before =
+            buildReaderChapterWindow(
+                active = chapter("chapter-2", index = 1),
+                previous = null,
+                next = null,
+            )
+        val after =
+            buildReaderChapterWindow(
+                active = chapter("chapter-2", index = 1),
+                previous = adjacent(ReaderTransitionDirection.PREVIOUS, chapter("chapter-1", 0), true),
+                next = null,
+            )
+
+        val result = readerChapterWindowAdoption(before, currentIndex = 1, after, startPage = 0)
+
+        assertEquals(4, result.targetIndex)
+        assertTrue(result.anchoredToCurrentKey)
+        assertTrue(result.targetIndex != result.fallbackIndex)
+        assertEquals(false, result.requiresExplicitScroll)
+    }
+
+    @Test
     fun `previous and next directions use symmetric ordering`() {
         val current = chapter("chapter-2", index = 1)
         val window =

@@ -386,11 +386,22 @@ private fun ComicPager(
     LaunchedEffect(chapterWindow, pagerState) {
         snapshotFlow { pagerState.isScrollInProgress }
             .first(::canAdoptReaderChapterWindow)
-        visibleChapterWindow = chapterWindow
-    }
-    LaunchedEffect(pagerChapterWindow?.activeChapterId, startPage) {
-        if (!pagerState.isScrollInProgress) {
-            pagerState.requestScrollToPage(initialPagerPage)
+        val oldWindow = visibleChapterWindow
+        val nextWindow = chapterWindow
+        val adoption =
+            if (oldWindow != null && nextWindow != null) {
+                readerChapterWindowAdoption(
+                    currentWindow = oldWindow,
+                    currentIndex = pagerState.settledPage,
+                    nextWindow = nextWindow,
+                    startPage = startPage,
+                )
+            } else {
+                null
+            }
+        visibleChapterWindow = nextWindow
+        if (adoption?.requiresExplicitScroll == true) {
+            pagerState.requestScrollToPage(adoption.targetIndex)
         }
     }
     val scope = rememberCoroutineScope()
