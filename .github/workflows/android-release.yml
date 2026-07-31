@@ -46,7 +46,7 @@ jobs:
           echo "name=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ steps.tag.outputs.name }}
           fetch-depth: 0
@@ -69,7 +69,15 @@ jobs:
           MINOR="${BASH_REMATCH[2]}"
           PATCH="${BASH_REMATCH[3]}"
           VERSION_NAME="${MAJOR}.${MINOR}.${PATCH}"
-          VERSION_CODE=$((10#$MAJOR * 1000000 + 10#$MINOR * 1000 + 10#$PATCH))
+
+          # Preview builds use the even code for a commit. A stable release of
+          # that same commit takes the next odd code so Android can upgrade it.
+          COMMIT_COUNT="$(git rev-list --count HEAD)"
+          VERSION_CODE=$((1000000 + COMMIT_COUNT * 2 + 1))
+          if (( VERSION_CODE > 2100000000 )); then
+            echo "Calculated versionCode exceeds Android's 2,100,000,000 limit." >&2
+            exit 1
+          fi
 
           git fetch --no-tags origin main
           if ! git merge-base --is-ancestor HEAD origin/main; then
@@ -94,7 +102,7 @@ jobs:
           echo "Release $TAG → versionName=$VERSION_NAME versionCode=$VERSION_CODE"
 
       - name: Set up JDK
-        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
         with:
           distribution: temurin
           java-version: 25
