@@ -21,6 +21,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MediumFlexibleTopAppBar
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -57,9 +59,11 @@ fun SettingsScreen(
     foldersViewModel: FoldersViewModel = viewModel(),
 ) {
     val cacheLimit by viewModel.cacheLimit.collectAsStateWithLifecycle()
-    val cacheUsage by viewModel.cacheUsageBytes.collectAsStateWithLifecycle()
+    val cacheUsage by viewModel.cacheUsage.collectAsStateWithLifecycle()
     val cacheBudgetBytes by viewModel.cacheBudgetBytes.collectAsStateWithLifecycle()
     val autoCacheBudgetBytes by viewModel.autoCacheBudgetBytes.collectAsStateWithLifecycle()
+    val isClearingOnlineCache by viewModel.isClearingOnlineCache.collectAsStateWithLifecycle()
+    val cacheMessage by viewModel.cacheMessage.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val unreadDiagnostics by
         remember(context) { DiagnosticRepository.get(context).unreadCriticalCount }
@@ -70,10 +74,18 @@ fun SettingsScreen(
                 initialValue = com.exio.inkleaf.data.ocr.OcrModelVariant.SMALL
             )
     var showCacheLimitSheet by remember { mutableStateOf(false) }
+    var showClearOnlineCacheDialog by rememberSaveable { mutableStateOf(false) }
     var showAboutSheet by remember { mutableStateOf(false) }
     var showLicensesSheet by remember { mutableStateOf(false) }
     var showFoldersSheet by rememberSaveable { mutableStateOf(false) }
     val lastPickedFolder by foldersViewModel.lastPickedFolder.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    SnackbarMessageEffect(
+        message = cacheMessage,
+        hostState = snackbarHostState,
+        onConsumed = viewModel::consumeCacheMessage,
+    )
 
     val treePicker =
         rememberLauncherForActivityResult(contract = ActivityResultContracts.OpenDocumentTree()) {
@@ -100,6 +112,7 @@ fun SettingsScreen(
                 scrollBehavior = topAppBarScrollBehavior,
             )
         },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { innerPadding ->
         Column(
             modifier =
@@ -115,12 +128,27 @@ fun SettingsScreen(
 
             SectionLabel("存储")
             InkleafActionListItem(
-                headline = "漫画缓存上限",
+                headline = "阅读缓存上限",
                 supporting =
-                    "当前占用 ${formatBytes(cacheUsage)} · " +
-                        cacheLimitSummary(cacheLimit, cacheBudgetBytes),
+                    "已用 ${formatBytes(cacheUsage.totalBytes)} / " +
+                        "上限 ${formatBytes(cacheBudgetBytes)}\n" +
+                        "本地副本 ${formatBytes(cacheUsage.localCopiesBytes)} · " +
+                        "在线正文 ${formatBytes(cacheUsage.onlineBodyBytes)} · " +
+                        "缩略图 ${formatBytes(cacheUsage.thumbnailsBytes)}",
                 onClick = { showCacheLimitSheet = true },
                 trailingContent = { ForwardIcon() },
+            )
+            InkleafActionListItem(
+                headline = "清除在线漫画缓存",
+                supporting =
+                    if (isClearingOnlineCache) {
+                        "正在清除在线正文和在线阅读缩略图"
+                    } else {
+                        "预计可释放 ${formatBytes(cacheUsage.reclaimableOnlineBytes)}"
+                    },
+                onClick = {
+                    if (!isClearingOnlineCache) showClearOnlineCacheDialog = true
+                },
             )
             SectionLabel("漫画库")
             InkleafActionListItem(
@@ -164,6 +192,21 @@ fun SettingsScreen(
                 trailingContent = { ForwardIcon() },
             )
         }
+    }
+
+    if (showClearOnlineCacheDialog) {
+        ConfirmDialog(
+            title = "清除在线漫画缓存？",
+            text =
+                "这会删除在线正文页和在线阅读缩略图。不会影响本地漫画、收藏、书签、" +
+                    "历史、阅读进度或插件登录状态。",
+            confirmLabel = "清除",
+            onConfirm = {
+                showClearOnlineCacheDialog = false
+                viewModel.clearOnlineCache()
+            },
+            onDismiss = { showClearOnlineCacheDialog = false },
+        )
     }
 
     if (showCacheLimitSheet) {
@@ -354,6 +397,7 @@ private fun SectionLabel(text: String) {
 
 private fun formatBytes(bytes: Long): String =
     when {
+        bytes <= 0L -> "0 B"
         bytes >= 1L shl 30 -> {
             val gb = 1L shl 30
             if (bytes % gb == 0L) {
@@ -364,13 +408,6 @@ private fun formatBytes(bytes: Long): String =
         }
 
         else -> "${bytes shr 20} MB"
-    }
-
-private fun cacheLimitSummary(limit: CacheLimit, budgetBytes: Long): String =
-    if (limit == CacheLimit.AUTO) {
-        "${limit.label}（约 ${formatBytes(budgetBytes)}）"
-    } else {
-        "上限 ${limit.label}"
     }
 
 private fun cacheLimitDescription(limit: CacheLimit, autoBudgetBytes: Long): String =
