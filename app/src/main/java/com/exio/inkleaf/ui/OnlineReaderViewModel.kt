@@ -125,8 +125,7 @@ internal class OnlineReaderViewModel(
     private val revealedAdjacentChapters = mutableSetOf<ReaderTransitionDirection>()
     private val lastPageByChapterId = mutableMapOf<String, Int>()
 
-    // 相邻章节预加载缓存：到达首/末页时后台预取，越界切换时直接复用，消除网络等待。
-    // 每次章节切换后整体丢弃（邻接关系已变），由到达首/末页时再次预热。
+    // Adjacent volumes survive boundary commits so Pager can preserve settled page identity.
     private var preloadedNext: PreloadedChapter? = null
     private var preloadedPrevious: PreloadedChapter? = null
 
@@ -289,12 +288,10 @@ internal class OnlineReaderViewModel(
         }
     }
 
-    /** 到达末页时预热下一章，使随后的越界切换无网络等待。无下一章时静默返回。 */
     fun preloadNextChapter() {
         prepareAdjacentChapter(ReaderTransitionDirection.NEXT)
     }
 
-    /** 到达首页时预热上一章。无上一章时静默返回。 */
     fun preloadPreviousChapter() {
         prepareAdjacentChapter(ReaderTransitionDirection.PREVIOUS)
     }
@@ -572,7 +569,6 @@ internal class OnlineReaderViewModel(
                 ChapterSwitchDirection.PREVIOUS -> null
             }
         try {
-            // 命中预加载缓存则直接复用，跳过网络请求以实现无缝切换
             val candidate: OnlineChapterVolume
             val revision: String
             if (prebuilt != null && prebuilt.index == index) {
@@ -587,7 +583,7 @@ internal class OnlineReaderViewModel(
                 settledPage?.takeIf { it in candidate.pages.indices }
                     ?: when (direction) {
                         ChapterSwitchDirection.NEXT -> 0
-                        // 回到上一章从其末页开始，保持向后阅读方向连续
+                        // Enter a previous chapter on its last page to preserve reading direction.
                         ChapterSwitchDirection.PREVIOUS ->
                             (candidate.totalPageCount - 1).coerceAtLeast(0)
                         ChapterSwitchDirection.MANUAL ->
@@ -690,7 +686,6 @@ internal class OnlineReaderViewModel(
         }
     }
 
-    /** 拉取单章节页面并构建 Volume，供直接加载与预加载共用。 */
     private suspend fun fetchChapterVolume(
         chapter: ChapterSummary
     ): Pair<OnlineChapterVolume, String> {
@@ -772,13 +767,11 @@ internal class OnlineReaderViewModel(
             }
         val index = target?.second
         return ReaderWindowAdjacent(
-            direction = direction,
             targetChapterId = target?.first?.chapterId,
             transition =
                 ReaderChapterTransition(
                     direction = direction,
                     chapterIndex = index,
-                    chapterLabel = index?.let { "第 ${it + 1} 章" }.orEmpty(),
                     title = target?.first?.title?.takeIf(String::isNotBlank).orEmpty(),
                     status = status,
                 ),
@@ -847,7 +840,7 @@ internal class OnlineReaderViewModel(
         transitionStatuses.clear()
     }
 
-    /** 章节切换后丢弃预加载缓存；[except] 指向本次将激活的 Volume 时不关闭（避免关闭正要使用的资源）。 */
+    /** Drops preload slots while retaining [except] and any volumes still visible in Pager. */
     private fun discardPreloadedChapters(
         except: OnlineChapterVolume? = null,
         deferRevealed: Boolean = true,
@@ -919,9 +912,7 @@ internal class OnlineReaderViewModel(
         favoritePages.clear()
         favoritePageKeys.clear()
         bookmarkEntriesByKey = emptyMap()
-        // 注意：不在此清空 readerMessage。章节切换时 prepareAndCommitChapter 会先设
-        // “正在进入下一章/上一章”、切换完成后清空；若这里也清空会导致消息刚设即被
-        // 覆盖，在 UI 上表现为 Snackbar 闪烁消失。消息生命周期由切换流程统一管理。
+        // Chapter switching owns readerMessage; clearing it here would erase an in-flight message.
     }
 
     private fun beginReadingSession(initialLocation: OnlinePageLocation) {
@@ -1321,10 +1312,11 @@ internal class OnlineReaderViewModel(
     }
 
     private fun OnlineChapterVolume.readerPageStateKey(page: Int): ReaderPageStateKey =
-        ReaderPageStateKey(
-            namespace = "$activeChapterId\u0000$sourceRevision",
+        ReaderChapterPageKey(
+            chapterId = activeChapterId,
+            chapterRevision = sourceRevision,
             pageIdentity = pageIdentity(page),
-        )
+        ).toReaderPageStateKey()
 
     private fun bookmarkKey(identity: OnlinePageIdentity): String =
         "online:${PluginContentCodec.json.encodeToString(identity)}"
@@ -1342,7 +1334,6 @@ internal class OnlineReaderViewModel(
 
     private enum class ChapterSwitchDirection { MANUAL, NEXT, PREVIOUS }
 
-    /** 预加载缓存项：已构建的 Volume 与其修订号，供越界切换时直接复用。 */
     private class PreloadedChapter(
         val volume: OnlineChapterVolume,
         val index: Int,

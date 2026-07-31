@@ -236,7 +236,6 @@ class ReaderChapterWindowTest {
         val result = readerChapterWindowAdoption(before, currentIndex = 3, after, startPage = 0)
 
         assertEquals(3, result.targetIndex)
-        assertTrue(result.anchoredToCurrentKey)
         assertEquals(false, result.requiresExplicitScroll)
     }
 
@@ -258,7 +257,6 @@ class ReaderChapterWindowTest {
         val result = readerChapterWindowAdoption(before, currentIndex = 1, after, startPage = 1)
 
         assertEquals(1, result.targetIndex)
-        assertTrue(result.anchoredToCurrentKey)
         assertEquals(false, result.requiresExplicitScroll)
     }
 
@@ -280,8 +278,6 @@ class ReaderChapterWindowTest {
         val result = readerChapterWindowAdoption(before, currentIndex = 1, after, startPage = 0)
 
         assertEquals(4, result.targetIndex)
-        assertTrue(result.anchoredToCurrentKey)
-        assertTrue(result.targetIndex != result.fallbackIndex)
         assertEquals(false, result.requiresExplicitScroll)
     }
 
@@ -407,13 +403,11 @@ class ReaderChapterWindowTest {
         prepared: Boolean = false,
     ) =
         ReaderWindowAdjacent(
-            direction = direction,
             targetChapterId = target.chapterId,
             transition =
                 ReaderChapterTransition(
                     direction = direction,
                     chapterIndex = target.chapterIndex,
-                    chapterLabel = "chapter",
                     title = target.chapterId,
                     status = if (prepared) ReaderTransitionStatus.Ready else ReaderTransitionStatus.Loading,
                 ),

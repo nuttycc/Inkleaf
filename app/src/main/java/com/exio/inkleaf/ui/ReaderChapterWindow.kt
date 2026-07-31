@@ -65,13 +65,11 @@ internal data class ReaderWindowChapter<T>(
 }
 
 internal data class ReaderWindowAdjacent<T>(
-    val direction: ReaderTransitionDirection,
     val targetChapterId: String?,
     val transition: ReaderChapterTransition,
     val preparedChapter: ReaderWindowChapter<T>? = null,
 ) {
     init {
-        require(transition.direction == direction)
         require(preparedChapter == null || preparedChapter.chapterId == targetChapterId)
     }
 }
@@ -148,27 +146,29 @@ internal data class ReaderChapterWindow<T>(
 internal fun <T> ReaderChapterWindow<T>.contextPageAt(
     itemIndex: Int,
 ): ReaderChapterWindowItem.Page<T> {
-    val activePage =
-        items.filterIsInstance<ReaderChapterWindowItem.Page<T>>()
-            .first { it.chapter.chapterId == activeChapterId }
-    val item = items.getOrNull(itemIndex) ?: return activePage
+    val item = items.getOrNull(itemIndex)
     if (item is ReaderChapterWindowItem.Page) return item
-    val direction =
-        when (item) {
-            is ReaderChapterWindowItem.Boundary -> item.transition.direction
-            is ReaderChapterWindowItem.Page -> return item
+    if (item is ReaderChapterWindowItem.Boundary) {
+        val searchIndices =
+            if (item.transition.direction == ReaderTransitionDirection.NEXT) {
+                itemIndex - 1 downTo 0
+            } else {
+                itemIndex + 1..items.lastIndex
+            }
+        for (candidateIndex in searchIndices) {
+            val candidate = items[candidateIndex]
+            if (candidate is ReaderChapterWindowItem.Page) return candidate
         }
-    val searchIndices =
-        if (direction == ReaderTransitionDirection.NEXT) {
-            itemIndex - 1 downTo 0
-        } else {
-            itemIndex + 1..items.lastIndex
-        }
-    for (candidateIndex in searchIndices) {
-        val candidate = items[candidateIndex]
-        if (candidate is ReaderChapterWindowItem.Page) return candidate
     }
-    return activePage
+    for (candidate in items) {
+        if (
+            candidate is ReaderChapterWindowItem.Page &&
+                candidate.chapter.chapterId == activeChapterId
+        ) {
+            return candidate
+        }
+    }
+    error("Reader chapter window has no active page")
 }
 
 internal fun <T> buildReaderChapterWindow(
@@ -176,8 +176,10 @@ internal fun <T> buildReaderChapterWindow(
     previous: ReaderWindowAdjacent<T>?,
     next: ReaderWindowAdjacent<T>?,
 ): ReaderChapterWindow<T> {
-    require(previous == null || previous.direction == ReaderTransitionDirection.PREVIOUS)
-    require(next == null || next.direction == ReaderTransitionDirection.NEXT)
+    require(
+        previous == null || previous.transition.direction == ReaderTransitionDirection.PREVIOUS
+    )
+    require(next == null || next.transition.direction == ReaderTransitionDirection.NEXT)
     val items = buildList {
         previous?.let { adjacent ->
             val boundary =
@@ -244,11 +246,8 @@ internal fun canAdoptReaderChapterWindow(pagerIsScrolling: Boolean): Boolean = !
 
 internal data class ReaderChapterWindowAdoption(
     val targetIndex: Int,
-    val fallbackIndex: Int,
-    val anchoredToCurrentKey: Boolean,
-) {
-    val requiresExplicitScroll: Boolean = !anchoredToCurrentKey
-}
+    val requiresExplicitScroll: Boolean,
+)
 
 internal fun <T> readerChapterWindowAdoption(
     currentWindow: ReaderChapterWindow<T>,
@@ -257,19 +256,18 @@ internal fun <T> readerChapterWindowAdoption(
     startPage: Int,
 ): ReaderChapterWindowAdoption {
     val fallbackIndex =
-        nextWindow.items.indexOfFirst { item ->
-            item is ReaderChapterWindowItem.Page<*> &&
-                item.chapter.chapterId == nextWindow.activeChapterId &&
-                item.pageIndex == startPage
-        }.takeIf { it >= 0 } ?: 0
+        readerWindowIndexForChapterPage(
+            window = nextWindow,
+            chapterId = nextWindow.activeChapterId,
+            pageIndex = startPage,
+        ).takeIf { it >= 0 } ?: 0
     val currentKey = currentWindow.items.getOrNull(currentIndex)?.stableKey
     val anchoredIndex =
         currentKey?.let { key -> nextWindow.items.indexOfFirst { it.stableKey == key } }
             ?.takeIf { it >= 0 }
     return ReaderChapterWindowAdoption(
         targetIndex = anchoredIndex ?: fallbackIndex,
-        fallbackIndex = fallbackIndex,
-        anchoredToCurrentKey = anchoredIndex != null,
+        requiresExplicitScroll = anchoredIndex == null,
     )
 }
 

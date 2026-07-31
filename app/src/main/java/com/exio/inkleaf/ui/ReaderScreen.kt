@@ -357,11 +357,13 @@ private fun ComicPager(
     var visibleChapterWindow by remember { mutableStateOf(chapterWindow) }
     val pagerChapterWindow = visibleChapterWindow
     val retainedVolumes =
-        pagerChapterWindow?.items
-            ?.mapNotNull { it as? ReaderChapterWindowItem.Page<ReaderWindowChapterContent> }
-            ?.map { it.chapter.payload.volume }
-            ?.distinct()
-            ?: listOf(volume)
+        remember(pagerChapterWindow, volume) {
+            pagerChapterWindow?.items
+                ?.mapNotNull { it as? ReaderChapterWindowItem.Page<ReaderWindowChapterContent> }
+                ?.map { it.chapter.payload.volume }
+                ?.distinct()
+                ?: listOf(volume)
+        }
     DisposableEffect(retainedVolumes) {
         onDispose { retainedVolumes.forEach(actions.onVolumeDisposed) }
     }
@@ -370,11 +372,13 @@ private fun ComicPager(
         remember(context) { OcrModelSettingsRepository(context).activeVariant }
             .collectAsStateWithLifecycle(initialValue = OcrModelVariant.SMALL)
     val initialPagerPage =
-        pagerChapterWindow?.items?.indexOfFirst { item ->
-            item is ReaderChapterWindowItem.Page<*> &&
-                item.chapter.chapterId == pagerChapterWindow.activeChapterId &&
-                item.pageIndex == startPage
-        }?.takeIf { it >= 0 } ?: startPage
+        remember(pagerChapterWindow, startPage) {
+            readerWindowIndexForChapterPage(
+                window = pagerChapterWindow,
+                chapterId = pagerChapterWindow?.activeChapterId,
+                pageIndex = startPage,
+            ).takeIf { it >= 0 } ?: startPage
+        }
     val pagerState =
         rememberPagerState(
             initialPage = initialPagerPage,
@@ -596,7 +600,7 @@ private fun ComicPager(
         }
     }
 
-    // 从模型下载界面返回后，自动重试之前挂起的 OCR 操作
+    // Retry the pending OCR request after returning from model download.
     androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
         val pageKey = pendingOcrPage ?: return@LifecycleEventEffect
         val target = currentPageTarget?.takeIf { it.key == pageKey }
@@ -1117,6 +1121,7 @@ private fun ReaderChapterTransitionPage(
 ) {
     val directionLabel =
         if (transition.direction == ReaderTransitionDirection.NEXT) "下一章" else "上一章"
+    val chapterLabel = transition.chapterIndex?.let { "第 ${it + 1} 章" }.orEmpty()
     val boundary = transition.status == ReaderTransitionStatus.Boundary
     Column(
         modifier = modifier.background(MaterialTheme.colorScheme.background),
@@ -1127,7 +1132,7 @@ private fun ReaderChapterTransitionPage(
             text = if (boundary) {
                 if (transition.direction == ReaderTransitionDirection.NEXT) "没有下一章" else "没有上一章"
             } else {
-                "$directionLabel：${transition.chapterLabel}"
+                "$directionLabel：$chapterLabel"
             },
             style = MaterialTheme.typography.headlineSmall,
             textAlign = TextAlign.Center,
@@ -1823,7 +1828,6 @@ private fun ComicPage(
             volumeToken = volume,
             page = page,
             cacheKeyPrefix = cacheKeyPrefix,
-            isCurrentPage = isCurrentPage,
             pageRenderRequest = pageRenderRequest,
         )
     val content by

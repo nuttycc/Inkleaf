@@ -25,8 +25,6 @@ internal fun readerPageContentKeys(
     volumeToken: Any,
     page: Int,
     cacheKeyPrefix: String,
-    @Suppress("UNUSED_PARAMETER")
-    isCurrentPage: Boolean,
     pageRenderRequest: PageRenderRequest?,
 ): ReaderPageContentKeys =
     ReaderPageContentKeys(

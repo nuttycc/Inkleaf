@@ -9,21 +9,12 @@ class ReaderPageContentKeysTest {
     private val volume = Any()
 
     @Test
-    fun `unrelated navigation does not restart an inactive page producer`() {
-        val before = keys(isCurrentPage = false)
-        val after = keys(isCurrentPage = false)
+    fun `same inputs reuse state and producer keys`() {
+        val before = keys()
+        val after = keys()
 
         assertEquals(before.stateReset, after.stateReset)
         assertEquals(before.producerRestart, after.producerRestart)
-    }
-
-    @Test
-    fun `entering or leaving the current page does not restart the producer`() {
-        val inactive = keys(isCurrentPage = false)
-        val active = keys(isCurrentPage = true)
-
-        assertEquals(inactive.stateReset, active.stateReset)
-        assertEquals(inactive.producerRestart, active.producerRestart)
     }
 
     @Test
@@ -48,14 +39,12 @@ class ReaderPageContentKeysTest {
         volumeToken: Any = volume,
         page: Int = 7,
         cacheKeyPrefix: String = "comic-1",
-        isCurrentPage: Boolean = true,
         pageRenderRequest: PageRenderRequest? = null,
     ): ReaderPageContentKeys =
         readerPageContentKeys(
             volumeToken = volumeToken,
             page = page,
             cacheKeyPrefix = cacheKeyPrefix,
-            isCurrentPage = isCurrentPage,
             pageRenderRequest = pageRenderRequest,
         )
 

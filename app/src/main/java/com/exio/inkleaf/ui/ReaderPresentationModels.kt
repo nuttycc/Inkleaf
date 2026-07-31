@@ -20,7 +20,6 @@ internal sealed interface ReaderTransitionStatus {
 internal data class ReaderChapterTransition(
     val direction: ReaderTransitionDirection,
     val chapterIndex: Int?,
-    val chapterLabel: String,
     val title: String,
     val status: ReaderTransitionStatus,
 )

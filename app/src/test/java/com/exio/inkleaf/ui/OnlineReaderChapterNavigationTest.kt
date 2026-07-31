@@ -66,7 +66,6 @@ class OnlineReaderChapterNavigationTest {
 
     @Test
     fun `previous readable chapter skips unavailable entries`() {
-        // 紧邻上一项不可用时，继续向前扫描首个可读章节
         val withGap =
             listOf(
                 ChapterSummary(chapterId = "chapter-1", title = "第一章"),
