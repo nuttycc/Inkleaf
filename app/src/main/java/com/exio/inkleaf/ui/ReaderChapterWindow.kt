@@ -107,6 +107,45 @@ internal sealed interface ReaderChapterWindowItem<out T> {
     }
 }
 
+internal fun ReaderChapterWindowItem<*>.saveablePagerKey(): String =
+    when (this) {
+        is ReaderChapterWindowItem.Page ->
+            encodePagerKey(
+                "page",
+                pageKey.chapterId,
+                pageKey.chapterRevision,
+                pageKey.pageIdentity,
+            )
+        is ReaderChapterWindowItem.Boundary ->
+            encodePagerKey(
+                "boundary",
+                boundaryKey.previousChapterId,
+                boundaryKey.nextChapterId,
+            )
+        is ReaderChapterWindowItem.Guard ->
+            encodePagerKey(
+                "guard",
+                boundaryKey.previousChapterId,
+                boundaryKey.nextChapterId,
+                direction.name,
+            )
+    }
+
+private fun encodePagerKey(type: String, vararg parts: String?): String =
+    buildString {
+        append(type)
+        append(':')
+        parts.forEach { part ->
+            if (part == null) {
+                append("-1:")
+            } else {
+                append(part.length)
+                append(':')
+                append(part)
+            }
+        }
+    }
+
 private data class ReaderBoundaryGuardKey(
     val boundary: ReaderChapterBoundaryKey,
     val direction: ReaderTransitionDirection,

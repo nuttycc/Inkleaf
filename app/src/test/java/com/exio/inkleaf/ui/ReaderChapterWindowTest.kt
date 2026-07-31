@@ -7,6 +7,72 @@ import org.junit.Test
 
 class ReaderChapterWindowTest {
     @Test
+    fun `pager keys are stable strings for every window item type`() {
+        val window =
+            buildReaderChapterWindow(
+                active = chapter("chapter-1", index = 0),
+                previous = null,
+                next = adjacent(ReaderTransitionDirection.NEXT, chapter("chapter-2", 1)),
+            )
+
+        val firstPass = window.items.map(ReaderChapterWindowItem<*>::saveablePagerKey)
+        val secondPass = window.items.map(ReaderChapterWindowItem<*>::saveablePagerKey)
+
+        assertEquals(firstPass, secondPass)
+        assertEquals(firstPass.size, firstPass.distinct().size)
+        assertTrue(firstPass.all { it.isNotBlank() })
+    }
+
+    @Test
+    fun `pager page keys distinguish chapter revision and page identity`() {
+        val base = ReaderChapterWindowItem.Page(chapter("chapter-1", revision = "rev-a"), 0)
+
+        assertNotEquals(
+            base.saveablePagerKey(),
+            ReaderChapterWindowItem.Page(chapter("chapter-2", revision = "rev-a"), 0)
+                .saveablePagerKey(),
+        )
+        assertNotEquals(
+            base.saveablePagerKey(),
+            ReaderChapterWindowItem.Page(chapter("chapter-1", revision = "rev-b"), 0)
+                .saveablePagerKey(),
+        )
+        assertNotEquals(
+            base.saveablePagerKey(),
+            ReaderChapterWindowItem.Page(chapter("chapter-1", revision = "rev-a"), 1)
+                .saveablePagerKey(),
+        )
+    }
+
+    @Test
+    fun `pager key encoding cannot collide through separators`() {
+        val first =
+            ReaderChapterWindowItem.Page(
+                ReaderWindowChapter(
+                    chapterId = "a:b",
+                    chapterIndex = 0,
+                    chapterRevision = "c",
+                    pageIdentities = listOf("d"),
+                    payload = Unit,
+                ),
+                pageIndex = 0,
+            )
+        val second =
+            ReaderChapterWindowItem.Page(
+                ReaderWindowChapter(
+                    chapterId = "a",
+                    chapterIndex = 0,
+                    chapterRevision = "b:c",
+                    pageIdentities = listOf("d"),
+                    payload = Unit,
+                ),
+                pageIndex = 0,
+            )
+
+        assertNotEquals(first.saveablePagerKey(), second.saveablePagerKey())
+    }
+
+    @Test
     fun `page keys distinguish chapters revisions and pages`() {
         val chapter = chapter("chapter-1", revision = "rev-a")
 

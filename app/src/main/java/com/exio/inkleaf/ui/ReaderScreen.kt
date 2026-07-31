@@ -752,7 +752,9 @@ private fun ComicPager(
                     isZoomed = zoomedPage == currentPageStateKey,
                     isOcrSelectionActive = ocrSelectionPage == currentPageStateKey,
                 ),
-            key = { page -> chapterWindow?.items?.getOrNull(page)?.stableKey ?: page },
+            key = { page ->
+                chapterWindow?.items?.getOrNull(page)?.saveablePagerKey() ?: "single:$page"
+            },
             modifier = Modifier.fillMaxSize(),
         ) { page ->
             if (chapterWindow != null) {
