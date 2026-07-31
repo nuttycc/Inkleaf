@@ -55,6 +55,10 @@ internal data class ReaderPresentationFeatures(
     val bookmarkPages: Set<Int> = emptySet(),
     val bookmarks: List<ReaderBookmarkItem> = emptyList(),
     val favoritePages: Set<Int> = emptySet(),
+    val thumbnailsByKey:
+        Map<ReaderPageStateKey, androidx.compose.ui.graphics.ImageBitmap> = emptyMap(),
+    val bookmarkPageKeys: Set<ReaderPageStateKey> = emptySet(),
+    val favoritePageKeys: Set<ReaderPageStateKey> = emptySet(),
 )
 
 internal data class ReaderChapterNavigation(

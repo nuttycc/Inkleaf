@@ -89,9 +89,12 @@ internal class OnlineReaderViewModel(
         private set
 
     val thumbnails = mutableStateMapOf<Int, ImageBitmap>()
+    val thumbnailsByKey = mutableStateMapOf<ReaderPageStateKey, ImageBitmap>()
     val bookmarkPages = mutableStateMapOf<Int, Unit>()
+    val bookmarkPageKeys = mutableStateMapOf<ReaderPageStateKey, Unit>()
     val bookmarks = mutableStateListOf<ReaderBookmarkItem>()
     val favoritePages = mutableStateMapOf<Int, Unit>()
+    val favoritePageKeys = mutableStateMapOf<ReaderPageStateKey, Unit>()
     var readerChapters by mutableStateOf<List<ReaderChapterItem>?>(null)
         private set
 
@@ -431,7 +434,8 @@ internal class OnlineReaderViewModel(
         val location = locationForOrNull(page) ?: return
         val opened = volume ?: return
         val chapterTitle = currentChapterTitle
-        viewModelScope.launch {
+        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            if (!acquireVolumeTask(opened)) return@launch
             try {
                 var added = false
                 favoriteMutationMutex.withLock {
@@ -460,6 +464,8 @@ internal class OnlineReaderViewModel(
                 if (location.identity.chapter == chapterIdentity) {
                     readerMessage = error.message?.let { "收藏失败：$it" } ?: "收藏失败"
                 }
+            } finally {
+                releaseVolumeTask(opened)
             }
         }
     }
@@ -939,9 +945,12 @@ internal class OnlineReaderViewModel(
 
     private fun clearChapterPresentation() {
         thumbnails.clear()
+        thumbnailsByKey.clear()
         bookmarkPages.clear()
+        bookmarkPageKeys.clear()
         bookmarks.clear()
         favoritePages.clear()
+        favoritePageKeys.clear()
         bookmarkEntriesByKey = emptyMap()
         // 注意：不在此清空 readerMessage。章节切换时 prepareAndCommitChapter 会先设
         // “正在进入下一章/上一章”、切换完成后清空；若这里也清空会导致消息刚设即被
@@ -1050,18 +1059,26 @@ internal class OnlineReaderViewModel(
         bookmarks.clear()
         bookmarks.addAll(resolvedBookmarks.map { it.second }.sortedBy { it.globalPage })
         bookmarkPages.clear()
+        bookmarkPageKeys.clear()
         resolvedBookmarks
             .filterNot { it.second.stale }
-            .forEach { bookmarkPages[it.second.globalPage] = Unit }
+            .forEach {
+                bookmarkPages[it.second.globalPage] = Unit
+                bookmarkPageKeys[opened.readerPageStateKey(it.second.globalPage)] = Unit
+            }
 
         val chapterFavorites =
             record?.pageFavorites.orEmpty().filter {
                 it.location.identity.chapter == chapterIdentity
             }
         favoritePages.clear()
+        favoritePageKeys.clear()
         chapterFavorites.forEach { favorite ->
             val resolution = resolvePage(favorite.location, opened)
-            if (!resolution.stale) favoritePages[resolution.page] = Unit
+            if (!resolution.stale) {
+                favoritePages[resolution.page] = Unit
+                favoritePageKeys[opened.readerPageStateKey(resolution.page)] = Unit
+            }
         }
     }
 
@@ -1151,7 +1168,9 @@ internal class OnlineReaderViewModel(
                     pageIdentity,
                 )
             if (cached != null) {
-                thumbnails[page] = cached.asImageBitmap()
+                val image = cached.asImageBitmap()
+                thumbnails[page] = image
+                thumbnailsByKey[opened.readerPageStateKey(page)] = image
                 return
             }
             val rendered =
@@ -1159,6 +1178,7 @@ internal class OnlineReaderViewModel(
                     opened.renderThumbnail(page, THUMB_TARGET_WIDTH)
                 } ?: return
             thumbnails[page] = rendered
+            thumbnailsByKey[opened.readerPageStateKey(page)] = rendered
             ReaderCache.writeOnlineThumbnail(
                 application,
                 namespace,
@@ -1332,6 +1352,12 @@ internal class OnlineReaderViewModel(
             digest.take(12).joinToString(separator = "") { "%02x".format(it.toInt() and 0xff) }
         return "online-$key"
     }
+
+    private fun OnlineChapterVolume.readerPageStateKey(page: Int): ReaderPageStateKey =
+        ReaderPageStateKey(
+            namespace = "$activeChapterId\u0000$sourceRevision",
+            pageIdentity = pageIdentity(page),
+        )
 
     private fun bookmarkKey(identity: OnlinePageIdentity): String =
         "online:${PluginContentCodec.json.encodeToString(identity)}"

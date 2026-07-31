@@ -37,6 +37,9 @@ fun OnlineReaderScreen(
             bookmarkPages = viewModel.bookmarkPages.keys,
             bookmarks = viewModel.bookmarks,
             favoritePages = viewModel.favoritePages.keys,
+            thumbnailsByKey = viewModel.thumbnailsByKey,
+            bookmarkPageKeys = viewModel.bookmarkPageKeys.keys,
+            favoritePageKeys = viewModel.favoritePageKeys.keys,
         )
     val actions =
         ReaderPresentationActions(

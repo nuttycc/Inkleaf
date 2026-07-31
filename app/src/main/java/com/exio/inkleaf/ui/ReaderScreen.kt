@@ -9,6 +9,7 @@ import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.annotation.DrawableRes
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -16,6 +17,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -149,6 +151,19 @@ private data class ReaderPageTarget(
     val volume: ComicVolume,
     val page: Int,
 )
+
+private enum class ReaderStatePhase {
+    LOADING,
+    ERROR,
+    READY,
+}
+
+private fun ReaderPresentationState.phase(): ReaderStatePhase =
+    when (this) {
+        ReaderPresentationState.Loading -> ReaderStatePhase.LOADING
+        is ReaderPresentationState.Error -> ReaderStatePhase.ERROR
+        is ReaderPresentationState.Ready -> ReaderStatePhase.READY
+    }
 
 @Composable
 fun ReaderScreen(
@@ -312,7 +327,14 @@ internal fun SharedReaderScreen(
         if (chapterNavigation == null) {
             Crossfade(targetState = state, label = "reader-state", content = readerContent)
         } else {
-            readerContent(state)
+            AnimatedContent(
+                targetState = state,
+                transitionSpec = { fadeIn() togetherWith fadeOut() },
+                contentKey = ReaderPresentationState::phase,
+                label = "online-reader-state",
+            ) { current ->
+                readerContent(current)
+            }
         }
     }
 }
@@ -369,6 +391,7 @@ private fun ComicPager(
         currentWindowItem as? ReaderChapterWindowItem.Page<ReaderWindowChapterContent>
     val currentRealPage = currentWindowPage?.pageIndex ?: pagerState.currentPage
     val currentVolume = currentWindowPage?.chapter?.payload?.volume ?: volume
+    val isCurrentVolumeActive = actions.isVolumeActive(currentVolume)
     val isTransitionPage =
         currentWindowItem is ReaderChapterWindowItem.Boundary ||
             currentWindowItem is ReaderChapterWindowItem.Guard
@@ -381,7 +404,11 @@ private fun ComicPager(
             )
         } ?: if (!isTransitionPage && currentRealPage in 0 until volume.totalPageCount) {
             ReaderPageTarget(
-                key = ReaderPageStateKey(cacheKeyPrefix, volume.pageIdentity(currentRealPage)),
+                key =
+                    ReaderPageStateKey(
+                        cacheKeyPrefix,
+                        volume.pageIdentity(currentRealPage) ?: "index:$currentRealPage",
+                    ),
                 volume = volume,
                 page = currentRealPage,
             )
@@ -427,6 +454,7 @@ private fun ComicPager(
     }
     LaunchedEffect(currentPageStateKey) {
         zoomedPage = null
+        activePanel = null
         if (ocrSelectionPage != currentPageStateKey) {
             ocrSelection = OcrSelectionSession()
             ocrSelectionPage = null
@@ -739,7 +767,9 @@ private fun ComicPager(
                             pageStateKey = pageStateKey,
                             currentPageStateKey = currentPageStateKey,
                             cacheKeyPrefix = content.cacheKeyPrefix,
-                            thumbnail = features.thumbnails[item.pageIndex].takeIf { isActiveVolume },
+                            thumbnail =
+                                features.thumbnailsByKey[pageStateKey]
+                                    ?: features.thumbnails[item.pageIndex].takeIf { isActiveVolume },
                             zoomToggleRequest = zoomToggleRequest,
                             zoomResetRequest = zoomResetRequest,
                             zoomTogglePage = zoomTogglePage,
@@ -781,7 +811,11 @@ private fun ComicPager(
                     }
                 }
             } else {
-                val pageStateKey = ReaderPageStateKey(cacheKeyPrefix, volume.pageIdentity(page))
+                val pageStateKey =
+                    ReaderPageStateKey(
+                        cacheKeyPrefix,
+                        volume.pageIdentity(page) ?: "index:$page",
+                    )
                 ComicPage(
                     volume = volume,
                     page = page,
@@ -934,7 +968,11 @@ private fun ComicPager(
         ReaderTopBar(
             visible = showControls && activeOcrResult == null,
             title = title,
-            isBookmarked = !isTransitionPage && currentRealPage in features.bookmarkPages,
+            isBookmarked =
+                !isTransitionPage &&
+                    currentPageStateKey != null &&
+                    (currentPageStateKey in features.bookmarkPageKeys ||
+                        (chapterWindow == null && currentRealPage in features.bookmarkPages)),
             isZoomed = !isTransitionPage && zoomedPage == currentPageStateKey,
             onBack = onBack,
             onToggleBookmark =
@@ -954,6 +992,7 @@ private fun ComicPager(
             visible =
                 showControls &&
                     !isTransitionPage &&
+                    isCurrentVolumeActive &&
                     activeOcrResult == null &&
                     ocrProcessingPage != currentPageStateKey,
             currentPage = currentRealPage,
@@ -1022,7 +1061,12 @@ private fun ComicPager(
                         )
                     ReaderPanel.Tools ->
                         ReaderToolsPanelContent(
-                            isFavorite = !isTransitionPage && currentRealPage in features.favoritePages,
+                            isFavorite =
+                                !isTransitionPage &&
+                                    currentPageStateKey != null &&
+                                    (currentPageStateKey in features.favoritePageKeys ||
+                                        (chapterWindow == null &&
+                                            currentRealPage in features.favoritePages)),
                             ocrBusy = ocrProcessingPage != null,
                             onToggleFavorite =
                                 actions.onToggleFavorite?.let { toggleFavorite ->
