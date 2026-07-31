@@ -158,6 +158,34 @@ internal sealed interface ReaderPageTurnResult {
     data object NoChange : ReaderPageTurnResult
 }
 
+internal sealed interface ReaderBoundaryIntentEffect {
+    data object PublishPreparedPages : ReaderBoundaryIntentEffect
+
+    data object RetryPreparation : ReaderBoundaryIntentEffect
+
+    data object None : ReaderBoundaryIntentEffect
+}
+
+internal fun readerBoundaryIntentEffect(
+    status: ReaderTransitionStatus?
+): ReaderBoundaryIntentEffect =
+    when (status) {
+        ReaderTransitionStatus.Ready -> ReaderBoundaryIntentEffect.PublishPreparedPages
+        ReaderTransitionStatus.Error -> ReaderBoundaryIntentEffect.RetryPreparation
+        ReaderTransitionStatus.Loading,
+        ReaderTransitionStatus.Boundary,
+        null -> ReaderBoundaryIntentEffect.None
+    }
+
+internal fun readerGuardSettledEffect(
+    status: ReaderTransitionStatus?
+): ReaderBoundaryIntentEffect =
+    if (status == ReaderTransitionStatus.Error) {
+        ReaderBoundaryIntentEffect.RetryPreparation
+    } else {
+        ReaderBoundaryIntentEffect.None
+    }
+
 internal fun readerPageTurnResult(
     items: List<ReaderChapterWindowItem<*>>,
     currentIndex: Int,

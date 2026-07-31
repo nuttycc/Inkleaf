@@ -9,7 +9,6 @@ import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.annotation.DrawableRes
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
@@ -45,7 +44,6 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -94,9 +92,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.painter.Painter
-import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
-import androidx.compose.ui.input.nestedscroll.NestedScrollSource
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
@@ -273,8 +268,7 @@ internal fun SharedReaderScreen(
     }
 
     Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
-        Crossfade(targetState = state, label = "reader-state") { current ->
-            when (current) {
+        when (val current = state) {
                 ReaderPresentationState.Loading -> LoadingView(Modifier.fillMaxSize())
                 is ReaderPresentationState.Error ->
                     ErrorView(
@@ -295,6 +289,7 @@ internal fun SharedReaderScreen(
                         startPage = current.startPage,
                         title = current.title,
                         cacheKeyPrefix = current.cacheKeyPrefix,
+                        chapterWindow = current.chapterWindow,
                         features = features,
                         actions = actions,
                         chapterNavigation = chapterNavigation,
@@ -303,7 +298,6 @@ internal fun SharedReaderScreen(
                         onToggleControls = { showControls = !showControls },
                         modifier = Modifier.fillMaxSize(),
                     )
-            }
         }
     }
 }
@@ -314,6 +308,7 @@ private fun ComicPager(
     startPage: Int,
     title: String,
     cacheKeyPrefix: String,
+    chapterWindow: ReaderChapterWindow<ReaderWindowChapterContent>? = null,
     features: ReaderPresentationFeatures,
     actions: ReaderPresentationActions,
     chapterNavigation: ReaderChapterNavigation?,
@@ -322,56 +317,46 @@ private fun ComicPager(
     onToggleControls: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    DisposableEffect(volume) {
-        onDispose { actions.onVolumeDisposed(volume) }
+    val retainedVolumes =
+        chapterWindow?.items
+            ?.mapNotNull { it as? ReaderChapterWindowItem.Page<ReaderWindowChapterContent> }
+            ?.map { it.chapter.payload.volume }
+            ?.distinct()
+            ?: listOf(volume)
+    DisposableEffect(retainedVolumes) {
+        onDispose { retainedVolumes.forEach(actions.onVolumeDisposed) }
     }
     val context = LocalContext.current
     val activeOcrVariant by
         remember(context) { OcrModelSettingsRepository(context).activeVariant }
             .collectAsStateWithLifecycle(initialValue = OcrModelVariant.SMALL)
-    val transition = chapterNavigation?.transition
+    val initialPagerPage =
+        chapterWindow?.items?.indexOfFirst { item ->
+            item is ReaderChapterWindowItem.Page<*> &&
+                item.chapter.chapterId == chapterWindow.activeChapterId &&
+                item.pageIndex == startPage
+        }?.takeIf { it >= 0 } ?: startPage
     val pagerState =
         rememberPagerState(
-            initialPage =
-                startPage +
-                    if (transition?.direction == ReaderTransitionDirection.PREVIOUS) 1 else 0,
-            pageCount = { volume.totalPageCount + if (transition == null) 0 else 1 },
+            initialPage = initialPagerPage,
+            pageCount = {
+                chapterWindow?.items?.size ?: volume.totalPageCount
+            },
         )
+    LaunchedEffect(volume, chapterWindow?.activeChapterId, startPage) {
+        if (!pagerState.isScrollInProgress) {
+            pagerState.requestScrollToPage(initialPagerPage)
+        }
+    }
     val scope = rememberCoroutineScope()
-    val currentPagerItem =
-        readerPagerItem(
-            pagerState.currentPage,
-            volume.totalPageCount,
-            transition,
-        )
-    val currentRealPage = (currentPagerItem as? ReaderPagerItem.Page)?.pageIndex ?: 0
-    val isTransitionPage = currentPagerItem is ReaderPagerItem.Transition
-    var transitionPageWasEntered by
-        remember(transition?.direction, transition?.chapterIndex) { mutableStateOf(false) }
-
-    LaunchedEffect(transition) {
-        val target =
-            when (transition?.direction) {
-                ReaderTransitionDirection.PREVIOUS -> 0
-                ReaderTransitionDirection.NEXT -> volume.totalPageCount
-                null -> null
-            }
-        if (target != null && pagerState.currentPage != target) {
-            pagerState.animateScrollToPage(target)
-        }
-    }
-
-    LaunchedEffect(pagerState.currentPage, transition) {
-        if (isTransitionPage) {
-            transitionPageWasEntered = true
-            chapterNavigation?.onTransitionEntered?.invoke()
-        } else if (
-            transition != null &&
-                shouldReturnFromReaderTransition(transitionPageWasEntered, isTransitionPage)
-        ) {
-            chapterNavigation?.onTransitionReturn?.invoke(transition.direction)
-        }
-    }
+    val currentWindowItem = chapterWindow?.items?.getOrNull(pagerState.currentPage)
+    val currentWindowPage =
+        currentWindowItem as? ReaderChapterWindowItem.Page<ReaderWindowChapterContent>
+    val currentRealPage = currentWindowPage?.pageIndex ?: pagerState.currentPage
+    val currentVolume = currentWindowPage?.chapter?.payload?.volume ?: volume
+    val isTransitionPage =
+        currentWindowItem is ReaderChapterWindowItem.Boundary ||
+            currentWindowItem is ReaderChapterWindowItem.Guard
 
     var zoomedPage by remember { mutableStateOf<Int?>(null) }
     var zoomToggleRequest by remember { mutableIntStateOf(0) }
@@ -380,14 +365,14 @@ private fun ComicPager(
     var zoomResetPage by remember { mutableIntStateOf(-1) }
     var zoomToggleAnchor by remember { mutableStateOf(Offset.Unspecified) }
     var activePanel by remember { mutableStateOf<ReaderPanel?>(null) }
-    var chapterLayoutVersion by remember(volume) { mutableIntStateOf(0) }
+    var chapterLayoutVersion by remember(currentVolume) { mutableIntStateOf(0) }
     val volumeChapters by
         produceState<List<ReaderChapterItem>?>(
             initialValue = null,
-            key1 = volume,
+            key1 = currentVolume,
         ) {
-            if (shouldShowChapterMenu(volume.chapterCount)) {
-                value = loadReaderChapterItems(volume)
+            if (shouldShowChapterMenu(currentVolume.chapterCount)) {
+                value = loadReaderChapterItems(currentVolume)
             }
         }
     LaunchedEffect(volumeChapters) {
@@ -431,7 +416,7 @@ private fun ComicPager(
                     return@launch
                 }
                 PaddleOcrEngine.setActiveVariant(variant)
-                val source = runCatching { openOcrPageSource(volume, page) }
+                val source = runCatching { openOcrPageSource(currentVolume, page) }
                 val outcome = source.mapCatching { pageSource ->
                     try {
                         PaddleOcrEngine.recognize(context, pageSource)
@@ -486,7 +471,7 @@ private fun ComicPager(
     }
 
     fun removeBookmark(bookmark: ReaderBookmarkItem) {
-        if (!actions.isVolumeActive(volume)) return
+        if (!actions.isVolumeActive(currentVolume)) return
         val remove = actions.onRemoveBookmark ?: return
         if (!bookmarkRemovalsInFlight.add(bookmark.key)) return
         scope.launch {
@@ -541,12 +526,12 @@ private fun ComicPager(
     // 当前页对应的章节信息，用于多章书籍的界面提示
     val currentPage = currentRealPage
     val chapterProgress =
-        remember(currentPage, volume, chapterLayoutVersion) {
-            volume.globalToChapterPage(currentPage)
+        remember(currentPage, currentVolume, chapterLayoutVersion) {
+            currentVolume.globalToChapterPage(currentPage)
         }
     val chapterTitle =
-        remember(chapterProgress, volume, chapterLayoutVersion) {
-            volume.chapterTitle(chapterProgress.chapterIndex)
+        remember(chapterProgress, currentVolume, chapterLayoutVersion) {
+            currentVolume.chapterTitle(chapterProgress.chapterIndex)
         }
     val readerChapters =
         if (chapterNavigation != null) chapterNavigation.chapters else volumeChapters
@@ -554,70 +539,76 @@ private fun ComicPager(
         if (chapterNavigation != null) {
             chapterNavigation.chapters?.size ?: (chapterNavigation.currentChapterIndex + 1)
         } else {
-            volume.chapterCount
+            currentVolume.chapterCount
         }
     val currentReaderChapterIndex =
-        chapterNavigation?.currentChapterIndex ?: chapterProgress.chapterIndex
+        currentWindowPage?.chapter?.chapterIndex
+            ?: chapterNavigation?.currentChapterIndex
+            ?: chapterProgress.chapterIndex
     val currentReaderChapterTitle =
         readerChapters?.getOrNull(currentReaderChapterIndex)?.title ?: chapterTitle
 
     // 翻页统一走"前进/后退"抽象：将来日漫右→左模式只需反转点按区到 delta 的映射
     val turnPage: (Int) -> Unit = { delta ->
-        if (isTransitionPage) {
-            val direction = (currentPagerItem as ReaderPagerItem.Transition).value.direction
-            val advances =
-                (direction == ReaderTransitionDirection.NEXT && delta > 0) ||
-                    (direction == ReaderTransitionDirection.PREVIOUS && delta < 0)
-            if (advances) {
-                if (direction == ReaderTransitionDirection.NEXT) {
-                    chapterNavigation?.onTransitionForward?.invoke()
-                } else {
-                    chapterNavigation?.onTransitionBackward?.invoke()
-                }
-            } else {
-                scope.launch {
-                    if (direction == ReaderTransitionDirection.PREVIOUS) {
-                        chapterNavigation?.onTransitionReturn?.invoke(direction)
-                        pagerState.animateScrollToPage(0)
-                    } else {
-                        pagerState.animateScrollToPage(volume.totalPageCount - 1)
-                        chapterNavigation?.onTransitionReturn?.invoke(direction)
-                    }
-                }
+        if (chapterWindow != null) {
+            when (val result = readerPageTurnResult(chapterWindow.items, pagerState.currentPage, delta)) {
+                is ReaderPageTurnResult.MoveTo ->
+                    scope.launch { pagerState.animateScrollToPage(result.index) }
+                is ReaderPageTurnResult.BoundaryIntent ->
+                    chapterNavigation?.onBoundaryIntent?.invoke(result.direction)
+                ReaderPageTurnResult.NoChange -> Unit
             }
-        } else if (actions.isVolumeActive(volume)) {
+        } else if (actions.isVolumeActive(currentVolume)) {
             val requested = pagerState.currentPage + delta
-            when {
-                requested >= pagerState.pageCount && delta > 0 ->
-                    chapterNavigation?.onForwardPastEnd?.invoke()
-                requested < 0 && delta < 0 ->
-                    chapterNavigation?.onBackwardPastStart?.invoke()
-                else -> {
-                    val target = requested.coerceIn(0, pagerState.pageCount - 1)
-                    if (target != pagerState.currentPage) {
-                        scope.launch { pagerState.animateScrollToPage(target) }
+            val target = requested.coerceIn(0, pagerState.pageCount - 1)
+            if (target != pagerState.currentPage) {
+                scope.launch { pagerState.animateScrollToPage(target) }
+            }
+        }
+    }
+
+    LaunchedEffect(pagerState, chapterWindow) {
+        if (chapterWindow == null) return@LaunchedEffect
+        snapshotFlow { pagerState.settledPage to pagerState.isScrollInProgress }.collect {
+            (settledPage, inProgress) ->
+            if (inProgress) return@collect
+            val item = chapterWindow.items.getOrNull(settledPage) ?: return@collect
+            when (item) {
+                is ReaderChapterWindowItem.Page<*> -> {
+                    val content = item.chapter.payload as ReaderWindowChapterContent
+                    chapterNavigation?.onWindowPageSettled?.invoke(item.pageKey)
+                    if (actions.isVolumeActive(content.volume)) {
+                        if (item.pageIndex == 0) {
+                            chapterNavigation?.onReachedFirstPage?.invoke()
+                        }
+                        if (item.pageIndex == item.chapter.pageIdentities.lastIndex) {
+                            chapterNavigation?.onReachedLastPage?.invoke()
+                        }
                     }
+                    chapterNavigation?.onPagerIdle?.invoke(item.stableKey)
+                }
+                is ReaderChapterWindowItem.Boundary -> {
+                    chapterNavigation?.onBoundarySettled?.invoke(item.transition.direction)
+                    chapterNavigation?.onPagerIdle?.invoke(item.stableKey)
+                }
+                is ReaderChapterWindowItem.Guard -> {
+                    chapterNavigation?.onGuardSettled?.invoke(item.direction)
+                    val boundaryIndex =
+                        chapterWindow.items.indexOfFirst { candidate ->
+                            candidate is ReaderChapterWindowItem.Boundary &&
+                                candidate.boundaryKey == item.boundaryKey
+                        }
+                    if (boundaryIndex >= 0) pagerState.animateScrollToPage(boundaryIndex)
                 }
             }
         }
     }
 
-    // 页码变化：上报进度，并在到达首/末页时预热相邻章节，使越界切换无网络等待
-    LaunchedEffect(pagerState, volume, transition) {
+    // Single-volume readers still report their chapter-local page index directly.
+    LaunchedEffect(pagerState, volume, chapterWindow) {
+        if (chapterWindow != null) return@LaunchedEffect
         snapshotFlow { pagerState.currentPage }.collect { page ->
-            when (val item = readerPagerItem(page, volume.totalPageCount, transition)) {
-                is ReaderPagerItem.Page -> {
-                    actions.onPageChanged(volume, item.pageIndex)
-                    if (chapterNavigation != null && actions.isVolumeActive(volume)) {
-                        if (item.pageIndex <= 0) {
-                            chapterNavigation.onReachedFirstPage?.invoke()
-                        } else if (item.pageIndex >= volume.totalPageCount - 1) {
-                            chapterNavigation.onReachedLastPage?.invoke()
-                        }
-                    }
-                }
-                is ReaderPagerItem.Transition -> Unit
-            }
+            actions.onPageChanged(volume, page)
         }
     }
 
@@ -633,34 +624,10 @@ private fun ComicPager(
         onConsumed = actions.onReaderMessageConsumed,
     )
 
-    // HorizontalPager dispatches its unconsumed boundary drag through nested scroll.
-    // 仅以 volume 作为 remember 键：volume 在章节切换时变更（借此重置累积状态），
-    // 而章节内保持稳定。chapterNavigation 不作为键——其 lambda 字段每次重组都会
-    // 产生新实例，若作为键会导致累积状态被反复丢弃。捕获的回调指向 ViewModel 方法，
-    // 调用时读取的是最新状态，故捕获一次即可。
-    val overscrollThresholdPx = with(LocalDensity.current) { OVERSCROLL_CHAPTER_THRESHOLD.dp.toPx() }
-    val boundaryScrollConnection =
-        remember(volume, transition?.direction, overscrollThresholdPx) {
-            ChapterBoundaryScrollConnection(
-                pagerState = pagerState,
-                volume = volume,
-                chapterNavigation = chapterNavigation,
-                transition = transition,
-                thresholdPx = overscrollThresholdPx,
-            )
-        }
-    // 手势结束后重置累积与触发标志，使下一次越界滑动可重新触发（重试/再次提示）
-    LaunchedEffect(boundaryScrollConnection, pagerState) {
-        snapshotFlow { pagerState.isScrollInProgress }.collect { inProgress ->
-            if (!inProgress) boundaryScrollConnection.reset()
-        }
-    }
-
     Box(
         modifier =
             modifier
                 .fillMaxSize()
-                .nestedScroll(boundaryScrollConnection)
                 // 1x 时 Pager 接管单指拖动；放大后由当前页接管平移。
                 // 点按检测在移动超过阈值时自动作废，工具栏上的按钮/滑杆会消费
                 // 自己的事件，也不会误触发这里。
@@ -704,35 +671,79 @@ private fun ComicPager(
                     isZoomed = zoomedPage == currentRealPage,
                     isOcrSelectionActive = ocrSelection.activePage == currentRealPage,
                 ),
+            key = { page -> chapterWindow?.items?.getOrNull(page)?.stableKey ?: page },
             modifier = Modifier.fillMaxSize(),
         ) { page ->
-            when (val item = readerPagerItem(page, volume.totalPageCount, transition)) {
-                is ReaderPagerItem.Page ->
-                    ComicPage(
-                        volume = volume,
-                        page = item.pageIndex,
-                        currentPage = currentRealPage,
-                        cacheKeyPrefix = cacheKeyPrefix,
-                        thumbnail = features.thumbnails[item.pageIndex],
-                        zoomToggleRequest = zoomToggleRequest,
-                        zoomResetRequest = zoomResetRequest,
-                        zoomTogglePage = zoomTogglePage,
-                        zoomResetPage = zoomResetPage,
-                        zoomToggleAnchor = zoomToggleAnchor,
-                        onZoomChanged = { isZoomed ->
-                            if (page == pagerState.currentPage) {
-                                zoomedPage = if (isZoomed) item.pageIndex else null
-                            }
-                        },
-                        ocrResult = ocrResults[item.pageIndex],
-                        ocrMode = ocrSelection.activePage == item.pageIndex,
-                    )
-                is ReaderPagerItem.Transition ->
-                    ReaderChapterTransitionPage(
-                        transition = item.value,
-                        onRetry = chapterNavigation?.onRetryTransition,
-                        modifier = Modifier.fillMaxSize(),
-                    )
+            if (chapterWindow != null) {
+                when (val item = chapterWindow.items[page]) {
+                    is ReaderChapterWindowItem.Page<*> -> {
+                        val content = item.chapter.payload as ReaderWindowChapterContent
+                        val isActiveVolume = actions.isVolumeActive(content.volume)
+                        ComicPage(
+                            volume = content.volume,
+                            page = item.pageIndex,
+                            currentPage = currentRealPage,
+                            cacheKeyPrefix = content.cacheKeyPrefix,
+                            thumbnail = features.thumbnails[item.pageIndex].takeIf { isActiveVolume },
+                            zoomToggleRequest = zoomToggleRequest,
+                            zoomResetRequest = zoomResetRequest,
+                            zoomTogglePage = zoomTogglePage,
+                            zoomResetPage = zoomResetPage,
+                            zoomToggleAnchor = zoomToggleAnchor,
+                            onZoomChanged = { isZoomed ->
+                                if (page == pagerState.currentPage) {
+                                    zoomedPage = if (isZoomed) item.pageIndex else null
+                                }
+                            },
+                            ocrResult = ocrResults[item.pageIndex].takeIf { isActiveVolume },
+                            ocrMode =
+                                isActiveVolume && ocrSelection.activePage == item.pageIndex,
+                        )
+                    }
+                    is ReaderChapterWindowItem.Boundary ->
+                        ReaderChapterTransitionPage(
+                            transition = item.transition,
+                            onRetry = {
+                                chapterNavigation?.onBoundaryIntent?.invoke(
+                                    item.transition.direction
+                                )
+                            },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    is ReaderChapterWindowItem.Guard -> {
+                        val transitionPage =
+                            chapterWindow.items
+                                .filterIsInstance<ReaderChapterWindowItem.Boundary>()
+                                .first { it.boundaryKey == item.boundaryKey }
+                        ReaderChapterTransitionPage(
+                            transition = transitionPage.transition,
+                            onRetry = {
+                                chapterNavigation?.onBoundaryIntent?.invoke(item.direction)
+                            },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
+            } else {
+                ComicPage(
+                    volume = volume,
+                    page = page,
+                    currentPage = currentRealPage,
+                    cacheKeyPrefix = cacheKeyPrefix,
+                    thumbnail = features.thumbnails[page],
+                    zoomToggleRequest = zoomToggleRequest,
+                    zoomResetRequest = zoomResetRequest,
+                    zoomTogglePage = zoomTogglePage,
+                    zoomResetPage = zoomResetPage,
+                    zoomToggleAnchor = zoomToggleAnchor,
+                    onZoomChanged = { isZoomed ->
+                        if (page == pagerState.currentPage) {
+                            zoomedPage = if (isZoomed) page else null
+                        }
+                    },
+                    ocrResult = ocrResults[page],
+                    ocrMode = ocrSelection.activePage == page,
+                )
             }
         }
 
@@ -842,7 +853,7 @@ private fun ComicPager(
                 activeOcrResult == null &&
                 snackbarHostState.currentSnackbarData == null
         ) {
-            val pageCountLabel = "${currentRealPage + 1} / ${volume.totalPageCount}"
+            val pageCountLabel = "${currentRealPage + 1} / ${currentVolume.totalPageCount}"
             val pageLabel =
                 if (readerChapterCount > 1) {
                     "$currentReaderChapterTitle · $pageCountLabel"
@@ -867,7 +878,7 @@ private fun ComicPager(
             onToggleBookmark =
                 actions.onToggleBookmark?.let { toggle ->
                     {
-                        if (actions.isVolumeActive(volume)) toggle(currentRealPage)
+                        if (actions.isVolumeActive(currentVolume)) toggle(currentRealPage)
                     }
                 },
             onResetZoom = {
@@ -883,13 +894,26 @@ private fun ComicPager(
                     !isTransitionPage &&
                     activeOcrResult == null &&
                     ocrProcessingPage != currentRealPage,
-            pagerState = pagerState,
-            pageCount = volume.totalPageCount,
+            currentPage = currentRealPage,
+            pageCount = currentVolume.totalPageCount,
+            onPageSelected = { selectedPage ->
+                val target =
+                    if (chapterWindow == null || currentWindowPage == null) {
+                        selectedPage
+                    } else {
+                        chapterWindow.items.indexOfFirst { candidate ->
+                            candidate is ReaderChapterWindowItem.Page<*> &&
+                                candidate.chapter.chapterId == currentWindowPage.chapter.chapterId &&
+                                candidate.pageIndex == selectedPage
+                        }
+                    }
+                if (target >= 0) scope.launch { pagerState.scrollToPage(target) }
+            },
             chapterCount = readerChapterCount,
             thumbnails = features.thumbnails,
             bookmarkPages = features.bookmarkPages,
             onNeedThumbnail = { page ->
-                if (actions.isVolumeActive(volume)) actions.onNeedThumbnail(page)
+                if (actions.isVolumeActive(currentVolume)) actions.onNeedThumbnail(page)
             },
             onPagesSelected = { activePanel = null },
             onHeightChanged = { bottomControlsHeightPx = it },
@@ -905,14 +929,14 @@ private fun ComicPager(
                             currentChapterIndex = currentReaderChapterIndex,
                             onSelect = { chapterIndex ->
                                 activePanel = null
-                                if (actions.isVolumeActive(volume)) {
+                                if (actions.isVolumeActive(currentVolume)) {
                                     val externalNavigation = chapterNavigation
                                     if (externalNavigation != null) {
                                         externalNavigation.onSelectChapter(chapterIndex)
                                     } else {
                                         scope.launch {
                                             pagerState.scrollToPage(
-                                                volume.chapterPageToGlobal(chapterIndex, 0)
+                                                currentVolume.chapterPageToGlobal(chapterIndex, 0)
                                             )
                                         }
                                     }
@@ -924,7 +948,7 @@ private fun ComicPager(
                             bookmarks = features.bookmarks,
                             thumbnails = features.thumbnails,
                             onNeedThumbnail = { page ->
-                                if (actions.isVolumeActive(volume)) actions.onNeedThumbnail(page)
+                                if (actions.isVolumeActive(currentVolume)) actions.onNeedThumbnail(page)
                             },
                             onSelect = { page ->
                                 activePanel = null
@@ -942,7 +966,7 @@ private fun ComicPager(
                                 actions.onToggleFavorite?.let { toggleFavorite ->
                                     {
                                         activePanel = null
-                                        if (actions.isVolumeActive(volume)) {
+                                        if (actions.isVolumeActive(currentVolume)) {
                                             toggleFavorite(currentRealPage)
                                         }
                                     }
@@ -955,7 +979,7 @@ private fun ComicPager(
                                 actions.onSetCover?.let { setCover ->
                                     {
                                         activePanel = null
-                                        if (actions.isVolumeActive(volume)) {
+                                        if (actions.isVolumeActive(currentVolume)) {
                                             setCover(currentRealPage)
                                         }
                                     }
@@ -1093,8 +1117,9 @@ private fun ReaderTopBar(
 @Composable
 private fun ReaderBottomControls(
     visible: Boolean,
-    pagerState: PagerState,
+    currentPage: Int,
     pageCount: Int,
+    onPageSelected: (Int) -> Unit,
     chapterCount: Int,
     thumbnails: Map<Int, ImageBitmap>,
     bookmarkPages: Set<Int>,
@@ -1106,11 +1131,10 @@ private fun ReaderBottomControls(
     attachedContent: @Composable ColumnScope.(ReaderPanel) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val scope = rememberCoroutineScope()
     val accent = readerAccentColor()
     // Keep the exact filmstrip position while another dock tab replaces the page content.
     val filmstripListState =
-        rememberLazyListState(initialFirstVisibleItemIndex = pagerState.currentPage)
+        rememberLazyListState(initialFirstVisibleItemIndex = currentPage)
 
     AnimatedVisibility(
         visible = visible,
@@ -1150,7 +1174,7 @@ private fun ReaderBottomControls(
                     // 拖动中的临时值；null = 未在拖动，滑杆跟随真实页码。
                     // 松手才真正跳页：拖动中实时翻页会狂触发图片加载
                     var draggingValue by remember { mutableStateOf<Float?>(null) }
-                    val shownPage = draggingValue?.roundToInt() ?: pagerState.currentPage
+                    val shownPage = draggingValue?.roundToInt() ?: currentPage
 
                     // 胶片条与滑杆共享 shownPage：拖滑杆时胶片实时跟随滚动，
                     // 形成"滑杆粗跳 + 胶片看准了再点"的两级定位。
@@ -1163,9 +1187,7 @@ private fun ReaderBottomControls(
                         currentPage = shownPage,
                         accent = accent,
                         isDragging = draggingValue != null,
-                        onPageSelected = { page ->
-                            scope.launch { pagerState.scrollToPage(page) }
-                        },
+                        onPageSelected = onPageSelected,
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Spacer(modifier = Modifier.height(8.dp))
@@ -1184,14 +1206,12 @@ private fun ReaderBottomControls(
                             modifier = Modifier.widthIn(min = 36.dp),
                         )
                         Slider(
-                            value = draggingValue ?: pagerState.currentPage.toFloat(),
+                            value = draggingValue ?: currentPage.toFloat(),
                             onValueChange = { draggingValue = it },
                             onValueChangeFinished = {
                                 draggingValue?.let { value ->
-                                    scope.launch {
-                                        pagerState.scrollToPage(value.roundToInt())
-                                        draggingValue = null
-                                    }
+                                    onPageSelected(value.roundToInt())
+                                    draggingValue = null
                                 }
                             },
                             valueRange = 0f..(pageCount - 1).coerceAtLeast(0).toFloat(),
@@ -1206,7 +1226,7 @@ private fun ReaderBottomControls(
                             track = {
                                 val fraction =
                                     if (pageCount > 1) {
-                                        (draggingValue ?: pagerState.currentPage.toFloat()) /
+                                        (draggingValue ?: currentPage.toFloat()) /
                                             (pageCount - 1)
                                     } else {
                                         0f
@@ -1997,92 +2017,5 @@ private fun ErrorView(
                 Text(removeLabel)
             }
         }
-    }
-}
-
-// 越界滑动触发章节切换的位移阈值（dp）。累积超过该值才视为明确的进入相邻章节意图，
-// 避免在边界处的轻微抖动误触发。
-private const val OVERSCROLL_CHAPTER_THRESHOLD = 48
-
-/**
- * 检测在章节首/末页继续向边界方向滑动的手势。
- *
- * `HorizontalPager` 在边界处会停下且不报告越界，这里通过父级 `nestedScroll` 的
- * `onPostScroll` 累积 pager **未消费的剩余位移**（真正的越界 leftover），超过阈值即
- * 触发进入相邻章节的回调。
- *
- * 必须用 `onPostScroll` 而非 `onPreScroll`：`onPreScroll` 在子节点消费前触发，
- * 无法区分“pager 即将消费以在末页停稳的位移”与“pager 在边界无法消费的越界位移”，
- * 会导致滑动**到**末页时误触发跳章。
- *
- * 仅响应 `NestedScrollSource.Drag`（手指未释放的 deliberate 拖动）：忽略 fling 冲到
- * 边界时的残余位移，避免快速翻到末页时误触发。手势结束后由外部调用 [reset]
- * 清空累积与触发标志，使下一次越界滑动可重新触发（用于重试或再次提示边界）。
- */
-private class ChapterBoundaryScrollConnection(
-    private val pagerState: PagerState,
-    private val volume: ComicVolume,
-    private val chapterNavigation: ReaderChapterNavigation?,
-    private val transition: ReaderChapterTransition?,
-    private val thresholdPx: Float,
-) : NestedScrollConnection {
-    private var forwardAccumulated = 0f
-    private var backwardAccumulated = 0f
-    private var forwardTriggered = false
-    private var backwardTriggered = false
-
-    override fun onPostScroll(
-        consumed: Offset,
-        available: Offset,
-        source: NestedScrollSource,
-    ): Offset {
-        val navigation = chapterNavigation ?: return Offset.Zero
-        // 只响应手指未释放的拖动：忽略 fling 冲到边界时的残余位移
-        if (source != NestedScrollSource.Drag) return Offset.Zero
-        val atLastPage = pagerState.currentPage >= pagerState.pageCount - 1
-        val atFirstPage = pagerState.currentPage <= 0
-        // available 是 pager 消费后的剩余位移（越界 leftover）：
-        //   available.x < 0：向末页方向的越界位移（前进）；available.x > 0：向首页方向的越界位移（后退）
-        if (transition != null && atFirstPage && available.x > 0f &&
-            transition.direction == ReaderTransitionDirection.PREVIOUS
-        ) {
-            backwardAccumulated += available.x
-            if (backwardAccumulated >= thresholdPx && !backwardTriggered) {
-                backwardTriggered = true
-                navigation.onTransitionBackward?.invoke()
-            }
-            return Offset.Zero
-        }
-        if (transition != null && atLastPage && available.x < 0f &&
-            transition.direction == ReaderTransitionDirection.NEXT
-        ) {
-            forwardAccumulated += -available.x
-            if (forwardAccumulated >= thresholdPx && !forwardTriggered) {
-                forwardTriggered = true
-                navigation.onTransitionForward?.invoke()
-            }
-            return Offset.Zero
-        }
-        if (atLastPage && available.x < 0f) {
-            forwardAccumulated += -available.x
-            if (forwardAccumulated >= thresholdPx && !forwardTriggered) {
-                forwardTriggered = true
-                navigation.onForwardPastEnd?.invoke()
-            }
-        } else if (atFirstPage && available.x > 0f) {
-            backwardAccumulated += available.x
-            if (backwardAccumulated >= thresholdPx && !backwardTriggered) {
-                backwardTriggered = true
-                navigation.onBackwardPastStart?.invoke()
-            }
-        }
-        return Offset.Zero
-    }
-
-    fun reset() {
-        forwardAccumulated = 0f
-        backwardAccumulated = 0f
-        forwardTriggered = false
-        backwardTriggered = false
     }
 }
