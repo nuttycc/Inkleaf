@@ -101,7 +101,7 @@ class ReaderChapterWindowTest {
     }
 
     @Test
-    fun `loading guards keep the source chapter edge page as their context`() {
+    fun `unprepared boundaries keep the source chapter edge page as their context`() {
         val current = chapter("chapter-2", index = 1)
         val previousWindow =
             buildReaderChapterWindow(
@@ -116,7 +116,9 @@ class ReaderChapterWindowTest {
                 next = adjacent(ReaderTransitionDirection.NEXT, chapter("chapter-3", 2)),
             )
 
+        assertTrue(previousWindow.items.first() is ReaderChapterWindowItem.Boundary)
         assertEquals(current.pageKey(0), previousWindow.contextPageAt(0).pageKey)
+        assertTrue(nextWindow.items.last() is ReaderChapterWindowItem.Boundary)
         assertEquals(
             current.pageKey(1),
             nextWindow.contextPageAt(nextWindow.items.lastIndex).pageKey,
@@ -173,7 +175,7 @@ class ReaderChapterWindowTest {
     }
 
     @Test
-    fun `unprepared next chapter keeps a stable rebound guard beyond its boundary`() {
+    fun `unprepared next chapter stops at its boundary`() {
         val window =
             buildReaderChapterWindow(
                 active = chapter("chapter-1", index = 0),
@@ -182,13 +184,38 @@ class ReaderChapterWindowTest {
             )
 
         assertEquals(
-            listOf("chapter-1:0", "chapter-1:1", "boundary", "guard:NEXT"),
+            listOf("chapter-1:0", "chapter-1:1", "boundary"),
             window.items.map(::label),
         )
         assertEquals(
-            ReaderPageTurnResult.MoveTo(3),
+            ReaderPageTurnResult.NoChange,
             readerPageTurnResult(window.items, currentIndex = 2, delta = 1),
         )
+    }
+
+    @Test
+    fun `unprepared previous chapter stops at its boundary`() {
+        val window =
+            buildReaderChapterWindow(
+                active = chapter("chapter-2", index = 1),
+                previous = adjacent(ReaderTransitionDirection.PREVIOUS, chapter("chapter-1", 0)),
+                next = null,
+            )
+
+        assertEquals(
+            listOf("boundary", "chapter-2:0", "chapter-2:1"),
+            window.items.map(::label),
+        )
+        assertEquals(
+            ReaderPageTurnResult.NoChange,
+            readerPageTurnResult(window.items, currentIndex = 0, delta = -1),
+        )
+    }
+
+    @Test
+    fun `reader window updates wait until the pager is idle`() {
+        assertTrue(canAdoptReaderChapterWindow(pagerIsScrolling = false))
+        assertEquals(false, canAdoptReaderChapterWindow(pagerIsScrolling = true))
     }
 
     @Test
@@ -274,62 +301,6 @@ class ReaderChapterWindowTest {
         )
     }
 
-    @Test
-    fun `guard settles as a rebound without queuing chapter entry`() {
-        val window =
-            buildReaderChapterWindow(
-                active = chapter("chapter-1", index = 0),
-                previous = null,
-                next = adjacent(ReaderTransitionDirection.NEXT, chapter("chapter-2", 1)),
-            )
-
-        assertEquals(
-            ReaderSettledPageEffect.ReboundBoundary(ReaderTransitionDirection.NEXT),
-            readerSettledPageEffect("chapter-1", window.items.last()),
-        )
-        assertTrue(window.items[window.items.lastIndex - 1] is ReaderChapterWindowItem.Boundary)
-    }
-
-    @Test
-    fun `loading intent does not queue entry and ready requires a new intent`() {
-        assertEquals(
-            ReaderBoundaryIntentEffect.None,
-            readerBoundaryIntentEffect(ReaderTransitionStatus.Loading),
-        )
-        assertEquals(
-            ReaderBoundaryIntentEffect.PublishPreparedPages,
-            readerBoundaryIntentEffect(ReaderTransitionStatus.Ready),
-        )
-    }
-
-    @Test
-    fun `error intent retries while content boundary remains inert`() {
-        assertEquals(
-            ReaderBoundaryIntentEffect.RetryPreparation,
-            readerBoundaryIntentEffect(ReaderTransitionStatus.Error),
-        )
-        assertEquals(
-            ReaderBoundaryIntentEffect.None,
-            readerBoundaryIntentEffect(ReaderTransitionStatus.Boundary),
-        )
-    }
-
-    @Test
-    fun `guard settled after loading becomes ready still rebounds without entering`() {
-        assertEquals(
-            ReaderBoundaryIntentEffect.None,
-            readerGuardSettledEffect(ReaderTransitionStatus.Ready),
-        )
-        assertEquals(
-            ReaderBoundaryIntentEffect.None,
-            readerGuardSettledEffect(ReaderTransitionStatus.Loading),
-        )
-        assertEquals(
-            ReaderBoundaryIntentEffect.RetryPreparation,
-            readerGuardSettledEffect(ReaderTransitionStatus.Error),
-        )
-    }
-
     private fun chapter(
         id: String,
         index: Int = 0,
@@ -366,6 +337,5 @@ class ReaderChapterWindowTest {
         when (item) {
             is ReaderChapterWindowItem.Page -> "${item.chapter.chapterId}:${item.pageIndex}"
             is ReaderChapterWindowItem.Boundary -> "boundary"
-            is ReaderChapterWindowItem.Guard -> "guard:${item.direction}"
         }
 }

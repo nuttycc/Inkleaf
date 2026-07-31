@@ -97,14 +97,6 @@ internal sealed interface ReaderChapterWindowItem<out T> {
     ) : ReaderChapterWindowItem<Nothing> {
         override val stableKey: ReaderChapterWindowKey = boundaryKey
     }
-
-    data class Guard(
-        val boundaryKey: ReaderChapterBoundaryKey,
-        val direction: ReaderTransitionDirection,
-    ) : ReaderChapterWindowItem<Nothing> {
-        override val stableKey: ReaderChapterWindowKey =
-            ReaderBoundaryGuardKey(boundaryKey, direction)
-    }
 }
 
 internal fun ReaderChapterWindowItem<*>.saveablePagerKey(): String =
@@ -122,13 +114,6 @@ internal fun ReaderChapterWindowItem<*>.saveablePagerKey(): String =
                 boundaryKey.previousChapterId,
                 boundaryKey.nextChapterId,
             )
-        is ReaderChapterWindowItem.Guard ->
-            encodePagerKey(
-                "guard",
-                boundaryKey.previousChapterId,
-                boundaryKey.nextChapterId,
-                direction.name,
-            )
     }
 
 private fun encodePagerKey(type: String, vararg parts: String?): String =
@@ -145,11 +130,6 @@ private fun encodePagerKey(type: String, vararg parts: String?): String =
             }
         }
     }
-
-private data class ReaderBoundaryGuardKey(
-    val boundary: ReaderChapterBoundaryKey,
-    val direction: ReaderTransitionDirection,
-) : ReaderChapterWindowKey
 
 internal data class ReaderChapterWindow<T>(
     val activeChapterId: String,
@@ -176,7 +156,6 @@ internal fun <T> ReaderChapterWindow<T>.contextPageAt(
     val direction =
         when (item) {
             is ReaderChapterWindowItem.Boundary -> item.transition.direction
-            is ReaderChapterWindowItem.Guard -> item.direction
             is ReaderChapterWindowItem.Page -> return item
         }
     val searchIndices =
@@ -207,9 +186,7 @@ internal fun <T> buildReaderChapterWindow(
                     nextChapterId = active.chapterId,
                 )
             val prepared = adjacent.preparedChapter
-            if (prepared == null) {
-                add(ReaderChapterWindowItem.Guard(boundary, ReaderTransitionDirection.PREVIOUS))
-            } else {
+            if (prepared != null) {
                 prepared.pageIdentities.indices.forEach { add(ReaderChapterWindowItem.Page(prepared, it)) }
             }
             add(ReaderChapterWindowItem.Boundary(boundary, adjacent.transition))
@@ -223,9 +200,7 @@ internal fun <T> buildReaderChapterWindow(
                 )
             add(ReaderChapterWindowItem.Boundary(boundary, adjacent.transition))
             val prepared = adjacent.preparedChapter
-            if (prepared == null) {
-                add(ReaderChapterWindowItem.Guard(boundary, ReaderTransitionDirection.NEXT))
-            } else {
+            if (prepared != null) {
                 prepared.pageIdentities.indices.forEach { add(ReaderChapterWindowItem.Page(prepared, it)) }
             }
         }
@@ -239,34 +214,6 @@ internal sealed interface ReaderPageTurnResult {
     data object NoChange : ReaderPageTurnResult
 }
 
-internal sealed interface ReaderBoundaryIntentEffect {
-    data object PublishPreparedPages : ReaderBoundaryIntentEffect
-
-    data object RetryPreparation : ReaderBoundaryIntentEffect
-
-    data object None : ReaderBoundaryIntentEffect
-}
-
-internal fun readerBoundaryIntentEffect(
-    status: ReaderTransitionStatus?
-): ReaderBoundaryIntentEffect =
-    when (status) {
-        ReaderTransitionStatus.Ready -> ReaderBoundaryIntentEffect.PublishPreparedPages
-        ReaderTransitionStatus.Error -> ReaderBoundaryIntentEffect.RetryPreparation
-        ReaderTransitionStatus.Loading,
-        ReaderTransitionStatus.Boundary,
-        null -> ReaderBoundaryIntentEffect.None
-    }
-
-internal fun readerGuardSettledEffect(
-    status: ReaderTransitionStatus?
-): ReaderBoundaryIntentEffect =
-    if (status == ReaderTransitionStatus.Error) {
-        ReaderBoundaryIntentEffect.RetryPreparation
-    } else {
-        ReaderBoundaryIntentEffect.None
-    }
-
 internal fun readerPageTurnResult(
     items: List<ReaderChapterWindowItem<*>>,
     currentIndex: Int,
@@ -279,14 +226,14 @@ internal fun readerPageTurnResult(
     return ReaderPageTurnResult.MoveTo(targetIndex)
 }
 
+internal fun canAdoptReaderChapterWindow(pagerIsScrolling: Boolean): Boolean = !pagerIsScrolling
+
 internal sealed interface ReaderSettledPageEffect {
     data class CommitChapter(
         val chapterId: String,
         val chapterIndex: Int,
         val pageIndex: Int,
     ) : ReaderSettledPageEffect
-
-    data class ReboundBoundary(val direction: ReaderTransitionDirection) : ReaderSettledPageEffect
 
     data object None : ReaderSettledPageEffect
 }
@@ -306,7 +253,5 @@ internal fun readerSettledPageEffect(
                     pageIndex = item.pageIndex,
                 )
             }
-        is ReaderChapterWindowItem.Guard ->
-            ReaderSettledPageEffect.ReboundBoundary(item.direction)
         is ReaderChapterWindowItem.Boundary -> ReaderSettledPageEffect.None
     }

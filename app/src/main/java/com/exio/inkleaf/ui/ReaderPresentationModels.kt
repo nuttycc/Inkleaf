@@ -68,10 +68,8 @@ internal data class ReaderChapterNavigation(
     val onReachedLastPage: (() -> Unit)? = null,
     val onReachedFirstPage: (() -> Unit)? = null,
     val onBoundarySettled: ((ReaderTransitionDirection) -> Unit)? = null,
-    val onBoundaryIntent: ((ReaderTransitionDirection) -> Unit)? = null,
-    val onGuardSettled: ((ReaderTransitionDirection) -> Unit)? = null,
+    val onBoundaryRetry: ((ReaderTransitionDirection) -> Unit)? = null,
     val onWindowPageSettled: ((ReaderChapterPageKey) -> Unit)? = null,
-    val onPagerIdle: ((ReaderChapterWindowKey) -> Unit)? = null,
 )
 
 internal data class ReaderBookmarkItem(

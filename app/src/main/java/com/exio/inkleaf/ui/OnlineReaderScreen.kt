@@ -70,10 +70,8 @@ fun OnlineReaderScreen(
                 onReachedLastPage = viewModel::preloadNextChapter,
                 onReachedFirstPage = viewModel::preloadPreviousChapter,
                 onBoundarySettled = viewModel::onBoundarySettled,
-                onBoundaryIntent = viewModel::onBoundaryIntent,
-                onGuardSettled = viewModel::onGuardSettled,
+                onBoundaryRetry = viewModel::retryBoundary,
                 onWindowPageSettled = viewModel::onWindowPageSettled,
-                onPagerIdle = viewModel::onReaderPagerIdle,
             ),
         onExit = {
             viewModel.endReadingSession()
