@@ -165,6 +165,33 @@ internal data class ReaderChapterWindow<T>(
     }
 }
 
+internal fun <T> ReaderChapterWindow<T>.contextPageAt(
+    itemIndex: Int,
+): ReaderChapterWindowItem.Page<T> {
+    val activePage =
+        items.filterIsInstance<ReaderChapterWindowItem.Page<T>>()
+            .first { it.chapter.chapterId == activeChapterId }
+    val item = items.getOrNull(itemIndex) ?: return activePage
+    if (item is ReaderChapterWindowItem.Page) return item
+    val direction =
+        when (item) {
+            is ReaderChapterWindowItem.Boundary -> item.transition.direction
+            is ReaderChapterWindowItem.Guard -> item.direction
+            is ReaderChapterWindowItem.Page -> return item
+        }
+    val searchIndices =
+        if (direction == ReaderTransitionDirection.NEXT) {
+            itemIndex - 1 downTo 0
+        } else {
+            itemIndex + 1..items.lastIndex
+        }
+    for (candidateIndex in searchIndices) {
+        val candidate = items[candidateIndex]
+        if (candidate is ReaderChapterWindowItem.Page) return candidate
+    }
+    return activePage
+}
+
 internal fun <T> buildReaderChapterWindow(
     active: ReaderWindowChapter<T>,
     previous: ReaderWindowAdjacent<T>?,

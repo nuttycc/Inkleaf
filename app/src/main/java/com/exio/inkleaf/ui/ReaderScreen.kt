@@ -389,8 +389,9 @@ private fun ComicPager(
     val currentWindowItem = chapterWindow?.items?.getOrNull(pagerState.currentPage)
     val currentWindowPage =
         currentWindowItem as? ReaderChapterWindowItem.Page<ReaderWindowChapterContent>
-    val currentRealPage = currentWindowPage?.pageIndex ?: pagerState.currentPage
-    val currentVolume = currentWindowPage?.chapter?.payload?.volume ?: volume
+    val currentContextPage = chapterWindow?.contextPageAt(pagerState.currentPage)
+    val currentRealPage = currentContextPage?.pageIndex ?: pagerState.currentPage
+    val currentVolume = currentContextPage?.chapter?.payload?.volume ?: volume
     val isCurrentVolumeActive = actions.isVolumeActive(currentVolume)
     val isTransitionPage =
         currentWindowItem is ReaderChapterWindowItem.Boundary ||

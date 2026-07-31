@@ -73,6 +73,70 @@ class ReaderChapterWindowTest {
     }
 
     @Test
+    fun `next boundary uses the current chapter last page as its context`() {
+        val current = chapter("chapter-1", index = 0)
+        val window =
+            buildReaderChapterWindow(
+                active = current,
+                previous = null,
+                next = adjacent(ReaderTransitionDirection.NEXT, chapter("chapter-2", 1), true),
+            )
+        val boundaryIndex = window.items.indexOfFirst { it is ReaderChapterWindowItem.Boundary }
+
+        assertEquals(current.pageKey(1), window.contextPageAt(boundaryIndex).pageKey)
+    }
+
+    @Test
+    fun `previous boundary uses the current chapter first page as its context`() {
+        val current = chapter("chapter-2", index = 1)
+        val window =
+            buildReaderChapterWindow(
+                active = current,
+                previous = adjacent(ReaderTransitionDirection.PREVIOUS, chapter("chapter-1", 0), true),
+                next = null,
+            )
+        val boundaryIndex = window.items.indexOfFirst { it is ReaderChapterWindowItem.Boundary }
+
+        assertEquals(current.pageKey(0), window.contextPageAt(boundaryIndex).pageKey)
+    }
+
+    @Test
+    fun `loading guards keep the source chapter edge page as their context`() {
+        val current = chapter("chapter-2", index = 1)
+        val previousWindow =
+            buildReaderChapterWindow(
+                active = current,
+                previous = adjacent(ReaderTransitionDirection.PREVIOUS, chapter("chapter-1", 0)),
+                next = null,
+            )
+        val nextWindow =
+            buildReaderChapterWindow(
+                active = current,
+                previous = null,
+                next = adjacent(ReaderTransitionDirection.NEXT, chapter("chapter-3", 2)),
+            )
+
+        assertEquals(current.pageKey(0), previousWindow.contextPageAt(0).pageKey)
+        assertEquals(
+            current.pageKey(1),
+            nextWindow.contextPageAt(nextWindow.items.lastIndex).pageKey,
+        )
+    }
+
+    @Test
+    fun `stale pager index falls back to a valid active chapter page`() {
+        val current = chapter("chapter-2", index = 1)
+        val window =
+            buildReaderChapterWindow(
+                active = current,
+                previous = null,
+                next = adjacent(ReaderTransitionDirection.NEXT, chapter("chapter-3", 2), true),
+            )
+
+        assertEquals(current.pageKey(0), window.contextPageAt(Int.MAX_VALUE).pageKey)
+    }
+
+    @Test
     fun `page keys distinguish chapters revisions and pages`() {
         val chapter = chapter("chapter-1", revision = "rev-a")
 
