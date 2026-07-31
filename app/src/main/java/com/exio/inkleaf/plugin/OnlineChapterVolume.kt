@@ -25,12 +25,28 @@ internal class OnlineChapterVolume(
 ) : ComicVolume {
     private val closed = AtomicBoolean(false)
     private val calls = ConcurrentHashMap.newKeySet<Call>()
+    // Keep source-provided IDs separate from revision/index fallbacks so they cannot collide.
+    private val pageIdentities =
+        pages.mapIndexed { index, page ->
+            page.pageId?.let { pageId -> "id:${pageId.length}:$pageId" }
+                ?: "revision-index:${sourceRevision.length}:$sourceRevision:$index"
+        }
 
     init {
         require(chapterId.isNotBlank()) { "chapterId must not be blank" }
         require(sourceRevision.isNotBlank()) { "sourceRevision must not be blank" }
         require(pages.isNotEmpty()) { "Online chapter must contain at least one page" }
         require(pages.indices.all { pages[it].index == it }) { "Page indexes must be contiguous" }
+        require(pages.all { it.pageId == null || it.pageId.isNotBlank() }) {
+            "Page ids must be non-blank"
+        }
+        val providedPageIds = pages.mapNotNull { it.pageId }
+        require(providedPageIds.distinct().size == providedPageIds.size) {
+            "Page ids must be unique"
+        }
+        require(pageIdentities.distinct().size == pageIdentities.size) {
+            "Page identities must be unique"
+        }
     }
 
     override val totalPageCount: Int = pages.size
@@ -63,8 +79,7 @@ internal class OnlineChapterVolume(
     }
 
     override fun pageIdentity(globalPage: Int): String {
-        val page = pages[requirePage(globalPage)]
-        return page.pageId ?: "revision:$sourceRevision:index:$globalPage"
+        return pageIdentities[requirePage(globalPage)]
     }
 
     override suspend fun loadPageBytes(globalPage: Int): ByteArray {

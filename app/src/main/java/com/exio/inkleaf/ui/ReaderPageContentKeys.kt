@@ -17,7 +17,6 @@ internal data class ReaderPageContentKeys(
     )
 
     internal data class ProducerRestart(
-        val isCurrentPage: Boolean,
         val pageRenderRequest: PageRenderRequest?,
     )
 }
@@ -26,7 +25,6 @@ internal fun readerPageContentKeys(
     volumeToken: Any,
     page: Int,
     cacheKeyPrefix: String,
-    isCurrentPage: Boolean,
     pageRenderRequest: PageRenderRequest?,
 ): ReaderPageContentKeys =
     ReaderPageContentKeys(
@@ -36,9 +34,9 @@ internal fun readerPageContentKeys(
                 page = page,
                 cacheKeyPrefix = cacheKeyPrefix,
             ),
+        // Current-page status changes presentation only; render requests carry real work changes.
         producerRestart =
             ReaderPageContentKeys.ProducerRestart(
-                isCurrentPage = isCurrentPage,
                 pageRenderRequest = pageRenderRequest,
             ),
     )

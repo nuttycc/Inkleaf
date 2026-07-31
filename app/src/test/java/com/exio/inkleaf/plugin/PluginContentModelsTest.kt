@@ -242,6 +242,36 @@ class PluginContentModelsTest {
     }
 
     @Test
+    fun `page ids must be nonblank and unique`() {
+        val invalidPageIds = listOf(listOf(" "), listOf("page-1", "page-1"))
+
+        invalidPageIds.forEach { pageIds ->
+            val response =
+                PluginPagesResponse(
+                    sourceId = "comic-1",
+                    chapterId = "chapter-1",
+                    pages =
+                        pageIds.mapIndexed { index, pageId ->
+                            PageDescriptor(
+                                pageId = pageId,
+                                index = index,
+                                url = "https://example.com/page-$index.jpg",
+                            )
+                        },
+                )
+            assertTrue(
+                runCatching {
+                        PluginContentCodec.pages(
+                            PluginContentCodec.json.encodeToJsonElement(response),
+                            "io.example.source",
+                        )
+                    }
+                    .exceptionOrNull() is PluginContentValidationException
+            )
+        }
+    }
+
+    @Test
     fun `image headers must be valid OkHttp ASCII headers`() {
         val response =
             PluginPagesResponse(

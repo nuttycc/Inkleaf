@@ -1,6 +1,7 @@
 package com.exio.inkleaf.plugin
 
 import com.exio.inkleaf.data.ComicOpenException
+import okhttp3.Call
 import okhttp3.MediaType
 import okhttp3.ResponseBody
 import okio.Buffer
@@ -40,6 +41,22 @@ class OnlineChapterVolumeTest {
     }
 
     @Test
+    fun `explicit and fallback page identities use separate namespaces`() {
+        val revision = "chapter-r1"
+        val oldFallbackCollision = "revision:$revision:index:1"
+        val volume = volume(pageIds = listOf(oldFallbackCollision, null), revision = revision)
+
+        assertNotEquals(volume.pageIdentity(0), volume.pageIdentity(1))
+    }
+
+    @Test
+    fun `blank page ids are rejected by the volume invariant`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            volume(pageIds = listOf(" "))
+        }
+    }
+
+    @Test
     fun `page body is rejected before an unknown-length response grows past its limit`() {
         val body = unknownLengthBody(ByteArray(6))
 
@@ -68,6 +85,18 @@ class OnlineChapterVolumeTest {
                         url = "https://example.com/page-$index$urlSuffix.jpg",
                     )
                 },
+        )
+
+    private fun volume(
+        pageIds: List<String?>,
+        revision: String = "chapter-r1",
+    ): OnlineChapterVolume =
+        OnlineChapterVolume(
+            chapterId = CHAPTER_ID,
+            title = "Chapter 1",
+            sourceRevision = revision,
+            pages = response(pageIds).pages,
+            client = Call.Factory { error("Network is not used by identity tests") },
         )
 
     private fun unknownLengthBody(bytes: ByteArray): ResponseBody =

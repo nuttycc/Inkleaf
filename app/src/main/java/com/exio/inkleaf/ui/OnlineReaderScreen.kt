@@ -37,6 +37,9 @@ fun OnlineReaderScreen(
             bookmarkPages = viewModel.bookmarkPages.keys,
             bookmarks = viewModel.bookmarks,
             favoritePages = viewModel.favoritePages.keys,
+            thumbnailsByKey = viewModel.thumbnailsByKey,
+            bookmarkPageKeys = viewModel.bookmarkPageKeys.keys,
+            favoritePageKeys = viewModel.favoritePageKeys.keys,
         )
     val actions =
         ReaderPresentationActions(
@@ -47,6 +50,8 @@ fun OnlineReaderScreen(
             onSetCover = null,
             onPageChanged = viewModel::saveProgress,
             onVolumeDisposed = viewModel::releaseInactiveVolume,
+            onVolumeTaskStarted = viewModel::acquireVolumeTask,
+            onVolumeTaskFinished = viewModel::releaseVolumeTask,
             isVolumeActive = viewModel::isActiveVolume,
             onNavigateToModelDownload = onNavigateToModelDownload,
             readerMessage = viewModel.readerMessage,
@@ -62,7 +67,11 @@ fun OnlineReaderScreen(
                 chapters = viewModel.readerChapters,
                 currentChapterIndex = viewModel.currentChapterIndex,
                 onSelectChapter = viewModel::selectChapter,
-                onForwardPastEnd = viewModel::continueToNextChapter,
+                onReachedLastPage = viewModel::preloadNextChapter,
+                onReachedFirstPage = viewModel::preloadPreviousChapter,
+                onBoundarySettled = viewModel::onBoundarySettled,
+                onBoundaryRetry = viewModel::retryBoundary,
+                onWindowPageSettled = viewModel::onWindowPageSettled,
             ),
         onExit = {
             viewModel.endReadingSession()
