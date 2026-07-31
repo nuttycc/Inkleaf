@@ -311,6 +311,26 @@ class ReaderChapterWindowTest {
     }
 
     @Test
+    fun `chapter page mapping accounts for prepended window items`() {
+        val window =
+            buildReaderChapterWindow(
+                active = chapter("chapter-2", index = 1),
+                previous =
+                    adjacent(
+                        ReaderTransitionDirection.PREVIOUS,
+                        chapter("chapter-1", 0),
+                        prepared = true,
+                    ),
+                next = null,
+            )
+
+        assertEquals(1, readerWindowIndexForChapterPage(null, "chapter-2", pageIndex = 1))
+        assertEquals(4, readerWindowIndexForChapterPage(window, "chapter-2", pageIndex = 1))
+        assertEquals(-1, readerWindowIndexForChapterPage(window, "chapter-2", pageIndex = 9))
+        assertEquals(-1, readerWindowIndexForChapterPage(window, null, pageIndex = 1))
+    }
+
+    @Test
     fun `chapter commits only after an adjacent real page settles`() {
         val current = chapter("chapter-1", index = 0)
         val next = chapter("chapter-2", index = 1)

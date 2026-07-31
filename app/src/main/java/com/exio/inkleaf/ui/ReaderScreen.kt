@@ -670,6 +670,13 @@ private fun ComicPager(
             }
         }
     }
+    val windowIndexForCurrentChapterPage: (Int) -> Int = { selectedPage ->
+        readerWindowIndexForChapterPage(
+            window = pagerChapterWindow,
+            chapterId = currentWindowPage?.chapter?.chapterId,
+            pageIndex = selectedPage,
+        )
+    }
 
     val latestVisibleChapterWindow by rememberUpdatedState(visibleChapterWindow)
     val latestChapterNavigation by rememberUpdatedState(chapterNavigation)
@@ -1003,16 +1010,7 @@ private fun ComicPager(
             currentPage = currentRealPage,
             pageCount = currentVolume.totalPageCount,
             onPageSelected = { selectedPage ->
-                val target =
-                    if (pagerChapterWindow == null || currentWindowPage == null) {
-                        selectedPage
-                    } else {
-                        pagerChapterWindow.items.indexOfFirst { candidate ->
-                            candidate is ReaderChapterWindowItem.Page<*> &&
-                                candidate.chapter.chapterId == currentWindowPage.chapter.chapterId &&
-                                candidate.pageIndex == selectedPage
-                        }
-                    }
+                val target = windowIndexForCurrentChapterPage(selectedPage)
                 if (target >= 0) scope.launch { pagerState.scrollToPage(target) }
             },
             chapterCount = readerChapterCount,
@@ -1058,7 +1056,8 @@ private fun ComicPager(
                             },
                             onSelect = { page ->
                                 activePanel = null
-                                scope.launch { pagerState.scrollToPage(page) }
+                                val target = windowIndexForCurrentChapterPage(page)
+                                if (target >= 0) scope.launch { pagerState.scrollToPage(target) }
                             },
                             removalsInFlight = bookmarkRemovalsInFlight,
                             onRemove =

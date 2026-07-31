@@ -214,6 +214,20 @@ internal sealed interface ReaderPageTurnResult {
     data object NoChange : ReaderPageTurnResult
 }
 
+internal fun readerWindowIndexForChapterPage(
+    window: ReaderChapterWindow<*>?,
+    chapterId: String?,
+    pageIndex: Int,
+): Int {
+    if (window == null) return pageIndex
+    if (chapterId == null) return -1
+    return window.items.indexOfFirst { item ->
+        item is ReaderChapterWindowItem.Page<*> &&
+            item.chapter.chapterId == chapterId &&
+            item.pageIndex == pageIndex
+    }
+}
+
 internal fun readerPageTurnResult(
     items: List<ReaderChapterWindowItem<*>>,
     currentIndex: Int,
@@ -222,7 +236,7 @@ internal fun readerPageTurnResult(
     require(currentIndex in items.indices)
     require(delta == -1 || delta == 1)
     val targetIndex = currentIndex + delta
-    val target = items.getOrNull(targetIndex) ?: return ReaderPageTurnResult.NoChange
+    if (targetIndex !in items.indices) return ReaderPageTurnResult.NoChange
     return ReaderPageTurnResult.MoveTo(targetIndex)
 }
 
