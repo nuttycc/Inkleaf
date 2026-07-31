@@ -67,7 +67,7 @@ internal data class ReaderChapterNavigation(
     val onBoundaryIntent: ((ReaderTransitionDirection) -> Unit)? = null,
     val onGuardSettled: ((ReaderTransitionDirection) -> Unit)? = null,
     val onWindowPageSettled: ((ReaderChapterPageKey) -> Unit)? = null,
-    val onPagerIdle: ((Any) -> Unit)? = null,
+    val onPagerIdle: ((ReaderChapterWindowKey) -> Unit)? = null,
 )
 
 internal data class ReaderBookmarkItem(
@@ -89,6 +89,8 @@ internal data class ReaderPresentationActions(
     val onSetCover: ((Int) -> Unit)?,
     val onPageChanged: (ComicVolume, Int) -> Unit,
     val onVolumeDisposed: (ComicVolume) -> Unit = {},
+    val onVolumeTaskStarted: (ComicVolume) -> Boolean = { true },
+    val onVolumeTaskFinished: (ComicVolume) -> Unit = {},
     val isVolumeActive: (ComicVolume) -> Boolean = { true },
     val onNavigateToModelDownload: () -> Unit,
     val readerMessage: String?,

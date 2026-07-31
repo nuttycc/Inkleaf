@@ -1,10 +1,12 @@
 package com.exio.inkleaf.ui
 
+internal sealed interface ReaderChapterWindowKey
+
 internal data class ReaderChapterPageKey(
     val chapterId: String,
     val chapterRevision: String,
     val pageIdentity: String,
-) {
+) : ReaderChapterWindowKey {
     init {
         require(chapterId.isNotBlank())
         require(chapterRevision.isNotBlank())
@@ -12,10 +14,26 @@ internal data class ReaderChapterPageKey(
     }
 }
 
+internal data class ReaderPageStateKey(
+    val namespace: String,
+    val pageIdentity: String,
+) {
+    init {
+        require(namespace.isNotBlank())
+        require(pageIdentity.isNotBlank())
+    }
+}
+
+internal fun ReaderChapterPageKey.toReaderPageStateKey(): ReaderPageStateKey =
+    ReaderPageStateKey(
+        namespace = "$chapterId\u0000$chapterRevision",
+        pageIdentity = pageIdentity,
+    )
+
 internal data class ReaderChapterBoundaryKey(
     val previousChapterId: String?,
     val nextChapterId: String?,
-) {
+) : ReaderChapterWindowKey {
     init {
         require(previousChapterId != null || nextChapterId != null)
         require(previousChapterId != nextChapterId)
@@ -59,7 +77,7 @@ internal data class ReaderWindowAdjacent<T>(
 }
 
 internal sealed interface ReaderChapterWindowItem<out T> {
-    val stableKey: Any
+    val stableKey: ReaderChapterWindowKey
 
     data class Page<T>(
         val chapter: ReaderWindowChapter<T>,
@@ -70,28 +88,29 @@ internal sealed interface ReaderChapterWindowItem<out T> {
         }
 
         val pageKey: ReaderChapterPageKey = chapter.pageKey(pageIndex)
-        override val stableKey: Any = pageKey
+        override val stableKey: ReaderChapterWindowKey = pageKey
     }
 
     data class Boundary(
         val boundaryKey: ReaderChapterBoundaryKey,
         val transition: ReaderChapterTransition,
     ) : ReaderChapterWindowItem<Nothing> {
-        override val stableKey: Any = boundaryKey
+        override val stableKey: ReaderChapterWindowKey = boundaryKey
     }
 
     data class Guard(
         val boundaryKey: ReaderChapterBoundaryKey,
         val direction: ReaderTransitionDirection,
     ) : ReaderChapterWindowItem<Nothing> {
-        override val stableKey: Any = ReaderBoundaryGuardKey(boundaryKey, direction)
+        override val stableKey: ReaderChapterWindowKey =
+            ReaderBoundaryGuardKey(boundaryKey, direction)
     }
 }
 
 private data class ReaderBoundaryGuardKey(
     val boundary: ReaderChapterBoundaryKey,
     val direction: ReaderTransitionDirection,
-)
+) : ReaderChapterWindowKey
 
 internal data class ReaderChapterWindow<T>(
     val activeChapterId: String,
@@ -105,8 +124,6 @@ internal data class ReaderChapterWindow<T>(
                 .any { it.chapter.chapterId == activeChapterId }
         )
     }
-
-    fun indexOf(key: Any): Int = items.indexOfFirst { it.stableKey == key }
 }
 
 internal fun <T> buildReaderChapterWindow(
@@ -153,8 +170,6 @@ internal fun <T> buildReaderChapterWindow(
 internal sealed interface ReaderPageTurnResult {
     data class MoveTo(val index: Int) : ReaderPageTurnResult
 
-    data class BoundaryIntent(val direction: ReaderTransitionDirection) : ReaderPageTurnResult
-
     data object NoChange : ReaderPageTurnResult
 }
 
@@ -195,11 +210,7 @@ internal fun readerPageTurnResult(
     require(delta == -1 || delta == 1)
     val targetIndex = currentIndex + delta
     val target = items.getOrNull(targetIndex) ?: return ReaderPageTurnResult.NoChange
-    return if (target is ReaderChapterWindowItem.Guard) {
-        ReaderPageTurnResult.BoundaryIntent(target.direction)
-    } else {
-        ReaderPageTurnResult.MoveTo(targetIndex)
-    }
+    return ReaderPageTurnResult.MoveTo(targetIndex)
 }
 
 internal sealed interface ReaderSettledPageEffect {

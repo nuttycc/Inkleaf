@@ -102,6 +102,7 @@ internal class OnlineReaderViewModel(
         private set
 
     private var volume: OnlineChapterVolume? = null
+    private val volumeUses = ReaderVolumeUseRegistry<ComicVolume>(ComicVolume::close)
     private var currentRevision: String? = requestedRevision
     private var currentChapterTitle: String = chapterId
     private var currentTitle: String = "在线漫画"
@@ -202,7 +203,7 @@ internal class OnlineReaderViewModel(
         }
     }
 
-    fun onReaderPagerIdle(settledKey: Any) {
+    fun onReaderPagerIdle(settledKey: ReaderChapterWindowKey) {
         val ready = state as? ReaderPresentationState.Ready ?: return
         val settled = ready.chapterWindow?.items?.firstOrNull { it.stableKey == settledKey }
         if (settled is ReaderChapterWindowItem.Guard) return
@@ -225,13 +226,15 @@ internal class OnlineReaderViewModel(
         @Suppress("UNCHECKED_CAST")
         val page =
             windowItem as ReaderChapterWindowItem.Page<ReaderWindowChapterContent>
-        if (page.chapter.chapterId == activeChapterId) {
+        val settledEffect = readerSettledPageEffect(activeChapterId, page)
+        if (settledEffect == ReaderSettledPageEffect.None) {
             saveProgress(page.chapter.payload.volume, page.pageIndex)
             return
         }
+        val commit = settledEffect as? ReaderSettledPageEffect.CommitChapter ?: return
         if (chapterLoadJob?.isActive == true) return
         val direction =
-            if (page.chapter.chapterIndex > currentChapterIndex) {
+            if (commit.chapterIndex > currentChapterIndex) {
                 ChapterSwitchDirection.NEXT
             } else {
                 ChapterSwitchDirection.PREVIOUS
@@ -243,7 +246,7 @@ internal class OnlineReaderViewModel(
                 } else {
                     ReaderTransitionDirection.PREVIOUS
                 }
-            )?.takeIf { it.chapter.chapterId == page.chapter.chapterId } ?: return
+            )?.takeIf { it.chapter.chapterId == commit.chapterId } ?: return
         chapterLoadJob =
             viewModelScope.launch {
                 prepareAndCommitChapter(
@@ -251,7 +254,7 @@ internal class OnlineReaderViewModel(
                     index = prepared.index,
                     direction = direction,
                     prebuilt = prepared,
-                    settledPage = page.pageIndex,
+                    settledPage = commit.pageIndex,
                 )
             }
     }
@@ -278,10 +281,16 @@ internal class OnlineReaderViewModel(
                                 PreloadedChapter(volume, targetIndex, target.first, revision)
                             }
                     if (direction == ReaderTransitionDirection.NEXT) {
-                        preloadedNext?.takeIf { it.volume !== prepared.volume }?.volume?.close()
+                        preloadedNext
+                            ?.takeIf { it.volume !== prepared.volume }
+                            ?.volume
+                            ?.let(::closeVolumeWhenUnused)
                         preloadedNext = prepared
                     } else {
-                        preloadedPrevious?.takeIf { it.volume !== prepared.volume }?.volume?.close()
+                        preloadedPrevious
+                            ?.takeIf { it.volume !== prepared.volume }
+                            ?.volume
+                            ?.let(::closeVolumeWhenUnused)
                         preloadedPrevious = prepared
                     }
                     transitionStatuses[direction] = ReaderTransitionStatus.Ready
@@ -349,7 +358,17 @@ internal class OnlineReaderViewModel(
             disposed === volume ||
                 disposed === preloadedNext?.volume ||
                 disposed === preloadedPrevious?.volume
-        if (!retained) disposed.close()
+        if (!retained) closeVolumeWhenUnused(disposed)
+    }
+
+    fun acquireVolumeTask(candidate: ComicVolume): Boolean = volumeUses.acquire(candidate)
+
+    fun releaseVolumeTask(candidate: ComicVolume) {
+        volumeUses.release(candidate)
+    }
+
+    private fun closeVolumeWhenUnused(candidate: ComicVolume) {
+        volumeUses.closeWhenUnused(candidate)
     }
 
     fun isActiveVolume(candidate: ComicVolume): Boolean = candidate === volume
@@ -521,7 +540,7 @@ internal class OnlineReaderViewModel(
             throw error
         } catch (error: Exception) {
             chapterReady = false
-            volume?.close()
+            volume?.let(::closeVolumeWhenUnused)
             volume = null
             withContext(Dispatchers.IO) {
                 runCatching {
@@ -600,7 +619,7 @@ internal class OnlineReaderViewModel(
                     }
             prepared = candidate
             if (activeChapterId != previousChapterId || currentRevision != previousRevision) {
-                candidate.close()
+                closeVolumeWhenUnused(candidate)
                 prepared = null
                 return
             }
@@ -686,7 +705,7 @@ internal class OnlineReaderViewModel(
                     error.message?.let { "无法切换章节：$it" } ?: "无法切换章节"
             }
         } finally {
-            if (!committed) prepared?.close()
+            if (!committed) prepared?.let(::closeVolumeWhenUnused)
         }
     }
 
@@ -825,14 +844,14 @@ internal class OnlineReaderViewModel(
                     ReaderTransitionDirection.PREVIOUS !in publishedAdjacentChapters
             }
             ?.volume
-            ?.close()
+            ?.let(::closeVolumeWhenUnused)
         preloadedNext
             ?.takeIf {
                 it.volume !in retainedVolumes &&
                     ReaderTransitionDirection.NEXT !in publishedAdjacentChapters
             }
             ?.volume
-            ?.close()
+            ?.let(::closeVolumeWhenUnused)
         when (direction) {
             ChapterSwitchDirection.NEXT -> {
                 preloadedPrevious = previousActive
@@ -869,7 +888,7 @@ internal class OnlineReaderViewModel(
                 (!deferPublished ||
                     ReaderTransitionDirection.NEXT !in publishedAdjacentChapters)
         ) {
-            next.volume.close()
+            closeVolumeWhenUnused(next.volume)
         }
         val prev = preloadedPrevious
         if (
@@ -878,7 +897,7 @@ internal class OnlineReaderViewModel(
                 (!deferPublished ||
                     ReaderTransitionDirection.PREVIOUS !in publishedAdjacentChapters)
         ) {
-            prev.volume.close()
+            closeVolumeWhenUnused(prev.volume)
         }
         preloadedNext = null
         preloadedPrevious = null
@@ -1117,6 +1136,10 @@ internal class OnlineReaderViewModel(
         thumbnailMutex.withLock {
             if (page in thumbnails || !thumbnailInFlight.add(page)) return
         }
+        if (!acquireVolumeTask(opened)) {
+            thumbnailMutex.withLock { thumbnailInFlight -= page }
+            return
+        }
         try {
             val namespace = cacheKeyPrefix(opened.sourceRevision)
             val pageIdentity = opened.pageIdentity(page)
@@ -1149,6 +1172,7 @@ internal class OnlineReaderViewModel(
             // A failed thumbnail remains retryable and never blocks the full-size page.
         } finally {
             thumbnailMutex.withLock { thumbnailInFlight -= page }
+            releaseVolumeTask(opened)
         }
     }
 
@@ -1315,7 +1339,7 @@ internal class OnlineReaderViewModel(
     override fun onCleared() {
         finishSession()
         discardPreloadedChapters(deferPublished = false)
-        volume?.close()
+        volume?.let(::closeVolumeWhenUnused)
         volume = null
     }
 

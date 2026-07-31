@@ -56,7 +56,7 @@ class ReaderChapterWindowTest {
             window.items.map(::label),
         )
         assertEquals(
-            ReaderPageTurnResult.BoundaryIntent(ReaderTransitionDirection.NEXT),
+            ReaderPageTurnResult.MoveTo(3),
             readerPageTurnResult(window.items, currentIndex = 2, delta = 1),
         )
     }
