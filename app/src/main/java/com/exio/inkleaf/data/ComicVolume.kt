@@ -88,6 +88,9 @@ interface ComicVolume {
     /** 读取第 [globalPage] 页的原始图片字节（zip/cbz 是压缩图片数据，PDF 是渲染后的 PNG） */
     suspend fun loadPageBytes(globalPage: Int): ByteArray
 
+    /** Invalidates a retryable source cache entry after the decoder rejects its bytes. */
+    fun invalidatePage(globalPage: Int): Boolean = false
+
     /** Whether this volume can rasterize a page for the reader's current physical viewport. */
     val supportsTargetedPageBitmap: Boolean
         get() = false

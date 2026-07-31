@@ -1,12 +1,35 @@
 package com.exio.inkleaf.plugin
 
 import com.exio.inkleaf.data.ComicOpenException
+import com.exio.inkleaf.data.OnlinePageCache
+import com.exio.inkleaf.data.OnlinePageCacheIdentity
+import com.exio.inkleaf.data.OnlinePageCacheKey
+import com.exio.inkleaf.data.OnlinePageLoadPriority
+import java.io.File
+import java.io.IOException
+import java.nio.file.Files
+import java.util.ArrayDeque
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import okhttp3.Call
 import okhttp3.MediaType
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Protocol
+import okhttp3.Request
+import okhttp3.Response
 import okhttp3.ResponseBody
+import okhttp3.ResponseBody.Companion.toResponseBody
 import okio.Buffer
 import okio.BufferedSource
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
@@ -45,14 +68,17 @@ class OnlineChapterVolumeTest {
         val revision = "chapter-r1"
         val oldFallbackCollision = "revision:$revision:index:1"
         val volume = volume(pageIds = listOf(oldFallbackCollision, null), revision = revision)
-
-        assertNotEquals(volume.pageIdentity(0), volume.pageIdentity(1))
+        try {
+            assertNotEquals(volume.pageIdentity(0), volume.pageIdentity(1))
+        } finally {
+            volume.close()
+        }
     }
 
     @Test
     fun `blank page ids are rejected by the volume invariant`() {
         assertThrows(IllegalArgumentException::class.java) {
-            volume(pageIds = listOf(" "))
+            volume(pageIds = listOf(" ")).close()
         }
     }
 
@@ -68,6 +94,229 @@ class OnlineChapterVolumeTest {
         val bytes = ByteArray(5) { it.toByte() }
 
         assertEquals(bytes.toList(), unknownLengthBody(bytes).readPageBytes(5L).toList())
+    }
+
+    @Test
+    fun `cache hit avoids a call and decode invalidation refetches only once`() = runBlocking {
+        val root = Files.createTempDirectory("online-volume-cache").toFile()
+        try {
+            val identity = cacheIdentity()
+            val cache = OnlinePageCache(root)
+            val pages = response(listOf("page-1")).pages
+            val key = OnlinePageCacheKey.create(identity, onlinePageIdentities(REVISION, pages).single())
+            cache.getOrLoad(key, OnlinePageLoadPriority.FOREGROUND) { byteArrayOf(1, 2, 3) }
+            val factory = callFactory(HttpOutcome(200, byteArrayOf(4, 5, 6)))
+            val volume = volume(pages, cache, identity, factory)
+            try {
+                assertEquals(listOf(1, 2, 3), volume.loadPageBytes(0).map { it.toInt() })
+                assertEquals(0, factory.calls.get())
+                assertTrue(volume.invalidatePage(0))
+                assertFalse(volume.invalidatePage(0))
+                assertEquals(listOf(4, 5, 6), volume.loadPageBytes(0).map { it.toInt() })
+                assertEquals(1, factory.calls.get())
+            } finally {
+                volume.close()
+            }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `page and thumbnail requests share one in flight call`() = runBlocking {
+        val root = Files.createTempDirectory("online-volume-flight").toFile()
+        val started = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        try {
+            val identity = cacheIdentity()
+            val factory =
+                callFactory(
+                    HttpOutcome(
+                        200,
+                        byteArrayOf(7, 8, 9),
+                        started = started,
+                        release = release,
+                    )
+                )
+            val volume =
+                volume(
+                    response(listOf("page-1")).pages,
+                    OnlinePageCache(root),
+                    identity,
+                    factory,
+                )
+            try {
+                val page =
+                    async(start = CoroutineStart.UNDISPATCHED) { volume.loadPageBytes(0) }
+                assertTrue(started.await(TEST_TIMEOUT_MS, TimeUnit.MILLISECONDS))
+                val thumbnail =
+                    async(start = CoroutineStart.UNDISPATCHED) {
+                        volume.loadThumbnailPageBytes(0)
+                    }
+                release.countDown()
+                val results =
+                    withTimeout(TEST_TIMEOUT_MS) { listOf(page, thumbnail).awaitAll() }
+                assertTrue(results.all { it.contentEquals(byteArrayOf(7, 8, 9)) })
+                assertEquals(1, factory.calls.get())
+            } finally {
+                release.countDown()
+                volume.close()
+            }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `foreground retries one transient failure while speculative does not`() = runBlocking {
+        val foregroundRoot = Files.createTempDirectory("online-volume-foreground").toFile()
+        val speculativeRoot = Files.createTempDirectory("online-volume-speculative").toFile()
+        try {
+            val foregroundFactory =
+                callFactory(FailureOutcome(IOException("temporary")), HttpOutcome(200, byteArrayOf(1)))
+            val foreground =
+                volume(
+                    response(listOf("page-1")).pages,
+                    OnlinePageCache(foregroundRoot),
+                    cacheIdentity(),
+                    foregroundFactory,
+                )
+            try {
+                assertEquals(listOf(1), foreground.loadPageBytes(0).map { it.toInt() })
+                assertEquals(2, foregroundFactory.calls.get())
+            } finally {
+                foreground.close()
+            }
+
+            val speculativeFactory =
+                callFactory(FailureOutcome(IOException("temporary")), HttpOutcome(200, byteArrayOf(2)))
+            val speculative =
+                volume(
+                    response(listOf("page-1")).pages,
+                    OnlinePageCache(speculativeRoot),
+                    cacheIdentity(),
+                    speculativeFactory,
+                )
+            try {
+                val error = runCatching { speculative.loadThumbnailPageBytes(0) }.exceptionOrNull()
+                assertTrue(error is ComicOpenException)
+                assertEquals(1, speculativeFactory.calls.get())
+            } finally {
+                speculative.close()
+            }
+        } finally {
+            foregroundRoot.deleteRecursively()
+            speculativeRoot.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `foreground retries one server failure`() = runBlocking {
+        val root = Files.createTempDirectory("online-volume-server-retry").toFile()
+        try {
+            val factory = callFactory(HttpOutcome(503), HttpOutcome(200, byteArrayOf(6)))
+            val volume =
+                volume(
+                    response(listOf("page-1")).pages,
+                    OnlinePageCache(root),
+                    cacheIdentity(),
+                    factory,
+                )
+            try {
+                assertEquals(listOf(6), volume.loadPageBytes(0).map { it.toInt() })
+                assertEquals(2, factory.calls.get())
+            } finally {
+                volume.close()
+            }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `authorization response refreshes descriptors once and retries`() = runBlocking {
+        val root = Files.createTempDirectory("online-volume-refresh").toFile()
+        try {
+            val factory = callFactory(HttpOutcome(401), HttpOutcome(200, byteArrayOf(3, 4)))
+            val refreshes = AtomicInteger()
+            val identity = cacheIdentity()
+            val refreshedPages = response(listOf("page-1"), urlSuffix = "-fresh").pages
+            val volume =
+                volume(
+                    response(listOf("page-1")).pages,
+                    OnlinePageCache(root),
+                    identity,
+                    factory,
+                    refreshChapter = {
+                        refreshes.incrementAndGet()
+                        OnlineChapterRefresh(refreshedPages, identity)
+                    },
+                )
+            try {
+                assertEquals(listOf(3, 4), volume.loadPageBytes(0).map { it.toInt() })
+                assertEquals(1, refreshes.get())
+                assertEquals(2, factory.calls.get())
+            } finally {
+                volume.close()
+            }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `retry after above thirty seconds does not block the reader`() = runBlocking {
+        val root = Files.createTempDirectory("online-volume-retry-after").toFile()
+        try {
+            val factory =
+                callFactory(
+                    HttpOutcome(429, headers = mapOf("Retry-After" to "31")),
+                    HttpOutcome(200, byteArrayOf(5)),
+                )
+            val volume =
+                volume(
+                    response(listOf("page-1")).pages,
+                    OnlinePageCache(root),
+                    cacheIdentity(),
+                    factory,
+                )
+            try {
+                val error = runCatching { volume.loadPageBytes(0) }.exceptionOrNull()
+                assertTrue(error is ComicOpenException)
+                assertEquals(1, factory.calls.get())
+            } finally {
+                volume.close()
+            }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `retry after within thirty seconds retries once`() = runBlocking {
+        val root = Files.createTempDirectory("online-volume-retry-after-zero").toFile()
+        try {
+            val factory =
+                callFactory(
+                    HttpOutcome(429, headers = mapOf("Retry-After" to "0")),
+                    HttpOutcome(200, byteArrayOf(7)),
+                )
+            val volume =
+                volume(
+                    response(listOf("page-1")).pages,
+                    OnlinePageCache(root),
+                    cacheIdentity(),
+                    factory,
+                )
+            try {
+                assertEquals(listOf(7), volume.loadPageBytes(0).map { it.toInt() })
+                assertEquals(2, factory.calls.get())
+            } finally {
+                volume.close()
+            }
+        } finally {
+            root.deleteRecursively()
+        }
     }
 
     private fun response(
@@ -90,14 +339,112 @@ class OnlineChapterVolumeTest {
     private fun volume(
         pageIds: List<String?>,
         revision: String = "chapter-r1",
-    ): OnlineChapterVolume =
-        OnlineChapterVolume(
+    ): OnlineChapterVolume {
+        val identity =
+            OnlinePageCacheIdentity.create(
+                pluginId = "plugin.test",
+                pluginVersion = "1.0.0",
+                accessScope = "public",
+                sourceId = "comic-1",
+                chapterId = CHAPTER_ID,
+                revision = revision,
+            )
+        return OnlineChapterVolume(
             chapterId = CHAPTER_ID,
             title = "Chapter 1",
             sourceRevision = revision,
             pages = response(pageIds).pages,
             client = Call.Factory { error("Network is not used by identity tests") },
+            cache =
+                OnlinePageCache(
+                    File(System.getProperty("java.io.tmpdir"), "online-volume-identity-test"),
+                ),
+            initialCacheIdentity = identity,
         )
+    }
+
+    private fun volume(
+        pages: List<PageDescriptor>,
+        cache: OnlinePageCache,
+        identity: OnlinePageCacheIdentity,
+        client: Call.Factory,
+        refreshChapter: (suspend () -> OnlineChapterRefresh?)? = null,
+    ): OnlineChapterVolume =
+        OnlineChapterVolume(
+            chapterId = CHAPTER_ID,
+            title = "Chapter 1",
+            sourceRevision = REVISION,
+            pages = pages,
+            client = client,
+            cache = cache,
+            initialCacheIdentity = identity,
+            refreshChapter = refreshChapter,
+        )
+
+    private fun cacheIdentity(): OnlinePageCacheIdentity =
+        OnlinePageCacheIdentity.create(
+            pluginId = "plugin.test",
+            pluginVersion = "1.0.0",
+            accessScope = "public",
+            sourceId = "comic-1",
+            chapterId = CHAPTER_ID,
+            revision = REVISION,
+        )
+
+    private fun callFactory(vararg outcomes: CallOutcome): CountingCallFactory {
+        val queue = ArrayDeque<CallOutcome>().apply { outcomes.forEach(::addLast) }
+        val client =
+            OkHttpClient.Builder()
+                .addInterceptor { chain ->
+                    val outcome =
+                        synchronized(queue) { queue.pollFirst() }
+                            ?: throw IOException("Unexpected extra request")
+                    when (outcome) {
+                        is FailureOutcome -> throw outcome.error
+                        is HttpOutcome -> {
+                            outcome.started?.countDown()
+                            outcome.release?.let { gate ->
+                                if (!gate.await(TEST_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+                                    throw IOException("Timed out waiting to release the fake response")
+                                }
+                            }
+                            Response.Builder()
+                                .request(chain.request())
+                                .protocol(Protocol.HTTP_1_1)
+                                .code(outcome.code)
+                                .message("test")
+                                .body(outcome.bytes.toResponseBody("image/jpeg".toMediaType()))
+                                .apply {
+                                    outcome.headers.forEach { (name, value) -> header(name, value) }
+                                }
+                                .build()
+                        }
+                    }
+                }
+                .build()
+        return CountingCallFactory(client)
+    }
+
+    private class CountingCallFactory(private val delegate: Call.Factory) : Call.Factory {
+        val calls = AtomicInteger()
+
+        override fun newCall(request: Request): Call {
+            calls.incrementAndGet()
+            return delegate.newCall(request)
+        }
+    }
+
+    private sealed interface CallOutcome
+
+    private data class FailureOutcome(val error: IOException) : CallOutcome
+
+    private data class HttpOutcome(
+        val code: Int,
+        val bytes: ByteArray = ByteArray(0),
+        val headers: Map<String, String> = emptyMap(),
+        val started: CountDownLatch? = null,
+        val release: CountDownLatch? = null,
+    ) : CallOutcome
 
     private fun unknownLengthBody(bytes: ByteArray): ResponseBody =
         object : ResponseBody() {
@@ -110,5 +457,7 @@ class OnlineChapterVolumeTest {
 
     private companion object {
         const val CHAPTER_ID = "chapter-1"
+        const val REVISION = "chapter-r1"
+        const val TEST_TIMEOUT_MS = 5_000L
     }
 }
