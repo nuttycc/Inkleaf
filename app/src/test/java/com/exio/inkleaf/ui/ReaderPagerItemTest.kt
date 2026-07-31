@@ -36,6 +36,11 @@ class ReaderPagerItemTest {
         assertEquals(ReaderPagerItem.Page(2), readerPagerItem(3, 3, previous))
     }
 
+    @Test
+    fun `removed next transition maps its stale pager index to the last real page`() {
+        assertEquals(ReaderPagerItem.Page(2), readerPagerItem(3, 3, null))
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun `mapping rejects an index outside pager bounds`() {
         readerPagerItem(4, 3, next)

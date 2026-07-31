@@ -39,8 +39,8 @@ internal fun readerPagerItem(
     require(realPageCount > 0)
     require(pagerIndex in 0..realPageCount)
     if (transition == null) {
-        require(pagerIndex < realPageCount)
-        return ReaderPagerItem.Page(pagerIndex)
+        // PagerState can retain the removed NEXT transition index for one composition frame.
+        return ReaderPagerItem.Page(pagerIndex.coerceAtMost(realPageCount - 1))
     }
     if (transition.direction == ReaderTransitionDirection.PREVIOUS && pagerIndex == 0) {
         return ReaderPagerItem.Transition(transition)
