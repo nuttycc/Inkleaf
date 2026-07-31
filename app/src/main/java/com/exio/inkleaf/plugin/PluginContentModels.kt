@@ -249,13 +249,16 @@ object PluginContentCodec {
             if (response.pages.size > PluginContentLimits.MAX_PAGES) {
                 throw PluginContentValidationException("Plugin returned too many pages")
             }
-            val pageIds = response.pages.mapNotNull { it.pageId }
-            if (pageIds.toSet().size != pageIds.size) {
-                throw PluginContentValidationException("Page ids must be unique")
-            }
+            val pageIds = HashSet<String>()
             response.pages.forEachIndexed { index, page ->
                 if (page.index != index || page.index < 0) {
                     throw PluginContentValidationException("Page indexes must be contiguous")
+                }
+                page.pageId?.let { pageId ->
+                    validateId(pageId, "page.pageId")
+                    if (!pageIds.add(pageId)) {
+                        throw PluginContentValidationException("Page ids must be unique")
+                    }
                 }
                 validateUrl(page.url, "page.url")
                 validateHeaders(page.headers, "page.headers")
