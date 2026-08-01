@@ -34,6 +34,8 @@ import com.exio.inkleaf.data.db.BookSourceType
 import com.exio.inkleaf.data.db.BookmarkEntity
 import com.exio.inkleaf.data.db.ComicEntity
 import com.exio.inkleaf.data.db.FavoritePageEntity
+import com.exio.inkleaf.data.saveImageBytesToGallery
+import com.exio.inkleaf.data.sanitizeFileName
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
@@ -108,6 +110,7 @@ class ReaderViewModel(
     private val bookmarkMutationMutex = Mutex()
     private val favoriteInFlight = mutableSetOf<Int>()
     private var coverInFlight = false
+    private var galleryExportInFlight = false
 
     /** 待落库的最新阅读进度；null = 没有待写的进度（见 saveProgress 的节流说明） */
     private var pendingProgress: ChapterProgress? = null
@@ -336,6 +339,32 @@ class ReaderViewModel(
                 readerMessage = e.message?.let { "设置封面失败：$it" } ?: "设置封面失败"
             } finally {
                 coverInFlight = false
+            }
+        }
+    }
+
+    fun saveCurrentPageToGallery(page: Int) {
+        if (galleryExportInFlight) return
+        val opened = volume ?: return
+        val source = comic ?: return
+        if (page !in 0 until opened.totalPageCount) return
+
+        galleryExportInFlight = true
+        viewModelScope.launch {
+            try {
+                val bytes = opened.loadPageBytes(page)
+                saveImageBytesToGallery(
+                    getApplication(),
+                    bytes,
+                    "${sanitizeFileName(source.title)}_p${page + 1}",
+                )
+                readerMessage = "已保存到相册"
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                readerMessage = e.message?.let { "保存到相册失败：$it" } ?: "保存到相册失败"
+            } finally {
+                galleryExportInFlight = false
             }
         }
     }

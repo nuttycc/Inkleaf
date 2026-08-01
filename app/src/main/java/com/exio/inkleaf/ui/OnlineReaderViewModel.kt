@@ -28,6 +28,8 @@ import com.exio.inkleaf.data.OnlinePageIdentity
 import com.exio.inkleaf.data.OnlinePageLocation
 import com.exio.inkleaf.data.ReadingSessionRules
 import com.exio.inkleaf.data.ReaderCache
+import com.exio.inkleaf.data.saveImageBytesToGallery
+import com.exio.inkleaf.data.sanitizeFileName
 import com.exio.inkleaf.plugin.ChapterSummary
 import com.exio.inkleaf.plugin.OnlineAvailability
 import com.exio.inkleaf.plugin.OnlineChapterRefresh
@@ -123,6 +125,7 @@ internal class OnlineReaderViewModel(
     private val thumbnailMutex = Mutex()
     private val bookmarkMutationMutex = Mutex()
     private val favoriteMutationMutex = Mutex()
+    private var galleryExportInFlight = false
 
     private var pendingProgressPage: Int? = null
     private var progressWriteJob: Job? = null
@@ -561,6 +564,32 @@ internal class OnlineReaderViewModel(
 
     fun consumeReaderMessage() {
         readerMessage = null
+    }
+
+    fun saveCurrentPageToGallery(page: Int) {
+        val opened = volume ?: return
+        if (page !in 0 until opened.totalPageCount) return
+        if (galleryExportInFlight) return
+        galleryExportInFlight = true
+        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            if (!acquireVolumeTask(opened)) return@launch
+            try {
+                val bytes = opened.loadPageBytes(page)
+                saveImageBytesToGallery(
+                    application,
+                    bytes,
+                    "${sanitizeFileName(currentTitle)}_${sanitizeFileName(currentChapterTitle)}_p${page + 1}",
+                )
+                readerMessage = "已保存到相册"
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                readerMessage = error.message?.let { "保存到相册失败：$it" } ?: "保存到相册失败"
+            } finally {
+                releaseVolumeTask(opened)
+                galleryExportInFlight = false
+            }
+        }
     }
 
     fun endReadingSession() {

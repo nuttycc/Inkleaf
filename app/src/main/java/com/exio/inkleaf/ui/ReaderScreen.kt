@@ -201,6 +201,7 @@ fun ReaderScreen(
             },
             onToggleFavorite = viewModel::toggleFavorite,
             onSetCover = viewModel::setCurrentPageAsCover,
+            onSaveToGallery = viewModel::saveCurrentPageToGallery,
             onPageChanged = { _, page -> viewModel.saveProgress(page) },
             readerMessage = viewModel.readerMessage,
             onReaderMessageConsumed = viewModel::consumeReaderMessage,
@@ -820,6 +821,15 @@ private fun ComicPager(
                                         activePanel = null
                                         if (actions.isVolumeActive(currentVolume)) {
                                             setCover(currentRealPage)
+                                        }
+                                    }
+                                },
+                            onSaveToGallery =
+                                actions.onSaveToGallery?.let { saveToGallery ->
+                                    {
+                                        activePanel = null
+                                        if (actions.isVolumeActive(currentVolume)) {
+                                            saveToGallery(currentRealPage)
                                         }
                                     }
                                 },

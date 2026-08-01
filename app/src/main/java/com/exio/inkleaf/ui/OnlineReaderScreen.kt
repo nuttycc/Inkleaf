@@ -47,6 +47,7 @@ fun OnlineReaderScreen(
             onRemoveBookmark = viewModel::removeBookmark,
             onToggleFavorite = viewModel::toggleFavorite,
             onSetCover = null,
+            onSaveToGallery = viewModel::saveCurrentPageToGallery,
             onPageChanged = viewModel::saveProgress,
             onVolumeDisposed = viewModel::releaseInactiveVolume,
             onVolumeTaskStarted = viewModel::acquireVolumeTask,
