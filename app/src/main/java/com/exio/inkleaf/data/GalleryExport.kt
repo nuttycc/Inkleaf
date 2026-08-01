@@ -35,7 +35,7 @@ suspend fun saveImageBytesToGallery(
         try {
             resolver.openOutputStream(uri)?.use { output ->
                 output.write(bytes)
-                output.fd?.sync()
+                (output as? java.io.FileOutputStream)?.fd?.sync()
             } ?: throw IOException("无法写入相册文件")
             values.clear()
             values.put(MediaStore.Images.Media.IS_PENDING, 0)
