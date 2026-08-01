@@ -1,0 +1,546 @@
+name: Android Preview
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+      timezone: "Asia/Shanghai"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Build and publish even when main has not changed
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: android-preview-main
+  cancel-in-progress: false
+
+jobs:
+  preview:
+    name: Build signed preview APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Detect new commits
+        id: detect
+        env:
+          FORCE_BUILD: ${{ github.event_name == 'workflow_dispatch' && inputs.force || false }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "Android Preview only runs from main (got: $GITHUB_REF)." >&2
+            exit 1
+          fi
+
+          PREVIOUS_SHA="$(
+            gh run list \
+              --repo "$GITHUB_REPOSITORY" \
+              --workflow android-preview.yml \
+              --branch main \
+              --status success \
+              --limit 1 \
+              --json headSha \
+              --jq '.[0].headSha // ""'
+          )"
+
+          SHOULD_BUILD=true
+          REASON=new-commit
+          if [ -z "$PREVIOUS_SHA" ]; then
+            REASON=first-run
+          elif [ "$PREVIOUS_SHA" = "$GITHUB_SHA" ] && [ "$FORCE_BUILD" != "true" ]; then
+            SHOULD_BUILD=false
+            REASON=no-new-commit
+          elif [ "$PREVIOUS_SHA" = "$GITHUB_SHA" ]; then
+            REASON=forced-rebuild
+          fi
+
+          {
+            echo "previous_sha=$PREVIOUS_SHA"
+            echo "should_build=$SHOULD_BUILD"
+            echo "reason=$REASON"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Summarize skipped preview
+        if: steps.detect.outputs.should_build == 'false'
+        run: |
+          {
+            echo "## Android Preview"
+            echo
+            echo "No new commit has reached main since the last successful preview."
+            echo
+            echo "- Commit: \`$GITHUB_SHA\`"
+            echo "- Result: Gradle and release publishing were skipped"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Checkout
+        if: steps.detect.outputs.should_build == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Resolve preview metadata
+        if: steps.detect.outputs.should_build == 'true'
+        id: meta
+        env:
+          FORCE_BUILD: ${{ github.event_name == 'workflow_dispatch' && inputs.force || false }}
+          PREVIOUS_SHA: ${{ steps.detect.outputs.previous_sha }}
+        run: |
+          set -euo pipefail
+
+          CHECKED_OUT_SHA="$(git rev-parse HEAD)"
+          if [ "$CHECKED_OUT_SHA" != "$GITHUB_SHA" ]; then
+            echo "Checkout resolved to $CHECKED_OUT_SHA instead of $GITHUB_SHA." >&2
+            exit 1
+          fi
+
+          if [ -n "$PREVIOUS_SHA" ] && [ "$PREVIOUS_SHA" != "$GITHUB_SHA" ]; then
+            if ! git cat-file -e "$PREVIOUS_SHA^{commit}" 2>/dev/null; then
+              echo "Previous preview commit $PREVIOUS_SHA is not available in main history." >&2
+              exit 1
+            fi
+            if ! git merge-base --is-ancestor "$PREVIOUS_SHA" "$GITHUB_SHA"; then
+              echo "Previous preview commit $PREVIOUS_SHA is not an ancestor of $GITHUB_SHA." >&2
+              echo "Refusing to publish after a rewritten main history." >&2
+              exit 1
+            fi
+          fi
+
+          COMMIT_COUNT="$(git rev-list --count HEAD)"
+          VERSION_CODE=$((1000000 + COMMIT_COUNT * 2))
+          if (( VERSION_CODE > 2100000000 )); then
+            echo "Calculated versionCode exceeds Android's 2,100,000,000 limit." >&2
+            exit 1
+          fi
+
+          TAG_CANDIDATES="$(
+            git tag --merged HEAD --list 'v*.*.*' --sort=-version:refname
+          )"
+          LATEST_STABLE_TAG=""
+          while IFS= read -r CANDIDATE; do
+            if [[ "$CANDIDATE" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              LATEST_STABLE_TAG="$CANDIDATE"
+              break
+            fi
+          done <<< "$TAG_CANDIDATES"
+          if [ -n "$LATEST_STABLE_TAG" ]; then
+            BASE_VERSION="${LATEST_STABLE_TAG#v}"
+          else
+            BASE_VERSION="0.0.0"
+          fi
+
+          BUILD_DATE="$(TZ=Asia/Shanghai date '+%Y%m%d')"
+          DISPLAY_DATE="$(TZ=Asia/Shanghai date '+%Y-%m-%d')"
+          BUILT_AT="$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S %Z')"
+          SHORT_SHA="$(git rev-parse --short=8 HEAD)"
+          PREVIEW_TAG="preview-${BUILD_DATE}-r${GITHUB_RUN_NUMBER}-a${GITHUB_RUN_ATTEMPT}-${SHORT_SHA}"
+          VERSION_NAME="${BASE_VERSION}-preview.${BUILD_DATE}.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}+${SHORT_SHA}"
+          SAFE_VERSION_NAME="${VERSION_NAME//+/-}"
+          RELEASE_TITLE="Inkleaf Preview · ${DISPLAY_DATE} · ${SHORT_SHA}"
+
+          NOTES_BASE=""
+          FORCED_REBUILD=false
+          if [ "$FORCE_BUILD" = "true" ] && [ "$PREVIOUS_SHA" = "$GITHUB_SHA" ]; then
+            FORCED_REBUILD=true
+          elif [ -n "$PREVIOUS_SHA" ]; then
+            NOTES_BASE="$PREVIOUS_SHA"
+          elif [ -n "$LATEST_STABLE_TAG" ]; then
+            NOTES_BASE="$LATEST_STABLE_TAG"
+          fi
+
+          {
+            echo "tag=$PREVIEW_TAG"
+            echo "title=$RELEASE_TITLE"
+            echo "version_name=$VERSION_NAME"
+            echo "safe_version_name=$SAFE_VERSION_NAME"
+            echo "version_code=$VERSION_CODE"
+            echo "short_sha=$SHORT_SHA"
+            echo "built_at=$BUILT_AT"
+            echo "notes_base=$NOTES_BASE"
+            echo "forced_rebuild=$FORCED_REBUILD"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Preview $PREVIEW_TAG → versionName=$VERSION_NAME versionCode=$VERSION_CODE"
+
+      - name: Check preview tag availability
+        if: steps.detect.outputs.should_build == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIEW_TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          set +e
+          LOOKUP_OUTPUT="$(
+            gh api \
+              "repos/$GITHUB_REPOSITORY/git/ref/tags/$PREVIEW_TAG" 2>&1
+          )"
+          LOOKUP_STATUS=$?
+          set -e
+
+          if [ "$LOOKUP_STATUS" -eq 0 ]; then
+            echo "Preview tag already exists: $PREVIEW_TAG" >&2
+            echo "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$PREVIEW_TAG" >&2
+            exit 1
+          fi
+          if ! grep -q 'HTTP 404' <<< "$LOOKUP_OUTPUT"; then
+            echo "Unable to verify preview tag availability." >&2
+            echo "$LOOKUP_OUTPUT" >&2
+            exit 1
+          fi
+
+      - name: Set up JDK
+        if: steps.detect.outputs.should_build == 'true'
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          distribution: temurin
+          java-version: 25
+
+      - name: Set up Gradle
+        if: steps.detect.outputs.should_build == 'true'
+        uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+        with:
+          cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
+      - name: Validate signing secrets
+        if: steps.detect.outputs.should_build == 'true'
+        env:
+          INKLEAF_KEYSTORE_BASE64: ${{ secrets.INKLEAF_KEYSTORE_BASE64 }}
+          INKLEAF_KEYSTORE_PASSWORD: ${{ secrets.INKLEAF_KEYSTORE_PASSWORD }}
+          INKLEAF_KEY_ALIAS: ${{ secrets.INKLEAF_KEY_ALIAS }}
+          INKLEAF_KEY_PASSWORD: ${{ secrets.INKLEAF_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          MISSING=()
+          for NAME in \
+            INKLEAF_KEYSTORE_BASE64 \
+            INKLEAF_KEYSTORE_PASSWORD \
+            INKLEAF_KEY_ALIAS \
+            INKLEAF_KEY_PASSWORD; do
+            if [ -z "${!NAME:-}" ]; then
+              MISSING+=("$NAME")
+            fi
+          done
+          if [ "${#MISSING[@]}" -ne 0 ]; then
+            printf 'Missing required signing secret: %s\n' "${MISSING[@]}" >&2
+            exit 1
+          fi
+
+      - name: Restore release keystore
+        if: steps.detect.outputs.should_build == 'true'
+        env:
+          INKLEAF_KEYSTORE_BASE64: ${{ secrets.INKLEAF_KEYSTORE_BASE64 }}
+        run: printf '%s' "$INKLEAF_KEYSTORE_BASE64" | base64 --decode > app/inkleaf-release.jks
+
+      - name: Run unit tests and build release APK
+        if: steps.detect.outputs.should_build == 'true'
+        # One invocation lets tests and release assembly share Gradle configuration.
+        run: |
+          ./gradlew testDebugUnitTest assembleRelease \
+            -Dorg.gradle.jvmargs="-Xmx6g -XX:MaxMetaspaceSize=1g -XX:+UseParallelGC -Dfile.encoding=UTF-8" \
+            -Dorg.gradle.workers.max=4 \
+            -Dorg.gradle.parallel=true \
+            -Dorg.gradle.priority=normal
+        env:
+          INKLEAF_KEYSTORE_FILE: ${{ github.workspace }}/app/inkleaf-release.jks
+          INKLEAF_KEYSTORE_PASSWORD: ${{ secrets.INKLEAF_KEYSTORE_PASSWORD }}
+          INKLEAF_KEY_ALIAS: ${{ secrets.INKLEAF_KEY_ALIAS }}
+          INKLEAF_KEY_PASSWORD: ${{ secrets.INKLEAF_KEY_PASSWORD }}
+          INKLEAF_VERSION_NAME: ${{ steps.meta.outputs.version_name }}
+          INKLEAF_VERSION_CODE: ${{ steps.meta.outputs.version_code }}
+
+      - name: Prepare preview artifacts
+        if: steps.detect.outputs.should_build == 'true'
+        id: artifacts
+        env:
+          SAFE_VERSION_NAME: ${{ steps.meta.outputs.safe_version_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p release
+
+          mapfile -t APK_FILES < <(
+            find app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' -print
+          )
+          if [ "${#APK_FILES[@]}" -ne 1 ]; then
+            echo "Expected exactly one release APK, found ${#APK_FILES[@]}." >&2
+            exit 1
+          fi
+
+          MAPPING_FILE="app/build/outputs/mapping/release/mapping.txt"
+          if [ ! -f "$MAPPING_FILE" ]; then
+            echo "R8 mapping file was not produced: $MAPPING_FILE" >&2
+            exit 1
+          fi
+
+          APK_PATH="release/Inkleaf-${SAFE_VERSION_NAME}-arm64-v8a.apk"
+          MAPPING_PATH="release/Inkleaf-${SAFE_VERSION_NAME}-mapping.txt.gz"
+          cp "${APK_FILES[0]}" "$APK_PATH"
+          gzip -9 -n -c "$MAPPING_FILE" > "$MAPPING_PATH"
+
+          {
+            echo "apk_path=$APK_PATH"
+            echo "mapping_path=$MAPPING_PATH"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Verify preview APK
+        if: steps.detect.outputs.should_build == 'true'
+        id: verify
+        env:
+          APK_PATH: ${{ steps.artifacts.outputs.apk_path }}
+        run: |
+          set -euo pipefail
+          APKSIGNER="$(
+            find "$ANDROID_SDK_ROOT/build-tools" -type f -name apksigner -print \
+              | sort -V \
+              | tail -n 1
+          )"
+          if [ -z "$APKSIGNER" ] || [ ! -x "$APKSIGNER" ]; then
+            echo "Unable to locate apksigner in the Android SDK." >&2
+            exit 1
+          fi
+
+          "$APKSIGNER" verify --verbose --print-certs "$APK_PATH"
+          APK_SHA256="$(sha256sum "$APK_PATH" | awk '{print $1}')"
+          echo "apk_sha256=$APK_SHA256" >> "$GITHUB_OUTPUT"
+
+      - name: Write preview release notes
+        if: steps.detect.outputs.should_build == 'true'
+        env:
+          APK_SHA256: ${{ steps.verify.outputs.apk_sha256 }}
+          BUILT_AT: ${{ steps.meta.outputs.built_at }}
+          FORCED_REBUILD: ${{ steps.meta.outputs.forced_rebuild }}
+          NOTES_BASE: ${{ steps.meta.outputs.notes_base }}
+          VERSION_CODE: ${{ steps.meta.outputs.version_code }}
+          VERSION_NAME: ${{ steps.meta.outputs.version_name }}
+        run: |
+          set -euo pipefail
+          RUN_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+          cat > release/notes.md <<EOF
+          > [!WARNING]
+          > This is an unstable preview build. Back up important data before installing it.
+
+          - Version: \`$VERSION_NAME\`
+          - Version code: \`$VERSION_CODE\`
+          - Commit: \`$GITHUB_SHA\`
+          - Built: $BUILT_AT
+          - Workflow run: $RUN_URL
+          - APK SHA-256: \`$APK_SHA256\`
+
+          ## Changes since the previous successful preview
+
+          EOF
+
+          if [ "$FORCED_REBUILD" = "true" ]; then
+            echo "- Forced rebuild of the same commit." >> release/notes.md
+          elif [ -n "$NOTES_BASE" ]; then
+            git log \
+              --reverse \
+              --pretty=format:'- `%h` %s' \
+              "$NOTES_BASE..HEAD" > release/changes.md
+            if [ -s release/changes.md ]; then
+              cat release/changes.md >> release/notes.md
+              printf '\n' >> release/notes.md
+            else
+              echo "- No commits after \`$NOTES_BASE\`." >> release/notes.md
+            fi
+          else
+            git log -1 --pretty=format:'- `%h` %s%n' HEAD >> release/notes.md
+          fi
+
+      - name: Create draft preview release
+        if: steps.detect.outputs.should_build == 'true'
+        id: create
+        env:
+          APK_PATH: ${{ steps.artifacts.outputs.apk_path }}
+          GH_TOKEN: ${{ github.token }}
+          MAPPING_PATH: ${{ steps.artifacts.outputs.mapping_path }}
+          PREVIEW_TAG: ${{ steps.meta.outputs.tag }}
+          RELEASE_TITLE: ${{ steps.meta.outputs.title }}
+        run: |
+          set -euo pipefail
+          echo "attempted=true" >> "$GITHUB_OUTPUT"
+
+          set +e
+          gh release create "$PREVIEW_TAG" \
+            "$APK_PATH" \
+            "$MAPPING_PATH" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "$RELEASE_TITLE" \
+            --notes-file release/notes.md \
+            --draft \
+            --prerelease \
+            --latest=false
+          CREATE_STATUS=$?
+          set -e
+          exit "$CREATE_STATUS"
+
+      - name: Publish preview release
+        if: steps.detect.outputs.should_build == 'true'
+        id: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIEW_TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release edit "$PREVIEW_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft=false \
+            --prerelease
+          echo "url=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$PREVIEW_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Clean up failed draft preview
+        if: failure() && steps.create.outputs.attempted == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIEW_TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          RELEASE_PAGES="$(
+            gh api \
+              --paginate \
+              --slurp \
+              "repos/$GITHUB_REPOSITORY/releases?per_page=100"
+          )"
+          RELEASE_STATE="$(
+            jq -r --arg tag "$PREVIEW_TAG" '
+              (add // [])
+              | map(select(.tag_name == $tag))
+              | if length == 0 then "missing"
+                elif length == 1 and .[0].draft == true then "draft"
+                elif length == 1 then "published"
+                else "ambiguous"
+                end
+            ' <<< "$RELEASE_PAGES"
+          )"
+
+          if [ "$RELEASE_STATE" = "draft" ]; then
+            gh release delete "$PREVIEW_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --cleanup-tag \
+              --yes
+          elif [ "$RELEASE_STATE" = "published" ]; then
+            echo "Published release $PREVIEW_TAG was preserved after a later failure."
+          elif [ "$RELEASE_STATE" = "missing" ]; then
+            set +e
+            TAG_LOOKUP="$(
+              gh api \
+                "repos/$GITHUB_REPOSITORY/git/ref/tags/$PREVIEW_TAG" 2>&1
+            )"
+            LOOKUP_STATUS=$?
+            set -e
+
+            if [ "$LOOKUP_STATUS" -eq 0 ]; then
+              gh api \
+                --method DELETE \
+                "repos/$GITHUB_REPOSITORY/git/refs/tags/$PREVIEW_TAG"
+            elif grep -q 'HTTP 404' <<< "$TAG_LOOKUP"; then
+              echo "No draft release or leftover tag remained for $PREVIEW_TAG."
+            else
+              echo "Unable to inspect a possible leftover tag for $PREVIEW_TAG." >&2
+              echo "$TAG_LOOKUP" >&2
+              exit "$LOOKUP_STATUS"
+            fi
+          else
+            echo "Ambiguous release state for $PREVIEW_TAG." >&2
+            exit 1
+          fi
+
+      - name: Prune old preview releases
+        if: steps.publish.outcome == 'success'
+        id: prune
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          RELEASE_PAGES="$(
+            gh api \
+              --paginate \
+              --slurp \
+              "repos/$GITHUB_REPOSITORY/releases?per_page=100"
+          )"
+          OLD_TAGS_OUTPUT="$(
+            jq -r '[
+              (add // [])[] | select(
+                .draft == false
+                and .prerelease == true
+                and (.tag_name | test("^preview-[0-9]{8}-r[0-9]+-a[0-9]+-[0-9a-f]{8}$"))
+              )
+            ] | sort_by(.published_at) | reverse | .[7:] | .[].tag_name' \
+              <<< "$RELEASE_PAGES"
+          )"
+
+          OLD_TAGS=()
+          if [ -n "$OLD_TAGS_OUTPUT" ]; then
+            mapfile -t OLD_TAGS <<< "$OLD_TAGS_OUTPUT"
+          fi
+
+          FAILED_TAGS=()
+          for TAG in "${OLD_TAGS[@]}"; do
+            if ! gh release delete "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --cleanup-tag \
+              --yes; then
+              FAILED_TAGS+=("$TAG")
+            fi
+          done
+
+          if [ "${#FAILED_TAGS[@]}" -ne 0 ]; then
+            printf 'Unable to prune preview release: %s\n' "${FAILED_TAGS[@]}" >&2
+            exit 1
+          fi
+
+      - name: Summarize published preview
+        if: steps.publish.outcome == 'success'
+        env:
+          APK_PATH: ${{ steps.artifacts.outputs.apk_path }}
+          APK_SHA256: ${{ steps.verify.outputs.apk_sha256 }}
+          MAPPING_PATH: ${{ steps.artifacts.outputs.mapping_path }}
+          PREVIEW_TAG: ${{ steps.meta.outputs.tag }}
+          PRUNE_OUTCOME: ${{ steps.prune.outcome }}
+          RELEASE_URL: ${{ steps.publish.outputs.url }}
+          VERSION_CODE: ${{ steps.meta.outputs.version_code }}
+          VERSION_NAME: ${{ steps.meta.outputs.version_name }}
+        run: |
+          {
+            echo "## Android Preview published"
+            echo
+            echo "- Release: [$PREVIEW_TAG]($RELEASE_URL)"
+            echo "- Version: \`$VERSION_NAME\`"
+            echo "- Version code: \`$VERSION_CODE\`"
+            echo "- Commit: \`$GITHUB_SHA\`"
+            echo "- APK: \`$APK_PATH\`"
+            echo "- Mapping: \`$MAPPING_PATH\`"
+            echo "- APK SHA-256: \`$APK_SHA256\`"
+            if [ "$PRUNE_OUTCOME" != "success" ]; then
+              echo
+              echo "> [!WARNING]"
+              echo "> The preview was published, but old preview cleanup failed. The next run will retry cleanup."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Summarize preview failure
+        if: failure()
+        env:
+          PREVIEW_TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          {
+            echo "## Android Preview failed"
+            echo
+            echo "- Commit: \`$GITHUB_SHA\`"
+            if [ -n "$PREVIEW_TAG" ]; then
+              echo "- Preview tag: \`$PREVIEW_TAG\`"
+            fi
+            echo "- The last successful preview remains the comparison baseline."
+            echo "- The next scheduled run will retry this commit."
+          } >> "$GITHUB_STEP_SUMMARY"
