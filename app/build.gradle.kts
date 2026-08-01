@@ -92,8 +92,7 @@ android {
     }
     packaging {
         jniLibs {
-            // Pdfium and OpenCV both bundle a 16 KB-aligned C++ runtime. Keep one shared copy;
-            // verify the selected library in the next manually built release artifact.
+            // Pdfium bundles the 16 KB-aligned C++ runtime. Keep one shared copy.
             pickFirsts += "lib/**/libc++_shared.so"
         }
     }
@@ -112,7 +111,6 @@ androidComponents {
 }
 
 dependencies {
-    implementation(project(":ppocr-sdk"))
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.appcompat)
@@ -149,9 +147,6 @@ dependencies {
     implementation(libs.androidx.documentfile)
     implementation(libs.ahmer.pdfium)
     implementation(libs.reorderable)
-    // Slim self-built OpenCV AAR (core/imgproc/imgcodecs/java/geometry/videoio, arm64-v8a only).
-    // Built via .github/workflows/build-opencv-aar.yml. See .scripts/opencv-android-config.py.
-    implementation(files("${rootDir}/libs/opencv-slim.aar"))
 
     testImplementation(libs.junit)
     testImplementation(libs.androidx.paging.testing)

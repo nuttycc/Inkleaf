@@ -70,7 +70,6 @@ import com.exio.inkleaf.ui.AlbumEditorScreen
 import com.exio.inkleaf.ui.DiagnosticScreen
 import com.exio.inkleaf.ui.FavoriteViewerScreen
 import com.exio.inkleaf.ui.HistoryScreen
-import com.exio.inkleaf.ui.OcrModelDownloadScreen
 import com.exio.inkleaf.ui.OnlineComicScreen
 import com.exio.inkleaf.ui.OnlineReaderScreen
 import com.exio.inkleaf.ui.OnlineReaderTarget
@@ -113,8 +112,6 @@ import kotlinx.serialization.encodeToString
 @Serializable data object DiagnosticRoute
 
 @Serializable data object ThemeSettingsRoute
-
-@Serializable data object OcrModelDownloadRoute
 
 @Serializable data object PluginDiscoverRoute
 
@@ -634,9 +631,6 @@ class MainActivity : AppCompatActivity() {
                                 comicId = route.comicId,
                                 initialPage = route.initialPage,
                                 onBack = { outerNavController.popBackStack() },
-                                onNavigateToModelDownload = {
-                                    outerNavController.navigate(OcrModelDownloadRoute)
-                                },
                             )
                         }
                         composable<FavoriteViewerRoute> { entry ->
@@ -662,9 +656,6 @@ class MainActivity : AppCompatActivity() {
                                 onOpenThemeSettings = {
                                     outerNavController.navigate(ThemeSettingsRoute)
                                 },
-                                onOpenOcrModelDownload = {
-                                    outerNavController.navigate(OcrModelDownloadRoute)
-                                },
                                 onOpenDiagnostics = {
                                     outerNavController.navigate(DiagnosticRoute)
                                 },
@@ -686,9 +677,6 @@ class MainActivity : AppCompatActivity() {
                                     )
                                 },
                             )
-                        }
-                        composable<OcrModelDownloadRoute> {
-                            OcrModelDownloadScreen(onBack = { outerNavController.popBackStack() })
                         }
                         composable<SourcesRoute> {
                             SourcesScreen(
@@ -749,9 +737,6 @@ class MainActivity : AppCompatActivity() {
                                 initialPageId = route.initialPageId,
                                 initialPageIndex = route.initialPageIndex,
                                 onBack = { outerNavController.popBackStack() },
-                                onNavigateToModelDownload = {
-                                    outerNavController.navigate(OcrModelDownloadRoute)
-                                },
                             )
                         }
                     }

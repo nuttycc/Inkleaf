@@ -16,7 +16,6 @@ fun OnlineReaderScreen(
     initialPageIndex: Int? = null,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
-    onNavigateToModelDownload: () -> Unit = {},
 ) {
     val viewModel: OnlineReaderViewModel = viewModel {
         val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY]!!
@@ -53,7 +52,6 @@ fun OnlineReaderScreen(
             onVolumeTaskStarted = viewModel::acquireVolumeTask,
             onVolumeTaskFinished = viewModel::releaseVolumeTask,
             isVolumeActive = viewModel::isActiveVolume,
-            onNavigateToModelDownload = onNavigateToModelDownload,
             readerMessage = viewModel.readerMessage,
             onReaderMessageConsumed = viewModel::consumeReaderMessage,
         )

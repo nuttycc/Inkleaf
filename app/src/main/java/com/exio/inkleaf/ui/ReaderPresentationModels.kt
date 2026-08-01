@@ -27,8 +27,7 @@ internal data class ReaderChapterTransition(
 internal fun readerPagerUserScrollEnabled(
     isTransitionPage: Boolean,
     isZoomed: Boolean,
-    isOcrSelectionActive: Boolean,
-): Boolean = isTransitionPage || (!isZoomed && !isOcrSelectionActive)
+): Boolean = isTransitionPage || !isZoomed
 
 internal sealed interface ReaderPresentationState {
     data object Loading : ReaderPresentationState
@@ -93,7 +92,6 @@ internal data class ReaderPresentationActions(
     val onVolumeTaskStarted: (ComicVolume) -> Boolean = { true },
     val onVolumeTaskFinished: (ComicVolume) -> Unit = {},
     val isVolumeActive: (ComicVolume) -> Boolean = { true },
-    val onNavigateToModelDownload: () -> Unit,
     val readerMessage: String?,
     val onReaderMessageConsumed: () -> Unit,
 )

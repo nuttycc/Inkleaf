@@ -20,15 +20,12 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.composables.icons.materialsymbols.outlined.R as MaterialSymbolsOutlinedR
 import com.exio.inkleaf.R
 
 @Composable
 internal fun ReaderToolsPanelContent(
     isFavorite: Boolean,
-    ocrBusy: Boolean,
     onToggleFavorite: (() -> Unit)?,
-    onRecognizePage: () -> Unit,
     onSetCover: (() -> Unit)?,
 ) {
     Column(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
@@ -48,15 +45,6 @@ internal fun ReaderToolsPanelContent(
                 isActive = isFavorite,
                 enabled = onToggleFavorite != null,
                 onClick = { onToggleFavorite?.invoke() },
-                modifier = Modifier.weight(1f),
-            )
-            ReaderToolCard(
-                label = "识字 (OCR)",
-                subtitle = if (ocrBusy) "正在扫描…" else "提取单页文本",
-                icon =
-                    MaterialSymbolsOutlinedR.drawable.materialsymbols_ic_document_scanner_outlined,
-                enabled = !ocrBusy,
-                onClick = onRecognizePage,
                 modifier = Modifier.weight(1f),
             )
         }

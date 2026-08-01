@@ -1,11 +1,7 @@
 package com.exio.inkleaf.ui
 
 import android.app.Activity
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
 import android.os.Build
-import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.annotation.DrawableRes
 import androidx.compose.animation.AnimatedVisibility
@@ -53,8 +49,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -74,7 +68,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateSetOf
 import androidx.compose.runtime.produceState
@@ -110,15 +103,12 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.DpOffset
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
@@ -128,14 +118,6 @@ import com.exio.inkleaf.data.ComicOpenException
 import com.exio.inkleaf.data.ComicVolume
 import com.exio.inkleaf.data.PageRenderRequest
 import com.exio.inkleaf.data.ReaderPageCacheKey
-import com.exio.inkleaf.data.ocr.OcrModelSettingsRepository
-import com.exio.inkleaf.data.ocr.OcrModelVariant
-import com.exio.inkleaf.data.ocr.OcrPageResult
-import com.exio.inkleaf.data.ocr.OcrSelectionSession
-import com.exio.inkleaf.data.ocr.PaddleOcrEngine
-import com.exio.inkleaf.data.ocr.isOcrModelReady
-import com.exio.inkleaf.data.ocr.openOcrPageSource
-import com.exio.inkleaf.data.ocr.selectedOcrText
 import kotlin.math.roundToInt
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
@@ -143,8 +125,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-
-private const val OCR_SESSION_CACHE_PAGES = 8
 
 private data class ReaderPageTarget(
     val key: ReaderPageStateKey,
@@ -171,7 +151,6 @@ fun ReaderScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     initialPage: Int? = null,
-    onNavigateToModelDownload: () -> Unit = {},
 ) {
     val viewModel: ReaderViewModel = viewModel {
         val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY]!!
@@ -223,7 +202,6 @@ fun ReaderScreen(
             onToggleFavorite = viewModel::toggleFavorite,
             onSetCover = viewModel::setCurrentPageAsCover,
             onPageChanged = { _, page -> viewModel.saveProgress(page) },
-            onNavigateToModelDownload = onNavigateToModelDownload,
             readerMessage = viewModel.readerMessage,
             onReaderMessageConsumed = viewModel::consumeReaderMessage,
         )
@@ -285,9 +263,6 @@ internal fun SharedReaderScreen(
                     .show(WindowInsetsCompat.Type.systemBars())
             }
         }
-    }
-    DisposableEffect(Unit) {
-        onDispose { PaddleOcrEngine.releaseWhenIdle() }
     }
 
     val readerContent: @Composable (ReaderPresentationState) -> Unit = { current ->
@@ -368,9 +343,6 @@ private fun ComicPager(
         onDispose { retainedVolumes.forEach(actions.onVolumeDisposed) }
     }
     val context = LocalContext.current
-    val activeOcrVariant by
-        remember(context) { OcrModelSettingsRepository(context).activeVariant }
-            .collectAsStateWithLifecycle(initialValue = OcrModelVariant.SMALL)
     val initialPagerPage =
         remember(pagerChapterWindow, startPage) {
             readerWindowIndexForChapterPage(
@@ -438,7 +410,6 @@ private fun ComicPager(
             null
         }
     val currentPageStateKey = currentPageTarget?.key
-    val latestCurrentPageStateKey by rememberUpdatedState(currentPageStateKey)
 
     var zoomedPage by remember { mutableStateOf<ReaderPageStateKey?>(null) }
     var zoomToggleRequest by remember { mutableIntStateOf(0) }
@@ -460,115 +431,15 @@ private fun ComicPager(
     LaunchedEffect(volumeChapters) {
         if (volumeChapters != null) chapterLayoutVersion++
     }
-    val ocrResults = remember { mutableStateMapOf<ReaderPageStateKey, OcrPageResult>() }
-    val ocrResultOrder = remember { ArrayDeque<ReaderPageStateKey>() }
     val snackbarHostState = remember { SnackbarHostState() }
     val bookmarkRemovalsInFlight = remember { mutableStateSetOf<String>() }
     var bottomControlsHeightPx by remember { mutableIntStateOf(0) }
-    var ocrProcessingPage by remember { mutableStateOf<ReaderPageStateKey?>(null) }
-    var ocrSelection by remember { mutableStateOf(OcrSelectionSession()) }
-    var ocrSelectionPage by remember { mutableStateOf<ReaderPageStateKey?>(null) }
-    var showOcrLongPressMenu by remember { mutableStateOf(false) }
-    var ocrLongPressAnchor by remember { mutableStateOf(Offset.Zero) }
-    var pendingOcrPage by remember { mutableStateOf<ReaderPageStateKey?>(null) }
     LaunchedEffect(showControls) {
         if (!showControls) activePanel = null
     }
     LaunchedEffect(currentPageStateKey) {
         zoomedPage = null
         activePanel = null
-        if (ocrSelectionPage != currentPageStateKey) {
-            ocrSelection = OcrSelectionSession()
-            ocrSelectionPage = null
-        }
-        if (pendingOcrPage != currentPageStateKey) pendingOcrPage = null
-        showOcrLongPressMenu = false
-    }
-
-    fun recognizePage(target: ReaderPageTarget) {
-        val cached = ocrResults[target.key]?.takeIf { it.regions.isNotEmpty() }
-        if (cached != null) {
-            ocrSelection = ocrSelection.enter(target.page)
-            ocrSelectionPage = target.key
-            return
-        }
-        if (ocrProcessingPage == null) {
-            ocrProcessingPage = target.key
-            scope.launch {
-                if (!actions.onVolumeTaskStarted(target.volume)) {
-                    if (ocrProcessingPage == target.key) ocrProcessingPage = null
-                    return@launch
-                }
-                val variant = activeOcrVariant
-                var retryRequested = false
-                try {
-                    // Model readiness is variant-specific; route to the downloader before opening
-                    // the page source.
-                    if (!isOcrModelReady(context.filesDir, variant)) {
-                        pendingOcrPage = target.key
-                        actions.onNavigateToModelDownload()
-                        return@launch
-                    }
-                    PaddleOcrEngine.setActiveVariant(variant)
-                    val source = runCatching { openOcrPageSource(target.volume, target.page) }
-                    val outcome = source.mapCatching { pageSource ->
-                        try {
-                            PaddleOcrEngine.recognize(context, pageSource)
-                        } finally {
-                            pageSource.close()
-                        }
-                    }
-                    outcome
-                        .onSuccess { result ->
-                            Log.d(
-                                "InkleafOcr",
-                                "page=${target.page} " +
-                                    "image=${result.imageWidth}x${result.imageHeight} " +
-                                    "tiles=${result.tileCount} raw=${result.rawRegionCount} " +
-                                    "lines=${result.regions.size} totalMs=${result.totalTimeMs}",
-                            )
-                            ocrResultOrder.remove(target.key)
-                            if (result.regions.isEmpty()) {
-                                ocrResults.remove(target.key)
-                            } else {
-                                ocrResults[target.key] = result
-                                ocrResultOrder.addLast(target.key)
-                                while (ocrResultOrder.size > OCR_SESSION_CACHE_PAGES) {
-                                    ocrResults.remove(ocrResultOrder.removeFirst())
-                                }
-                            }
-                            if (latestCurrentPageStateKey == target.key) {
-                                if (result.regions.isEmpty()) {
-                                    snackbarHostState.showSnackbar("当前页未识别到文字")
-                                } else {
-                                    ocrSelection = ocrSelection.enter(target.page)
-                                    ocrSelectionPage = target.key
-                                }
-                            }
-                        }
-                        .onFailure { error ->
-                            if (error is CancellationException) throw error
-                            Log.e(
-                                "InkleafOcr",
-                                "Current-page OCR failed for page=${target.page}",
-                                error,
-                            )
-                            val feedback =
-                                snackbarHostState.showSnackbar(
-                                    message = "文字识别失败",
-                                    actionLabel = "重试",
-                                )
-                            retryRequested =
-                                feedback == SnackbarResult.ActionPerformed &&
-                                    latestCurrentPageStateKey == target.key
-                        }
-                } finally {
-                    if (ocrProcessingPage == target.key) ocrProcessingPage = null
-                    actions.onVolumeTaskFinished(target.volume)
-                }
-                if (retryRequested) recognizePage(target)
-            }
-        }
     }
 
     fun removeBookmark(bookmark: ReaderBookmarkItem) {
@@ -597,28 +468,6 @@ private fun ComicPager(
             } finally {
                 bookmarkRemovalsInFlight.remove(bookmark.key)
             }
-        }
-    }
-
-    // Retry the pending OCR request after returning from model download.
-    androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
-        val pageKey = pendingOcrPage ?: return@LifecycleEventEffect
-        val target = currentPageTarget?.takeIf { it.key == pageKey }
-        if (target != null && isOcrModelReady(context.filesDir, activeOcrVariant)) {
-            pendingOcrPage = null
-            recognizePage(target)
-        }
-    }
-
-    BackHandler(
-        enabled =
-            ocrSelectionPage == currentPageStateKey || ocrSelection.detailText != null
-    ) {
-        if (ocrSelection.detailText != null) {
-            ocrSelection = ocrSelection.dismissText()
-        } else {
-            ocrSelection = ocrSelection.exit()
-            ocrSelectionPage = null
         }
     }
 
@@ -718,12 +567,6 @@ private fun ComicPager(
         }
     }
 
-    val activeOcrResult =
-        if (!isTransitionPage) {
-            currentPageStateKey?.let(ocrResults::get)?.takeIf {
-                ocrSelectionPage == currentPageStateKey
-            }
-        } else null
     val bottomControlsHeight = with(LocalDensity.current) { bottomControlsHeightPx.toDp() }
 
     SnackbarMessageEffect(
@@ -739,25 +582,14 @@ private fun ComicPager(
                 // 1x 时 Pager 接管单指拖动；放大后由当前页接管平移。
                 // 点按检测在移动超过阈值时自动作废，工具栏上的按钮/滑杆会消费
                 // 自己的事件，也不会误触发这里。
-                .pointerInput(pagerState.currentPage, pagerChapterWindow, zoomedPage, ocrSelectionPage) {
+                .pointerInput(pagerState.currentPage, pagerChapterWindow, zoomedPage) {
                     detectTapGestures(
-                        onLongPress = { anchor ->
-                            if (activeOcrResult != null) return@detectTapGestures
-                            ocrLongPressAnchor = anchor
-                            showOcrLongPressMenu = true
-                        },
                         onDoubleTap = { anchor ->
-                            if (ocrSelectionPage == currentPageStateKey) {
-                                return@detectTapGestures
-                            }
                             zoomToggleAnchor = anchor
                             zoomTogglePage = currentPageStateKey
                             zoomToggleRequest++
                         },
                         onTap = { offset ->
-                            if (ocrSelectionPage == currentPageStateKey) {
-                                return@detectTapGestures
-                            }
                             val third = size.width / 3f
                             when {
                                 zoomedPage == currentPageStateKey &&
@@ -777,7 +609,6 @@ private fun ComicPager(
                 readerPagerUserScrollEnabled(
                     isTransitionPage = isTransitionPage,
                     isZoomed = zoomedPage == currentPageStateKey,
-                    isOcrSelectionActive = ocrSelectionPage == currentPageStateKey,
                 ),
             key = { page ->
                 pagerChapterWindow?.items?.getOrNull(page)?.saveablePagerKey() ?: "single:$page"
@@ -809,8 +640,6 @@ private fun ComicPager(
                                     zoomedPage = if (isZoomed) pageStateKey else null
                                 }
                             },
-                            ocrResult = ocrResults[pageStateKey].takeIf { isActiveVolume },
-                            ocrMode = isActiveVolume && ocrSelectionPage == pageStateKey,
                             onVolumeTaskStarted = actions.onVolumeTaskStarted,
                             onVolumeTaskFinished = actions.onVolumeTaskFinished,
                         )
@@ -849,93 +678,10 @@ private fun ComicPager(
                             zoomedPage = if (isZoomed) pageStateKey else null
                         }
                     },
-                    ocrResult = ocrResults[pageStateKey],
-                    ocrMode = ocrSelectionPage == pageStateKey,
                     onVolumeTaskStarted = actions.onVolumeTaskStarted,
                     onVolumeTaskFinished = actions.onVolumeTaskFinished,
                 )
             }
-        }
-
-        if (activeOcrResult != null) {
-            ReaderOcrPageOverlay(
-                result = activeOcrResult,
-                selectedIds = ocrSelection.selectedIds,
-                accent = readerAccentColor(),
-                onRegionTapped = { regionId ->
-                    ocrSelection = ocrSelection.toggle(regionId)
-                },
-                onRegionAdded = { regionId ->
-                    ocrSelection = ocrSelection.add(regionId)
-                },
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
-
-        if (showOcrLongPressMenu) {
-            Box(
-                modifier =
-                    Modifier.offset {
-                        IntOffset(
-                            x = ocrLongPressAnchor.x.roundToInt(),
-                            y = ocrLongPressAnchor.y.roundToInt(),
-                        )
-                    }
-            ) {
-                DropdownMenu(
-                    expanded = true,
-                    onDismissRequest = { showOcrLongPressMenu = false },
-                    offset = DpOffset.Zero,
-                ) {
-                    DropdownMenuItem(
-                        text = { Text("识别当前页文字") },
-                        enabled = ocrProcessingPage == null,
-                        onClick = {
-                            showOcrLongPressMenu = false
-                            currentPageTarget?.let(::recognizePage)
-                        },
-                    )
-                }
-            }
-        }
-
-        if (ocrProcessingPage == currentPageStateKey && !isTransitionPage) {
-            ReaderOcrProcessingStatus(modifier = Modifier.align(Alignment.BottomCenter))
-        }
-
-        if (activeOcrResult != null) {
-            val selectedText =
-                remember(activeOcrResult, ocrSelection.selectedIds) {
-                    selectedOcrText(activeOcrResult.regions, ocrSelection.selectedIds)
-                }
-            ReaderOcrSelectionBar(
-                selectedText = selectedText,
-                selectedCount = ocrSelection.selectedIds.size,
-                totalCount = activeOcrResult.regions.size,
-                onSelectAll = {
-                    ocrSelection =
-                        if (ocrSelection.selectedIds.size == activeOcrResult.regions.size) {
-                            ocrSelection.clearSelection()
-                        } else {
-                            ocrSelection.copy(
-                                selectedIds = activeOcrResult.regions.mapTo(linkedSetOf()) { it.id }
-                            )
-                        }
-                },
-                onShowText = { ocrSelection = ocrSelection.showText(selectedText) },
-                onCopy = {
-                    val clipboard =
-                        context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    clipboard.setPrimaryClip(ClipData.newPlainText("OCR 文字", selectedText))
-                    ocrSelection = ocrSelection.clearSelection()
-                    scope.launch { snackbarHostState.showSnackbar("已复制所选文字") }
-                },
-                onExit = {
-                    ocrSelection = ocrSelection.exit()
-                    ocrSelectionPage = null
-                },
-                modifier = Modifier.align(Alignment.BottomCenter),
-            )
         }
 
         SnackbarHost(
@@ -945,24 +691,13 @@ private fun ComicPager(
                     .navigationBarsPadding()
                     .padding(
                         bottom =
-                            when {
-                                activeOcrResult != null -> 96.dp
-                                bottomControlsHeightPx > 0 &&
-                                    ocrProcessingPage != currentPageStateKey -> {
-                                    bottomControlsHeight + 12.dp
-                                }
-                                ocrProcessingPage == currentPageStateKey && !isTransitionPage ->
-                                    72.dp
-                                else -> 16.dp
-                            }
+                            if (bottomControlsHeightPx > 0) bottomControlsHeight + 12.dp else 16.dp
                     ),
         )
 
         if (
             !showControls &&
                 !isTransitionPage &&
-                ocrProcessingPage != currentPageStateKey &&
-                activeOcrResult == null &&
                 snackbarHostState.currentSnackbarData == null
         ) {
             val pageCountLabel = "${currentRealPage + 1} / ${currentVolume.totalPageCount}"
@@ -982,7 +717,7 @@ private fun ComicPager(
         }
 
         ReaderTopBar(
-            visible = showControls && activeOcrResult == null,
+            visible = showControls,
             title = title,
             isBookmarked =
                 !isTransitionPage &&
@@ -1005,12 +740,7 @@ private fun ComicPager(
         )
 
         ReaderBottomControls(
-            visible =
-                showControls &&
-                    !isTransitionPage &&
-                    isCurrentVolumeActive &&
-                    activeOcrResult == null &&
-                    ocrProcessingPage != currentPageStateKey,
+            visible = showControls && !isTransitionPage && isCurrentVolumeActive,
             currentPage = currentRealPage,
             pageCount = currentVolume.totalPageCount,
             onPageSelected = { selectedPage ->
@@ -1075,7 +805,6 @@ private fun ComicPager(
                                     (currentPageStateKey in features.favoritePageKeys ||
                                         (pagerChapterWindow == null &&
                                             currentRealPage in features.favoritePages)),
-                            ocrBusy = ocrProcessingPage != null,
                             onToggleFavorite =
                                 actions.onToggleFavorite?.let { toggleFavorite ->
                                     {
@@ -1085,10 +814,6 @@ private fun ComicPager(
                                         }
                                     }
                                 },
-                            onRecognizePage = {
-                                activePanel = null
-                                currentPageTarget?.let(::recognizePage)
-                            },
                             onSetCover =
                                 actions.onSetCover?.let { setCover ->
                                     {
@@ -1102,13 +827,6 @@ private fun ComicPager(
                 }
             },
             modifier = Modifier.align(Alignment.BottomCenter),
-        )
-    }
-
-    ocrSelection.detailText?.let { text ->
-        ReaderOcrTextSheet(
-            text = text,
-            onDismiss = { ocrSelection = ocrSelection.dismissText() },
         )
     }
 }
@@ -1728,8 +1446,6 @@ private fun ComicPage(
     zoomResetPage: ReaderPageStateKey?,
     zoomToggleAnchor: Offset,
     onZoomChanged: (Boolean) -> Unit,
-    ocrResult: OcrPageResult?,
-    ocrMode: Boolean,
     onVolumeTaskStarted: (ComicVolume) -> Boolean,
     onVolumeTaskFinished: (ComicVolume) -> Unit,
     modifier: Modifier = Modifier,
@@ -1790,10 +1506,6 @@ private fun ComicPage(
 
     LaunchedEffect(isCurrentPage) {
         if (!isCurrentPage) resetZoom()
-    }
-
-    LaunchedEffect(ocrMode) {
-        if (ocrMode) resetZoom()
     }
 
     LaunchedEffect(zoomToggleRequest, zoomTogglePage) {
@@ -1884,7 +1596,7 @@ private fun ComicPage(
                     .transformable(
                         state = transformState,
                         canPan = { scale > ZOOMED_THRESHOLD },
-                        enabled = isCurrentPage && !ocrMode,
+                        enabled = isCurrentPage,
                     ),
             contentAlignment = Alignment.Center,
         ) {
@@ -2008,14 +1720,6 @@ private fun ComicPage(
             }
 
             pageArtwork()
-
-            if (ocrMode && ocrResult != null && pagePainter != null) {
-                ReaderOcrFocusLayer(
-                    result = ocrResult,
-                    painter = pagePainter,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
         }
     }
 }

@@ -41,8 +41,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.exio.inkleaf.data.CacheLimit
 import com.exio.inkleaf.data.ThemeSettings
-import com.exio.inkleaf.data.ocr.OcrModelSettingsRepository
-import com.exio.inkleaf.data.ocr.isOcrModelReady
 import com.exio.inkleaf.diagnostics.DiagnosticRepository
 
 /** General settings. Theme editing lives on its own route with an explicit apply boundary. */
@@ -52,7 +50,6 @@ fun SettingsScreen(
     themeSettings: ThemeSettings,
     onBack: () -> Unit,
     onOpenThemeSettings: () -> Unit,
-    onOpenOcrModelDownload: () -> Unit = {},
     onOpenDiagnostics: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: SettingsViewModel = viewModel(),
@@ -68,15 +65,9 @@ fun SettingsScreen(
     val unreadDiagnostics by
         remember(context) { DiagnosticRepository.get(context).unreadCriticalCount }
             .collectAsStateWithLifecycle()
-    val activeOcrVariant by
-        remember(context) { OcrModelSettingsRepository(context).activeVariant }
-            .collectAsStateWithLifecycle(
-                initialValue = com.exio.inkleaf.data.ocr.OcrModelVariant.SMALL
-            )
     var showCacheLimitSheet by remember { mutableStateOf(false) }
     var showClearOnlineCacheDialog by rememberSaveable { mutableStateOf(false) }
     var showAboutSheet by remember { mutableStateOf(false) }
-    var showLicensesSheet by remember { mutableStateOf(false) }
     var showFoldersSheet by rememberSaveable { mutableStateOf(false) }
     val lastPickedFolder by foldersViewModel.lastPickedFolder.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -158,19 +149,6 @@ fun SettingsScreen(
                 trailingContent = { ForwardIcon() },
             )
 
-            SectionLabel("文字识别")
-            InkleafActionListItem(
-                headline = "OCR 模型",
-                supporting =
-                    if (isOcrModelReady(context.filesDir, activeOcrVariant)) {
-                        "${activeOcrVariant.displayName} · 已就绪"
-                    } else {
-                        "${activeOcrVariant.displayName} · 未下载"
-                    },
-                onClick = onOpenOcrModelDownload,
-                trailingContent = { ForwardIcon() },
-            )
-
             SectionLabel("开发者")
             InkleafActionListItem(
                 headline = "诊断",
@@ -247,20 +225,7 @@ fun SettingsScreen(
                 onOpenGitHub = {
                     context.startActivity(Intent(Intent.ACTION_VIEW, GITHUB_URL.toUri()))
                 },
-                onOpenLicenses = {
-                    showAboutSheet = false
-                    showLicensesSheet = true
-                },
             )
-        }
-    }
-
-    if (showLicensesSheet) {
-        ModalBottomSheet(
-            onDismissRequest = { showLicensesSheet = false },
-            sheetState = rememberExpandOnlySheetState(),
-        ) {
-            ThirdPartyLicensesSheetContent()
         }
     }
 }
@@ -284,7 +249,6 @@ private fun themeSummary(settings: ThemeSettings): String {
 private fun AboutSheetContent(
     versionName: String,
     onOpenGitHub: () -> Unit,
-    onOpenLicenses: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     SheetColumn(modifier = modifier) {
@@ -297,67 +261,8 @@ private fun AboutSheetContent(
             onClick = onOpenGitHub,
             trailingContent = { ForwardIcon() },
         )
-        InkleafActionListItem(
-            headline = "开源许可",
-            supporting = "OCR 模型、运行时与图像库许可",
-            onClick = onOpenLicenses,
-            trailingContent = { ForwardIcon() },
-        )
     }
 }
-
-@Composable
-private fun ThirdPartyLicensesSheetContent(modifier: Modifier = Modifier) {
-    val context = LocalContext.current
-    SheetColumn(modifier = modifier, scrollable = true) {
-        StandardSheetTitle("开源许可")
-        Text(
-            text = "OCR 模型与相关库版权归各自上游项目。",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-        )
-        THIRD_PARTY_NOTICES.forEach { notice ->
-            InkleafActionListItem(
-                headline = notice.name,
-                supporting = "${notice.summary}\n${notice.license}",
-                onClick = {
-                    context.startActivity(Intent(Intent.ACTION_VIEW, notice.url.toUri()))
-                },
-                trailingContent = { ForwardIcon() },
-            )
-        }
-    }
-}
-
-private data class ThirdPartyNotice(
-    val name: String,
-    val summary: String,
-    val license: String,
-    val url: String,
-)
-
-private val THIRD_PARTY_NOTICES =
-    listOf(
-        ThirdPartyNotice(
-            name = "PP-OCRv6 / PaddleOCR",
-            summary = "轻量文字检测与识别引擎",
-            license = "Apache-2.0 · PaddlePaddle Authors",
-            url = "https://github.com/PaddlePaddle/PaddleOCR",
-        ),
-        ThirdPartyNotice(
-            name = "ONNX Runtime",
-            summary = "跨平台机器学习推理运行时",
-            license = "MIT · Microsoft Corporation",
-            url = "https://github.com/microsoft/onnxruntime",
-        ),
-        ThirdPartyNotice(
-            name = "OpenCV Android",
-            summary = "计算机视觉基础库",
-            license = "Apache-2.0 · OpenCV team",
-            url = "https://github.com/opencv/opencv",
-        ),
-    )
 
 @Composable
 private fun CacheLimitSheetContent(

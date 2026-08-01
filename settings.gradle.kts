@@ -24,4 +24,3 @@ dependencyResolutionManagement {
 
 rootProject.name = "Inkleaf"
 include(":app")
-include(":ppocr-sdk")
