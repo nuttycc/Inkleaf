@@ -1,12 +1,10 @@
 package com.exio.inkleaf.data
 
 import android.util.Log
+import com.exio.inkleaf.replaceFileAtomically
 import java.io.File
 import java.io.IOException
 import java.nio.charset.StandardCharsets
-import java.nio.file.AtomicMoveNotSupportedException
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -434,20 +432,7 @@ internal class OnlinePageCache(
             if (generation != expectedGeneration || clearPendingMarker.exists()) {
                 return@synchronized false
             }
-            try {
-                Files.move(
-                    temporary.toPath(),
-                    destination.toPath(),
-                    StandardCopyOption.ATOMIC_MOVE,
-                    StandardCopyOption.REPLACE_EXISTING,
-                )
-            } catch (_: AtomicMoveNotSupportedException) {
-                Files.move(
-                    temporary.toPath(),
-                    destination.toPath(),
-                    StandardCopyOption.REPLACE_EXISTING,
-                )
-            }
+            replaceFileAtomically(temporary.toPath(), destination.toPath())
             destination.setLastModified(System.currentTimeMillis())
             true
         }
