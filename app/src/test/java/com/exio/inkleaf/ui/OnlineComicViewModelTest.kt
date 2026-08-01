@@ -5,14 +5,54 @@ import com.exio.inkleaf.plugin.ComicSummary
 import com.exio.inkleaf.plugin.OnlineComicRecord
 import com.exio.inkleaf.plugin.OnlineContentKey
 import com.exio.inkleaf.plugin.OnlineAvailability
+import com.exio.inkleaf.plugin.OnlineContentRepository
 import com.exio.inkleaf.plugin.PageImage
 import com.exio.inkleaf.plugin.PluginChaptersResponse
+import java.nio.file.Files
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class OnlineComicViewModelTest {
+    @Test
+    fun `reader progress updates an existing detail observer`() = runBlocking {
+        val root = Files.createTempDirectory("inkleaf-online-detail-progress").toFile()
+        try {
+            val repository = OnlineContentRepository(root.resolve("state.json"))
+            val positions = Channel<Int?>(Channel.UNLIMITED)
+            val observer =
+                launch {
+                    observeOnlineComicPosition(repository, PLUGIN_ID, SOURCE_ID) { position ->
+                        positions.trySend(position?.pageIndex).getOrThrow()
+                    }
+                }
+            try {
+                assertEquals(null, withTimeout(1_000) { positions.receive() })
+
+                repository.recordPosition(
+                    pluginId = PLUGIN_ID,
+                    sourceId = SOURCE_ID,
+                    chapterId = "chapter-1",
+                    pageId = "page-5",
+                    pageIndex = 4,
+                    chapterRevision = "revision-1",
+                )
+
+                assertEquals(4, withTimeout(1_000) { positions.receive() })
+            } finally {
+                observer.cancelAndJoin()
+            }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
     @Test
     fun `matching fresh detail and chapter snapshots skip refresh`() {
         val record = record(detailFetchedAtMs = 100L, chaptersFetchedAtMs = 100L)

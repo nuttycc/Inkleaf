@@ -9,6 +9,7 @@ import com.exio.inkleaf.plugin.ComicDetail
 import com.exio.inkleaf.plugin.ComicSummary
 import com.exio.inkleaf.plugin.OnlineAvailability
 import com.exio.inkleaf.plugin.OnlineComicRecord
+import com.exio.inkleaf.plugin.OnlineContentRepository
 import com.exio.inkleaf.plugin.OnlineReadingPosition
 import com.exio.inkleaf.plugin.OnlineUserReference
 import com.exio.inkleaf.plugin.PluginChapterRequest
@@ -21,6 +22,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -42,6 +44,17 @@ internal data class OnlineComicUiState(
     val position: OnlineReadingPosition? = null,
     val errorMessage: String? = null,
 )
+
+internal suspend fun observeOnlineComicPosition(
+    repository: OnlineContentRepository,
+    pluginId: String,
+    sourceId: String,
+    onPosition: (OnlineReadingPosition?) -> Unit,
+) {
+    repository.revision.collectLatest {
+        onPosition(withContext(Dispatchers.IO) { repository.get(pluginId, sourceId)?.position })
+    }
+}
 
 internal class OnlineComicViewModel(
     app: Application,
@@ -73,6 +86,15 @@ internal class OnlineComicViewModel(
     val state: StateFlow<OnlineComicUiState> = _state.asStateFlow()
 
     init {
+        viewModelScope.launch {
+            observeOnlineComicPosition(
+                repository = application.onlineContentRepository,
+                pluginId = pluginId,
+                sourceId = sourceId,
+            ) { position ->
+                _state.value = _state.value.copy(position = position)
+            }
+        }
         refresh(force = false)
     }
 
