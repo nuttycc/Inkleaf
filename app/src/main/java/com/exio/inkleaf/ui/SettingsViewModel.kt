@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.exio.inkleaf.data.CacheLimit
 import com.exio.inkleaf.data.CacheSettingsRepository
 import com.exio.inkleaf.data.ReaderCache
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -59,9 +60,24 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
                 0L,
             )
 
-    /** 缓存当前占用：设置项的"可验证反馈"，进入设置页和改档位后都会刷新 */
-    private val _cacheUsageBytes = MutableStateFlow(0L)
-    val cacheUsageBytes: StateFlow<Long> = _cacheUsageBytes.asStateFlow()
+    /** Categorized unified reader-cache usage shown by the settings screen. */
+    private val _cacheUsage =
+        MutableStateFlow(
+            ReaderCache.Usage(
+                localCopiesBytes = 0L,
+                onlinePagesBytes = 0L,
+                manifestsBytes = 0L,
+                localThumbnailsBytes = 0L,
+                onlineThumbnailsBytes = 0L,
+            )
+        )
+    internal val cacheUsage: StateFlow<ReaderCache.Usage> = _cacheUsage.asStateFlow()
+
+    private val _isClearingOnlineCache = MutableStateFlow(false)
+    val isClearingOnlineCache: StateFlow<Boolean> = _isClearingOnlineCache.asStateFlow()
+
+    private val _cacheMessage = MutableStateFlow<String?>(null)
+    val cacheMessage: StateFlow<String?> = _cacheMessage.asStateFlow()
 
     init {
         refreshCacheUsage()
@@ -72,16 +88,44 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             cacheRepo.setLimit(limit)
             ReaderCache.enforceBudget(getApplication(), keep = null)
-            refreshCacheUsage()
+            updateCacheUsage()
         }
     }
 
-    private fun refreshCacheUsage() {
+    fun clearOnlineCache() {
+        if (_isClearingOnlineCache.value) return
         viewModelScope.launch {
-            _cacheUsageBytes.value =
-                withContext(Dispatchers.IO) {
-                    ReaderCache.usageBytes(getApplication())
+            _isClearingOnlineCache.value = true
+            try {
+                ReaderCache.clearOnlineCache(getApplication())
+                updateCacheUsage()
+                _cacheMessage.value = "在线漫画缓存已清除"
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                try {
+                    updateCacheUsage()
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (_: Exception) {
+                    // The clear failure remains actionable even if recounting also fails.
                 }
+                _cacheMessage.value = "在线漫画缓存清理失败，请重试"
+            } finally {
+                _isClearingOnlineCache.value = false
+            }
         }
+    }
+
+    fun consumeCacheMessage() {
+        _cacheMessage.value = null
+    }
+
+    private fun refreshCacheUsage() {
+        viewModelScope.launch { updateCacheUsage() }
+    }
+
+    private suspend fun updateCacheUsage() {
+        _cacheUsage.value = withContext(Dispatchers.IO) { ReaderCache.usage(getApplication()) }
     }
 }

@@ -45,7 +45,6 @@ internal suspend fun openOcrPageSource(volume: ComicVolume, page: Int): OcrPageS
 private class RegionDecodedOcrPageSource(bytes: ByteArray) : OcrPageSource {
     private val decoder =
         BitmapRegionDecoder.newInstance(bytes, 0, bytes.size, false)
-            ?: throw ComicOpenException("本页图像无法解码")
     private val sourceWidth = decoder.width
     private val sourceHeight = decoder.height
     private val orientation =

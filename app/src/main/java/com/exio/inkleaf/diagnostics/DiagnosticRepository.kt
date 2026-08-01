@@ -369,7 +369,7 @@ class DiagnosticRepository private constructor(private val context: Context) {
                             "reason" to exit.reason.toString(),
                             "status" to exit.status.toString(),
                             "importance" to exit.importance.toString(),
-                            "process" to (exit.processName ?: "unknown"),
+                            "process" to exit.processName,
                             "pssKb" to exit.pss.toString(),
                             "rssKb" to exit.rss.toString(),
                         ),

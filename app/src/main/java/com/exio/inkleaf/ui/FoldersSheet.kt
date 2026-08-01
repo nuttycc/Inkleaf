@@ -112,7 +112,6 @@ fun FoldersSheetContent(
                             // 渐变期间旧分支仍在组合，list 可能已变空——orEmpty 兜底
                             items(list.orEmpty(), key = { it.folder.id }) { item ->
                                 ListItem(
-                                    headlineContent = { Text(item.folder.displayName) },
                                     leadingContent = {
                                         Icon(
                                             painterResource(R.drawable.ic_folder),
@@ -157,7 +156,9 @@ fun FoldersSheetContent(
                                         ListItemDefaults.colors(containerColor = Color.Transparent),
                                     // 新行插入/删除时其余行平滑让位，而不是瞬移
                                     modifier = Modifier.animateItem(),
-                                )
+                                ) {
+                                    Text(item.folder.displayName)
+                                }
                             }
                         }
                 }

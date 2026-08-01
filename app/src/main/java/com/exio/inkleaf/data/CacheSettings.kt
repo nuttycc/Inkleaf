@@ -12,9 +12,8 @@ import kotlinx.coroutines.flow.map
 private val Context.cacheSettingsDataStore by preferencesDataStore(name = "cache_settings")
 
 /**
- * 漫画缓存（zip 副本）总量的阶梯档位。
- *
- * 注意预算小于单本漫画体积时（如 512 MB 档遇上 1 GB 的大书）， "当前正读的书永不淘汰"的规则使实际语义退化为"只保留当前书"—— 这是物理边界而非失效，UI 文案需如实说明。
+ * Unified reader-cache limits for local working copies, online pages, manifests, and thumbnails.
+ * Active reader working sets remain protected, so they may temporarily exceed the selected limit.
  */
 enum class CacheLimit(
     val label: String,

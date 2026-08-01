@@ -301,7 +301,6 @@ private fun ModelManagementCard(
                             }
                         }
                     }
-                    else -> Unit
                 }
             } else {
                 // Static / Idle actions per card

@@ -141,7 +141,7 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
-    private val browseSessions =
+    private val browseSessions: MutableMap<PluginBrowseCacheKey, BrowseSessionSnapshot> =
         object : LinkedHashMap<PluginBrowseCacheKey, BrowseSessionSnapshot>(16, 0.75f, true) {
             override fun removeEldestEntry(
                 eldest: MutableMap.MutableEntry<PluginBrowseCacheKey, BrowseSessionSnapshot>?
