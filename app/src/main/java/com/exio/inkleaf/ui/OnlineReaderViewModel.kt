@@ -1279,20 +1279,16 @@ internal class OnlineReaderViewModel(
                     page = page,
                     stale = activeRequestedRevision != currentRevision,
                 )
-            }
-        if (saved == null || saved.chapterId != activeChapterId) return RestoredOnlinePage(0, false)
-        saved.pageId?.let { pageId ->
-            opened.pages
-                .indexOfFirst { it.pageId == pageId }
-                .takeIf { it >= 0 }
-                ?.let {
-                    return RestoredOnlinePage(it, stale = false)
-                }
         }
+        if (saved == null || saved.chapterId != activeChapterId) return RestoredOnlinePage(0, false)
         val restored =
-            saved.pageIndex.takeIf {
-                saved.chapterRevision == currentRevision && it in opened.pages.indices
-            } ?: 0
+            resolveOnlinePageReference(
+                pageId = saved.pageId,
+                fallbackPageIndex = saved.pageIndex,
+                fallbackChapterRevision = saved.chapterRevision,
+                currentChapterRevision = currentRevision,
+                pages = opened.pages,
+            ) ?: 0
         return RestoredOnlinePage(restored, stale = false)
     }
 
@@ -1306,15 +1302,13 @@ internal class OnlineReaderViewModel(
             ?.takeIf { it in opened.pages.indices }
             ?.let { return it }
         if (saved?.chapterId != chapterId) return 0
-        saved.pageId?.let { pageId ->
-            opened.pages
-                .indexOfFirst { it.pageId == pageId }
-                .takeIf { it >= 0 }
-                ?.let { return it }
-        }
-        return saved.pageIndex.takeIf {
-            saved.chapterRevision == revision && it in opened.pages.indices
-        } ?: 0
+        return resolveOnlinePageReference(
+            pageId = saved.pageId,
+            fallbackPageIndex = saved.pageIndex,
+            fallbackChapterRevision = saved.chapterRevision,
+            currentChapterRevision = revision,
+            pages = opened.pages,
+        ) ?: 0
     }
 
     private suspend fun refreshUserRecords() {
@@ -1368,17 +1362,16 @@ internal class OnlineReaderViewModel(
         location: OnlinePageLocation,
         opened: OnlineChapterVolume,
     ): ResolvedOnlinePage {
-        location.identity.pageId?.let { pageId ->
-            val exact = opened.pages.indexOfFirst { it.pageId == pageId }
-            if (exact >= 0) return ResolvedOnlinePage(exact, stale = false)
-        }
         val fallback = location.identity.fallback
-        val exactFallback =
-            fallback != null &&
-                fallback.chapterRevision == currentRevision &&
-                fallback.pageIndex in opened.pages.indices
-        if (exactFallback)
-            return ResolvedOnlinePage(requireNotNull(fallback).pageIndex, stale = false)
+        val resolved =
+            resolveOnlinePageReference(
+                pageId = location.identity.pageId,
+                fallbackPageIndex = fallback?.pageIndex,
+                fallbackChapterRevision = fallback?.chapterRevision,
+                currentChapterRevision = currentRevision,
+                pages = opened.pages,
+            )
+        if (resolved != null) return ResolvedOnlinePage(resolved, stale = false)
         return ResolvedOnlinePage(
             page = location.pageIndex.coerceIn(0, opened.totalPageCount - 1),
             stale = true,
