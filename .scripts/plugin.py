@@ -12,18 +12,17 @@ import argparse
 import base64
 import json
 import os
-from pathlib import Path, PurePosixPath
 import re
 import shutil
 import stat
 import subprocess
 import sys
 import time
-from dataclasses import dataclass
-from typing import Callable, Sequence
 import uuid
 import zipfile
-
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
 
 MINIMUM_PYTHON = (3, 10)
 DEFAULT_PACKAGE_ID = "com.exio.inkleaf"
@@ -114,7 +113,9 @@ def require_safe_input(path: Path, root: Path, *, directory: bool = False) -> No
     for segment in relative.parts:
         current /= segment
         if is_link(current):
-            raise PluginToolError(f"Plugin input path must not contain a link: {current}")
+            raise PluginToolError(
+                f"Plugin input path must not contain a link: {current}"
+            )
     if directory and not path_absolute.is_dir():
         raise PluginToolError(f"Plugin input directory does not exist: {path}")
     if not directory and not path_absolute.is_file():
@@ -146,7 +147,9 @@ def load_plugin(directory: Path) -> Plugin:
     manifest = read_json_object(manifest_path, "plugin manifest")
     for field in ("id", "version"):
         if not isinstance(manifest.get(field), str) or not str(manifest[field]).strip():
-            raise PluginToolError(f"Manifest must declare a non-empty string '{field}': {manifest_path}")
+            raise PluginToolError(
+                f"Manifest must declare a non-empty string '{field}': {manifest_path}"
+            )
     if not PACKAGE_VERSION_PATTERN.fullmatch(str(manifest["version"])):
         raise PluginToolError(
             f"Manifest version contains characters that are unsafe in a package filename: {manifest_path}"
@@ -159,10 +162,14 @@ def load_plugin(directory: Path) -> Plugin:
         unknown = set(build) - {"runtime"}
         if unknown:
             fields = ", ".join(sorted(unknown))
-            raise PluginToolError(f"Unsupported plugin.build.json fields for {name}: {fields}")
+            raise PluginToolError(
+                f"Unsupported plugin.build.json fields for {name}: {fields}"
+            )
         runtime_value = build.get("runtime")
         if not isinstance(runtime_value, str) or not runtime_value.strip():
-            raise PluginToolError(f"plugin.build.json must declare a non-empty 'runtime': {build_path}")
+            raise PluginToolError(
+                f"plugin.build.json must declare a non-empty 'runtime': {build_path}"
+            )
         runtime = directory / runtime_value
         require_safe_input(runtime, FIXTURES_ROOT)
         runtime = Path(os.path.abspath(runtime))
@@ -174,7 +181,9 @@ def discover_plugins() -> list[Plugin]:
     require_plain_directory(FIXTURES_ROOT)
     plugins: list[Plugin] = []
     failures: list[str] = []
-    for directory in sorted(FIXTURES_ROOT.iterdir(), key=lambda item: item.name.casefold()):
+    for directory in sorted(
+        FIXTURES_ROOT.iterdir(), key=lambda item: item.name.casefold()
+    ):
         if not directory.is_dir() or not (directory / "manifest.json").exists():
             continue
         try:
@@ -182,7 +191,9 @@ def discover_plugins() -> list[Plugin]:
         except (OSError, UnicodeError, PluginToolError, zipfile.BadZipFile) as error:
             failures.append(str(error))
     if failures:
-        raise PluginToolError("Invalid plugin directories:\n  - " + "\n  - ".join(failures))
+        raise PluginToolError(
+            "Invalid plugin directories:\n  - " + "\n  - ".join(failures)
+        )
     if not plugins:
         raise PluginToolError(f"No plugins found below {FIXTURES_ROOT}")
     return plugins
@@ -213,7 +224,9 @@ def ensure_safe_directory(path: Path, root: Path) -> None:
     for segment in relative.parts:
         current /= segment
         if current.exists() and (not current.is_dir() or is_link(current)):
-            raise PluginToolError(f"Output directory must not contain a link: {current}")
+            raise PluginToolError(
+                f"Output directory must not contain a link: {current}"
+            )
         current.mkdir(exist_ok=True)
 
 
@@ -234,10 +247,14 @@ def resolve_output_path(plugin: Plugin, value: str | None) -> Path:
         raise PluginToolError(f"Output path must remain below {DIST_ROOT}") from error
     build_root = Path(os.path.abspath(DIST_ROOT / "build"))
     if candidate == build_root or build_root in candidate.parents:
-        raise PluginToolError(f"Output path must not be inside the staging directory: {build_root}")
+        raise PluginToolError(
+            f"Output path must not be inside the staging directory: {build_root}"
+        )
     ensure_safe_directory(candidate.parent, DIST_ROOT)
     if candidate.exists() and (candidate.is_dir() or is_link(candidate)):
-        raise PluginToolError(f"Output file must not be a directory or link: {candidate}")
+        raise PluginToolError(
+            f"Output file must not be a directory or link: {candidate}"
+        )
     return candidate
 
 
@@ -271,7 +288,9 @@ def stage_plugin(plugin: Plugin) -> Path:
     staging = build_root / plugin.name
     if staging.exists():
         if is_link(staging) or not staging.is_dir():
-            raise PluginToolError(f"Build directory must be a plain directory: {staging}")
+            raise PluginToolError(
+                f"Build directory must be a plain directory: {staging}"
+            )
         shutil.rmtree(staging)
     staging.mkdir()
 
@@ -299,11 +318,14 @@ def stage_plugin(plugin: Plugin) -> Path:
 
 
 def package_plugin(plugin: Plugin, output_value: str | None = None) -> Path:
+    print(f"[info] Packaging {plugin.name} v{plugin.version} ({plugin.build_strategy})")
     output = resolve_output_path(plugin, output_value)
     staging = stage_plugin(plugin)
     temporary = output.with_name(f".{output.name}.{uuid.uuid4().hex}.tmp")
     try:
-        with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        with zipfile.ZipFile(
+            temporary, "w", compression=zipfile.ZIP_DEFLATED
+        ) as archive:
             entries = [staging / "manifest.json", staging / "main.js"]
             assets = staging / "assets"
             if assets.is_dir():
@@ -313,7 +335,7 @@ def package_plugin(plugin: Plugin, output_value: str | None = None) -> Path:
         temporary.replace(output)
     finally:
         temporary.unlink(missing_ok=True)
-    print(f"Created {output}")
+    print(f"[ok] Created {output}")
     return output
 
 
@@ -328,7 +350,9 @@ def package_plugins(
     if output and len(plugins) != 1:
         raise PluginToolError("--output can only be used when packaging one plugin")
     if output_directory and len(plugins) == 1:
-        raise PluginToolError("--output-dir can only be used when packaging multiple plugins")
+        raise PluginToolError(
+            "--output-dir can only be used when packaging multiple plugins"
+        )
 
     packages: list[Path] = []
     failures: list[str] = []
@@ -357,7 +381,9 @@ def resolve_adb_path() -> Path:
     candidates: list[Path] = []
     for variable in ("ANDROID_HOME", "ANDROID_SDK_ROOT"):
         if os.environ.get(variable):
-            candidates.append(Path(os.environ[variable]) / "platform-tools" / executable_name)
+            candidates.append(
+                Path(os.environ[variable]) / "platform-tools" / executable_name
+            )
     local_properties = REPOSITORY_ROOT / "local.properties"
     if local_properties.is_file():
         for line in local_properties.read_text(encoding="utf-8").splitlines():
@@ -377,10 +403,14 @@ def resolve_adb_path() -> Path:
     for candidate in candidates:
         if candidate.is_file():
             return candidate.resolve()
-    raise PluginToolError("adb not found. Install Android platform-tools or configure the SDK path.")
+    raise PluginToolError(
+        "adb not found. Install Android platform-tools or configure the SDK path."
+    )
 
 
-def run_adb(adb: Path, arguments: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
+def run_adb(
+    adb: Path, arguments: list[str], *, check: bool = True
+) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(
         [str(adb), *arguments],
         text=True,
@@ -391,7 +421,9 @@ def run_adb(adb: Path, arguments: list[str], *, check: bool = True) -> subproces
         check=False,
     )
     if check and result.returncode != 0:
-        raise PluginToolError(f"ADB command failed ({result.returncode}): {result.stdout.strip()}")
+        raise PluginToolError(
+            f"ADB command failed ({result.returncode}): {result.stdout.strip()}"
+        )
     return result
 
 
@@ -419,9 +451,13 @@ def select_device(
         if any(device.serial == preferred for device in ready):
             return preferred
         known = ", ".join(device.serial for device in ready) or "none"
-        raise PluginToolError(f"ADB device '{preferred}' is not ready. Ready devices: {known}")
+        raise PluginToolError(
+            f"ADB device '{preferred}' is not ready. Ready devices: {known}"
+        )
     if not ready:
-        seen = ", ".join(f"{device.serial}={device.state}" for device in devices) or "none"
+        seen = (
+            ", ".join(f"{device.serial}={device.state}" for device in devices) or "none"
+        )
         raise PluginToolError(f"No ready ADB device. Seen devices: {seen}")
     if len(ready) == 1:
         return ready[0].serial
@@ -431,7 +467,9 @@ def select_device(
             raise KeyboardInterrupt
         return selected
     serials = ", ".join(device.serial for device in ready)
-    raise PluginToolError(f"Multiple ADB devices are ready. Re-run with --serial. Devices: {serials}")
+    raise PluginToolError(
+        f"Multiple ADB devices are ready. Re-run with --serial. Devices: {serials}"
+    )
 
 
 def validate_device_directory(value: str) -> str:
@@ -451,20 +489,41 @@ def has_install_receiver(adb: Path, device: str, package_id: str) -> bool:
     component = receiver_component(package_id)
     result = run_adb(
         adb,
-        ["-s", device, "shell", "cmd", "package", "query-receivers", "--brief", "--components", "-n", component],
+        [
+            "-s",
+            device,
+            "shell",
+            "cmd",
+            "package",
+            "query-receivers",
+            "--brief",
+            "--components",
+            "-n",
+            component,
+        ],
         check=False,
     )
-    return result.returncode == 0 and component in {line.strip() for line in result.stdout.splitlines()}
+    return result.returncode == 0 and component in {
+        line.strip() for line in result.stdout.splitlines()
+    }
 
 
 def assert_install_receiver(adb: Path, device: str, package_id: str) -> None:
-    package = run_adb(adb, ["-s", device, "shell", "pm", "path", package_id], check=False)
-    if package.returncode != 0 or not any(line.startswith("package:") for line in package.stdout.splitlines()):
-        raise PluginToolError(f"Inkleaf package is not installed on the device: {package_id}")
+    package = run_adb(
+        adb, ["-s", device, "shell", "pm", "path", package_id], check=False
+    )
+    if package.returncode != 0 or not any(
+        line.startswith("package:") for line in package.stdout.splitlines()
+    ):
+        raise PluginToolError(
+            f"Inkleaf package is not installed on the device: {package_id}"
+        )
     if has_install_receiver(adb, device, package_id):
         return
     hint = " Install a current Inkleaf build before deploying plugins."
-    if package_id != DEBUG_PACKAGE_ID and has_install_receiver(adb, device, DEBUG_PACKAGE_ID):
+    if package_id != DEBUG_PACKAGE_ID and has_install_receiver(
+        adb, device, DEBUG_PACKAGE_ID
+    ):
         hint += f" The debug app is ready; re-run with --package-id {DEBUG_PACKAGE_ID}."
     raise PluginToolError(
         f"Installed Inkleaf package '{package_id}' does not expose the ADB install receiver.{hint}"
@@ -475,11 +534,24 @@ def start_app(adb: Path, device: str, package_id: str) -> None:
     print(f"[info] Waking {package_id} so it can receive the install broadcast")
     resolved = run_adb(
         adb,
-        ["-s", device, "shell", "cmd", "package", "resolve-activity", "--brief", package_id],
+        [
+            "-s",
+            device,
+            "shell",
+            "cmd",
+            "package",
+            "resolve-activity",
+            "--brief",
+            package_id,
+        ],
         check=False,
     )
     component = next(
-        (line.strip() for line in resolved.stdout.splitlines() if line.strip().startswith(f"{package_id}/")),
+        (
+            line.strip()
+            for line in resolved.stdout.splitlines()
+            if line.strip().startswith(f"{package_id}/")
+        ),
         None,
     )
     if component:
@@ -487,33 +559,59 @@ def start_app(adb: Path, device: str, package_id: str) -> None:
     else:
         run_adb(
             adb,
-            ["-s", device, "shell", "monkey", "-p", package_id, "-c", "android.intent.category.LAUNCHER", "1"],
+            [
+                "-s",
+                device,
+                "shell",
+                "monkey",
+                "-p",
+                package_id,
+                "-c",
+                "android.intent.category.LAUNCHER",
+                "1",
+            ],
         )
     for _ in range(20):
         time.sleep(0.5)
         result = run_adb(adb, ["-s", device, "shell", "pidof", package_id], check=False)
         if result.returncode == 0 and result.stdout.strip():
             return
-    raise PluginToolError(f"Unable to start {package_id}; launch it manually and re-run.")
+    raise PluginToolError(
+        f"Unable to start {package_id}; launch it manually and re-run."
+    )
 
 
-def install_broadcast(adb: Path, device: str, package_id: str, extras: list[str]) -> str:
+def install_broadcast(
+    adb: Path, device: str, package_id: str, extras: list[str]
+) -> str:
     result = run_adb(
         adb,
         [
-            "-s", device, "shell", "am", "broadcast",
-            "-a", "com.exio.inkleaf.action.ADB_INSTALL_PLUGIN",
-            "-n", receiver_component(package_id),
-            "--receiver-foreground", "--include-stopped-packages", *extras,
+            "-s",
+            device,
+            "shell",
+            "am",
+            "broadcast",
+            "-a",
+            "com.exio.inkleaf.action.ADB_INSTALL_PLUGIN",
+            "-n",
+            receiver_component(package_id),
+            "--receiver-foreground",
+            "--include-stopped-packages",
+            *extras,
         ],
     )
     completion = BROADCAST_RESULT_PATTERN.search(result.stdout)
     if not completion:
-        raise PluginToolError(f"Inkleaf did not return an installation result: {result.stdout.strip()}")
+        raise PluginToolError(
+            f"Inkleaf did not return an installation result: {result.stdout.strip()}"
+        )
     detail = completion.group("data") or ""
     if completion.group("code") != "-1":
         if not detail:
-            raise PluginToolError(f"The install receiver did not execute: {result.stdout.strip()}")
+            raise PluginToolError(
+                f"The install receiver did not execute: {result.stdout.strip()}"
+            )
         raise PluginToolError(f"Inkleaf rejected the plugin deployment: {detail}")
     return detail
 
@@ -531,29 +629,44 @@ def deploy_plugin(
         raise PluginToolError(f"Invalid Android package id: {package_id}")
     device_directory = validate_device_directory(device_directory)
     adb = resolve_adb_path()
+    print(f"[info] Using adb at {adb}")
     device = select_device(adb, serial, interactive=interactive)
-    package = package_plugin(plugin, output)
-    device_path = f"{device_directory.rstrip('/')}/{plugin.name}-plugin-v{plugin.version}.zip"
-
     print(f"[info] Using ADB device {device}")
+    package = package_plugin(plugin, output)
+    device_path = (
+        f"{device_directory.rstrip('/')}/{plugin.name}-plugin-v{plugin.version}.zip"
+    )
+
     assert_install_receiver(adb, device, package_id)
     start_app(adb, device, package_id)
+    print(f"[info] Uploading {package.name} to {device}:{device_path}")
     run_adb(adb, ["-s", device, "shell", "mkdir", "-p", device_directory])
     run_adb(adb, ["-s", device, "push", str(package), device_path])
+    print(f"[ok] Package pushed to {device_path}")
 
     # Command-line-safe chunks stay below both Windows and Binder limits.
     session = uuid.uuid4().hex
     encoded = base64.b64encode(package.read_bytes()).decode("ascii")
     common = ["--es", "session", session]
-    print(f"[info] Starting ADB installation in {package_id}")
-    install_broadcast(adb, device, package_id, [*common, "--es", "operation", "begin"])
     chunk_size = 12 * 1024
+    chunk_count = (len(encoded) + chunk_size - 1) // chunk_size
+    print(f"[info] Starting ADB installation in {package_id}")
+    print(f"[info] Sending payload in {chunk_count} chunk(s)")
+    install_broadcast(adb, device, package_id, [*common, "--es", "operation", "begin"])
     for offset in range(0, len(encoded), chunk_size):
         install_broadcast(
             adb,
             device,
             package_id,
-            [*common, "--es", "operation", "append", "--es", "payload", encoded[offset : offset + chunk_size]],
+            [
+                *common,
+                "--es",
+                "operation",
+                "append",
+                "--es",
+                "payload",
+                encoded[offset : offset + chunk_size],
+            ],
         )
     result = install_broadcast(
         adb,
@@ -561,12 +674,17 @@ def deploy_plugin(
         package_id,
         [
             *common,
-            "--es", "operation", "commit",
-            "--es", "expectedPluginId", plugin.plugin_id,
-            "--es", "expectedVersion", plugin.version,
+            "--es",
+            "operation",
+            "commit",
+            "--es",
+            "expectedPluginId",
+            plugin.plugin_id,
+            "--es",
+            "expectedVersion",
+            plugin.version,
         ],
     )
-    print(f"[ok] Plugin package pushed to {device_path}")
     print(f"[ok] Plugin installed and activated: {result}")
 
 
@@ -619,7 +737,10 @@ def run_interactive() -> None:
     targets = [("Release app", DEFAULT_PACKAGE_ID), ("Debug app", DEBUG_PACKAGE_ID)]
     target = questionary.select(
         "Choose the target app:",
-        choices=[questionary.Choice(f"{label} ({app_id})", value=app_id) for label, app_id in targets],
+        choices=[
+            questionary.Choice(f"{label} ({app_id})", value=app_id)
+            for label, app_id in targets
+        ],
     ).ask()
     if target is None:
         raise KeyboardInterrupt
@@ -630,7 +751,9 @@ def run_interactive() -> None:
         interactive=True,
         choose_ready=lambda ready: questionary.select(
             "Choose an ADB device:",
-            choices=[questionary.Choice(item.serial, value=item.serial) for item in ready],
+            choices=[
+                questionary.Choice(item.serial, value=item.serial) for item in ready
+            ],
         ).ask(),
     )
     confirmed = questionary.confirm(
@@ -658,13 +781,22 @@ def build_parser() -> argparse.ArgumentParser:
         epilog="Run without arguments for the interactive menu.",
     )
     subparsers = parser.add_subparsers(dest="action", required=True)
-    package_parser = subparsers.add_parser("package", help="Build an installable plugin ZIP.")
-    package_parser.add_argument(
-        "plugins", nargs="*", metavar="plugin", help="Directory names below plugin-fixtures."
+    package_parser = subparsers.add_parser(
+        "package", help="Build an installable plugin ZIP."
     )
-    package_parser.add_argument("--all", action="store_true", help="Package every discovered plugin.")
+    package_parser.add_argument(
+        "plugins",
+        nargs="*",
+        metavar="plugin",
+        help="Directory names below plugin-fixtures.",
+    )
+    package_parser.add_argument(
+        "--all", action="store_true", help="Package every discovered plugin."
+    )
     output_group = package_parser.add_mutually_exclusive_group()
-    output_group.add_argument("--output", help="ZIP path for a single plugin below plugin-fixtures/dist.")
+    output_group.add_argument(
+        "--output", help="ZIP path for a single plugin below plugin-fixtures/dist."
+    )
     output_group.add_argument(
         "--output-dir",
         help="Output directory for multiple versioned ZIPs below plugin-fixtures/dist.",
@@ -674,7 +806,9 @@ def build_parser() -> argparse.ArgumentParser:
         "deploy", help="Package, push, install, and activate a plugin over ADB."
     )
     deploy_parser.add_argument("plugin", help="Directory name below plugin-fixtures.")
-    deploy_parser.add_argument("--serial", help="ADB device serial; required when several are ready.")
+    deploy_parser.add_argument(
+        "--serial", help="ADB device serial; required when several are ready."
+    )
     deploy_parser.add_argument("--device-directory", default=DEFAULT_DEVICE_DIRECTORY)
     deploy_parser.add_argument("--output", help="ZIP path below plugin-fixtures/dist.")
     deploy_parser.add_argument("--package-id", default=DEFAULT_PACKAGE_ID)
@@ -704,7 +838,9 @@ def main(arguments: list[str]) -> int:
                 if name not in seen:
                     selected.append(find_plugin(name, available))
                     seen.add(name)
-        package_plugins(selected, output=options.output, output_directory=options.output_dir)
+        package_plugins(
+            selected, output=options.output, output_directory=options.output_dir
+        )
     else:
         plugin = find_plugin(options.plugin)
         deploy_plugin(
