@@ -1,3 +1,6 @@
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -99,6 +102,13 @@ android {
 }
 
 // Debug: separate package; About shows a fixed "debug" version string.
+// APK file name carries the git commit hash + build date to tell builds apart.
+val gitShortHash = providers.exec {
+    commandLine("git", "rev-parse", "--short", "HEAD")
+    isIgnoreExitValue = true
+}.standardOutput.asText.getOrElse("nogit").trim()
+val buildDate = LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE)
+
 androidComponents {
     onVariants(selector().withBuildType("debug")) { variant ->
         variant.applicationId.set("com.exio.inkleaf.debug")
@@ -106,6 +116,7 @@ androidComponents {
         variant.outputs.forEach { output ->
             output.versionName.set("debug")
             output.versionName.finalizeValue()
+            output.outputFileName.set("inkleaf-debug-$gitShortHash-$buildDate.apk")
         }
     }
 }

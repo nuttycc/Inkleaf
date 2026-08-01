@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install the debug APK on a wireless ADB device and restart the app."""
+"""Build the debug APK with Gradle, install it on a wireless ADB device, and restart the app."""
 
 from __future__ import annotations
 
@@ -9,16 +9,29 @@ import shlex
 import shutil
 import subprocess
 import sys
+import threading
 from pathlib import Path
-
 
 DEFAULT_PACKAGE = "com.exio.inkleaf.debug"
 DEFAULT_ACTIVITY = "com.exio.inkleaf.MainActivity"
-DEFAULT_APK = Path(__file__).resolve().parents[1] / "app" / "build" / "outputs" / "apk" / "debug" / "app-debug.apk"
+DEFAULT_APK_DIR = (
+    Path(__file__).resolve().parents[1] / "app" / "build" / "outputs" / "apk" / "debug"
+)
+
+
+def find_latest_apk(apk_dir: Path) -> Path:
+    apks = sorted(apk_dir.glob("*.apk"), key=lambda p: p.stat().st_mtime)
+    if not apks:
+        raise FileNotFoundError(f"no APK found in: {apk_dir}")
+    return apks[-1]
 
 
 class AdbError(RuntimeError):
     """Raised when an ADB command cannot complete successfully."""
+
+
+class BuildError(RuntimeError):
+    """Raised when the Gradle build cannot complete successfully."""
 
 
 def log(message: str) -> None:
@@ -40,11 +53,59 @@ def find_adb(explicit: str | None) -> str:
         sdk_root = os.environ.get(sdk_variable)
         if not sdk_root:
             continue
-        candidate = Path(sdk_root) / "platform-tools" / ("adb.exe" if os.name == "nt" else "adb")
+        candidate = (
+            Path(sdk_root)
+            / "platform-tools"
+            / ("adb.exe" if os.name == "nt" else "adb")
+        )
         if candidate.is_file():
             return str(candidate)
 
-    raise FileNotFoundError("adb was not found on PATH or in ANDROID_HOME/ANDROID_SDK_ROOT")
+    raise FileNotFoundError(
+        "adb was not found on PATH or in ANDROID_HOME/ANDROID_SDK_ROOT"
+    )
+
+
+def _pump_output(proc: subprocess.Popen) -> None:
+    """Stream a subprocess's stdout to our stdout line by line."""
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        print(line, end="", flush=True)
+
+
+def build_debug_apk(root: Path, timeout: float) -> None:
+    """Run `gradlew assembleDebug` in the project root, streaming output."""
+    gradlew = root / ("gradlew.bat" if os.name == "nt" else "gradlew")
+    if not gradlew.is_file():
+        raise BuildError(f"gradle wrapper not found: {gradlew}")
+    if os.name == "nt":
+        command = ["cmd", "/c", str(gradlew), "assembleDebug"]
+    else:
+        command = ["./gradlew", "assembleDebug"]
+    log(f"执行: {shlex.join(command)}")
+    try:
+        proc = subprocess.Popen(
+            command,
+            cwd=root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+        )
+    except OSError as exc:
+        raise BuildError(f"could not start gradle build: {exc}") from exc
+    pump = threading.Thread(target=_pump_output, args=(proc,), daemon=True)
+    pump.start()
+    pump.join(timeout=timeout)
+    if pump.is_alive():
+        proc.kill()
+        pump.join()
+        raise BuildError(f"gradle build timed out after {timeout:g}s")
+    if proc.wait() != 0:
+        raise BuildError(f"gradle build failed with exit code {proc.returncode}")
+    log("debug APK 构建成功")
 
 
 def run_adb(adb: str, args: list[str], serial: str | None, timeout: float) -> str:
@@ -65,7 +126,9 @@ def run_adb(adb: str, args: list[str], serial: str | None, timeout: float) -> st
             check=False,
         )
     except subprocess.TimeoutExpired as exc:
-        raise AdbError(f"ADB command timed out after {timeout:g}s: {shlex.join(command)}") from exc
+        raise AdbError(
+            f"ADB command timed out after {timeout:g}s: {shlex.join(command)}"
+        ) from exc
     except OSError as exc:
         raise AdbError(f"could not start adb: {exc}") from exc
 
@@ -98,13 +161,20 @@ def choose_device(adb: str, requested_serial: str | None, timeout: float) -> str
     if requested_serial:
         state = states.get(requested_serial)
         if state != "device":
-            available = ", ".join(f"{name} ({state})" for name, state in states.items()) or "none"
+            available = (
+                ", ".join(f"{name} ({state})" for name, state in states.items())
+                or "none"
+            )
             raise AdbError(
                 f"requested device {requested_serial!r} is not ready; available devices: {available}"
             )
         return requested_serial
 
-    candidates = [serial for serial, state in states.items() if state == "device" and looks_wireless(serial)]
+    candidates = [
+        serial
+        for serial, state in states.items()
+        if state == "device" and looks_wireless(serial)
+    ]
     if len(candidates) == 1:
         return candidates[0]
     if not candidates:
@@ -117,14 +187,21 @@ def choose_device(adb: str, requested_serial: str | None, timeout: float) -> str
     )
 
 
-def restart_app(adb: str, serial: str, package: str, activity: str, timeout: float) -> None:
+def restart_app(
+    adb: str, serial: str, package: str, activity: str, timeout: float
+) -> None:
     run_adb(adb, ["shell", "am", "force-stop", package], serial, timeout)
     component = activity if "/" in activity else f"{package}/{activity}"
     run_adb(adb, ["shell", "am", "start", "-n", component], serial, timeout)
 
 
 def run(args: argparse.Namespace) -> None:
-    apk = Path(args.apk).expanduser().resolve()
+    if args.apk is None:
+        build_debug_apk(Path(__file__).resolve().parents[1], args.build_timeout)
+        apk = find_latest_apk(DEFAULT_APK_DIR)
+        log(f"使用最新构建产物: {apk.name}")
+    else:
+        apk = Path(args.apk).expanduser().resolve()
     if not apk.is_file():
         raise FileNotFoundError(f"debug APK does not exist: {apk}")
 
@@ -140,7 +217,9 @@ def run(args: argparse.Namespace) -> None:
 
 
 def self_test() -> None:
-    assert device_states("List of devices attached\n192.168.1.10:5555\tdevice\nUSB123\tdevice\n") == {
+    assert device_states(
+        "List of devices attached\n192.168.1.10:5555\tdevice\nUSB123\tdevice\n"
+    ) == {
         "192.168.1.10:5555": "device",
         "USB123": "device",
     }
@@ -152,20 +231,48 @@ def self_test() -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--apk", default=str(DEFAULT_APK), help="debug APK path")
-    parser.add_argument("--serial", help="ADB serial; required when multiple wireless devices are ready")
-    parser.add_argument("--package", default=DEFAULT_PACKAGE, help="application package name")
-    parser.add_argument("--activity", default=DEFAULT_ACTIVITY, help="launcher activity or full package/activity")
+    parser.add_argument(
+        "--apk",
+        help="install a specific APK instead of building the latest one",
+    )
+    parser.add_argument(
+        "--build-timeout",
+        type=float,
+        default=600,
+        help="gradle build timeout in seconds (default: 600)",
+    )
+    parser.add_argument(
+        "--serial", help="ADB serial; required when multiple wireless devices are ready"
+    )
+    parser.add_argument(
+        "--package", default=DEFAULT_PACKAGE, help="application package name"
+    )
+    parser.add_argument(
+        "--activity",
+        default=DEFAULT_ACTIVITY,
+        help="launcher activity or full package/activity",
+    )
     parser.add_argument("--adb", help="path to adb executable")
-    parser.add_argument("--timeout", type=float, default=30, help="timeout per adb command in seconds")
-    parser.add_argument("--self-test", action="store_true", help="run local checks without adb or a phone")
+    parser.add_argument(
+        "--timeout", type=float, default=30, help="timeout per adb command in seconds"
+    )
+    parser.add_argument(
+        "--self-test",
+        action="store_true",
+        help="run local checks without adb or a phone",
+    )
     args = parser.parse_args()
     if args.timeout <= 0:
         parser.error("--timeout must be greater than zero")
+    if args.build_timeout <= 0:
+        parser.error("--build-timeout must be greater than zero")
     return args
 
 
 def main() -> int:
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if reconfigure:
+        reconfigure(errors="replace")
     args = parse_args()
     try:
         if args.self_test:
@@ -175,7 +282,7 @@ def main() -> int:
     except KeyboardInterrupt:
         print("[ERROR] 操作已取消", file=sys.stderr)
         return 130
-    except Exception as exc:
+    except (AdbError, BuildError, OSError) as exc:
         print(f"[ERROR] {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
     return 0
