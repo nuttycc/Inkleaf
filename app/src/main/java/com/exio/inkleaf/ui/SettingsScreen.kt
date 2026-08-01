@@ -398,7 +398,18 @@ private fun SectionLabel(text: String) {
 private fun formatBytes(bytes: Long): String =
     when {
         bytes <= 0L -> "0 B"
-        bytes >= 1L shl 30 -> {
+        bytes < 1L shl 10 -> "$bytes B"
+        bytes < 1L shl 20 -> {
+            val kiB = 1L shl 10
+            if (bytes % kiB == 0L) {
+                "${bytes / kiB} KiB"
+            } else {
+                "%.1f KiB".format(bytes / 1024f)
+            }
+        }
+        bytes < 1L shl 30 -> "${bytes shr 20} MB"
+
+        else -> {
             val gb = 1L shl 30
             if (bytes % gb == 0L) {
                 "${bytes / gb} GB"
@@ -406,8 +417,6 @@ private fun formatBytes(bytes: Long): String =
                 "%.1f GB".format(bytes / (1024f * 1024f * 1024f))
             }
         }
-
-        else -> "${bytes shr 20} MB"
     }
 
 private fun cacheLimitDescription(limit: CacheLimit, autoBudgetBytes: Long): String =

@@ -53,7 +53,9 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
@@ -912,7 +914,7 @@ internal class OnlineReaderViewModel(
         OnlinePageCacheIdentity.create(
             pluginId = pluginId,
             pluginVersion = pluginVersion,
-            accessScope = response.accessScope ?: "legacy:${UUID.randomUUID()}",
+            accessScope = response.accessScope ?: LEGACY_ACCESS_SCOPE,
             sourceId = sourceId,
             chapterId = chapterId,
             revision = revision,
@@ -984,19 +986,37 @@ internal class OnlineReaderViewModel(
                         candidate.findPageByIdentity(opened.pageIdentity(currentPage))
                             ?: currentPage.coerceIn(0, candidate.totalPageCount - 1)
                     descriptorRefreshJob = null
-                    prepareAndCommitChapter(
-                        chapter = refreshedChapter,
-                        index = chapterIndex,
-                        direction = ChapterSwitchDirection.REFRESH,
-                        prebuilt =
-                            PreloadedChapter(
-                                candidate,
-                                chapterIndex,
-                                refreshedChapter,
-                                candidateRevision,
-                            ),
-                        settledPage = targetPage,
-                    )
+                    // Serialize the commit with chapter switches: while a chapter load is in
+                    // flight the refresh must not commit on top of it, and the commit itself
+                    // must claim chapterLoadJob so switches cannot enter prepareAndCommitChapter
+                    // concurrently. coroutineScope keeps the commit a structured child of this
+                    // descriptor job: cancelling the revalidation also cancels an in-flight
+                    // commit, and async/await keeps commit failures in this try/catch.
+                    if (chapterLoadJob?.isActive == true) {
+                        closeVolumeWhenUnused(candidate)
+                        return@launch
+                    }
+                    coroutineScope {
+                        val commitJob =
+                            async(start = CoroutineStart.LAZY) {
+                                prepareAndCommitChapter(
+                                    chapter = refreshedChapter,
+                                    index = chapterIndex,
+                                    direction = ChapterSwitchDirection.REFRESH,
+                                    prebuilt =
+                                        PreloadedChapter(
+                                            candidate,
+                                            chapterIndex,
+                                            refreshedChapter,
+                                            candidateRevision,
+                                        ),
+                                    settledPage = targetPage,
+                                )
+                            }
+                        chapterLoadJob = commitJob
+                        commitJob.start()
+                        commitJob.await()
+                    }
                 } catch (error: CancellationException) {
                     throw error
                 } catch (_: Exception) {
@@ -1459,7 +1479,11 @@ internal class OnlineReaderViewModel(
     }
 
     private fun prewarmThumbnails(opened: OnlineChapterVolume, startPage: Int) {
-        launchThumbnailJob { loadThumbnail(startPage) }
+        launchThumbnailJob {
+            // The prewarm is bound to the volume that requested it; a chapter switch may have
+            // replaced the active volume before the job runs.
+            if (volume === opened) loadThumbnail(startPage)
+        }
     }
 
     private fun launchThumbnailJob(block: suspend () -> Unit) {
@@ -1641,6 +1665,7 @@ internal class OnlineReaderViewModel(
 
     private companion object {
         val MANIFEST_TTL = 15.minutes
+        const val LEGACY_ACCESS_SCOPE = "legacy"
         const val METERED_PREFETCH_PAGES = 2
         const val UNMETERED_PREFETCH_PAGES = 5
         const val ADJACENT_PREFETCH_DISTANCE = 2

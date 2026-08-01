@@ -1,5 +1,6 @@
 package com.exio.inkleaf.data
 
+import android.util.Log
 import java.io.File
 import java.io.IOException
 import java.nio.charset.StandardCharsets
@@ -119,8 +120,8 @@ internal class OnlinePageCache(
     private val manifestsDirectory = File(rootDirectory, MANIFESTS_DIR)
     private val clearPendingMarker =
         File(rootDirectory.absoluteFile.parentFile, ".${rootDirectory.name}$CLEAR_PENDING_SUFFIX")
-    private val foregroundDownloads = Semaphore(1)
-    private val speculativeDownloads = Semaphore(2)
+    private val foregroundDownloads = Semaphore(MAX_FOREGROUND_DOWNLOADS)
+    private val speculativeDownloads = Semaphore(MAX_SPECULATIVE_DOWNLOADS)
     private val flightScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val flightLock = Any()
     private val flights = mutableMapOf<String, Flight>()
@@ -341,7 +342,13 @@ internal class OnlinePageCache(
     }
 
     fun cleanupOnColdStart(staleBeforeMs: Long) {
-        if (clearPendingMarker.exists()) clearRoot()
+        if (clearPendingMarker.exists() && !clearRoot()) {
+            Log.w(
+                TAG,
+                "Unable to complete deferred online cache clear; " +
+                    "the pending marker keeps the online cache disabled until the next cold start",
+            )
+        }
         rootDirectory
             .walkTopDown()
             .filter { it.isFile && it.name.endsWith(TEMP_SUFFIX) && it.lastModified() < staleBeforeMs }
@@ -472,22 +479,15 @@ internal class OnlinePageCache(
     }
 
     private fun revisionDirectory(base: File, identity: OnlinePageCacheIdentity): File =
-        File(
-            File(
-                File(
-                    File(
-                        File(
-                            File(base, identity.pluginIdHash),
-                            identity.pluginVersionHash,
-                        ),
-                        identity.accessScopeHash,
-                    ),
-                    identity.sourceIdHash,
-                ),
+        listOf(
+                identity.pluginIdHash,
+                identity.pluginVersionHash,
+                identity.accessScopeHash,
+                identity.sourceIdHash,
                 identity.chapterIdHash,
-            ),
-            identity.revisionHash,
-        )
+                identity.revisionHash,
+            )
+            .fold(base) { directory, segment -> File(directory, segment) }
 
     private fun manifestFile(identity: OnlinePageCacheIdentity): File =
         File(revisionDirectory(manifestsDirectory, identity), MANIFEST_FILE)
@@ -500,15 +500,6 @@ internal class OnlinePageCache(
 
     private fun String.isInside(root: String): Boolean =
         this == root || startsWith(root + File.separator)
-
-    private fun deleteEmptyParents(start: File?, stop: File) {
-        var current = start
-        while (current != null && current != stop && current.list().isNullOrEmpty()) {
-            val parent = current.parentFile
-            current.delete()
-            current = parent
-        }
-    }
 
     private class Flight(val initialPriority: OnlinePageLoadPriority) {
         lateinit var job: Deferred<ByteArray>
@@ -542,6 +533,9 @@ internal class OnlinePageCache(
     )
 
     private companion object {
+        const val TAG = "OnlinePageCache"
+        const val MAX_FOREGROUND_DOWNLOADS = 1
+        const val MAX_SPECULATIVE_DOWNLOADS = 2
         const val PAGES_DIR = "pages"
         const val MANIFESTS_DIR = "manifests"
         const val MANIFEST_FILE = "manifest.json"

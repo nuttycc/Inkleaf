@@ -25,4 +25,13 @@ class OnlinePagePrefetchTest {
         assertEquals(listOf(4, 3), adjacentOnlinePagePrefetchOrder(5, direction = -1))
         assertEquals(listOf(0), adjacentOnlinePagePrefetchOrder(1, direction = 1))
     }
+
+    @Test
+    fun `degenerate inputs produce no prefetch targets`() {
+        assertEquals(emptyList<Int>(), onlinePagePrefetchOrder(5, 20, direction = 1, count = 0))
+        assertEquals(emptyList<Int>(), onlinePagePrefetchOrder(20, 20, direction = 1, count = 3))
+        assertEquals(emptyList<Int>(), onlinePagePrefetchOrder(0, 0, direction = 1, count = 3))
+        assertEquals(emptyList<Int>(), adjacentOnlinePagePrefetchOrder(0, direction = 1))
+        assertEquals(listOf(0), adjacentOnlinePagePrefetchOrder(1, direction = -1))
+    }
 }

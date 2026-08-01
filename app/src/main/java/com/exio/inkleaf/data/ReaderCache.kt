@@ -3,6 +3,7 @@ package com.exio.inkleaf.data
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.util.Log
 import java.io.File
 import java.io.IOException
 import java.nio.file.AtomicMoveNotSupportedException
@@ -26,6 +27,7 @@ import kotlinx.coroutines.withContext
  * identity manifests, and reader thumbnails. User records and saved online snapshots live elsewhere.
  */
 object ReaderCache {
+    private const val TAG = "ReaderCache"
     private const val BOOKS_DIR = "books"
     private const val THUMBS_DIR = "thumbs"
     private const val ONLINE_PAGES_DIR = "online-pages"
@@ -43,10 +45,14 @@ object ReaderCache {
             for (context in budgetRequests) {
                 try {
                     enforceBudget(context, keep = null)
+                    // The dedicated online-thumbnail cap stays enforced through the conflated
+                    // pipeline instead of the thumbnail write path, so eviction never runs
+                    // while onlineThumbnailWriteMutex is held.
+                    enforceOnlineThumbnailBudget(context)
                 } catch (error: CancellationException) {
                     throw error
-                } catch (_: Exception) {
-                    // A maintenance failure must not turn a successful page load into a reader error.
+                } catch (error: Exception) {
+                    Log.w(TAG, "Cache budget enforcement failed", error)
                 }
             }
         }
@@ -238,7 +244,6 @@ object ReaderCache {
                                 temporary.delete()
                             }
                         }.isSuccess
-                    if (stored) runCatching { enforceOnlineThumbnailBudget(context) }
                     stored
                 }
             if (stored) scheduleBudgetEnforcement(context)
@@ -254,7 +259,9 @@ object ReaderCache {
                 .filter { it.isDirectory && it.name.startsWith("online-") }
                 .flatMap { it.listFiles().orEmpty().asSequence() }
                 .filter {
-                    it.isFile && (it.name.endsWith(".jpg") || it.name.endsWith(".tmp"))
+                    // .tmp files belong to in-flight writes; eviction must never delete an
+                    // active temporary. Stale .tmp leftovers are cleaned on cold start.
+                    it.isFile && it.name.endsWith(".jpg")
                 }
                 .toList()
         var total = files.sumOf(File::length)
@@ -328,6 +335,7 @@ object ReaderCache {
                         thumbsRoot
                             .walkTopDown()
                             .filter(File::isFile)
+                            .filterNot { it.name.endsWith(".tmp") }
                             .filterNot { file ->
                                 val topDirectory =
                                     runCatching {
@@ -420,15 +428,6 @@ object ReaderCache {
 
     private fun directorySize(directory: File): Long =
         directory.walkTopDown().filter(File::isFile).sumOf(File::length)
-
-    private fun deleteEmptyParents(start: File?, stop: File) {
-        var current = start
-        while (current != null && current != stop && current.list().isNullOrEmpty()) {
-            val parent = current.parentFile
-            current.delete()
-            current = parent
-        }
-    }
 
     private data class EvictionEntry(val file: File, val kind: EvictionKind)
 

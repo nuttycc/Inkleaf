@@ -246,6 +246,8 @@ class OnlinePageCacheTest {
 
             assertTrue(loaded.all { it.contentEquals(PAGE_BYTES) })
             assertEquals(1, calls.get())
+            // The simulated disk failure (root is a plain file) must not create a page file.
+            assertFalse(cache.pageFile(key).exists())
         } finally {
             rootFile.delete()
         }

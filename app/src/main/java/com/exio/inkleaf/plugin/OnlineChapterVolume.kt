@@ -50,6 +50,7 @@ internal class OnlineChapterVolume(
     private val refreshMutex = Mutex()
     private val decodeRetriedPages = ConcurrentHashMap.newKeySet<Int>()
     private val protectedIdentities = ConcurrentHashMap.newKeySet<OnlinePageCacheIdentity>()
+    private val protectionLock = Any()
     @Volatile private var currentSource = ChapterSource(pages, initialCacheIdentity)
     // Keep source-provided IDs separate from revision/index fallbacks so they cannot collide.
     private val pageIdentities = onlinePageIdentities(sourceRevision, pages)
@@ -126,6 +127,9 @@ internal class OnlineChapterVolume(
         if (!sameStablePages(refresh.pages)) return false
         currentSource = ChapterSource(refresh.pages, refresh.cacheIdentity)
         protect(refresh.cacheIdentity)
+        // The replacement brings fresh bytes for the same stable pages, so each page deserves
+        // a new decode retry against the new cache identity.
+        decodeRetriedPages.clear()
         return true
     }
 
@@ -140,8 +144,12 @@ internal class OnlineChapterVolume(
         if (!closed.compareAndSet(false, true)) return
         calls.forEach { it.cancel() }
         calls.clear()
-        protectedIdentities.forEach(cache::releaseChapter)
-        protectedIdentities.clear()
+        // protect() and this release section share protectionLock so a concurrent protect()
+        // cannot add a cache protection after close() has released and cleared the set.
+        synchronized(protectionLock) {
+            protectedIdentities.forEach(cache::releaseChapter)
+            protectedIdentities.clear()
+        }
     }
 
     private fun requirePage(globalPage: Int): Int {
@@ -195,23 +203,27 @@ internal class OnlineChapterVolume(
     }
 
     private fun protect(identity: OnlinePageCacheIdentity) {
-        if (protectedIdentities.add(identity)) cache.protectChapter(identity)
+        synchronized(protectionLock) {
+            if (closed.get()) return
+            if (protectedIdentities.add(identity)) cache.protectChapter(identity)
+        }
     }
 
     private suspend fun download(
         page: PageDescriptor,
         priority: OnlinePageLoadPriority,
     ): ByteArray {
+        // The request is immutable and body-less, so one instance is safe to reuse across retries.
+        val request =
+            Request.Builder()
+                .url(page.url)
+                .apply {
+                    page.headers.forEach { (name, value) -> header(name, value) }
+                    page.referer?.let { header("Referer", it) }
+                }
+                .build()
         var retry = false
         while (true) {
-            val request =
-                Request.Builder()
-                    .url(page.url)
-                    .apply {
-                        page.headers.forEach { (name, value) -> header(name, value) }
-                        page.referer?.let { header("Referer", it) }
-                    }
-                    .build()
             try {
                 return execute(request)
             } catch (error: CancellationException) {
@@ -230,11 +242,21 @@ internal class OnlineChapterVolume(
                         !retry
                 ) {
                     val waitMillis = error.retryAfterMillis
-                    if (waitMillis != null) {
-                        if (waitMillis > MAX_RETRY_AFTER_MS) {
-                            throw ComicOpenException("请求过于频繁，请稍后重试")
+                    when {
+                        waitMillis != null -> {
+                            if (waitMillis > MAX_RETRY_AFTER_MS) {
+                                throw ComicOpenException("请求过于频繁，请稍后重试")
+                            }
+                            delay(waitMillis.milliseconds)
                         }
-                        delay(waitMillis.milliseconds)
+
+                        // A 429 without Retry-After still signals rate limiting; back off briefly
+                        // instead of hammering the server again immediately.
+                        error.code == 429 -> delay(DEFAULT_RETRY_BACKOFF_MS.milliseconds)
+
+                        else -> {
+                            // 5xx without Retry-After: the next attempt may succeed right away.
+                        }
                     }
                     retry = true
                     continue
@@ -330,6 +352,7 @@ internal class OnlineChapterVolume(
     private companion object {
         val DESCRIPTOR_REFRESH_CODES = setOf(401, 403, 404)
         const val MAX_RETRY_AFTER_MS = 30_000L
+        const val DEFAULT_RETRY_BACKOFF_MS = 1_000L
     }
 }
 

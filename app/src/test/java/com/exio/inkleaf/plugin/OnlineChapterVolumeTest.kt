@@ -28,6 +28,7 @@ import okhttp3.ResponseBody
 import okhttp3.ResponseBody.Companion.toResponseBody
 import okio.Buffer
 import okio.BufferedSource
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -36,6 +37,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class OnlineChapterVolumeTest {
+    private val temporaryRoots = mutableListOf<File>()
+
+    @After
+    fun deleteTemporaryRoots() {
+        temporaryRoots.forEach { it.deleteRecursively() }
+        temporaryRoots.clear()
+    }
+
     @Test
     fun `ordered page ids provide a URL independent revision fallback`() {
         val first = response(pageIds = listOf("page-1", "page-2"))
@@ -265,6 +274,101 @@ class OnlineChapterVolumeTest {
     }
 
     @Test
+    fun `prefetch authorization failure does not refresh descriptors`() = runBlocking {
+        val root = Files.createTempDirectory("online-volume-prefetch-401").toFile()
+        try {
+            val factory = callFactory(HttpOutcome(401))
+            val refreshes = AtomicInteger()
+            val volume =
+                volume(
+                    response(listOf("page-1")).pages,
+                    OnlinePageCache(root),
+                    cacheIdentity(),
+                    factory,
+                    refreshChapter = {
+                        refreshes.incrementAndGet()
+                        OnlineChapterRefresh(response(listOf("page-1")).pages, cacheIdentity())
+                    },
+                )
+            try {
+                val error = runCatching { volume.prefetchPage(0) }.exceptionOrNull()
+                assertTrue(error is ComicOpenException)
+                assertEquals(0, refreshes.get())
+                assertEquals(1, factory.calls.get())
+            } finally {
+                volume.close()
+            }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `descriptor refresh resets the decode retry budget`() = runBlocking {
+        val root = Files.createTempDirectory("online-volume-retry-reset").toFile()
+        try {
+            val volume =
+                volume(
+                    response(listOf("page-1")).pages,
+                    OnlinePageCache(root),
+                    cacheIdentity(),
+                    Call.Factory { error("Network is not used by retry-budget tests") },
+                )
+            try {
+                assertTrue(volume.invalidatePage(0))
+                assertFalse(volume.invalidatePage(0))
+                assertTrue(
+                    volume.replaceDescriptors(
+                        OnlineChapterRefresh(response(listOf("page-1")).pages, cacheIdentity()),
+                    )
+                )
+                // The replacement brings fresh bytes, so the page may be retried once more.
+                assertTrue(volume.invalidatePage(0))
+            } finally {
+                volume.close()
+            }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `closed volume does not protect a replacement identity`() = runBlocking {
+        val root = Files.createTempDirectory("online-volume-close-protect").toFile()
+        try {
+            val cache = OnlinePageCache(root)
+            val identity = cacheIdentity()
+            val volume =
+                volume(
+                    response(listOf("page-1")).pages,
+                    cache,
+                    identity,
+                    Call.Factory { error("Network is not used by close-protection tests") },
+                )
+            val replacement =
+                OnlinePageCacheIdentity.create(
+                    pluginId = "plugin.test",
+                    pluginVersion = "1.0.0",
+                    accessScope = "public",
+                    sourceId = "comic-1",
+                    chapterId = CHAPTER_ID,
+                    revision = "chapter-r2",
+                )
+            volume.close()
+            assertTrue(
+                volume.replaceDescriptors(
+                    OnlineChapterRefresh(response(listOf("page-1")).pages, replacement),
+                )
+            )
+            // The closed volume must not leak cache protection for the replacement identity.
+            assertFalse(cache.isProtected(cache.pageFile(OnlinePageCacheKey.create(replacement, "page-1"))))
+            assertFalse(cache.isProtected(cache.pageFile(OnlinePageCacheKey.create(identity, "page-1"))))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun `retry after above thirty seconds does not block the reader`() = runBlocking {
         val root = Files.createTempDirectory("online-volume-retry-after").toFile()
         try {
@@ -349,16 +453,15 @@ class OnlineChapterVolumeTest {
                 chapterId = CHAPTER_ID,
                 revision = revision,
             )
+        val root = Files.createTempDirectory("online-volume-identity").toFile()
+        temporaryRoots += root
         return OnlineChapterVolume(
             chapterId = CHAPTER_ID,
             title = "Chapter 1",
             sourceRevision = revision,
             pages = response(pageIds).pages,
             client = Call.Factory { error("Network is not used by identity tests") },
-            cache =
-                OnlinePageCache(
-                    File(System.getProperty("java.io.tmpdir"), "online-volume-identity-test"),
-                ),
+            cache = OnlinePageCache(root),
             initialCacheIdentity = identity,
         )
     }
