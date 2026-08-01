@@ -241,12 +241,12 @@ fun OnlineComicScreen(
                                                 Icon(
                                                     painter =
                                                         painterResource(R.drawable.ic_bookmark),
-                                                    contentDescription = "已追漫",
+                                                    contentDescription = "已在书架",
                                                     modifier = Modifier.size(16.dp),
                                                 )
                                                 Spacer(modifier = Modifier.width(4.dp))
                                                 Text(
-                                                    "已追漫",
+                                                    "已在书架",
                                                     style = MaterialTheme.typography.labelMedium,
                                                 )
                                             }
@@ -265,12 +265,12 @@ fun OnlineComicScreen(
                                                         painterResource(
                                                             R.drawable.ic_bookmark_border
                                                         ),
-                                                    contentDescription = "追漫",
+                                                    contentDescription = "加入书架",
                                                     modifier = Modifier.size(16.dp),
                                                 )
                                                 Spacer(modifier = Modifier.width(4.dp))
                                                 Text(
-                                                    "追漫",
+                                                    "加入书架",
                                                     style = MaterialTheme.typography.labelMedium,
                                                 )
                                             }

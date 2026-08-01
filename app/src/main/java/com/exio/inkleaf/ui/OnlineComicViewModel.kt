@@ -130,8 +130,8 @@ internal class OnlineComicViewModel(
                         _state.value.copy(
                             isBookmarked = persistedBookmarkState,
                             errorMessage =
-                                error.message?.let { "追漫状态保存失败：$it" }
-                                    ?: "追漫状态保存失败",
+                                error.message?.let { "书架状态保存失败：$it" }
+                                    ?: "书架状态保存失败",
                         )
                 }
             }
