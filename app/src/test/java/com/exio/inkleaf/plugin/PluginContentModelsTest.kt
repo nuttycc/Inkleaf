@@ -272,6 +272,52 @@ class PluginContentModelsTest {
     }
 
     @Test
+    fun `page access scope is optional validated and retained`() {
+        val page = PageDescriptor(index = 0, url = "https://example.com/page.jpg")
+        val legacy =
+            PluginContentCodec.pages(
+                PluginContentCodec.json.parseToJsonElement(
+                    """{"sourceId":"comic-1","chapterId":"chapter-1","pages":[{"index":0,"url":"https://example.com/page.jpg"}]}"""
+                ),
+                "io.example.source",
+            )
+        assertEquals(null, legacy.accessScope)
+
+        val scoped =
+            PluginContentCodec.pages(
+                PluginContentCodec.json.encodeToJsonElement(
+                    PluginPagesResponse(
+                        sourceId = "comic-1",
+                        chapterId = "chapter-1",
+                        pages = listOf(page),
+                        accessScope = "member-tier-a",
+                    )
+                ),
+                "io.example.source",
+            )
+        assertEquals("member-tier-a", scoped.accessScope)
+
+        listOf(" ", "bad\u0000scope", "a".repeat(513)).forEach { invalidScope ->
+            val error =
+                runCatching {
+                        PluginContentCodec.pages(
+                            PluginContentCodec.json.encodeToJsonElement(
+                                PluginPagesResponse(
+                                    sourceId = "comic-1",
+                                    chapterId = "chapter-1",
+                                    pages = listOf(page),
+                                    accessScope = invalidScope,
+                                )
+                            ),
+                            "io.example.source",
+                        )
+                    }
+                    .exceptionOrNull()
+            assertTrue(error is PluginContentValidationException)
+        }
+    }
+
+    @Test
     fun `image headers must be valid OkHttp ASCII headers`() {
         val response =
             PluginPagesResponse(

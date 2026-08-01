@@ -8,6 +8,7 @@ import coil.ImageLoaderFactory
 import com.exio.inkleaf.data.AlbumExporter
 import com.exio.inkleaf.data.AlbumRepository
 import com.exio.inkleaf.data.ComicRepository
+import com.exio.inkleaf.data.OnlinePageCache
 import com.exio.inkleaf.data.ReaderCache
 import com.exio.inkleaf.diagnostics.DiagnosticEventType
 import com.exio.inkleaf.diagnostics.DiagnosticRepository
@@ -78,6 +79,9 @@ class InkleafApplication : Application(), ImageLoaderFactory {
     }
     val onlineContentRepository: OnlineContentRepository by lazy {
         OnlineContentRepository(File(filesDir, "online-content/state.json"))
+    }
+    internal val onlinePageCache: OnlinePageCache by lazy {
+        ReaderCache.onlinePageCache(this)
     }
     internal val onlineImageCallFactory: Call.Factory by lazy {
         val client =

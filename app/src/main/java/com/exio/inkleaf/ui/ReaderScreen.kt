@@ -1739,6 +1739,8 @@ private fun ComicPage(
     var offset by remember(pageStateKey) { mutableStateOf(Offset.Zero) }
     var viewportSize by remember(pageStateKey) { mutableStateOf(IntSize.Zero) }
     var useZoomedPdfRender by remember(pageStateKey) { mutableStateOf(false) }
+    var decodeRetryRequest by remember(pageStateKey) { mutableIntStateOf(0) }
+    var decodeFailureMessage by remember(pageStateKey) { mutableStateOf<String?>(null) }
     val isCurrentPage = pageStateKey == currentPageStateKey
     fun resetZoom() {
         scale = MIN_ZOOM_SCALE
@@ -1835,6 +1837,7 @@ private fun ComicPage(
             produceState<PageContent>(
                 initialValue = PageContent.Loading,
                 key1 = contentKeys.producerRestart,
+                key2 = decodeRetryRequest,
             ) {
                 if (!onVolumeTaskStarted(volume)) {
                     value = PageContent.Error("本页资源已释放")
@@ -1940,7 +1943,14 @@ private fun ComicPage(
                             rememberAsyncImagePainter(
                                 model = imageRequest,
                                 onSuccess = { imageReady = true },
-                                onError = { imageReady = true },
+                                onError = {
+                                    if (decodeRetryRequest == 0 && volume.invalidatePage(page)) {
+                                        decodeRetryRequest += 1
+                                    } else {
+                                        decodeFailureMessage = "页面图片无法解码"
+                                        imageReady = true
+                                    }
+                                },
                                 contentScale = ContentScale.Fit,
                             )
                         }
@@ -1970,7 +1980,15 @@ private fun ComicPage(
 
                     is PageContent.Bitmap,
                     is PageContent.Bytes -> {
-                        if (pagePainter == null) {
+                        if (decodeFailureMessage != null) {
+                            Text(
+                                text = requireNotNull(decodeFailureMessage),
+                                color = Color.White,
+                                style = MaterialTheme.typography.bodyLarge,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(32.dp),
+                            )
+                        } else if (pagePainter == null) {
                             DelayedSpinner(showDelay = 200.milliseconds)
                         } else {
                             Box(

@@ -148,6 +148,7 @@ data class PluginPagesResponse(
     val chapterId: String,
     val revision: String? = null,
     val pages: List<PageDescriptor> = emptyList(),
+    val accessScope: String? = null,
 )
 
 @Serializable
@@ -246,6 +247,7 @@ object PluginContentCodec {
             validateId(response.sourceId, "pages.sourceId")
             validatePluginId(pluginId)
             validateId(response.chapterId, "pages.chapterId")
+            response.accessScope?.let { validateId(it, "pages.accessScope") }
             if (response.pages.size > PluginContentLimits.MAX_PAGES) {
                 throw PluginContentValidationException("Plugin returned too many pages")
             }

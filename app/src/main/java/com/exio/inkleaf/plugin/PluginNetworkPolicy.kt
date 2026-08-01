@@ -14,11 +14,12 @@ import java.net.ProxySelector
 import java.net.SocketAddress
 import java.net.URI
 import java.net.UnknownHostException
+import javax.net.SocketFactory
 import okhttp3.Call
 import okhttp3.Dns
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
-import okhttp3.Request
+import okhttp3.Response
 
 /** Network boundary shared by plugin-controlled requests. */
 internal object PluginNetworkPolicy {
@@ -46,20 +47,20 @@ internal object PluginNetworkPolicy {
                 NetworkDiagnosticReporter.interceptor(context, diagnosticSource, pluginId)
             )
         }
-        val policyClient =
+        val policyBuilder =
             builder
                 .addInterceptor(hostValidationInterceptor())
                 .proxy(null)
                 .proxySelector(validatingProxySelector())
                 .followRedirects(client.followRedirects)
                 .followSslRedirects(client.followSslRedirects && followSslRedirects)
-                .build()
-        if (context == null) return policyClient
-
-        val appContext = context.applicationContext ?: context
-        val connectivityManager =
-            appContext.getSystemService(ConnectivityManager::class.java) ?: return policyClient
-        return NetworkBoundCallFactory(connectivityManager, policyClient)
+        if (context != null) {
+            val appContext = context.applicationContext ?: context
+            appContext.getSystemService(ConnectivityManager::class.java)?.let { connectivityManager ->
+                policyBuilder.addInterceptor(VpnNetworkInterceptor(connectivityManager))
+            }
+        }
+        return policyBuilder.build()
     }
 
     internal fun requirePublicUrlHost(hostname: String) {
@@ -105,43 +106,6 @@ internal object PluginNetworkPolicy {
                 value.length <= MAX_HEADER_VALUE_LENGTH &&
                     value.all { it == '\t' || it in '\u0020'..'\u007e' }
             }
-
-    private class NetworkBoundCallFactory(
-        private val connectivityManager: ConnectivityManager,
-        private val baseClient: OkHttpClient,
-    ) : Call.Factory {
-        @Volatile private var binding: NetworkBinding? = null
-
-        override fun newCall(request: Request): Call {
-            val vpnNetwork =
-                activeVpnNetwork(connectivityManager) ?: return baseClient.newCall(request)
-            return clientFor(vpnNetwork).newCall(request)
-        }
-
-        private fun clientFor(network: Network): OkHttpClient {
-            binding
-                ?.takeIf { it.network == network }
-                ?.let {
-                    return it.client
-                }
-            return synchronized(this) {
-                binding?.takeIf { it.network == network }?.client
-                    ?: baseClient
-                        .newBuilder()
-                        // DNS and sockets stay on one captured VPN. If that network disappears,
-                        // the request fails instead of sending its Fake-IP route on another
-                        // network.
-                        .dns(vpnDns(connectivityManager, network))
-                        .proxySelector(validatingProxySelector(connectivityManager, network))
-                        .addInterceptor(networkBindingInterceptor(connectivityManager, network))
-                        .socketFactory(network.socketFactory)
-                        .build()
-                        .also { client -> binding = NetworkBinding(network, client) }
-            }
-        }
-    }
-
-    private data class NetworkBinding(val network: Network, val client: OkHttpClient)
 
     private fun vpnDns(
         connectivityManager: ConnectivityManager,
@@ -192,15 +156,47 @@ internal object PluginNetworkPolicy {
             override fun connectFailed(uri: URI?, sa: SocketAddress?, ioe: IOException?) = Unit
         }
 
-    private fun networkBindingInterceptor(
-        connectivityManager: ConnectivityManager,
-        network: Network,
-    ): Interceptor = Interceptor { chain ->
-        if (activeVpnNetwork(connectivityManager) != network) {
-            throw UnknownHostException("VPN changed before request: ${chain.request().url.host}")
+    private class VpnNetworkInterceptor(
+        private val connectivityManager: ConnectivityManager,
+    ) : Interceptor {
+        @Volatile private var binding: VpnBinding? = null
+
+        override fun intercept(chain: Interceptor.Chain): Response {
+            val request = chain.request()
+            val network =
+                activeVpnNetwork(connectivityManager)
+                    ?: return chain.proceed(request)
+            val binding = bindingFor(network)
+            if (activeVpnNetwork(connectivityManager) != network) {
+                throw UnknownHostException("VPN changed before request: ${request.url.host}")
+            }
+            return chain
+                .withDns(binding.dns)
+                .withProxySelector(binding.proxySelector)
+                .withSocketFactory(binding.socketFactory)
+                .proceed(request)
         }
-        chain.proceed(chain.request())
+
+        private fun bindingFor(network: Network): VpnBinding =
+            binding?.takeIf { it.network == network }
+                ?: synchronized(this) {
+                    binding?.takeIf { it.network == network }
+                        ?: VpnBinding(
+                            network = network,
+                            dns = vpnDns(connectivityManager, network),
+                            proxySelector = validatingProxySelector(connectivityManager, network),
+                            socketFactory = network.socketFactory,
+                        )
+                            .also { binding = it }
+                }
     }
+
+    private data class VpnBinding(
+        val network: Network,
+        val dns: Dns,
+        val proxySelector: ProxySelector,
+        val socketFactory: SocketFactory,
+    )
 
     private fun hostValidationInterceptor(): Interceptor = Interceptor { chain ->
         requirePublicUrlHost(chain.request().url.host)
