@@ -49,6 +49,7 @@ data class RevisionPageIndex(
  * revision-bound so an index cannot silently identify different content after a source update.
  */
 @Serializable
+@ConsistentCopyVisibility
 data class OnlinePageIdentity
 private constructor(
     val chapter: OnlineChapterIdentity,

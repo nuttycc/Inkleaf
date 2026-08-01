@@ -24,6 +24,7 @@ import kotlinx.serialization.json.Json
 internal enum class OnlinePageLoadPriority { FOREGROUND, SPECULATIVE }
 
 /** A secret-free, hashed identity for one online chapter revision. */
+@ConsistentCopyVisibility
 internal data class OnlinePageCacheIdentity private constructor(
     val pluginIdHash: String,
     val pluginVersion: String,
