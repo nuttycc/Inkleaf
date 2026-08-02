@@ -336,11 +336,11 @@ private fun SourceIdentityCard(
     onRecover: () -> Unit,
 ) {
     val state = plugin?.state
-    ElevatedCard(
+    Card(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
         shape = MaterialTheme.shapes.large,
         colors =
-            CardDefaults.elevatedCardColors(
+            CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.surfaceContainerLow
             ),
     ) {

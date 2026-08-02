@@ -869,7 +869,7 @@ private fun DiscoverComicCard(
     Card(
         onClick = onClick,
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(8.dp),
         colors =
             CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
@@ -880,7 +880,7 @@ private fun DiscoverComicCard(
                 modifier =
                     Modifier.fillMaxWidth()
                         .aspectRatio(COVER_ASPECT)
-                        .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)),
+                        .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp)),
             )
 
             Column(
@@ -931,7 +931,7 @@ private fun DiscoverComicRow(
                 cover = comic.cover,
                 contentDescription = comic.title,
                 modifier =
-                    Modifier.size(width = 64.dp, height = 88.dp).clip(RoundedCornerShape(6.dp)),
+                    Modifier.size(width = 64.dp, height = 88.dp).clip(RoundedCornerShape(4.dp)),
             )
 
             Column(
@@ -1118,9 +1118,22 @@ private fun BrowseFilterMenu(
             ?: filter.options.firstOrNull()?.title
             ?: "选择"
     Box {
-        OutlinedButton(onClick = { expanded = true }) {
-            Text("${filter.title}: $selectedTitle")
-        }
+        FilterChip(
+            selected = selectedOptionId != null,
+            onClick = { expanded = true },
+            label = { Text("${filter.title}: $selectedTitle") },
+            trailingIcon = {
+                Icon(
+                    painter =
+                        painterResource(
+                            MaterialSymbolsOutlinedR.drawable
+                                .materialsymbols_ic_expand_more_outlined
+                        ),
+                    contentDescription = null,
+                    modifier = Modifier.size(FilterChipDefaults.IconSize),
+                )
+            },
+        )
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             filter.options.forEach { option ->
                 DropdownMenuItem(
@@ -1183,7 +1196,7 @@ private fun M3ErrorBanner(
                 containerColor = MaterialTheme.colorScheme.errorContainer,
                 contentColor = MaterialTheme.colorScheme.onErrorContainer,
             ),
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(8.dp),
         modifier = modifier.fillMaxWidth(),
     ) {
         Row(

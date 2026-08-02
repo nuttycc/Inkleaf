@@ -422,7 +422,7 @@ internal fun HealthStatusBadge(
         when {
             pluginState.health == PluginHealth.STORAGE_CORRUPT ->
                 Triple(
-                    "BROKEN (状态损坏)",
+                    "状态损坏",
                     MaterialTheme.colorScheme.errorContainer,
                     MaterialTheme.colorScheme.onErrorContainer,
                 )
@@ -434,25 +434,25 @@ internal fun HealthStatusBadge(
                 )
             pluginState.health == PluginHealth.HEALTHY ->
                 Triple(
-                    "HEALTHY",
+                    "正常",
                     MaterialTheme.colorScheme.primaryContainer,
                     MaterialTheme.colorScheme.onPrimaryContainer,
                 )
             pluginState.health == PluginHealth.RUNTIME_UNHEALTHY ->
                 Triple(
-                    "BROKEN (运行异常)",
+                    "运行异常",
                     MaterialTheme.colorScheme.errorContainer,
                     MaterialTheme.colorScheme.onErrorContainer,
                 )
             pluginState.health.name.contains("DEGRADED", ignoreCase = true) ->
                 Triple(
-                    "DEGRADED (降级)",
+                    "已降级",
                     MaterialTheme.colorScheme.tertiaryContainer,
                     MaterialTheme.colorScheme.onTertiaryContainer,
                 )
             pluginState.health.name.contains("BROKEN", ignoreCase = true) ->
                 Triple(
-                    "BROKEN",
+                    "异常",
                     MaterialTheme.colorScheme.errorContainer,
                     MaterialTheme.colorScheme.onErrorContainer,
                 )
@@ -494,10 +494,12 @@ private fun SourceManagementItem(
 ) {
     val displayName = plugin.manifest?.name ?: plugin.state.pluginId
 
-    ElevatedCard(
+    Card(
         onClick = onOpen,
         modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+        colors =
+            CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
         ListItem(
             supportingContent = {

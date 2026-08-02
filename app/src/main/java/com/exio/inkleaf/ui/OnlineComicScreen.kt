@@ -95,6 +95,11 @@ fun OnlineComicScreen(
     val detail = state.detail
     val chapters = state.chapters
     var isDescriptionExpanded by remember { mutableStateOf(false) }
+    var isAscending by remember { mutableStateOf(true) }
+    val displayChapters =
+        remember(chapters, isAscending) {
+            if (isAscending) chapters else chapters.reversed()
+        }
 
     Scaffold(
         modifier = modifier,
@@ -111,7 +116,7 @@ fun OnlineComicScreen(
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 96.dp),
+                columns = GridCells.Adaptive(minSize = 108.dp),
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -126,7 +131,7 @@ fun OnlineComicScreen(
                     // Compact Horizontal Header Card
                     item(span = { GridItemSpan(maxLineSpan) }) {
                         Card(
-                            shape = RoundedCornerShape(16.dp),
+                            shape = RoundedCornerShape(12.dp),
                             colors =
                                 CardDefaults.cardColors(
                                     containerColor = MaterialTheme.colorScheme.surfaceContainerLow
@@ -154,7 +159,7 @@ fun OnlineComicScreen(
                                             Modifier
                                                 .width(90.dp)
                                                 .height(120.dp)
-                                                .clip(RoundedCornerShape(10.dp)),
+                                                .clip(RoundedCornerShape(4.dp)),
                                     )
                                 }
                                     ?: Box(
@@ -162,7 +167,7 @@ fun OnlineComicScreen(
                                             Modifier
                                                 .width(90.dp)
                                                 .height(120.dp)
-                                                .clip(RoundedCornerShape(10.dp)),
+                                                .clip(RoundedCornerShape(4.dp)),
                                         contentAlignment = Alignment.Center,
                                     ) {
                                         Icon(
@@ -236,7 +241,6 @@ fun OnlineComicScreen(
                                                         horizontal = 10.dp,
                                                         vertical = 4.dp,
                                                     ),
-                                                modifier = Modifier.height(34.dp),
                                             ) {
                                                 Icon(
                                                     painter =
@@ -258,7 +262,6 @@ fun OnlineComicScreen(
                                                         horizontal = 10.dp,
                                                         vertical = 4.dp,
                                                     ),
-                                                modifier = Modifier.height(34.dp),
                                             ) {
                                                 Icon(
                                                     painter =
@@ -325,7 +328,7 @@ fun OnlineComicScreen(
                                                         modifier =
                                                             Modifier.size(
                                                                 AssistChipDefaults.IconSize
-                                                            ),
+                                                             ),
                                                     )
                                                 },
                                             )
@@ -427,15 +430,29 @@ fun OnlineComicScreen(
                 // 3-4 Column Compact Chapter Grid
                 if (chapters.isNotEmpty()) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
-                        Text(
-                            text = "章节 (${chapters.size})",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = "章节 (${chapters.size})",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            TextButton(
+                                onClick = { isAscending = !isAscending },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                            ) {
+                                Text(
+                                    text = if (isAscending) "正序" else "倒序",
+                                    style = MaterialTheme.typography.labelMedium,
+                                )
+                            }
+                        }
                     }
 
-                    items(chapters, key = { chapter -> chapter.chapterId }) { chapter ->
+                    items(displayChapters, key = { chapter -> chapter.chapterId }) { chapter ->
                         OutlinedButton(
                             onClick = {
                                 onOpenChapter(
