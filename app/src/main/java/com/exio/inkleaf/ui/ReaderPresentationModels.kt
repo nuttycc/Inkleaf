@@ -87,6 +87,7 @@ internal data class ReaderPresentationActions(
     val onRemoveBookmark: (suspend (ReaderBookmarkItem) -> ReaderBookmarkUndo)?,
     val onToggleFavorite: ((Int) -> Unit)?,
     val onSetCover: ((Int) -> Unit)?,
+    val onSaveToGallery: ((Int) -> Unit)? = null,
     val onPageChanged: (ComicVolume, Int) -> Unit,
     val onVolumeDisposed: (ComicVolume) -> Unit = {},
     val onVolumeTaskStarted: (ComicVolume) -> Boolean = { true },

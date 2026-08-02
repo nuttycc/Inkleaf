@@ -27,6 +27,7 @@ internal fun ReaderToolsPanelContent(
     isFavorite: Boolean,
     onToggleFavorite: (() -> Unit)?,
     onSetCover: (() -> Unit)?,
+    onSaveToGallery: (() -> Unit)?,
 ) {
     Column(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
         ReaderAttachedPanelHeader(title = ReaderPanel.Tools.title())
@@ -45,6 +46,14 @@ internal fun ReaderToolsPanelContent(
                 isActive = isFavorite,
                 enabled = onToggleFavorite != null,
                 onClick = { onToggleFavorite?.invoke() },
+                modifier = Modifier.weight(1f),
+            )
+            ReaderToolCard(
+                label = "保存到相册",
+                subtitle = "存入系统相册",
+                icon = R.drawable.ic_download,
+                enabled = onSaveToGallery != null,
+                onClick = { onSaveToGallery?.invoke() },
                 modifier = Modifier.weight(1f),
             )
         }
