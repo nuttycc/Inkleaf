@@ -111,9 +111,6 @@ class DiagnosticRepository private constructor(private val context: Context) {
             }
         }
 
-    suspend fun breadcrumb(title: String, metadata: Map<String, String> = emptyMap()): DiagnosticEvent =
-        record(DiagnosticEventType.BREADCRUMB, title, metadata = metadata)
-
     /** Writes the only diagnostic artifact that is safe to create from an uncaught exception handler. */
     fun recordEmergency(
         type: DiagnosticEventType,

@@ -184,11 +184,6 @@ class PluginPackageStore(
         }
     }
 
-    fun activeEntryFile(pluginId: String): File? =
-        synchronized(lock) {
-            get(pluginId)?.activeDirectory?.resolve(PluginContract.ENTRY_PATH)?.takeIf { it.isFile }
-        }
-
     private fun installLocked(packageFile: File, activate: Boolean): PluginInstallResult {
         if (!packageFile.isFile) {
             return rejected(

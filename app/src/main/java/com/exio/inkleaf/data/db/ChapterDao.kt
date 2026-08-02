@@ -21,12 +21,6 @@ abstract class ChapterDao {
     )
     abstract suspend fun getReadableByComicId(comicId: Long): List<ChapterEntity>
 
-    @Query("SELECT * FROM chapters WHERE comicId = :comicId ORDER BY chapterIndex")
-    abstract fun observeByComicId(comicId: Long): kotlinx.coroutines.flow.Flow<List<ChapterEntity>>
-
-    @Query("SELECT * FROM chapters WHERE comicId = :comicId AND chapterIndex = :chapterIndex")
-    abstract suspend fun getByIndex(comicId: Long, chapterIndex: Int): ChapterEntity?
-
     @Query("SELECT * FROM chapters WHERE comicId = :comicId AND fileKey = :fileKey")
     abstract suspend fun getByFileKey(comicId: Long, fileKey: String): ChapterEntity?
 

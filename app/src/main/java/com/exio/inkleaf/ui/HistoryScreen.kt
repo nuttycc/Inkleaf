@@ -589,22 +589,6 @@ private fun HistoryEmpty(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun HistoryError(
-    message: String,
-    onRetry: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Column(
-        modifier = modifier,
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(message, style = MaterialTheme.typography.bodyLarge)
-        TextButton(onClick = onRetry) { Text("重试") }
-    }
-}
-
-@Composable
 private fun HistorySkeletonList(modifier: Modifier = Modifier) {
     Column(modifier = modifier.padding(top = 8.dp)) {
         repeat(3) { HistorySessionSkeletonRow() }

@@ -292,8 +292,6 @@ object ReaderCache {
         )
     }
 
-    fun usageBytes(context: Context): Long = usage(context).totalBytes
-
     /** Evicts the oldest unprotected reader-cache entries until the unified budget is met. */
     suspend fun enforceBudget(context: Context, keep: File?) {
         budgetEnforcementMutex.withLock {

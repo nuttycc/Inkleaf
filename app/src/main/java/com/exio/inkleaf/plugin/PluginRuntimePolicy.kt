@@ -18,8 +18,6 @@ object PluginRuntimePolicy {
     const val LIGHT_DEADLINE_MS = 10_000L
     const val NORMAL_DEADLINE_MS = 30_000L
     const val HARD_DEADLINE_MS = 60_000L
-    const val HEALTH_FAILURE_WINDOW_MS = 10L * 60L * 1000L
-    const val HEALTH_FAILURE_THRESHOLD = 3
     const val MAX_REQUEST_ID_LENGTH = 128
     const val MAX_METHOD_LENGTH = 128
 }
