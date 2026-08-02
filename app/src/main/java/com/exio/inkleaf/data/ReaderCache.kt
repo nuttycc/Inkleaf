@@ -4,11 +4,10 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Log
+import com.exio.inkleaf.replaceFileAtomically
 import java.io.File
 import java.io.IOException
-import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
-import java.nio.file.StandardCopyOption
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CancellationException
@@ -225,20 +224,7 @@ object ReaderCache {
                                     check(bitmap.compress(Bitmap.CompressFormat.JPEG, 85, output))
                                     output.flush()
                                 }
-                                try {
-                                    Files.move(
-                                        temporary.toPath(),
-                                        destination.toPath(),
-                                        StandardCopyOption.ATOMIC_MOVE,
-                                        StandardCopyOption.REPLACE_EXISTING,
-                                    )
-                                } catch (_: AtomicMoveNotSupportedException) {
-                                    Files.move(
-                                        temporary.toPath(),
-                                        destination.toPath(),
-                                        StandardCopyOption.REPLACE_EXISTING,
-                                    )
-                                }
+                                replaceFileAtomically(temporary.toPath(), destination.toPath())
                                 destination.setLastModified(System.currentTimeMillis())
                             } finally {
                                 temporary.delete()

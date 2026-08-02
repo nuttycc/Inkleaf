@@ -1,13 +1,11 @@
 package com.exio.inkleaf.plugin
 
+import com.exio.inkleaf.replaceFileAtomically
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
 import java.nio.charset.StandardCharsets
-import java.nio.file.AtomicMoveNotSupportedException
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.util.UUID
 import java.util.zip.ZipFile
@@ -593,16 +591,7 @@ class PluginPackageStore(
                 throw IOException("Unable to create ${parent.path}")
         }
         try {
-            try {
-                Files.move(
-                    source.toPath(),
-                    target.toPath(),
-                    StandardCopyOption.ATOMIC_MOVE,
-                    StandardCopyOption.REPLACE_EXISTING,
-                )
-            } catch (_: AtomicMoveNotSupportedException) {
-                Files.move(source.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
-            }
+            replaceFileAtomically(source.toPath(), target.toPath())
         } finally {
             if (source.exists()) source.delete()
         }

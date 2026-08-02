@@ -1,11 +1,9 @@
 package com.exio.inkleaf.plugin
 
+import com.exio.inkleaf.replaceFileAtomically
 import java.io.File
 import java.io.IOException
 import java.nio.charset.StandardCharsets
-import java.nio.file.AtomicMoveNotSupportedException
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
@@ -233,16 +231,7 @@ class PluginBrowseRepository(
         val temp = file.resolveSibling("${file.name}.tmp-${UUID.randomUUID()}")
         try {
             temp.writeText(value, StandardCharsets.UTF_8)
-            try {
-                Files.move(
-                    temp.toPath(),
-                    file.toPath(),
-                    StandardCopyOption.ATOMIC_MOVE,
-                    StandardCopyOption.REPLACE_EXISTING,
-                )
-            } catch (_: AtomicMoveNotSupportedException) {
-                Files.move(temp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING)
-            }
+            replaceFileAtomically(temp.toPath(), file.toPath())
         } finally {
             if (temp.exists()) temp.delete()
         }
