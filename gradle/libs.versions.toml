@@ -57,7 +57,6 @@ androidx-compose-material-icons-core = { group = "androidx.compose.material", na
 composables-material-symbols-outlined-android = { group = "com.composables", name = "icons-material-symbols-outlined-android", version.ref = "composablesIcons" }
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
 androidx-room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "roomRuntime" }
-androidx-room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "roomRuntime" }
 androidx-room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "roomRuntime" }
 androidx-room-paging = { group = "androidx.room", name = "room-paging", version.ref = "roomRuntime" }
 androidx-paging-runtime = { group = "androidx.paging", name = "paging-runtime", version.ref = "paging" }
