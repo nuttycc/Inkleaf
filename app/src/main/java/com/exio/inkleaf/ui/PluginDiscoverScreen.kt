@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyGridLayoutInfo
 import androidx.compose.foundation.lazy.grid.LazyGridScope
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -62,7 +63,9 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -93,6 +96,7 @@ import com.exio.inkleaf.plugin.PageImage
 import com.exio.inkleaf.plugin.PluginFilterDescriptor
 import com.exio.inkleaf.plugin.PluginHealth
 import com.exio.inkleaf.plugin.PluginSearchResult
+import kotlinx.coroutines.flow.first
 
 /** 距列表末尾还有这么多条目时就预取下一页，滚动到底之前内容已经补上。 */
 private const val LOAD_MORE_PREFETCH = 6
@@ -122,7 +126,7 @@ fun PluginDiscoverScreen(
     val isBrowsing by viewModel.isBrowsing.collectAsStateWithLifecycle()
     val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
     val browseError by viewModel.browseError.collectAsStateWithLifecycle()
-    val browseTargetRevision by viewModel.browseTargetRevision.collectAsStateWithLifecycle()
+    val browseReady by viewModel.browseReady.collectAsStateWithLifecycle()
     val browseCommitRevision by viewModel.browseFirstPageCommitRevision.collectAsStateWithLifecycle()
     val query by viewModel.query.collectAsStateWithLifecycle()
     val selectedPluginIds by viewModel.selectedPluginIds.collectAsStateWithLifecycle()
@@ -191,9 +195,99 @@ fun PluginDiscoverScreen(
     val isListLayout = layoutSettings.layout == DiscoverLayoutMode.LIST
     var showLayoutSheet by remember { mutableStateOf(false) }
 
-    LaunchedEffect(mode, browseTargetRevision) {
-        if (mode == DiscoverViewModel.Mode.BROWSE && browseTargetRevision > 0) {
+    val scrollContext =
+        when (mode) {
+            DiscoverViewModel.Mode.BROWSE ->
+                selectedFeed?.let { feed ->
+                    DiscoverScrollContextKey.Browse(
+                        pluginId = feed.pluginId,
+                        pluginVersion = feed.pluginVersion,
+                        feedId = feed.descriptor.id,
+                        filters = browseFilters.toSortedMap(),
+                    )
+                }
+            DiscoverViewModel.Mode.SEARCH ->
+                DiscoverScrollContextKey.Search(
+                    query = query.trim(),
+                    selectedPlugins =
+                        activeHealthyPlugins
+                            .filter { it.state.pluginId in currentSelectedIds }
+                            .mapTo(linkedSetOf()) {
+                                DiscoverSearchPluginKey(
+                                    pluginId = it.state.pluginId,
+                                    pluginVersion = it.state.activeVersion.orEmpty(),
+                                )
+                            },
+                )
+        }
+    val gridComicItems =
+        if (activeHealthyPlugins.isEmpty()) {
+            emptyList()
+        } else if (mode == DiscoverViewModel.Mode.BROWSE) {
+            buildBrowseGridComicItems(
+                feeds = feeds,
+                selectedFeed = selectedFeed,
+                isLoadingFeeds = isLoadingFeeds,
+                feedLoadError = feedLoadError,
+                browseItems = browseItems,
+                browseError = browseError,
+                isBrowsing = isBrowsing,
+                hasMore = browseNextCursor != null,
+            )
+        } else {
+            buildSearchGridComicItems(
+                visibleResults = visibleResults,
+                query = query,
+                isSearching = isSearching,
+                errorMessage = errorMessage,
+                hasNoResults = hasNoResults,
+            )
+        }
+    val latestGridComicItems by rememberUpdatedState(gridComicItems)
+    val savedScrollAnchor =
+        remember(scrollContext) {
+            scrollContext?.let { contextKey -> viewModel.scrollAnchor(contextKey) }
+        }
+    val restoreReady =
+        when {
+            scrollContext == null -> true
+            savedScrollAnchor == null -> true
+            mode == DiscoverViewModel.Mode.BROWSE -> browseReady
+            query.isBlank() -> true
+            isSearching -> false
+            visibleResults.isNotEmpty() -> true
+            results.isNotEmpty() || errorMessage != null -> true
+            else -> false
+        }
+    val latestRestoreReady by rememberUpdatedState(restoreReady)
+
+    LaunchedEffect(scrollContext) {
+        if (scrollContext == null) return@LaunchedEffect
+
+        snapshotFlow {
+            latestRestoreReady && gridState.layoutInfo.totalItemsCount > 0
+        }
+            .first { it }
+
+        val currentItems = latestGridComicItems
+        val anchor = viewModel.scrollAnchor(scrollContext)
+        val target = resolveDiscoverScrollTarget(anchor, currentItems)
+        val lastGridIndex = (gridState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)
+        if (target != null) {
+            gridState.scrollToItem(
+                index = target.gridIndex.coerceIn(0, lastGridIndex),
+                scrollOffset = target.scrollOffset,
+            )
+        } else {
             gridState.scrollToItem(0)
+        }
+
+        snapshotFlow {
+            discoverScrollAnchor(gridState.layoutInfo, latestGridComicItems)
+        }.collect { currentAnchor ->
+            if (currentAnchor != null) {
+                viewModel.updateScrollAnchor(scrollContext, currentAnchor)
+            }
         }
     }
 
@@ -683,6 +777,119 @@ private fun BrowseFilterRow(
 // ---------------------------------------------------------------------------
 // 内容
 // ---------------------------------------------------------------------------
+
+private fun buildBrowseGridComicItems(
+    feeds: List<DiscoverViewModel.Feed>,
+    selectedFeed: DiscoverViewModel.Feed?,
+    isLoadingFeeds: Boolean,
+    feedLoadError: String?,
+    browseItems: List<ComicSummary>,
+    browseError: String?,
+    isBrowsing: Boolean,
+    hasMore: Boolean,
+): List<DiscoverGridComicItem> {
+    if (isLoadingFeeds && feeds.isEmpty()) return emptyList()
+    if (feeds.isEmpty()) return emptyList()
+
+    val feed = selectedFeed ?: return emptyList()
+    var leadingStructuralItemCount = 0
+    if (feedLoadError != null) leadingStructuralItemCount += 1
+    if (browseError != null) leadingStructuralItemCount += 1
+    if (isBrowsing && browseItems.isEmpty()) {
+        leadingStructuralItemCount += 1
+    } else if (!isBrowsing && browseError == null && browseItems.isEmpty()) {
+        leadingStructuralItemCount += 1
+    }
+
+    val trailingStructuralItemCount =
+        if (isBrowsing && browseItems.isNotEmpty()) {
+            1
+        } else if (hasMore && browseError != null) {
+            1
+        } else {
+            0
+        }
+
+    return mapDiscoverGridComicItems(
+        leadingStructuralItemCount = leadingStructuralItemCount,
+        sections =
+            listOf(
+                DiscoverGridComicSection(
+                    structuralItemCount = 0,
+                    comicKeys =
+                        browseItems.map { comic ->
+                            DiscoverComicKey(feed.pluginId, comic.sourceId)
+                        },
+                )
+            ),
+        trailingStructuralItemCount = trailingStructuralItemCount,
+    )
+}
+
+private fun buildSearchGridComicItems(
+    visibleResults: List<PluginSearchResult>,
+    query: String,
+    isSearching: Boolean,
+    errorMessage: String?,
+    hasNoResults: Boolean,
+): List<DiscoverGridComicItem> {
+    var leadingStructuralItemCount = 0
+    if (isSearching) leadingStructuralItemCount += 1
+    if (errorMessage != null) leadingStructuralItemCount += 1
+
+    if (!isSearching && errorMessage == null && query.isNotBlank() && hasNoResults) {
+        return emptyList()
+    }
+
+    val sections =
+        visibleResults.map { result ->
+            val comics = result.page?.items.orEmpty()
+            val structuralItemCount =
+                1 +
+                    when {
+                        result.error != null -> 1
+                        comics.isEmpty() -> 1
+                        else -> 0
+                    }
+            DiscoverGridComicSection(
+                structuralItemCount = structuralItemCount,
+                comicKeys =
+                    if (result.error == null) {
+                        comics.map { comic -> DiscoverComicKey(result.pluginId, comic.sourceId) }
+                    } else {
+                        emptyList()
+                    },
+            )
+        }
+
+    return mapDiscoverGridComicItems(
+        leadingStructuralItemCount = leadingStructuralItemCount,
+        sections = sections,
+    )
+}
+
+private fun discoverScrollAnchor(
+    layoutInfo: LazyGridLayoutInfo,
+    currentItems: List<DiscoverGridComicItem>,
+): DiscoverScrollAnchor? {
+    if (currentItems.isEmpty()) return null
+
+    val itemsByGridIndex = currentItems.associateBy { it.gridIndex }
+    val firstVisibleComic =
+        layoutInfo.visibleItemsInfo
+            .asSequence()
+            .sortedBy { it.index }
+            .mapNotNull { itemInfo ->
+                itemsByGridIndex[itemInfo.index]?.let { comicItem -> itemInfo to comicItem }
+            }
+            .firstOrNull() ?: return null
+
+    return DiscoverScrollAnchor(
+        itemKey = firstVisibleComic.second.key,
+        scrollOffset = -firstVisibleComic.first.offset.y,
+        orderedKeys = currentItems.map { it.key },
+    )
+}
 
 private fun LazyGridScope.browseContent(
     feeds: List<DiscoverViewModel.Feed>,

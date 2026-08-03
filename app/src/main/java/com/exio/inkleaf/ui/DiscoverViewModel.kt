@@ -119,8 +119,8 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
     private val _browseError = MutableStateFlow<String?>(null)
     val browseError: StateFlow<String?> = _browseError.asStateFlow()
 
-    private val _browseTargetRevision = MutableStateFlow(0L)
-    val browseTargetRevision: StateFlow<Long> = _browseTargetRevision.asStateFlow()
+    private val _browseReady = MutableStateFlow(false)
+    val browseReady: StateFlow<Boolean> = _browseReady.asStateFlow()
 
     private val _browseFirstPageCommitRevision = MutableStateFlow(0L)
     val browseFirstPageCommitRevision: StateFlow<Long> =
@@ -153,6 +153,7 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
                 eldest: MutableMap.MutableEntry<String, Map<String, String>>?
             ): Boolean = size > MAX_BROWSE_SESSIONS
         }
+    private val scrollAnchors = DiscoverScrollAnchorStore(MAX_SCROLL_CONTEXTS)
     private var currentBrowseKey: PluginBrowseCacheKey? = null
     private var loadedFeedSignature: List<String>? = null
     private var browseFailure: BrowseFailure? = null
@@ -164,6 +165,16 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
     private var feedLoadGeneration = 0L
     private var browseGeneration = 0L
     private var searchGeneration = 0L
+
+    fun scrollAnchor(contextKey: DiscoverScrollContextKey): DiscoverScrollAnchor? =
+        scrollAnchors.get(contextKey)
+
+    fun updateScrollAnchor(
+        contextKey: DiscoverScrollContextKey,
+        anchor: DiscoverScrollAnchor,
+    ) {
+        scrollAnchors.put(contextKey, anchor)
+    }
 
     fun enterSearch() {
         _mode.value = Mode.SEARCH
@@ -445,11 +456,9 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
         key: PluginBrowseCacheKey?,
         filters: Map<String, String>,
     ) {
-        val targetChanged = key != currentBrowseKey
         browseGeneration += 1
         browseJob?.cancel()
         currentBrowseKey = key
-        if (targetChanged && key != null) _browseTargetRevision.value += 1
         _browseFilters.value = filters
         _browseError.value = null
         _isBrowsing.value = false
@@ -461,6 +470,7 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         if (key != null && session == null) browseSessions.remove(key)
+        _browseReady.value = key == null || session != null
         _browseItems.value = session?.items.orEmpty()
         _browseNextCursor.value = session?.nextCursor
         if (
@@ -493,6 +503,7 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
         val feed = selectedFeed()
         val key = currentBrowseKey
         if (feed == null || key == null) {
+            _browseReady.value = true
             if (manual) _isRefreshing.value = false
             return
         }
@@ -540,6 +551,7 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
             } catch (error: Throwable) {
                 if (generation == browseGeneration && key == currentBrowseKey) {
                     _browseError.value = error.message ?: "加载失败"
+                    _browseReady.value = true
                     browseFailure = BrowseFailure.FIRST_PAGE
                 }
             } finally {
@@ -617,6 +629,7 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
                 previous.cacheGeneration != snapshot.cacheGeneration
         _browseItems.value = snapshot.page.items
         _browseNextCursor.value = snapshot.page.nextCursor
+        _browseReady.value = true
         browseSessions[key] =
             BrowseSessionSnapshot(
                 items = snapshot.page.items,
@@ -658,5 +671,6 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
 
     private companion object {
         const val MAX_BROWSE_SESSIONS = 32
+        const val MAX_SCROLL_CONTEXTS = 32
     }
 }
