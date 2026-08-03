@@ -221,29 +221,55 @@ fun PluginDiscoverScreen(
                 )
         }
     val gridComicItems =
-        if (activeHealthyPlugins.isEmpty()) {
-            emptyList()
-        } else if (mode == DiscoverViewModel.Mode.BROWSE) {
-            buildBrowseGridComicItems(
-                feeds = feeds,
-                selectedFeed = selectedFeed,
-                isLoadingFeeds = isLoadingFeeds,
-                feedLoadError = feedLoadError,
-                browseItems = browseItems,
-                browseError = browseError,
-                isBrowsing = isBrowsing,
-                hasMore = browseNextCursor != null,
-            )
-        } else {
-            buildSearchGridComicItems(
-                visibleResults = visibleResults,
-                query = query,
-                isSearching = isSearching,
-                errorMessage = errorMessage,
-                hasNoResults = hasNoResults,
-            )
+        remember(
+            activeHealthyPlugins.isEmpty(),
+            mode,
+            feeds,
+            selectedFeed,
+            isLoadingFeeds,
+            feedLoadError,
+            browseItems,
+            browseError,
+            isBrowsing,
+            browseNextCursor,
+            visibleResults,
+            query,
+            isSearching,
+            errorMessage,
+            hasNoResults,
+        ) {
+            if (activeHealthyPlugins.isEmpty()) {
+                emptyList()
+            } else if (mode == DiscoverViewModel.Mode.BROWSE) {
+                buildBrowseGridComicItems(
+                    feeds = feeds,
+                    selectedFeed = selectedFeed,
+                    isLoadingFeeds = isLoadingFeeds,
+                    feedLoadError = feedLoadError,
+                    browseItems = browseItems,
+                    browseError = browseError,
+                    isBrowsing = isBrowsing,
+                    hasMore = browseNextCursor != null,
+                )
+            } else {
+                buildSearchGridComicItems(
+                    visibleResults = visibleResults,
+                    query = query,
+                    isSearching = isSearching,
+                    errorMessage = errorMessage,
+                    hasNoResults = hasNoResults,
+                )
+            }
         }
     val latestGridComicItems by rememberUpdatedState(gridComicItems)
+    val gridComicLookup =
+        remember(gridComicItems) {
+            DiscoverGridComicLookup(
+                comicByGridIndex = gridComicItems.associate { it.gridIndex to it.key },
+                orderedKeys = gridComicItems.map { it.key },
+            )
+        }
+    val latestGridComicLookup by rememberUpdatedState(gridComicLookup)
     val savedScrollAnchor =
         remember(scrollContext) {
             scrollContext?.let { contextKey -> viewModel.scrollAnchor(contextKey) }
@@ -283,7 +309,7 @@ fun PluginDiscoverScreen(
         }
 
         snapshotFlow {
-            discoverScrollAnchor(gridState.layoutInfo, latestGridComicItems)
+            discoverScrollAnchor(gridState.layoutInfo, latestGridComicLookup)
         }.collect { currentAnchor ->
             if (currentAnchor != null) {
                 viewModel.updateScrollAnchor(scrollContext, currentAnchor)
@@ -778,6 +804,11 @@ private fun BrowseFilterRow(
 // 内容
 // ---------------------------------------------------------------------------
 
+private data class DiscoverGridComicLookup(
+    val comicByGridIndex: Map<Int, DiscoverComicKey>,
+    val orderedKeys: List<DiscoverComicKey>,
+)
+
 private fun buildBrowseGridComicItems(
     feeds: List<DiscoverViewModel.Feed>,
     selectedFeed: DiscoverViewModel.Feed?,
@@ -870,25 +901,29 @@ private fun buildSearchGridComicItems(
 
 private fun discoverScrollAnchor(
     layoutInfo: LazyGridLayoutInfo,
-    currentItems: List<DiscoverGridComicItem>,
+    lookup: DiscoverGridComicLookup,
 ): DiscoverScrollAnchor? {
-    if (currentItems.isEmpty()) return null
+    if (lookup.orderedKeys.isEmpty()) return null
 
-    val itemsByGridIndex = currentItems.associateBy { it.gridIndex }
-    val firstVisibleComic =
-        layoutInfo.visibleItemsInfo
-            .asSequence()
-            .sortedBy { it.index }
-            .mapNotNull { itemInfo ->
-                itemsByGridIndex[itemInfo.index]?.let { comicItem -> itemInfo to comicItem }
-            }
-            .firstOrNull() ?: return null
+    var firstVisibleIndex = Int.MAX_VALUE
+    var firstVisibleOffset = 0
+    var firstVisibleKey: DiscoverComicKey? = null
+    layoutInfo.visibleItemsInfo.forEach { itemInfo ->
+        val comicKey = lookup.comicByGridIndex[itemInfo.index] ?: return@forEach
+        if (itemInfo.index < firstVisibleIndex) {
+            firstVisibleIndex = itemInfo.index
+            firstVisibleOffset = itemInfo.offset.y
+            firstVisibleKey = comicKey
+        }
+    }
 
-    return DiscoverScrollAnchor(
-        itemKey = firstVisibleComic.second.key,
-        scrollOffset = -firstVisibleComic.first.offset.y,
-        orderedKeys = currentItems.map { it.key },
-    )
+    return firstVisibleKey?.let { itemKey ->
+        DiscoverScrollAnchor(
+            itemKey = itemKey,
+            scrollOffset = -firstVisibleOffset,
+            orderedKeys = lookup.orderedKeys,
+        )
+    }
 }
 
 private fun LazyGridScope.browseContent(

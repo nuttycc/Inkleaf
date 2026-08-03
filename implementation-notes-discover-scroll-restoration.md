@@ -24,9 +24,13 @@ None in behavior or navigation. A review suggestion to wait for stale-cache refr
 because the confirmed contract explicitly requires restoring the current in-memory list first and
 refreshing in the background without moving the viewport.
 
+The structural-layout unification suggestion from PR review was deferred. The existing browse/search
+index mapping remains unchanged because it matches the current render branches and a larger rewrite
+would expand this fix beyond the requested performance cleanup.
+
 ## Verification
 
-- `git diff --check`: passed.
+- `git diff --check`: passed before and after the PR review optimization.
 - Gradle unit tests and debug compilation: not run. The user chose not to run Gradle, and
   `AGENTS.md` requires explicit permission for every Gradle task.
 - Second read-only review: no blocking findings. Remaining risk is limited to unverified
@@ -43,3 +47,6 @@ refreshing in the background without moving the viewport.
   semantics unchanged.
 - Added JVM tests for context identity, the generic structural-index mapper used by browse/search,
   exact and fallback anchor resolution, signed offset preservation, and LRU eviction/access order.
+- Applied the PR performance cleanup: memoized `gridComicItems`, precomputed grid lookup data, and
+  reduced anchor capture to a single pass over visible items without sorting or per-snapshot full-list
+  allocations.
