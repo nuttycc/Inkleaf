@@ -110,7 +110,6 @@ fun OnlineComicScreen(
                         text = detail?.title ?: "在线漫画",
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(horizontal = 4.dp),
                     )
                 },
                 navigationIcon = {
