@@ -119,8 +119,8 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
     private val _browseError = MutableStateFlow<String?>(null)
     val browseError: StateFlow<String?> = _browseError.asStateFlow()
 
-    private val _browseTargetRevision = MutableStateFlow(0L)
-    val browseTargetRevision: StateFlow<Long> = _browseTargetRevision.asStateFlow()
+    private val _browseReady = MutableStateFlow(false)
+    val browseReady: StateFlow<Boolean> = _browseReady.asStateFlow()
 
     private val _browseFirstPageCommitRevision = MutableStateFlow(0L)
     val browseFirstPageCommitRevision: StateFlow<Long> =
@@ -138,6 +138,9 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
     private val _isSearching = MutableStateFlow(false)
     val isSearching: StateFlow<Boolean> = _isSearching.asStateFlow()
 
+    private val _searchReady = MutableStateFlow(true)
+    val searchReady: StateFlow<Boolean> = _searchReady.asStateFlow()
+
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
@@ -153,6 +156,7 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
                 eldest: MutableMap.MutableEntry<String, Map<String, String>>?
             ): Boolean = size > MAX_BROWSE_SESSIONS
         }
+    private val scrollAnchors = DiscoverScrollAnchorStore(MAX_SCROLL_CONTEXTS)
     private var currentBrowseKey: PluginBrowseCacheKey? = null
     private var loadedFeedSignature: List<String>? = null
     private var browseFailure: BrowseFailure? = null
@@ -163,7 +167,17 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
     private var installedLoadGeneration = 0L
     private var feedLoadGeneration = 0L
     private var browseGeneration = 0L
-    private var searchGeneration = 0L
+    private val searchRequestGate = DiscoverSearchRequestGate()
+
+    fun scrollAnchor(contextKey: DiscoverScrollContextKey): DiscoverScrollAnchor? =
+        scrollAnchors.get(contextKey)
+
+    fun updateScrollAnchor(
+        contextKey: DiscoverScrollContextKey,
+        anchor: DiscoverScrollAnchor,
+    ) {
+        scrollAnchors.put(contextKey, anchor)
+    }
 
     fun enterSearch() {
         _mode.value = Mode.SEARCH
@@ -354,12 +368,9 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
 
     fun updateQuery(newQuery: String) {
         if (newQuery == _query.value) return
-        searchGeneration += 1
-        searchJob?.cancel()
-        _isSearching.value = false
+        finishSearchWithoutRequest()
+        _searchReady.value = newQuery.isBlank()
         _query.value = newQuery
-        _results.value = emptyList()
-        _errorMessage.value = null
     }
 
     fun togglePluginSelection(pluginId: String, availablePluginIds: List<String>) {
@@ -379,10 +390,21 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
         if (retained != current) _selectedPluginIds.value = retained
     }
 
+    private fun finishSearchWithoutRequest() {
+        searchRequestGate.invalidate()
+        searchJob?.cancel()
+        searchJob = null
+        _isSearching.value = false
+        _searchReady.value = true
+        _results.value = emptyList()
+        _errorMessage.value = null
+        _isRefreshing.value = false
+    }
+
     fun performSearch(catalog: PluginCatalog, availablePlugins: List<InstalledPlugin>) {
         val currentQuery = _query.value.trim()
         if (currentQuery.isBlank()) {
-            _isRefreshing.value = false
+            finishSearchWithoutRequest()
             return
         }
 
@@ -395,42 +417,48 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 .map { it.state.pluginId }
         if (activeHealthyIds.isEmpty()) {
-            _isRefreshing.value = false
+            finishSearchWithoutRequest()
             return
         }
 
         val targetIds =
             (_selectedPluginIds.value ?: activeHealthyIds.toSet()).filter { it in activeHealthyIds }
         if (targetIds.isEmpty()) {
-            searchJob?.cancel()
-            _results.value = emptyList()
-            _isSearching.value = false
-            _isRefreshing.value = false
-            _errorMessage.value = null
+            finishSearchWithoutRequest()
             return
         }
 
-        val generation = ++searchGeneration
+        val generation = searchRequestGate.next()
         searchJob?.cancel()
+        _isSearching.value = true
+        _searchReady.value = false
+        _errorMessage.value = null
         searchJob = viewModelScope.launch {
-            _isSearching.value = true
-            _errorMessage.value = null
             try {
                 val result =
                     catalog.search(
                         PluginSearchRequest(query = currentQuery),
                         pluginIds = targetIds,
                     )
-                if (generation == searchGeneration && _query.value.trim() == currentQuery) {
+                if (
+                    searchRequestGate.accepts(generation) &&
+                        _query.value.trim() == currentQuery
+                ) {
                     _results.value = result
                 }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Throwable) {
-                if (generation == searchGeneration) _errorMessage.value = error.message ?: "搜索失败"
+                if (searchRequestGate.accepts(generation)) {
+                    _errorMessage.value = error.message ?: "搜索失败"
+                }
             } finally {
-                _isRefreshing.value = false
-                if (generation == searchGeneration) _isSearching.value = false
+                if (searchRequestGate.accepts(generation)) {
+                    searchJob = null
+                    _isRefreshing.value = false
+                    _isSearching.value = false
+                    _searchReady.value = true
+                }
             }
         }
     }
@@ -445,11 +473,9 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
         key: PluginBrowseCacheKey?,
         filters: Map<String, String>,
     ) {
-        val targetChanged = key != currentBrowseKey
         browseGeneration += 1
         browseJob?.cancel()
         currentBrowseKey = key
-        if (targetChanged && key != null) _browseTargetRevision.value += 1
         _browseFilters.value = filters
         _browseError.value = null
         _isBrowsing.value = false
@@ -461,6 +487,7 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         if (key != null && session == null) browseSessions.remove(key)
+        _browseReady.value = key == null || session != null
         _browseItems.value = session?.items.orEmpty()
         _browseNextCursor.value = session?.nextCursor
         if (
@@ -493,6 +520,7 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
         val feed = selectedFeed()
         val key = currentBrowseKey
         if (feed == null || key == null) {
+            _browseReady.value = true
             if (manual) _isRefreshing.value = false
             return
         }
@@ -528,18 +556,21 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
                         expectedRevision = cached?.revision,
                         force = force,
                     )
-                if (
-                    generation == browseGeneration &&
-                        key == currentBrowseKey &&
-                        refreshed.cacheGeneration == repository.cacheGeneration(key.pluginId)
-                ) {
-                    publishFirstPage(key, refreshed)
+                if (generation == browseGeneration && key == currentBrowseKey) {
+                    if (refreshed.cacheGeneration == repository.cacheGeneration(key.pluginId)) {
+                        publishFirstPage(key, refreshed)
+                    } else {
+                        _browseError.value = "内容源版本已更新，请重试"
+                        _browseReady.value = true
+                        browseFailure = BrowseFailure.FIRST_PAGE
+                    }
                 }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Throwable) {
                 if (generation == browseGeneration && key == currentBrowseKey) {
                     _browseError.value = error.message ?: "加载失败"
+                    _browseReady.value = true
                     browseFailure = BrowseFailure.FIRST_PAGE
                 }
             } finally {
@@ -617,6 +648,7 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
                 previous.cacheGeneration != snapshot.cacheGeneration
         _browseItems.value = snapshot.page.items
         _browseNextCursor.value = snapshot.page.nextCursor
+        _browseReady.value = true
         browseSessions[key] =
             BrowseSessionSnapshot(
                 items = snapshot.page.items,
@@ -658,5 +690,6 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
 
     private companion object {
         const val MAX_BROWSE_SESSIONS = 32
+        const val MAX_SCROLL_CONTEXTS = 32
     }
 }
