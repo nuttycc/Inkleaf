@@ -105,7 +105,14 @@ fun OnlineComicScreen(
         modifier = modifier,
         topBar = {
             TopAppBar(
-                title = { Text(detail?.title ?: "在线漫画") },
+                title = {
+                    Text(
+                        text = detail?.title ?: "在线漫画",
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(horizontal = 8.dp),
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
