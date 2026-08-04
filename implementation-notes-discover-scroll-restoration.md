@@ -46,11 +46,8 @@ larger rewrite would expand this fix beyond the requested behavior change.
 
 ## Verification
 
-- `git diff --check`: passed before and after the PR review optimization and after the visual
-  restoration changes.
-- Read-only review: identified and fixed search empty-result readiness, browse cache-generation
-  deadlock, and the zero-item restore wait; the final review process was terminated after returning
-  its partial confirmation.
+- `git diff --check`: passed before and after the visual restoration changes and this pagination fix.
+- Read-only root-cause review: confirmed the stale `LazyGridState` capture and the keyed-state fix.
 - Gradle unit tests and debug compilation: not run. The user chose not to run Gradle, and
   `AGENTS.md` requires explicit permission for every Gradle task.
 
@@ -66,6 +63,8 @@ larger rewrite would expand this fix beyond the requested behavior change.
 - Released the restore gate on cache-generation conflicts with a retryable first-page error.
 - Kept pagination, navigation, bottom-tab state saving, refresh behavior, and layout context
   semantics unchanged.
+- Keyed the prefetch derived state and effect by the context-bound `LazyGridState`; otherwise the
+  first feed load can leave infinite scrolling observing the old empty grid.
 - Added JVM tests for context identity, the generic structural-index mapper used by browse/search,
   exact and fallback anchor resolution, signed offset preservation, and LRU eviction/access order.
 - Applied the PR performance cleanup: memoized `gridComicItems`, precomputed grid lookup data, and

@@ -338,8 +338,9 @@ fun PluginDiscoverScreen(
         }
     }
 
-    // 触底预取。derivedStateOf 让滚动的每一帧都不触发重组，只有跨过阈值那一刻才发信号
-    val reachedPrefetchEdge by remember {
+    // 触底预取。derivedStateOf 让滚动的每一帧都不触发重组，只有跨过阈值那一刻才发信号。
+    // gridState 按上下文重建；派生值和 effect 必须跟随同一个 state，否则会观察旧的空网格。
+    val reachedPrefetchEdge by remember(gridState) {
         derivedStateOf {
             val info = gridState.layoutInfo
             val lastVisible =
@@ -349,7 +350,13 @@ fun PluginDiscoverScreen(
     }
     // browseItems.size 也当 key：一页数据太少时阈值条件持续成立，
     // 只监听 reachedPrefetchEdge 的话它不会二次变化，翻页就停在这里了
-    LaunchedEffect(reachedPrefetchEdge, browseItems.size, browseNextCursor, mode) {
+    LaunchedEffect(
+        gridState,
+        reachedPrefetchEdge,
+        browseItems.size,
+        browseNextCursor,
+        mode,
+    ) {
         if (
             mode == DiscoverViewModel.Mode.BROWSE && reachedPrefetchEdge && browseNextCursor != null
         ) {
