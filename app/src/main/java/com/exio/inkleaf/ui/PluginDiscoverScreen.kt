@@ -20,9 +20,9 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyGridLayoutInfo
 import androidx.compose.foundation.lazy.grid.LazyGridScope
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -64,6 +64,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
@@ -132,6 +133,7 @@ fun PluginDiscoverScreen(
     val selectedPluginIds by viewModel.selectedPluginIds.collectAsStateWithLifecycle()
     val results by viewModel.results.collectAsStateWithLifecycle()
     val isSearching by viewModel.isSearching.collectAsStateWithLifecycle()
+    val searchReady by viewModel.searchReady.collectAsStateWithLifecycle()
     val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
 
     LaunchedEffect(Unit) {
@@ -190,7 +192,6 @@ fun PluginDiscoverScreen(
             feeds.filter { it.pluginId == selectedFeed?.pluginId }
         }
 
-    val gridState = rememberLazyGridState()
     val contentAlpha = remember { Animatable(1f) }
     val isListLayout = layoutSettings.layout == DiscoverLayoutMode.LIST
     var showLayoutSheet by remember { mutableStateOf(false) }
@@ -279,37 +280,50 @@ fun PluginDiscoverScreen(
             scrollContext == null -> true
             savedScrollAnchor == null -> true
             mode == DiscoverViewModel.Mode.BROWSE -> browseReady
-            query.isBlank() -> true
-            isSearching -> false
-            visibleResults.isNotEmpty() -> true
-            results.isNotEmpty() || errorMessage != null -> true
-            else -> false
+            else -> searchReady
         }
     val latestRestoreReady by rememberUpdatedState(restoreReady)
+    val gridState =
+        rememberSaveable(scrollContext, saver = LazyGridState.Saver) {
+            LazyGridState()
+        }
+    val latestGridState by rememberUpdatedState(gridState)
+    var restoreComplete by remember(scrollContext) {
+        mutableStateOf(savedScrollAnchor == null)
+    }
+    val showGrid = savedScrollAnchor == null || restoreComplete
 
     LaunchedEffect(scrollContext) {
         if (scrollContext == null) return@LaunchedEffect
 
-        snapshotFlow {
-            latestRestoreReady && gridState.layoutInfo.totalItemsCount > 0
-        }
-            .first { it }
+        if (savedScrollAnchor != null) {
+            snapshotFlow {
+                latestRestoreReady &&
+                    (latestGridState.layoutInfo.totalItemsCount > 0 ||
+                        latestGridComicItems.isEmpty())
+            }
+                .first { it }
 
-        val currentItems = latestGridComicItems
-        val anchor = viewModel.scrollAnchor(scrollContext)
-        val target = resolveDiscoverScrollTarget(anchor, currentItems)
-        val lastGridIndex = (gridState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)
-        if (target != null) {
-            gridState.scrollToItem(
-                index = target.gridIndex.coerceIn(0, lastGridIndex),
-                scrollOffset = target.scrollOffset,
-            )
-        } else {
-            gridState.scrollToItem(0)
+            if (latestGridState.layoutInfo.totalItemsCount > 0) {
+                val currentItems = latestGridComicItems
+                val anchor = viewModel.scrollAnchor(scrollContext)
+                val target = resolveDiscoverScrollTarget(anchor, currentItems)
+                val lastGridIndex =
+                    (latestGridState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)
+                if (target != null) {
+                    latestGridState.scrollToItem(
+                        index = target.gridIndex.coerceIn(0, lastGridIndex),
+                        scrollOffset = target.scrollOffset,
+                    )
+                } else {
+                    latestGridState.scrollToItem(0)
+                }
+            }
+            restoreComplete = true
         }
 
         snapshotFlow {
-            discoverScrollAnchor(gridState.layoutInfo, latestGridComicLookup)
+            discoverScrollAnchor(latestGridState.layoutInfo, latestGridComicLookup)
         }.collect { currentAnchor ->
             if (currentAnchor != null) {
                 viewModel.updateScrollAnchor(scrollContext, currentAnchor)
@@ -317,8 +331,12 @@ fun PluginDiscoverScreen(
         }
     }
 
-    LaunchedEffect(mode, browseCommitRevision) {
-        if (mode == DiscoverViewModel.Mode.BROWSE && browseCommitRevision > 0) {
+    val initialBrowseCommitRevision = remember { browseCommitRevision }
+    LaunchedEffect(browseCommitRevision) {
+        if (
+            mode == DiscoverViewModel.Mode.BROWSE &&
+                browseCommitRevision > initialBrowseCommitRevision
+        ) {
             contentAlpha.snapTo(0.92f)
             contentAlpha.animateTo(1f, animationSpec = tween(durationMillis = 160))
         }
@@ -454,7 +472,9 @@ fun PluginDiscoverScreen(
                     },
                 state = gridState,
                 modifier =
-                    Modifier.fillMaxSize().graphicsLayer { alpha = contentAlpha.value },
+                    Modifier.fillMaxSize().graphicsLayer {
+                        alpha = if (showGrid) contentAlpha.value else 0f
+                    },
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(if (isListLayout) 0.dp else 12.dp),

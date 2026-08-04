@@ -138,6 +138,9 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
     private val _isSearching = MutableStateFlow(false)
     val isSearching: StateFlow<Boolean> = _isSearching.asStateFlow()
 
+    private val _searchReady = MutableStateFlow(true)
+    val searchReady: StateFlow<Boolean> = _searchReady.asStateFlow()
+
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
@@ -368,6 +371,7 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
         searchGeneration += 1
         searchJob?.cancel()
         _isSearching.value = false
+        _searchReady.value = newQuery.isBlank()
         _query.value = newQuery
         _results.value = emptyList()
         _errorMessage.value = null
@@ -393,6 +397,7 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
     fun performSearch(catalog: PluginCatalog, availablePlugins: List<InstalledPlugin>) {
         val currentQuery = _query.value.trim()
         if (currentQuery.isBlank()) {
+            _searchReady.value = true
             _isRefreshing.value = false
             return
         }
@@ -406,6 +411,7 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 .map { it.state.pluginId }
         if (activeHealthyIds.isEmpty()) {
+            _searchReady.value = true
             _isRefreshing.value = false
             return
         }
@@ -416,6 +422,7 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
             searchJob?.cancel()
             _results.value = emptyList()
             _isSearching.value = false
+            _searchReady.value = true
             _isRefreshing.value = false
             _errorMessage.value = null
             return
@@ -423,6 +430,7 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
 
         val generation = ++searchGeneration
         searchJob?.cancel()
+        _searchReady.value = false
         searchJob = viewModelScope.launch {
             _isSearching.value = true
             _errorMessage.value = null
@@ -441,7 +449,10 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
                 if (generation == searchGeneration) _errorMessage.value = error.message ?: "搜索失败"
             } finally {
                 _isRefreshing.value = false
-                if (generation == searchGeneration) _isSearching.value = false
+                if (generation == searchGeneration) {
+                    _isSearching.value = false
+                    _searchReady.value = true
+                }
             }
         }
     }
@@ -539,12 +550,14 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
                         expectedRevision = cached?.revision,
                         force = force,
                     )
-                if (
-                    generation == browseGeneration &&
-                        key == currentBrowseKey &&
-                        refreshed.cacheGeneration == repository.cacheGeneration(key.pluginId)
-                ) {
-                    publishFirstPage(key, refreshed)
+                if (generation == browseGeneration && key == currentBrowseKey) {
+                    if (refreshed.cacheGeneration == repository.cacheGeneration(key.pluginId)) {
+                        publishFirstPage(key, refreshed)
+                    } else {
+                        _browseError.value = "内容源版本已更新，请重试"
+                        _browseReady.value = true
+                        browseFailure = BrowseFailure.FIRST_PAGE
+                    }
                 }
             } catch (error: CancellationException) {
                 throw error

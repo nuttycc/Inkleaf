@@ -13,6 +13,11 @@ configuration-safe, non-persistent, and bounded by a global LRU of 32 contexts.
 - Extend `DiscoverViewModel` with the in-memory scroll store and browse readiness state.
 - Replace the unconditional re-entry `scrollToItem(0)` effect with a one-shot restoration
   effect keyed only by the active context.
+- Keep an anchored grid hidden until its data reaches a terminal/restorable state, then perform
+  the non-animated correction before revealing it; new contexts without an anchor remain visible
+  from the top.
+- Bind the lazy-grid Saver state to the active context and only replay browse alpha animation
+  when its revision increases during the current composition.
 - Build the actual lazy-grid index map while accounting for structural rows in browse/search.
 - Record the first visible comic item continuously with its signed pixel offset.
 - Add focused JVM tests for context identity, grid index mapping, anchor resolution, and LRU eviction.
@@ -20,29 +25,40 @@ configuration-safe, non-persistent, and bounded by a global LRU of 32 contexts.
 
 ## Deviations
 
-None in behavior or navigation. A review suggestion to wait for stale-cache refresh was not adopted
-because the confirmed contract explicitly requires restoring the current in-memory list first and
-refreshing in the background without moving the viewport.
+The visual restore intentionally keeps the anchored grid transparent until the target data is
+ready, then performs `scrollToItem` while hidden. This is a small timing deviation from pure
+constructor-time initialization, chosen because the stable comic anchor can carry a signed offset
+when structural rows are above it; the user still sees the first visible frame at the saved position.
 
-The structural-layout unification suggestion from PR review was deferred. The existing browse/search
-index mapping remains unchanged because it matches the current render branches and a larger rewrite
-would expand this fix beyond the requested performance cleanup.
+Search now exposes an explicit ready state so successful empty results and other terminal states do
+not leave an anchored grid hidden. A browse cache-generation conflict is surfaced as a retryable
+first-page error and releases the restore gate instead of retrying indefinitely or leaving the page
+transparent.
+
+The structural-layout unification suggestion from PR review remains deferred. The existing
+browse/search index mapping remains unchanged because it matches the current render branches and a
+larger rewrite would expand this fix beyond the requested behavior change.
 
 ## Verification
 
-- `git diff --check`: passed before and after the PR review optimization.
+- `git diff --check`: passed before and after the PR review optimization and after the visual
+  restoration changes.
+- Read-only review: identified and fixed search empty-result readiness, browse cache-generation
+  deadlock, and the zero-item restore wait; the final review process was terminated after returning
+  its partial confirmation.
 - Gradle unit tests and debug compilation: not run. The user chose not to run Gradle, and
   `AGENTS.md` requires explicit permission for every Gradle task.
-- Second read-only review: no blocking findings. Remaining risk is limited to unverified
-  Compose compiler/API compatibility and runtime `LazyGridLayoutInfo.offset` behavior.
 
 ## Summary
 
 - Added `DiscoverScrollState.kt` with browse/search context keys, stable comic keys, structural
   grid-index mapping, exact/nearest anchor resolution, and a global access-ordered LRU capped at 32.
-- Extended `DiscoverViewModel` with in-memory scroll anchors and browse readiness state.
-- Replaced the unconditional discovery re-entry `scrollToItem(0)` behavior with a context-keyed,
-  one-shot, non-animated restore and continuous first-visible-comic anchor recording.
+- Extended `DiscoverViewModel` with in-memory scroll anchors, browse readiness, and explicit
+  search readiness for empty/error terminal states.
+- Replaced visible post-layout re-entry jumps with a context-keyed, non-animated restore performed
+  while anchored grids are hidden; new contexts without anchors still start at the top.
+- Added a guard so returning to an existing browse context does not replay its old alpha animation.
+- Released the restore gate on cache-generation conflicts with a retryable first-page error.
 - Kept pagination, navigation, bottom-tab state saving, refresh behavior, and layout context
   semantics unchanged.
 - Added JVM tests for context identity, the generic structural-index mapper used by browse/search,
