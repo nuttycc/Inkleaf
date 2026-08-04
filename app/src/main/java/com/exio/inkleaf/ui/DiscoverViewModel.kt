@@ -179,16 +179,6 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
         scrollAnchors.put(contextKey, anchor)
     }
 
-    fun scrollAnchor(contextKey: DiscoverScrollContextKey): DiscoverScrollAnchor? =
-        scrollAnchors.get(contextKey)
-
-    fun updateScrollAnchor(
-        contextKey: DiscoverScrollContextKey,
-        anchor: DiscoverScrollAnchor,
-    ) {
-        scrollAnchors.put(contextKey, anchor)
-    }
-
     fun enterSearch() {
         _mode.value = Mode.SEARCH
     }
