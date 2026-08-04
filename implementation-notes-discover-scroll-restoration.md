@@ -61,8 +61,9 @@ larger rewrite would expand this fix beyond the requested behavior change.
   while anchored grids are hidden; new contexts without anchors still start at the top.
 - Added a guard so returning to an existing browse context does not replay its old alpha animation.
 - Released the restore gate on cache-generation conflicts with a retryable first-page error.
-- Kept pagination, navigation, bottom-tab state saving, refresh behavior, and layout context
-  semantics unchanged.
+- Kept pagination, navigation, bottom-tab state saving, layout context, and existing refresh
+  semantics unchanged, except that cache-generation conflicts now surface as retryable
+  first-page errors.
 - Keyed the prefetch derived state and effect by the context-bound `LazyGridState`; otherwise the
   first feed load can leave infinite scrolling observing the old empty grid.
 - Added JVM tests for context identity, the generic structural-index mapper used by browse/search,

@@ -149,12 +149,29 @@ fun PluginDiscoverScreen(
         }
     val activePluginSignature =
         remember(activeHealthyPlugins) {
-            activeHealthyPlugins.map { "${it.state.pluginId}:${it.state.activeVersion}" }
+            activeHealthyPlugins.map { "${it.state.pluginId}:${it.state.activeVersion}" }.sorted()
         }
+    val latestMode by rememberUpdatedState(mode)
+    val latestQuery by rememberUpdatedState(query)
+    var observedPluginSignature by remember { mutableStateOf<List<String>?>(null) }
     LaunchedEffect(activePluginSignature) {
+        val previousSignature = observedPluginSignature
+        observedPluginSignature = activePluginSignature
+
         viewModel.retainAvailablePluginSelections(
             activeHealthyPlugins.mapTo(linkedSetOf()) { it.state.pluginId }
         )
+        if (
+            previousSignature != null &&
+                previousSignature != activePluginSignature &&
+                latestMode == DiscoverViewModel.Mode.SEARCH &&
+                latestQuery.isNotBlank()
+        ) {
+            viewModel.performSearch(
+                application.pluginCatalog,
+                activeHealthyPlugins,
+            )
+        }
         viewModel.loadFeeds(
             application.pluginCatalog,
             application.pluginBrowseRepository,

@@ -167,7 +167,7 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
     private var installedLoadGeneration = 0L
     private var feedLoadGeneration = 0L
     private var browseGeneration = 0L
-    private var searchGeneration = 0L
+    private val searchRequestGate = DiscoverSearchRequestGate()
 
     fun scrollAnchor(contextKey: DiscoverScrollContextKey): DiscoverScrollAnchor? =
         scrollAnchors.get(contextKey)
@@ -368,13 +368,9 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
 
     fun updateQuery(newQuery: String) {
         if (newQuery == _query.value) return
-        searchGeneration += 1
-        searchJob?.cancel()
-        _isSearching.value = false
+        finishSearchWithoutRequest()
         _searchReady.value = newQuery.isBlank()
         _query.value = newQuery
-        _results.value = emptyList()
-        _errorMessage.value = null
     }
 
     fun togglePluginSelection(pluginId: String, availablePluginIds: List<String>) {
@@ -394,11 +390,21 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
         if (retained != current) _selectedPluginIds.value = retained
     }
 
+    private fun finishSearchWithoutRequest() {
+        searchRequestGate.invalidate()
+        searchJob?.cancel()
+        searchJob = null
+        _isSearching.value = false
+        _searchReady.value = true
+        _results.value = emptyList()
+        _errorMessage.value = null
+        _isRefreshing.value = false
+    }
+
     fun performSearch(catalog: PluginCatalog, availablePlugins: List<InstalledPlugin>) {
         val currentQuery = _query.value.trim()
         if (currentQuery.isBlank()) {
-            _searchReady.value = true
-            _isRefreshing.value = false
+            finishSearchWithoutRequest()
             return
         }
 
@@ -411,45 +417,45 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 .map { it.state.pluginId }
         if (activeHealthyIds.isEmpty()) {
-            _searchReady.value = true
-            _isRefreshing.value = false
+            finishSearchWithoutRequest()
             return
         }
 
         val targetIds =
             (_selectedPluginIds.value ?: activeHealthyIds.toSet()).filter { it in activeHealthyIds }
         if (targetIds.isEmpty()) {
-            searchJob?.cancel()
-            _results.value = emptyList()
-            _isSearching.value = false
-            _searchReady.value = true
-            _isRefreshing.value = false
-            _errorMessage.value = null
+            finishSearchWithoutRequest()
             return
         }
 
-        val generation = ++searchGeneration
+        val generation = searchRequestGate.next()
         searchJob?.cancel()
+        _isSearching.value = true
         _searchReady.value = false
+        _errorMessage.value = null
         searchJob = viewModelScope.launch {
-            _isSearching.value = true
-            _errorMessage.value = null
             try {
                 val result =
                     catalog.search(
                         PluginSearchRequest(query = currentQuery),
                         pluginIds = targetIds,
                     )
-                if (generation == searchGeneration && _query.value.trim() == currentQuery) {
+                if (
+                    searchRequestGate.accepts(generation) &&
+                        _query.value.trim() == currentQuery
+                ) {
                     _results.value = result
                 }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Throwable) {
-                if (generation == searchGeneration) _errorMessage.value = error.message ?: "搜索失败"
+                if (searchRequestGate.accepts(generation)) {
+                    _errorMessage.value = error.message ?: "搜索失败"
+                }
             } finally {
-                _isRefreshing.value = false
-                if (generation == searchGeneration) {
+                if (searchRequestGate.accepts(generation)) {
+                    searchJob = null
+                    _isRefreshing.value = false
                     _isSearching.value = false
                     _searchReady.value = true
                 }
