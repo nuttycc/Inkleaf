@@ -99,3 +99,19 @@ internal fun wholeComicProgress(
         totalPages = comic.pageCount,
     )
 }
+
+/**
+ * 在线追读卡片的阅读进度文案。能确定章节序数时显示"第 N 话 · 第 M 页"；
+ * 章节列表缺失或找不到对应章节时退回只显示页码（保持旧行为）。
+ * 无阅读位置时返回 null，由调用方显示来源名。
+ */
+internal fun onlineProgressLabel(record: OnlineComicRecord): String? {
+    val position = record.position ?: return null
+    val page = position.pageIndex + 1
+    val chapterIndex = record.chapters.indexOfFirst { it.chapterId == position.chapterId }
+    return if (chapterIndex >= 0) {
+        "第 ${chapterIndex + 1} 话 · 第 $page 页"
+    } else {
+        "第 $page 页"
+    }
+}

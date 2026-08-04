@@ -1218,7 +1218,7 @@ private fun OnlineBookmarkedCard(
         )
         Text(
             text =
-                record.position?.let { "第 ${it.pageIndex + 1} 页" }
+                onlineProgressLabel(record)
                     ?: record.key.pluginId.substringAfterLast('.'),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,

@@ -5,6 +5,10 @@ import com.exio.inkleaf.data.ShelfGroupSelection
 import com.exio.inkleaf.data.db.BookSourceType
 import com.exio.inkleaf.data.db.ChapterEntity
 import com.exio.inkleaf.data.db.ComicEntity
+import com.exio.inkleaf.plugin.ChapterSummary
+import com.exio.inkleaf.plugin.OnlineComicRecord
+import com.exio.inkleaf.plugin.OnlineContentKey
+import com.exio.inkleaf.plugin.OnlineReadingPosition
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -62,6 +66,49 @@ class ShelfEntryModelsTest {
         assertEquals(listOf("local:1"), entries.map(ShelfEntry::key))
     }
 
+    @Test
+    fun `online progress shows chapter ordinal and page`() {
+        val record =
+            onlineRecord(
+                chapters =
+                    listOf(
+                        ChapterSummary(chapterId = "c-1", title = "第 1 话"),
+                        ChapterSummary(chapterId = "c-2", title = "第 2 话"),
+                        ChapterSummary(chapterId = "c-3", title = "第 3 话"),
+                    ),
+                chapterId = "c-3",
+                pageIndex = 4,
+            )
+
+        assertEquals("第 3 话 · 第 5 页", onlineProgressLabel(record))
+    }
+
+    @Test
+    fun `online progress falls back to page only when chapters are missing`() {
+        val record = onlineRecord(chapters = emptyList(), chapterId = "c-3", pageIndex = 4)
+
+        assertEquals("第 5 页", onlineProgressLabel(record))
+    }
+
+    @Test
+    fun `online progress falls back to page only when chapter id is unknown`() {
+        val record =
+            onlineRecord(
+                chapters = listOf(ChapterSummary(chapterId = "c-1", title = "第 1 话")),
+                chapterId = "missing",
+                pageIndex = 4,
+            )
+
+        assertEquals("第 5 页", onlineProgressLabel(record))
+    }
+
+    @Test
+    fun `online progress is null without a reading position`() {
+        val record = onlineRecord(chapters = emptyList(), chapterId = null, pageIndex = 0)
+
+        assertNull(onlineProgressLabel(record))
+    }
+
     private fun comic(
         pageCount: Int = 10,
         chapterIndex: Int = 0,
@@ -89,5 +136,23 @@ class ShelfEntryModelsTest {
             title = "Chapter $index",
             pageCount = pageCount,
             isMissing = isMissing,
+        )
+
+    private fun onlineRecord(
+        chapters: List<ChapterSummary>,
+        chapterId: String?,
+        pageIndex: Int,
+    ) =
+        OnlineComicRecord(
+            key = OnlineContentKey("io.example.source", "comic-1"),
+            chapters = chapters,
+            position =
+                chapterId?.let {
+                    OnlineReadingPosition(
+                        chapterId = it,
+                        pageIndex = pageIndex,
+                        updatedAtMs = 1,
+                    )
+                },
         )
 }
