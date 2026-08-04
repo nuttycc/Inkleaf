@@ -64,7 +64,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
@@ -283,10 +282,7 @@ fun PluginDiscoverScreen(
             else -> searchReady
         }
     val latestRestoreReady by rememberUpdatedState(restoreReady)
-    val gridState =
-        rememberSaveable(scrollContext, saver = LazyGridState.Saver) {
-            LazyGridState()
-        }
+    val gridState = remember(scrollContext) { LazyGridState() }
     val latestGridState by rememberUpdatedState(gridState)
     var restoreComplete by remember(scrollContext) {
         mutableStateOf(savedScrollAnchor == null)

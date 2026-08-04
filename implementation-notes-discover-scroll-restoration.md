@@ -16,8 +16,9 @@ configuration-safe, non-persistent, and bounded by a global LRU of 32 contexts.
 - Keep an anchored grid hidden until its data reaches a terminal/restorable state, then perform
   the non-animated correction before revealing it; new contexts without an anchor remain visible
   from the top.
-- Bind the lazy-grid Saver state to the active context and only replay browse alpha animation
-  when its revision increases during the current composition.
+- Bind the lazy-grid state to the active context and let the ViewModel anchor remain the only
+  restore source; only replay browse alpha animation when its revision increases during the current
+  composition.
 - Build the actual lazy-grid index map while accounting for structural rows in browse/search.
 - Record the first visible comic item continuously with its signed pixel offset.
 - Add focused JVM tests for context identity, grid index mapping, anchor resolution, and LRU eviction.
@@ -29,6 +30,10 @@ The visual restore intentionally keeps the anchored grid transparent until the t
 ready, then performs `scrollToItem` while hidden. This is a small timing deviation from pure
 constructor-time initialization, chosen because the stable comic anchor can carry a signed offset
 when structural rows are above it; the user still sees the first visible frame at the saved position.
+
+The anchored grid uses an in-memory `remember(scrollContext)` state rather than a saveable grid
+state. This keeps the ViewModel anchor as the only restore source and preserves the no-cold-start
+persistence contract; configuration/navigation restoration still comes from the ViewModel anchor.
 
 Search now exposes an explicit ready state so successful empty results and other terminal states do
 not leave an anchored grid hidden. A browse cache-generation conflict is surfaced as a retryable
