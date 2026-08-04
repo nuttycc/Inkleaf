@@ -1,14 +1,28 @@
 package com.exio.inkleaf.ui
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DiscoverScrollStateTest {
     private val first = DiscoverComicKey("plugin", "first")
     private val second = DiscoverComicKey("plugin", "second")
     private val third = DiscoverComicKey("plugin", "third")
+
+    @Test
+    fun `stale search generation is rejected after availability invalidation`() {
+        val gate = DiscoverSearchRequestGate()
+        val staleGeneration = gate.next()
+
+        gate.invalidate()
+
+        assertFalse(gate.accepts(staleGeneration))
+        val currentGeneration = gate.next()
+        assertTrue(gate.accepts(currentGeneration))
+    }
 
     @Test
     fun `browse context equality ignores filter map order`() {

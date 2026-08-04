@@ -79,6 +79,18 @@ data class DiscoverScrollAnchor(
     val orderedKeys: List<DiscoverComicKey>,
 )
 
+internal class DiscoverSearchRequestGate {
+    private var generation = 0L
+
+    fun next(): Long = ++generation
+
+    fun invalidate() {
+        generation += 1
+    }
+
+    fun accepts(candidate: Long): Boolean = candidate == generation
+}
+
 data class DiscoverScrollTarget(
     val gridIndex: Int,
     val scrollOffset: Int,
