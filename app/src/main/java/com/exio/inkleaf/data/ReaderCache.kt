@@ -3,7 +3,6 @@ package com.exio.inkleaf.data
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.util.Log
 import com.exio.inkleaf.replaceFileAtomically
 import java.io.File
 import java.io.IOException
@@ -20,13 +19,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import timber.log.Timber
 
 /**
  * Owns all rebuildable reader files under cacheDir: local working copies, online page bytes,
  * identity manifests, and reader thumbnails. User records and saved online snapshots live elsewhere.
  */
 object ReaderCache {
-    private const val TAG = "ReaderCache"
     private const val BOOKS_DIR = "books"
     private const val THUMBS_DIR = "thumbs"
     private const val ONLINE_PAGES_DIR = "online-pages"
@@ -51,7 +50,7 @@ object ReaderCache {
                 } catch (error: CancellationException) {
                     throw error
                 } catch (error: Exception) {
-                    Log.w(TAG, "Cache budget enforcement failed", error)
+                    Timber.w(error, "Cache budget enforcement failed")
                 }
             }
         }

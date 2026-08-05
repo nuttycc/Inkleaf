@@ -23,6 +23,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -39,9 +40,10 @@ import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.exio.inkleaf.DeveloperMode
 import com.exio.inkleaf.data.CacheLimit
 import com.exio.inkleaf.data.ThemeSettings
-import com.exio.inkleaf.diagnostics.DiagnosticRepository
+import com.ms.square.debugoverlay.DebugOverlay
 
 /** General settings. Theme editing lives on its own route with an explicit apply boundary. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -50,7 +52,6 @@ fun SettingsScreen(
     themeSettings: ThemeSettings,
     onBack: () -> Unit,
     onOpenThemeSettings: () -> Unit,
-    onOpenDiagnostics: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: SettingsViewModel = viewModel(),
     foldersViewModel: FoldersViewModel = viewModel(),
@@ -61,10 +62,8 @@ fun SettingsScreen(
     val autoCacheBudgetBytes by viewModel.autoCacheBudgetBytes.collectAsStateWithLifecycle()
     val isClearingOnlineCache by viewModel.isClearingOnlineCache.collectAsStateWithLifecycle()
     val cacheMessage by viewModel.cacheMessage.collectAsStateWithLifecycle()
+    val developerModeEnabled by viewModel.developerModeEnabled.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val unreadDiagnostics by
-        remember(context) { DiagnosticRepository.get(context).unreadCriticalCount }
-            .collectAsStateWithLifecycle()
     var showCacheLimitSheet by remember { mutableStateOf(false) }
     var showClearOnlineCacheDialog by rememberSaveable { mutableStateOf(false) }
     var showAboutSheet by remember { mutableStateOf(false) }
@@ -151,16 +150,21 @@ fun SettingsScreen(
 
             SectionLabel("开发者")
             InkleafActionListItem(
-                headline = "诊断",
-                supporting =
-                    if (unreadDiagnostics > 0) {
-                        "$unreadDiagnostics 条新的崩溃或异常退出"
-                    } else {
-                        "崩溃、错误与本地诊断包"
-                    },
-                onClick = onOpenDiagnostics,
-                trailingContent = { ForwardIcon() },
+                headline = "开发者模式",
+                supporting = "显示运行时指标并启用调试控制台",
+                onClick = { viewModel.setDeveloperModeEnabled(!developerModeEnabled) },
+                trailingContent = {
+                    Switch(checked = developerModeEnabled, onCheckedChange = null)
+                },
             )
+            if (developerModeEnabled) {
+                InkleafActionListItem(
+                    headline = "调试控制台",
+                    supporting = "查看日志、网络请求、性能与退出记录",
+                    onClick = { DebugOverlay.openPanel(context) },
+                    trailingContent = { ForwardIcon() },
+                )
+            }
 
             SectionLabel("关于")
             InkleafActionListItem(

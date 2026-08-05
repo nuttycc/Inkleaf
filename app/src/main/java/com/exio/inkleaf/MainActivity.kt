@@ -3,7 +3,6 @@ package com.exio.inkleaf
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -32,9 +31,6 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -64,10 +60,8 @@ import androidx.navigation.toRoute
 import com.exio.inkleaf.data.ComicRepository
 import com.exio.inkleaf.data.ThemeSettings
 import com.exio.inkleaf.data.ThemeSettingsRepository
-import com.exio.inkleaf.diagnostics.DiagnosticRepository
 import com.exio.inkleaf.plugin.PluginContentCodec
 import com.exio.inkleaf.ui.AlbumEditorScreen
-import com.exio.inkleaf.ui.DiagnosticScreen
 import com.exio.inkleaf.ui.FavoriteViewerScreen
 import com.exio.inkleaf.ui.HistoryScreen
 import com.exio.inkleaf.ui.OnlineComicScreen
@@ -91,6 +85,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
+import timber.log.Timber
 
 /** 类型安全路由：路由就是普通数据类（类比 react-router 的 path + params， 但参数有编译期类型保障）。@Serializable 让编译器生成参数的编解码器。 */
 @Serializable data object ShellRoute
@@ -108,8 +103,6 @@ import kotlinx.serialization.encodeToString
 @Serializable data class FavoriteViewerRoute(val favoriteId: Long)
 
 @Serializable data object SettingsRoute
-
-@Serializable data object DiagnosticRoute
 
 @Serializable data object ThemeSettingsRoute
 
@@ -376,12 +369,12 @@ class MainActivity : AppCompatActivity() {
                 try {
                     withTimeout(THEME_LOAD_TIMEOUT_MS.milliseconds) { themeRepo.settings.first() }
                 } catch (error: TimeoutCancellationException) {
-                    Log.e(LOG_TAG, "Timed out while loading theme settings", error)
+                    Timber.e(error, "Timed out while loading theme settings")
                     ThemeSettings()
                 } catch (error: CancellationException) {
                     throw error
                 } catch (error: Exception) {
-                    Log.e(LOG_TAG, "Failed to load theme settings", error)
+                    Timber.e(error, "Failed to load theme settings")
                     ThemeSettings()
                 }
             val awaitingRecreation =
@@ -403,11 +396,11 @@ class MainActivity : AppCompatActivity() {
                     (application as InkleafApplication).awaitShelfWarmup()
                 }
             } catch (error: TimeoutCancellationException) {
-                Log.w(LOG_TAG, "Shelf warmup timed out; continuing startup", error)
+                Timber.w(error, "Shelf warmup timed out; continuing startup")
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                Log.w(LOG_TAG, "Shelf warmup failed; continuing startup", error)
+                Timber.w(error, "Shelf warmup failed; continuing startup")
             } finally {
                 shelfWarm = true
             }
@@ -424,23 +417,6 @@ class MainActivity : AppCompatActivity() {
                 // 外层：壳 ↔ 二级；内层 Tab NavController 建在 Shell 目的地里
                 val outerNavController = rememberNavController()
                 val pendingExternalOpen = externalOpenRequest
-                val diagnostics = remember { DiagnosticRepository.get(this@MainActivity) }
-                val unreadCriticalDiagnostics by diagnostics.unreadCriticalCount.collectAsStateWithLifecycle()
-                val snackbarHostState = remember { SnackbarHostState() }
-
-                LaunchedEffect(unreadCriticalDiagnostics) {
-                    if (unreadCriticalDiagnostics <= 0) return@LaunchedEffect
-                    val result =
-                        snackbarHostState.showSnackbar(
-                            message = "发现 $unreadCriticalDiagnostics 条新的崩溃或异常退出",
-                            actionLabel = "查看",
-                            withDismissAction = true,
-                        )
-                    if (result == SnackbarResult.ActionPerformed) {
-                        outerNavController.navigate(DiagnosticRoute) { launchSingleTop = true }
-                    }
-                }
-
                 LaunchedEffect(pendingExternalOpen) {
                     val request = pendingExternalOpen ?: return@LaunchedEffect
                     val comicId =
@@ -449,7 +425,7 @@ class MainActivity : AppCompatActivity() {
                         } catch (error: CancellationException) {
                             throw error
                         } catch (error: Exception) {
-                            Log.w(LOG_TAG, "Failed to open external comic", error)
+                            Timber.w(error, "Failed to open external comic")
                             if (consumeExternalOpenRequest(request)) {
                                 Toast.makeText(
                                         this@MainActivity,
@@ -656,13 +632,7 @@ class MainActivity : AppCompatActivity() {
                                 onOpenThemeSettings = {
                                     outerNavController.navigate(ThemeSettingsRoute)
                                 },
-                                onOpenDiagnostics = {
-                                    outerNavController.navigate(DiagnosticRoute)
-                                },
                             )
-                        }
-                        composable<DiagnosticRoute> {
-                            DiagnosticScreen(onBack = { outerNavController.popBackStack() })
                         }
                         composable<ThemeSettingsRoute> {
                             ThemeSettingsScreen(
@@ -740,10 +710,6 @@ class MainActivity : AppCompatActivity() {
                             )
                         }
                     }
-                    SnackbarHost(
-                        hostState = snackbarHostState,
-                        modifier = Modifier.align(Alignment.BottomCenter),
-                    )
                     }
                 }
             }
@@ -779,7 +745,6 @@ class MainActivity : AppCompatActivity() {
         }
 
     private companion object {
-        const val LOG_TAG = "MainActivity"
         const val THEME_LOAD_TIMEOUT_MS = 5_000L
         const val SHELF_WARMUP_TIMEOUT_MS = 3_000L
         const val STATE_EXTERNAL_OPEN_SEQUENCE = "external_open_sequence"

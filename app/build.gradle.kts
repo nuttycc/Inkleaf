@@ -143,6 +143,10 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.material.kolor)
     implementation(libs.okhttp)
+    implementation(libs.debugoverlay)
+    implementation(libs.debugoverlay.okhttp)
+    implementation(libs.debugoverlay.timber)
+    implementation(libs.timber)
 
     // The plugin runtime is feature-gated at startup and fails closed when the WebView lacks it.
     implementation(libs.androidx.javascriptengine)

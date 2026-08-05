@@ -3,6 +3,7 @@ package com.exio.inkleaf.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.exio.inkleaf.DeveloperMode
 import com.exio.inkleaf.data.CacheLimit
 import com.exio.inkleaf.data.CacheSettingsRepository
 import com.exio.inkleaf.data.ReaderCache
@@ -22,6 +23,8 @@ import kotlinx.coroutines.withContext
 /** Owns the non-theme settings that remain on the general settings screen. */
 class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     private val cacheRepo = CacheSettingsRepository(app)
+    private val _developerModeEnabled = MutableStateFlow(DeveloperMode.isEnabled(app))
+    val developerModeEnabled: StateFlow<Boolean> = _developerModeEnabled.asStateFlow()
 
     val cacheLimit: StateFlow<CacheLimit> =
         cacheRepo.limit.stateIn(
@@ -90,6 +93,12 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
             ReaderCache.enforceBudget(getApplication(), keep = null)
             updateCacheUsage()
         }
+    }
+
+    fun setDeveloperModeEnabled(enabled: Boolean) {
+        if (_developerModeEnabled.value == enabled) return
+        DeveloperMode.setEnabled(getApplication(), enabled)
+        _developerModeEnabled.value = enabled
     }
 
     fun clearOnlineCache() {

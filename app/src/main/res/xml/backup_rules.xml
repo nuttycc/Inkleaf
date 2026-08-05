@@ -17,10 +17,6 @@
     <exclude
         domain="file"
         path="ai_enhanced_images/" />
-    <!-- Diagnostics are device-local and can contain exception details. -->
-    <exclude
-        domain="file"
-        path="diagnostics/" />
     <!--
    <include domain="sharedpref" path="."/>
    <exclude domain="sharedpref" path="device.xml"/>

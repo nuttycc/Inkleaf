@@ -9,6 +9,7 @@ import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -73,27 +74,45 @@ class PluginHostSessionTest {
     }
 
     @Test
-    fun `structured log redacts sensitive fields`() = runBlocking {
-        val root = Files.createTempDirectory("inkleaf-plugin-log").toFile()
-        try {
-            PluginHostSession("io.example.one", root).use { session ->
-                session.handle(
-                    "log",
-                    PluginContentCodec.json.encodeToJsonElement(
-                        PluginLogEntry(
-                            "info",
-                            "login",
-                            mapOf("token" to "secret-value", "site" to "example"),
-                        )
-                    ),
-                )
+    fun `structured log redacts sensitive fields`() {
+        val sensitiveFields =
+            linkedMapOf(
+                "token" to "token-value",
+                "apiKey" to "camel-api-key-value",
+                "api_key" to "snake-api-key-value",
+                "x-api-key" to "header-api-key-value",
+                "credential" to "credential-value",
+            )
+        val text =
+            formatPluginLog(
+                "io.example.one",
+                PluginLogEntry(
+                    "info",
+                    "login",
+                    sensitiveFields + ("site" to "example"),
+                ),
+            )
+        assertTrue(text.contains("[REDACTED]"))
+        sensitiveFields.values.forEach { value -> assertFalse(text.contains(value)) }
+        assertTrue(text.contains("site=example"))
+    }
+
+    @Test
+    fun `structured log caps the complete record`() {
+        val fields =
+            buildMap {
+                repeat(32) { index ->
+                    put("field-$index-${"k".repeat(512)}", "v".repeat(4 * 1024))
+                }
             }
-            val text = root.resolve("logs/events.jsonl").readText()
-            assertTrue(text.contains("[REDACTED]"))
-            assertTrue(!text.contains("secret-value"))
-        } finally {
-            root.deleteRecursively()
-        }
+
+        val text =
+            formatPluginLog(
+                "io.example.one",
+                PluginLogEntry("info", "m".repeat(8 * 1024), fields),
+            )
+
+        assertEquals(16 * 1024, text.length)
     }
 
     @Test
@@ -120,23 +139,4 @@ class PluginHostSessionTest {
         }
     }
 
-    @Test
-    fun `log quota keeps at most two thousand entries`() = runBlocking {
-        val root = Files.createTempDirectory("inkleaf-plugin-log-quota").toFile()
-        try {
-            PluginHostSession("io.example.one", root).use { session ->
-                repeat(2_005) { index ->
-                    session.handle(
-                        "log",
-                        PluginContentCodec.json.encodeToJsonElement(
-                            PluginLogEntry("info", "entry-$index")
-                        ),
-                    )
-                }
-            }
-            assertTrue(root.resolve("logs/events.jsonl").readLines().size <= 2_000)
-        } finally {
-            root.deleteRecursively()
-        }
-    }
 }

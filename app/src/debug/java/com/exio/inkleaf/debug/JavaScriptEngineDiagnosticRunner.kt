@@ -2,7 +2,6 @@ package com.exio.inkleaf.debug
 
 import android.content.Context
 import android.os.Build
-import android.util.Log
 import android.webkit.WebView
 import androidx.core.util.Consumer
 import androidx.javascriptengine.IsolateStartupParameters
@@ -19,6 +18,7 @@ import java.util.concurrent.Executor
 import java.util.concurrent.Future
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
+import timber.log.Timber
 
 /**
  * Runs a small, bounded probe against the real WebView-provided JavaScript sandbox.
@@ -587,7 +587,7 @@ class JavaScriptEngineDiagnosticRunner(
     private fun record(lines: MutableList<String>, key: String, value: String) {
         val line = "$key=$value"
         lines += line
-        Log.i(TAG, line)
+        Timber.tag(TAG).i(line)
     }
 
     private fun describe(error: Throwable): String {
@@ -610,7 +610,7 @@ class JavaScriptEngineDiagnosticRunner(
         try {
             closeable?.close()
         } catch (error: Throwable) {
-            Log.w(TAG, "close failed: ${describe(error)}")
+            Timber.tag(TAG).w("close failed: %s", describe(error))
         }
     }
 }

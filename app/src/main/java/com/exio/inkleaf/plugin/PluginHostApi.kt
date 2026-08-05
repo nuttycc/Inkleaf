@@ -120,7 +120,7 @@ class PluginHostSession(
     private val json: Json = defaultJson,
     private val clockMs: () -> Long = { System.currentTimeMillis() },
     private val logger: PluginLogger =
-        FilePluginLogger(pluginId, pluginDirectory.resolve("logs"), json, clockMs),
+        TimberPluginLogger(pluginId),
     private val globalHttpSemaphore: Semaphore = DEFAULT_GLOBAL_HTTP_SEMAPHORE,
     private val settingsReader: PluginSettingsReader = PluginSettingsReader { _, _ -> null },
     private val networkContext: Context? = null,
@@ -146,8 +146,6 @@ class PluginHostSession(
             networkContext,
             httpClientDelegate.value,
             followSslRedirects = true,
-            diagnosticSource = "plugin_http",
-            pluginId = pluginId,
         )
     }
     private val httpClient: OkHttpClient
@@ -682,66 +680,45 @@ interface PluginLogger {
     fun append(entry: PluginLogEntry)
 }
 
-private class FilePluginLogger(
-    private val pluginId: String,
-    private val directory: File,
-    private val json: Json,
-    private val clockMs: () -> Long,
-) : PluginLogger {
-    private val lock = Any()
-    private val file
-        get() = directory.resolve("events.jsonl")
-
-    private var entryCount = if (file.isFile) file.useLines { lines -> lines.count() } else 0
-
-    override fun append(entry: PluginLogEntry) =
-        synchronized(lock) {
-            val safeFields = entry.fields.mapValues { (key, value) -> redact(key, value) }
-            val line =
-                json.encodeToString(
-                    buildJsonObject {
-                        put("pluginId", pluginId)
-                        put("timestampMs", clockMs())
-                        put("level", entry.level.take(16))
-                        put("message", entry.message.take(16 * 1024))
-                        put("fields", json.encodeToJsonElement(safeFields))
-                    }
-                ) + "\n"
-            directory.mkdirs()
-            file.appendText(line, StandardCharsets.UTF_8)
-            entryCount++
-            trim()
+private class TimberPluginLogger(private val pluginId: String) : PluginLogger {
+    override fun append(entry: PluginLogEntry) {
+        val message = formatPluginLog(pluginId, entry)
+        when (entry.level.lowercase(Locale.ROOT)) {
+            "error" -> timber.log.Timber.e(message)
+            "warn", "warning" -> timber.log.Timber.w(message)
+            "debug" -> timber.log.Timber.d(message)
+            else -> timber.log.Timber.i(message)
         }
-
-    private fun trim() {
-        if (!file.isFile) return
-        if (entryCount <= MAX_LOG_ENTRIES && file.length() <= MAX_LOG_BYTES) return
-        val lines = file.readLines(StandardCharsets.UTF_8)
-        var bytes = 0L
-        val retained = ArrayDeque<String>()
-        lines.asReversed().forEach { line ->
-            val lineBytes = line.toByteArray(StandardCharsets.UTF_8).size + 1L
-            if (retained.size >= MAX_LOG_ENTRIES || bytes + lineBytes > MAX_LOG_BYTES)
-                return@forEach
-            retained.addFirst(line)
-            bytes += lineBytes
-        }
-        writeAtomically(file, retained.joinToString("\n", postfix = "\n"))
-        entryCount = retained.size
-    }
-
-    private fun redact(key: String, value: String): String {
-        val sensitive =
-            listOf("authorization", "cookie", "set-cookie", "password", "token", "secret")
-        return if (sensitive.any { key.contains(it, ignoreCase = true) }) "[REDACTED]"
-        else value.take(16 * 1024)
-    }
-
-    private companion object {
-        const val MAX_LOG_ENTRIES = 2_000
-        const val MAX_LOG_BYTES = 2L * 1024L * 1024L
     }
 }
+
+internal fun formatPluginLog(pluginId: String, entry: PluginLogEntry): String {
+    return buildString {
+        fun appendLimited(value: String) {
+            val count = minOf(value.length, MAX_PLUGIN_LOG_RECORD_CHARS - length)
+            if (count > 0) append(value, 0, count)
+        }
+
+        appendLimited("[$pluginId] ")
+        appendLimited(entry.message)
+        for ((key, value) in entry.fields) {
+            if (length >= MAX_PLUGIN_LOG_RECORD_CHARS) break
+            val normalizedKey = key.lowercase(Locale.ROOT).filter { it.isLetterOrDigit() }
+            val sensitive =
+                SENSITIVE_PLUGIN_LOG_FIELD_MARKERS.any { marker ->
+                    normalizedKey.contains(marker)
+                }
+            appendLimited(" | ")
+            appendLimited(key)
+            appendLimited("=")
+            appendLimited(if (sensitive) "[REDACTED]" else value)
+        }
+    }
+}
+
+private const val MAX_PLUGIN_LOG_RECORD_CHARS = 16 * 1024
+private val SENSITIVE_PLUGIN_LOG_FIELD_MARKERS =
+    setOf("authorization", "cookie", "password", "token", "secret", "apikey", "credential")
 
 private fun writeAtomically(file: File, value: String) {
     file.parentFile?.let { parent ->

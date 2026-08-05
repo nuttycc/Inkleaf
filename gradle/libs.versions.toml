@@ -28,6 +28,8 @@ paging = "3.5.0"
 okhttp = "5.4.0"
 spotless = "8.8.0"
 javascriptengine = "1.1.0"
+debugoverlay = "2.6.2"
+timber = "5.0.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -69,6 +71,10 @@ reorderable = { module = "sh.calvin.reorderable:reorderable", version.ref = "reo
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 androidx-javascriptengine = { group = "androidx.javascriptengine", name = "javascriptengine", version.ref = "javascriptengine" }
+debugoverlay = { module = "com.ms-square:debugoverlay", version.ref = "debugoverlay" }
+debugoverlay-okhttp = { module = "com.ms-square:debugoverlay-extension-okhttp", version.ref = "debugoverlay" }
+debugoverlay-timber = { module = "com.ms-square:debugoverlay-extension-timber", version.ref = "debugoverlay" }
+timber = { module = "com.jakewharton.timber:timber", version.ref = "timber" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

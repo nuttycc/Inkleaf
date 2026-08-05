@@ -6,7 +6,4 @@
     <cache-path
         name="album_exports"
         path="exports/" />
-    <cache-path
-        name="diagnostic_exports"
-        path="diagnostic-exports/" />
 </paths>

@@ -4,7 +4,7 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
-import com.exio.inkleaf.diagnostics.NetworkDiagnosticReporter
+import com.ms.square.debugoverlay.extension.okhttp.DebugOverlayNetworkInterceptor
 import java.io.IOException
 import java.net.Inet4Address
 import java.net.Inet6Address
@@ -23,6 +23,7 @@ import okhttp3.Response
 
 /** Network boundary shared by plugin-controlled requests. */
 internal object PluginNetworkPolicy {
+    private val debugOverlayInterceptor = DebugOverlayNetworkInterceptor(maxBodySize = 0L)
     private val strictDns: Dns =
         object : Dns {
             override fun lookup(hostname: String): List<InetAddress> =
@@ -33,20 +34,12 @@ internal object PluginNetworkPolicy {
         context: Context?,
         client: OkHttpClient,
         followSslRedirects: Boolean,
-        diagnosticSource: String? = null,
-        pluginId: String? = null,
     ): Call.Factory {
         val builder =
             client
                 .newBuilder()
                 .dns(strictDns)
-        if (context != null && diagnosticSource != null) {
-            // Observe before validation so blocked requests are visible too; this interceptor
-            // neither reads sensitive request data nor changes policy outcomes.
-            builder.addInterceptor(
-                NetworkDiagnosticReporter.interceptor(context, diagnosticSource, pluginId)
-            )
-        }
+                .addInterceptor(debugOverlayInterceptor)
         val policyBuilder =
             builder
                 .addInterceptor(hostValidationInterceptor())

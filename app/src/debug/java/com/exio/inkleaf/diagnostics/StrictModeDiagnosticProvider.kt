@@ -8,7 +8,7 @@ import android.net.Uri
 /** Installs debug-only StrictMode policies before the application is created. */
 class StrictModeDiagnosticProvider : ContentProvider() {
     override fun onCreate(): Boolean {
-        context?.let(DebugStrictModeDiagnosticInstaller::install)
+        DebugStrictModeDiagnosticInstaller.install()
         return true
     }
 
