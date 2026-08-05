@@ -93,7 +93,7 @@ class InkleafApplication : Application(), ImageLoaderFactory {
 
     override fun onCreate() {
         super.onCreate()
-        DeveloperMode.configure(DeveloperMode.isEnabled(this))
+        DeveloperMode.configureOverlay()
         installUncaughtExceptionHandler()
 
         // Process-owned startup work must survive the short-lived Activity used to synchronize

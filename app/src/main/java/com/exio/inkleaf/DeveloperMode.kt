@@ -14,13 +14,10 @@ internal object DeveloperMode {
             .edit()
             .putBoolean(ENABLED, enabled)
             .apply()
-        configure(enabled)
     }
 
-    fun configure(enabled: Boolean) {
-        DebugOverlay.configure {
-            overlayMode = if (enabled) OverlayMode.FullMetrics() else OverlayMode.Hidden()
-        }
+    fun configureOverlay() {
+        DebugOverlay.configure { overlayMode = OverlayMode.Hidden() }
     }
 
     private const val PREFERENCES = "developer_mode"
