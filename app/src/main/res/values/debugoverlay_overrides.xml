@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="debugoverlay_device_info_hz_value">%1$.0f Hz/%2$.0f Hz</string>
+</resources>
