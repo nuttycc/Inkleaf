@@ -693,18 +693,32 @@ private class TimberPluginLogger(private val pluginId: String) : PluginLogger {
 }
 
 internal fun formatPluginLog(pluginId: String, entry: PluginLogEntry): String {
-    val fields =
-        entry.fields.entries.joinToString { (key, value) ->
-            val sensitive =
-                listOf("authorization", "cookie", "set-cookie", "password", "token", "secret")
-                    .any { key.contains(it, ignoreCase = true) }
-            "$key=${if (sensitive) "[REDACTED]" else value.take(16 * 1024)}"
-        }
     return buildString {
-        append('[').append(pluginId).append("] ").append(entry.message.take(16 * 1024))
-        if (fields.isNotEmpty()) append(" | ").append(fields)
+        fun appendLimited(value: String) {
+            val count = minOf(value.length, MAX_PLUGIN_LOG_RECORD_CHARS - length)
+            if (count > 0) append(value, 0, count)
+        }
+
+        appendLimited("[$pluginId] ")
+        appendLimited(entry.message)
+        for ((key, value) in entry.fields) {
+            if (length >= MAX_PLUGIN_LOG_RECORD_CHARS) break
+            val normalizedKey = key.lowercase(Locale.ROOT).filter { it.isLetterOrDigit() }
+            val sensitive =
+                SENSITIVE_PLUGIN_LOG_FIELD_MARKERS.any { marker ->
+                    normalizedKey.contains(marker)
+                }
+            appendLimited(" | ")
+            appendLimited(key)
+            appendLimited("=")
+            appendLimited(if (sensitive) "[REDACTED]" else value)
+        }
     }
 }
+
+private const val MAX_PLUGIN_LOG_RECORD_CHARS = 16 * 1024
+private val SENSITIVE_PLUGIN_LOG_FIELD_MARKERS =
+    setOf("authorization", "cookie", "password", "token", "secret", "apikey", "credential")
 
 private fun writeAtomically(file: File, value: String) {
     file.parentFile?.let { parent ->
