@@ -3,7 +3,6 @@ package com.exio.inkleaf
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -91,6 +90,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
+import timber.log.Timber
 
 /** 类型安全路由：路由就是普通数据类（类比 react-router 的 path + params， 但参数有编译期类型保障）。@Serializable 让编译器生成参数的编解码器。 */
 @Serializable data object ShellRoute
@@ -376,12 +376,12 @@ class MainActivity : AppCompatActivity() {
                 try {
                     withTimeout(THEME_LOAD_TIMEOUT_MS.milliseconds) { themeRepo.settings.first() }
                 } catch (error: TimeoutCancellationException) {
-                    Log.e(LOG_TAG, "Timed out while loading theme settings", error)
+                    Timber.e(error, "Timed out while loading theme settings")
                     ThemeSettings()
                 } catch (error: CancellationException) {
                     throw error
                 } catch (error: Exception) {
-                    Log.e(LOG_TAG, "Failed to load theme settings", error)
+                    Timber.e(error, "Failed to load theme settings")
                     ThemeSettings()
                 }
             val awaitingRecreation =
@@ -403,11 +403,11 @@ class MainActivity : AppCompatActivity() {
                     (application as InkleafApplication).awaitShelfWarmup()
                 }
             } catch (error: TimeoutCancellationException) {
-                Log.w(LOG_TAG, "Shelf warmup timed out; continuing startup", error)
+                Timber.w(error, "Shelf warmup timed out; continuing startup")
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                Log.w(LOG_TAG, "Shelf warmup failed; continuing startup", error)
+                Timber.w(error, "Shelf warmup failed; continuing startup")
             } finally {
                 shelfWarm = true
             }
@@ -449,7 +449,7 @@ class MainActivity : AppCompatActivity() {
                         } catch (error: CancellationException) {
                             throw error
                         } catch (error: Exception) {
-                            Log.w(LOG_TAG, "Failed to open external comic", error)
+                            Timber.w(error, "Failed to open external comic")
                             if (consumeExternalOpenRequest(request)) {
                                 Toast.makeText(
                                         this@MainActivity,
@@ -779,7 +779,6 @@ class MainActivity : AppCompatActivity() {
         }
 
     private companion object {
-        const val LOG_TAG = "MainActivity"
         const val THEME_LOAD_TIMEOUT_MS = 5_000L
         const val SHELF_WARMUP_TIMEOUT_MS = 3_000L
         const val STATE_EXTERNAL_OPEN_SEQUENCE = "external_open_sequence"

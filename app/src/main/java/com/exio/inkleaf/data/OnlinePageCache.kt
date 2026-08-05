@@ -1,6 +1,5 @@
 package com.exio.inkleaf.data
 
-import android.util.Log
 import com.exio.inkleaf.replaceFileAtomically
 import java.io.File
 import java.io.IOException
@@ -18,6 +17,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import timber.log.Timber
 
 internal enum class OnlinePageLoadPriority { FOREGROUND, SPECULATIVE }
 
@@ -342,8 +342,7 @@ internal class OnlinePageCache(
 
     fun cleanupOnColdStart(staleBeforeMs: Long) {
         if (clearPendingMarker.exists() && !clearRoot()) {
-            Log.w(
-                TAG,
+            Timber.w(
                 "Unable to complete deferred online cache clear; " +
                     "the pending marker keeps the online cache disabled until the next cold start",
             )
@@ -519,7 +518,6 @@ internal class OnlinePageCache(
     )
 
     private companion object {
-        const val TAG = "OnlinePageCache"
         const val MAX_FOREGROUND_DOWNLOADS = 1
         const val MAX_SPECULATIVE_DOWNLOADS = 2
         const val PAGES_DIR = "pages"

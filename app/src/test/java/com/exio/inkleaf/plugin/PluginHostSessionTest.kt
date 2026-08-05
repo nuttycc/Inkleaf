@@ -73,27 +73,19 @@ class PluginHostSessionTest {
     }
 
     @Test
-    fun `structured log redacts sensitive fields`() = runBlocking {
-        val root = Files.createTempDirectory("inkleaf-plugin-log").toFile()
-        try {
-            PluginHostSession("io.example.one", root).use { session ->
-                session.handle(
-                    "log",
-                    PluginContentCodec.json.encodeToJsonElement(
-                        PluginLogEntry(
-                            "info",
-                            "login",
-                            mapOf("token" to "secret-value", "site" to "example"),
-                        )
-                    ),
-                )
-            }
-            val text = root.resolve("logs/events.jsonl").readText()
-            assertTrue(text.contains("[REDACTED]"))
-            assertTrue(!text.contains("secret-value"))
-        } finally {
-            root.deleteRecursively()
-        }
+    fun `structured log redacts sensitive fields`() {
+        val text =
+            formatPluginLog(
+                "io.example.one",
+                PluginLogEntry(
+                    "info",
+                    "login",
+                    mapOf("token" to "secret-value", "site" to "example"),
+                ),
+            )
+        assertTrue(text.contains("[REDACTED]"))
+        assertTrue(!text.contains("secret-value"))
+        assertTrue(text.contains("site=example"))
     }
 
     @Test
@@ -120,23 +112,4 @@ class PluginHostSessionTest {
         }
     }
 
-    @Test
-    fun `log quota keeps at most two thousand entries`() = runBlocking {
-        val root = Files.createTempDirectory("inkleaf-plugin-log-quota").toFile()
-        try {
-            PluginHostSession("io.example.one", root).use { session ->
-                repeat(2_005) { index ->
-                    session.handle(
-                        "log",
-                        PluginContentCodec.json.encodeToJsonElement(
-                            PluginLogEntry("info", "entry-$index")
-                        ),
-                    )
-                }
-            }
-            assertTrue(root.resolve("logs/events.jsonl").readLines().size <= 2_000)
-        } finally {
-            root.deleteRecursively()
-        }
-    }
 }
