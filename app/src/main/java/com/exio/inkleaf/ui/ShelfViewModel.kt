@@ -33,12 +33,14 @@ import com.exio.inkleaf.data.db.GroupWithCount
 import com.exio.inkleaf.plugin.OnlineComicRecord
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -50,6 +52,12 @@ data class ScanState(
     val message: String? = null,
     val seriesConfirmations: List<SeriesScanConfirmation> = emptyList(),
 )
+
+internal fun observeOnlineBookmarked(
+    revisions: Flow<Int>,
+    read: suspend () -> List<OnlineComicRecord>,
+): Flow<List<OnlineComicRecord>> =
+    revisions.map { withContext(Dispatchers.IO) { read() } }
 
 class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycleObserver {
     private val repo = ComicRepository(app)
@@ -64,9 +72,10 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycle
 
     private val onlineRepo = (app as InkleafApplication).onlineContentRepository
 
+    /** 阅读页覆盖书架时仍持续刷新在线快照，返回书架直接拿到最新记录。 */
     private val onlineBookmarked =
-        onlineRepo.revision
-            .map { withContext(Dispatchers.IO) { onlineRepo.listBookmarked() } }
+        observeOnlineBookmarked(onlineRepo.revision) { onlineRepo.listBookmarked() }
+            .shareIn(viewModelScope, SharingStarted.Eagerly, replay = 1)
 
     /** One presentation state gates the first frame on both stores and keeps ordering stable. */
     internal val shelfState: StateFlow<ShelfUiState?> =

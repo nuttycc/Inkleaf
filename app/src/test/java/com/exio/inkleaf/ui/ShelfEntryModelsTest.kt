@@ -67,20 +67,61 @@ class ShelfEntryModelsTest {
     }
 
     @Test
-    fun `online progress shows chapter ordinal and page`() {
+    fun `online progress shows chapter number and page`() {
         val record =
             onlineRecord(
                 chapters =
                     listOf(
-                        ChapterSummary(chapterId = "c-1", title = "第 1 话"),
-                        ChapterSummary(chapterId = "c-2", title = "第 2 话"),
-                        ChapterSummary(chapterId = "c-3", title = "第 3 话"),
+                        ChapterSummary(chapterId = "c-1", title = "第 1 话", number = 1.0),
+                        ChapterSummary(chapterId = "c-2", title = "第 2 话", number = 2.0),
+                        ChapterSummary(chapterId = "c-3", title = "第 3 话", number = 3.0),
                     ),
                 chapterId = "c-3",
                 pageIndex = 4,
             )
 
         assertEquals("第 3 话 · 第 5 页", onlineProgressLabel(record))
+    }
+
+    @Test
+    fun `online progress uses chapter number when chapters are newest first`() {
+        val record =
+            onlineRecord(
+                chapters =
+                    listOf(
+                        ChapterSummary(chapterId = "c-42", title = "第 42 话", number = 42.0),
+                        ChapterSummary(chapterId = "c-10", title = "第 10 话", number = 10.0),
+                    ),
+                chapterId = "c-42",
+                pageIndex = 4,
+            )
+
+        assertEquals("第 42 话 · 第 5 页", onlineProgressLabel(record))
+    }
+
+    @Test
+    fun `online progress preserves decimal chapter number`() {
+        val record =
+            onlineRecord(
+                chapters =
+                    listOf(ChapterSummary(chapterId = "c-35", title = "第 3.5 话", number = 3.5)),
+                chapterId = "c-35",
+                pageIndex = 4,
+            )
+
+        assertEquals("第 3.5 话 · 第 5 页", onlineProgressLabel(record))
+    }
+
+    @Test
+    fun `online progress uses chapter title when number is missing`() {
+        val record =
+            onlineRecord(
+                chapters = listOf(ChapterSummary(chapterId = "extra", title = "番外")),
+                chapterId = "extra",
+                pageIndex = 4,
+            )
+
+        assertEquals("番外 · 第 5 页", onlineProgressLabel(record))
     }
 
     @Test
