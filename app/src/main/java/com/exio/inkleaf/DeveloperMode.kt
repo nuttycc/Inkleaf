@@ -4,7 +4,7 @@ import android.content.Context
 import com.ms.square.debugoverlay.DebugOverlay
 import com.ms.square.debugoverlay.OverlayMode
 
-object DeveloperMode {
+internal object DeveloperMode {
     fun isEnabled(context: Context): Boolean =
         context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE).getBoolean(ENABLED, false)
 
