@@ -1,6 +1,7 @@
 package com.exio.inkleaf
 
 import android.app.Application
+import android.os.Process
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import com.exio.inkleaf.data.AlbumExporter
@@ -30,6 +31,7 @@ import kotlinx.coroutines.launch
 import okhttp3.Call
 import okhttp3.OkHttpClient
 import timber.log.Timber
+import kotlin.system.exitProcess
 
 class InkleafApplication : Application(), ImageLoaderFactory {
     private val coroutineErrorHandler =
@@ -92,6 +94,7 @@ class InkleafApplication : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
         DeveloperMode.configure(DeveloperMode.isEnabled(this))
+        installUncaughtExceptionHandler()
 
         // Process-owned startup work must survive the short-lived Activity used to synchronize
         // a stored night mode on cold start.
@@ -108,6 +111,22 @@ class InkleafApplication : Application(), ImageLoaderFactory {
 
     suspend fun awaitShelfWarmup() {
         shelfWarmup.await()
+    }
+
+    private fun installUncaughtExceptionHandler() {
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+            try {
+                Timber.e(error, "Uncaught exception on thread %s", thread.name)
+            } finally {
+                if (previous != null) {
+                    previous.uncaughtException(thread, error)
+                } else {
+                    Process.killProcess(Process.myPid())
+                    exitProcess(10)
+                }
+            }
+        }
     }
 
     /** Remove generated storage owned exclusively by the retired enhancement feature. */

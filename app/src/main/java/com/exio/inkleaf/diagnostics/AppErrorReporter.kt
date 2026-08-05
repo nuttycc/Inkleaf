@@ -3,20 +3,14 @@ package com.exio.inkleaf.diagnostics
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
-import android.util.Log
 import java.time.Instant
 import java.util.Collections
 import java.util.IdentityHashMap
-import kotlinx.coroutines.CancellationException
+import timber.log.Timber
 
 data class AppErrorReport(val summary: String, val details: String)
 
-/**
- * Compatibility facade for UI code that needs a copyable error report.
- *
- * New diagnostics remain structured in [DiagnosticRepository], while this API deliberately keeps
- * the existing concise Chinese feedback and plain-text details expected by source action screens.
- */
+/** Builds copyable UI feedback and sends the underlying failure to Timber. */
 object AppErrorReporter {
     suspend fun report(
         context: Context,
@@ -32,23 +26,9 @@ object AppErrorReporter {
                 timestamp = Instant.now().toString(),
                 appVersion = context.appVersionNameOrUnknown(),
             )
-        Log.e(TAG, "$operation failed", error)
-        try {
-            DiagnosticRepository.get(context).record(
-                type = DiagnosticEventType.ERROR,
-                title = operation,
-                error = error,
-                metadata = metadata,
-            )
-        } catch (writeError: CancellationException) {
-            throw writeError
-        } catch (writeError: Throwable) {
-            Log.e(TAG, "Unable to persist app error", writeError)
-        }
+        Timber.e(error, "%s failed", operation)
         return report
     }
-
-    private const val TAG = "AppErrorReporter"
 }
 
 internal fun Context.appVersionNameOrUnknown(): String =
@@ -107,15 +87,6 @@ private fun Throwable.causeChain(): List<Throwable> {
         current = current.cause
     }
     return causes
-}
-
-/** Retained for compatibility with old on-device reports and focused JVM tests. */
-internal fun retainErrorLogEntries(existing: String, newEntry: String): String {
-    val separator = "\n\n=== Inkleaf error ===\n\n"
-    val escaped = "\n\n=== Inkleaf error marker ===\n\n"
-    val entries = existing.split(separator).map { it.trim() }.filter { it.isNotEmpty() }
-    val safeNewEntry = newEntry.trim().replace(separator, escaped)
-    return (entries + safeNewEntry).takeLast(100).joinToString(separator, postfix = "\n")
 }
 
 private const val MAX_ERROR_SUMMARY_CHARS = 160
