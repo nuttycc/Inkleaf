@@ -1,11 +1,36 @@
 package com.exio.inkleaf.ui
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ReaderChapterWindowTest {
+    @Test
+    fun `missing current page key is never considered zoomed`() {
+        val pageKey = ReaderPageStateKey(namespace = "book", pageIdentity = "page-1")
+
+        assertFalse(readerIsCurrentPageZoomed(currentPageStateKey = null, zoomedPage = null))
+        assertFalse(readerIsCurrentPageZoomed(currentPageStateKey = null, zoomedPage = pageKey))
+        assertFalse(readerIsCurrentPageZoomed(currentPageStateKey = pageKey, zoomedPage = null))
+    }
+
+    @Test
+    fun `only matching current page key is considered zoomed`() {
+        val currentPage = ReaderPageStateKey(namespace = "book", pageIdentity = "page-1")
+        val otherPage = ReaderPageStateKey(namespace = "book", pageIdentity = "page-2")
+
+        assertTrue(readerIsCurrentPageZoomed(currentPage, currentPage))
+        assertFalse(readerIsCurrentPageZoomed(currentPage, otherPage))
+    }
+
+    @Test
+    fun `page turn directions map to adjacent page deltas`() {
+        assertEquals(-1, readerPageTurnDelta(ReaderTransitionDirection.PREVIOUS))
+        assertEquals(1, readerPageTurnDelta(ReaderTransitionDirection.NEXT))
+    }
+
     @Test
     fun `pager keys are stable strings for every window item type`() {
         val window =

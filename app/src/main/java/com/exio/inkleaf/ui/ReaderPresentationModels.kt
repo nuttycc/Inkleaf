@@ -7,6 +7,17 @@ internal enum class ReaderTransitionDirection {
     NEXT,
 }
 
+internal fun readerPageTurnDelta(direction: ReaderTransitionDirection): Int =
+    when (direction) {
+        ReaderTransitionDirection.PREVIOUS -> -1
+        ReaderTransitionDirection.NEXT -> 1
+    }
+
+internal fun readerIsCurrentPageZoomed(
+    currentPageStateKey: ReaderPageStateKey?,
+    zoomedPage: ReaderPageStateKey?,
+): Boolean = currentPageStateKey != null && zoomedPage == currentPageStateKey
+
 internal sealed interface ReaderTransitionStatus {
     data object Loading : ReaderTransitionStatus
 
