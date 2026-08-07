@@ -101,17 +101,13 @@ internal fun wholeComicProgress(
 }
 
 /**
- * 在线追读卡片的阅读进度文案。优先使用章节自身的编号或标题；章节缺失时只显示页码。
+ * 在线追读卡片的阅读进度文案。使用章节标题；章节缺失时只显示页码。
  * 无阅读位置时返回 null，由调用方显示来源名。
  */
 internal fun onlineProgressLabel(record: OnlineComicRecord): String? {
     val position = record.position ?: return null
     val page = position.pageIndex + 1
     val chapter = record.chapters.firstOrNull { it.chapterId == position.chapterId }
-    val chapterLabel =
-        chapter?.number
-            ?.takeIf { it.isFinite() && it >= 0.0 }
-            ?.let { "第 ${it.toString().removeSuffix(".0")} 话" }
-            ?: chapter?.title?.takeIf(String::isNotBlank)
+    val chapterLabel = chapter?.title?.takeIf(String::isNotBlank)
     return chapterLabel?.let { "$it · 第 $page 页" } ?: "第 $page 页"
 }

@@ -301,8 +301,7 @@ internal class OnlineChapterVolume(
                                         retryAfterMillis = retryAfterMillis(it.header("Retry-After")),
                                     )
                                 }
-                                it.body?.readPageBytes(PluginRuntimePolicy.MAX_IMAGE_BYTES)
-                                    ?: throw ComicOpenException("页面响应为空")
+                                it.body.readPageBytes(PluginRuntimePolicy.MAX_IMAGE_BYTES)
                             }
                         }
                         result.fold(

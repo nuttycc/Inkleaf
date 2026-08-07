@@ -418,6 +418,11 @@ private fun ComicPager(
     var zoomTogglePage by remember { mutableStateOf<ReaderPageStateKey?>(null) }
     var zoomResetPage by remember { mutableStateOf<ReaderPageStateKey?>(null) }
     var zoomToggleAnchor by remember { mutableStateOf(Offset.Unspecified) }
+    val isCurrentPageZoomed =
+        readerIsCurrentPageZoomed(
+            currentPageStateKey = currentPageStateKey,
+            zoomedPage = zoomedPage,
+        )
     var activePanel by remember { mutableStateOf<ReaderPanel?>(null) }
     var chapterLayoutVersion by remember(currentVolume) { mutableIntStateOf(0) }
     val volumeChapters by
@@ -501,8 +506,9 @@ private fun ComicPager(
     val currentReaderChapterTitle =
         readerChapters?.getOrNull(currentReaderChapterIndex)?.title ?: chapterTitle
 
-    // 翻页统一走"前进/后退"抽象：将来日漫右→左模式只需反转点按区到 delta 的映射
-    val turnPage: (Int) -> Unit = { delta ->
+    // 点击和未来按键都通过同一个逻辑方向入口；Pager 滑动仍由原生 Pager 驱动。
+    val turnPage: (ReaderTransitionDirection) -> Unit = { direction ->
+        val delta = readerPageTurnDelta(direction)
         if (pagerChapterWindow != null) {
             when (
                 val result =
@@ -593,10 +599,9 @@ private fun ComicPager(
                         onTap = { offset ->
                             val third = size.width / 3f
                             when {
-                                zoomedPage == currentPageStateKey &&
-                                    offset.x !in third..(third * 2) -> Unit
-                                offset.x < third -> turnPage(-1)
-                                offset.x > third * 2 -> turnPage(1)
+                                isCurrentPageZoomed && offset.x !in third..(third * 2) -> Unit
+                                offset.x < third -> turnPage(ReaderTransitionDirection.PREVIOUS)
+                                offset.x > third * 2 -> turnPage(ReaderTransitionDirection.NEXT)
                                 else -> onToggleControls()
                             }
                         },
@@ -609,7 +614,7 @@ private fun ComicPager(
             userScrollEnabled =
                 readerPagerUserScrollEnabled(
                     isTransitionPage = isTransitionPage,
-                    isZoomed = zoomedPage == currentPageStateKey,
+                    isZoomed = isCurrentPageZoomed,
                 ),
             key = { page ->
                 pagerChapterWindow?.items?.getOrNull(page)?.saveablePagerKey() ?: "single:$page"
@@ -725,7 +730,7 @@ private fun ComicPager(
                     currentPageStateKey != null &&
                     (currentPageStateKey in features.bookmarkPageKeys ||
                         (pagerChapterWindow == null && currentRealPage in features.bookmarkPages)),
-            isZoomed = !isTransitionPage && zoomedPage == currentPageStateKey,
+            isZoomed = !isTransitionPage && isCurrentPageZoomed,
             onBack = onBack,
             onToggleBookmark =
                 actions.onToggleBookmark?.let { toggle ->

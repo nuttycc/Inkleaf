@@ -350,10 +350,7 @@ class PluginHostSession(
         }
 
     private fun readResponse(response: Response): PluginHttpResponse {
-        val responseBody = response.body
-        val bytes =
-            responseBody?.readBounded(PluginRuntimePolicy.MAX_HTTP_RESPONSE_BYTES.toLong())
-                ?: ByteArray(0)
+        val bytes = response.body.readBounded(PluginRuntimePolicy.MAX_HTTP_RESPONSE_BYTES.toLong())
         val headers =
             response.headers.toMultimap().mapValues { (_, values) -> values.joinToString(",") }
         if (bytes.size <= HTTP_INLINE_BODY_BYTES) {

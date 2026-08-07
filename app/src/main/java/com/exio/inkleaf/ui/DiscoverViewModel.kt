@@ -542,7 +542,7 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
                 if (
                     cached != null &&
                         (cached.revision != session?.firstPageRevision ||
-                            cached.cacheGeneration != session?.cacheGeneration)
+                            cached.cacheGeneration != session.cacheGeneration)
                 ) {
                     publishFirstPage(key, cached)
                 }
