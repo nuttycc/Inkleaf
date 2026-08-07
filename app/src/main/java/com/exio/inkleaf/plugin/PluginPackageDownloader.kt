@@ -74,16 +74,16 @@ class PluginPackageDownloader(
                 val startBytes = if (resumed) existingBytes else 0L
                 if (!resumed && partial.exists() && !partial.delete())
                     throw IOException("Unable to restart partial plugin download")
-                val contentLength = result.body?.contentLength()?.takeIf { it >= 0L }
+                val contentLength = result.body.contentLength().takeIf { it >= 0L }
                 val total = contentLength?.let { it + startBytes } ?: source.expectedSizeBytes
                 if (total != null && total > PluginStorageLimits.MAX_PACKAGE_BYTES) {
                     throw IOException("Plugin download exceeds the package size limit")
                 }
-                result.body?.byteStream()?.use { input ->
+                result.body.byteStream().use { input ->
                     java.io.FileOutputStream(partial, resumed).buffered().use { output ->
                         copyBounded(input, output, startBytes, total, resumed, onProgress)
                     }
-                } ?: throw IOException("Plugin download returned an empty body")
+                }
             }
             if (partial.length() > PluginStorageLimits.MAX_PACKAGE_BYTES) {
                 throw IOException("Plugin download exceeds the package size limit")
