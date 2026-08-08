@@ -17,6 +17,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import com.exio.inkleaf.InkleafApplication
 import com.exio.inkleaf.data.ComicOpenException
@@ -76,6 +77,7 @@ internal class OnlineReaderViewModel(
     opaqueContextJson: String?,
     private val initialPageId: String?,
     private val initialPageIndex: Int?,
+    private val savedState: SavedStateHandle,
 ) : AndroidViewModel(app) {
     private val application = getApplication<InkleafApplication>()
     private val repository = application.onlineContentRepository
@@ -428,6 +430,7 @@ internal class OnlineReaderViewModel(
         lastPageByChapterId[activeChapterId] = page
         sessionLatestLocation = locationFor(page)
         pendingProgressPage = page
+        persistLivePosition(activeChapterId, currentRevision, page)
         if (progressWriteJob?.isActive == true) return
         progressWriteJob = viewModelScope.launch {
             try {
@@ -609,6 +612,20 @@ internal class OnlineReaderViewModel(
         val previousOpened = volume
         state = ReaderPresentationState.Loading
         try {
+            // 进程重建恢复：优先采用 SavedStateHandle 里记录的实时位置。路由参数
+            // 冻结于打开那一刻（可能是旧章节/旧页），只有导航状态随进程一起被保存。
+            val liveRestore = readLivePosition()
+            if (liveRestore != null) {
+                activeChapterId = liveRestore.chapterId
+                activeRequestedRevision = liveRestore.chapterRevision
+                activeOpaqueContext =
+                    liveRestore.opaqueContextJson
+                        ?.let {
+                            runCatching { PluginContentCodec.json.parseToJsonElement(it) }
+                                .getOrNull()
+                        }
+                        ?: contentOpaqueContext
+            }
             val snapshot = withContext(Dispatchers.IO) { repository.get(pluginId, sourceId) }
             updateChapterNavigation(snapshot)
             val chapter =
@@ -624,11 +641,12 @@ internal class OnlineReaderViewModel(
             previousOpened?.takeIf { it !== opened }?.let(::closeVolumeWhenUnused)
             cancelThumbnailJobs()
             clearChapterPresentation()
-            val restored = restorePage(snapshot?.position, opened)
+            val restored = restorePage(snapshot?.position, opened, liveRestore)
             val startPage = restored.page
             opened.loadPageBytes(startPage)
             currentPage = startPage
             lastPageByChapterId[activeChapterId] = startPage
+            persistLivePosition(activeChapterId, currentRevision, startPage)
             val initialLocation = locationFor(startPage)
             if (sessionId == null) {
                 beginReadingSession(initialLocation)
@@ -785,6 +803,7 @@ internal class OnlineReaderViewModel(
             volume = candidate
             currentPage = startPage
             lastPageByChapterId[activeChapterId] = startPage
+            persistLivePosition(activeChapterId, revision, startPage)
             sessionLatestLocation = locationFor(startPage)
             state =
                 ReaderPresentationState.Ready(
@@ -1245,6 +1264,7 @@ internal class OnlineReaderViewModel(
         pendingProgressPage = null
         progressWriteJob?.cancelAndJoin()
         progressWriteJob = null
+        persistLivePosition(activeChapterId, currentRevision, page)
         if (volume != null) {
             try {
                 withContext(Dispatchers.IO) { persistPositionOnIo(page) }
@@ -1281,7 +1301,21 @@ internal class OnlineReaderViewModel(
     private fun restorePage(
         saved: com.exio.inkleaf.plugin.OnlineReadingPosition?,
         opened: OnlineChapterVolume,
+        liveRestore: LiveRestorePosition? = null,
     ): RestoredOnlinePage {
+        // 进程重建恢复：SavedStateHandle 里的实时位置比路由参数新，直接按它解析。
+        // 页身份随源更新自动重映射，失败则退回首页并标记过期。
+        if (liveRestore != null) {
+            val resolved =
+                resolveOnlinePageReference(
+                    pageId = liveRestore.pageId,
+                    fallbackPageIndex = liveRestore.pageIndex,
+                    fallbackChapterRevision = liveRestore.chapterRevision,
+                    currentChapterRevision = currentRevision,
+                    pages = opened.pages,
+                )
+            return RestoredOnlinePage(resolved ?: 0, stale = resolved == null)
+        }
         val rememberedPage = lastPageByChapterId[activeChapterId]
         if (sessionId != null && rememberedPage != null && rememberedPage in opened.pages.indices) {
             return RestoredOnlinePage(rememberedPage, stale = false)
@@ -1558,6 +1592,40 @@ internal class OnlineReaderViewModel(
         )
     }
 
+    /**
+     * 把实时位置写入导航 SavedStateHandle（随回退栈保存、进程重建后原样恢复）。
+     * 章节切换、翻页、进入后台时都会刷新，保证离开点 == 恢复点。
+     */
+    private fun persistLivePosition(chapterId: String, revision: String?, page: Int) {
+        val opened = volume ?: return
+        if (page !in opened.pages.indices) return
+        savedState[KEY_LIVE_CHAPTER_ID] = chapterId
+        savedState[KEY_LIVE_PAGE_ID] = opened.pages[page].pageId
+        savedState[KEY_LIVE_PAGE_INDEX] = page
+        savedState[KEY_LIVE_REVISION] = revision ?: currentRevision
+        savedState[KEY_LIVE_OPAQUE] = activeOpaqueContext?.toString()
+    }
+
+    /** 读取上次写入的实时位置；从未写入（新开的回退栈条目）时返回 null。 */
+    private fun readLivePosition(): LiveRestorePosition? {
+        val chapterId = savedState.get<String>(KEY_LIVE_CHAPTER_ID) ?: return null
+        return LiveRestorePosition(
+            chapterId = chapterId,
+            pageId = savedState.get<String>(KEY_LIVE_PAGE_ID),
+            pageIndex = savedState.get<Int>(KEY_LIVE_PAGE_INDEX) ?: 0,
+            chapterRevision = savedState.get<String>(KEY_LIVE_REVISION),
+            opaqueContextJson = savedState.get<String>(KEY_LIVE_OPAQUE),
+        )
+    }
+
+    private data class LiveRestorePosition(
+        val chapterId: String,
+        val pageId: String?,
+        val pageIndex: Int,
+        val chapterRevision: String?,
+        val opaqueContextJson: String?,
+    )
+
     private fun attachProcessLifecycle() {
         if (processLifecycleAttached || sessionEnded) return
         processLifecycleAttached = true
@@ -1592,6 +1660,8 @@ internal class OnlineReaderViewModel(
         val now = SystemClock.elapsedRealtime()
         activeReadingMillis += ReadingSessionRules.segmentDurationMillis(started, now)
         activeSegmentStartedElapsedMs = null
+        // 进入后台/切章前把离开位置写进导航状态，进程随后被回收也能恢复。
+        persistLivePosition(activeChapterId, currentRevision, currentPage)
     }
 
     private fun finishSession() {
@@ -1603,6 +1673,7 @@ internal class OnlineReaderViewModel(
         pendingProgressPage = null
         progressWriteJob?.cancel()
         progressWriteJob = null
+        persistLivePosition(activeChapterId, currentRevision, finalPage)
         val id = sessionId
         val start = sessionStartLocation
         val end = locationForOrNull(finalPage) ?: sessionLatestLocation
@@ -1686,6 +1757,11 @@ internal class OnlineReaderViewModel(
     )
 
     private companion object {
+        const val KEY_LIVE_CHAPTER_ID = "online_reader_live_chapter_id"
+        const val KEY_LIVE_PAGE_ID = "online_reader_live_page_id"
+        const val KEY_LIVE_PAGE_INDEX = "online_reader_live_page_index"
+        const val KEY_LIVE_REVISION = "online_reader_live_revision"
+        const val KEY_LIVE_OPAQUE = "online_reader_live_opaque_context"
         val MANIFEST_TTL = 15.minutes
         const val LEGACY_ACCESS_SCOPE = "legacy"
         const val METERED_PREFETCH_PAGES = 2

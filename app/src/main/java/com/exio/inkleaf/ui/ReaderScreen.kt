@@ -111,6 +111,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
@@ -158,7 +159,7 @@ fun ReaderScreen(
 ) {
     val viewModel: ReaderViewModel = viewModel {
         val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY]!!
-        ReaderViewModel(app, comicId, initialPage)
+        ReaderViewModel(app, comicId, initialPage, createSavedStateHandle())
     }
     val settingsViewModel: ReaderSettingsViewModel = viewModel()
     val readerSettings by settingsViewModel.settings.collectAsStateWithLifecycle()

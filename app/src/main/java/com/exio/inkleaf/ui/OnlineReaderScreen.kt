@@ -5,6 +5,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewmodel.compose.viewModel
 
 @Composable
@@ -30,6 +31,7 @@ fun OnlineReaderScreen(
             opaqueContextJson = opaqueContextJson,
             initialPageId = initialPageId,
             initialPageIndex = initialPageIndex,
+            savedState = createSavedStateHandle(),
         )
     }
     val settingsViewModel: ReaderSettingsViewModel = viewModel()
