@@ -38,14 +38,23 @@ internal fun readerStageBackgroundColor(value: ReaderStageBackground): Color =
 internal fun readerStageContentColor(value: ReaderStageBackground): Color =
     if (value == ReaderStageBackground.BEIGE) Color.Black else Color.White
 
-internal fun readerPageStatusContentColor(settings: ReaderSettings): Color =
-    when (readerPageStatusTone(settings)) {
+/** Bundles the background/content pair so callers derive it once per recomposition. */
+internal data class ReaderStagePalette(val background: Color, val content: Color)
+
+internal fun readerStagePalette(value: ReaderStageBackground): ReaderStagePalette =
+    ReaderStagePalette(
+        background = readerStageBackgroundColor(value),
+        content = readerStageContentColor(value),
+    )
+
+internal fun readerPageStatusContentColor(tone: ReaderPageStatusTone): Color =
+    when (tone) {
         ReaderPageStatusTone.LIGHT_CONTENT -> Color.White
         ReaderPageStatusTone.DARK_CONTENT -> Color.Black
     }
 
-internal fun readerPageStatusContainerColor(settings: ReaderSettings): Color =
-    when (readerPageStatusTone(settings)) {
+internal fun readerPageStatusContainerColor(tone: ReaderPageStatusTone): Color =
+    when (tone) {
         ReaderPageStatusTone.LIGHT_CONTENT -> Color.Black.copy(alpha = 0.78f)
         ReaderPageStatusTone.DARK_CONTENT -> Color.White.copy(alpha = 0.88f)
     }
