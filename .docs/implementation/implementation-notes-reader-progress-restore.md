@@ -58,6 +58,11 @@ Implement the approved reader-progress recovery plan for local and online reader
 - FFF MCP returned `Transport closed` for one targeted `applicationScope` lookup. The indexed
   codebase-memory graph and exact `InkleafApplication.kt` source were used instead; scope and design
   decisions did not change.
+- The required parallel Standards/Spec review agents were retried with the available model options,
+  but the service returned unsupported-model 404s or temporary high-demand errors. The conservative
+  fallback was a fixed-point (`6aa23f1...HEAD`) review in the main thread using the same two axes;
+  it found no documented-standard violations, baseline smells requiring changes, missing spec
+  requirements, or scope creep.
 
 ## Verification log
 
@@ -68,6 +73,15 @@ Implement the approved reader-progress recovery plan for local and online reader
 - Related JVM regression group passed: `ReaderProgressRestorePolicyTest`,
   `OnlinePageResolutionTest`, `OnlineReaderChapterNavigationTest`,
   `ReadingPositionResolverTest`, and `OnlineContentRepositoryTest`.
+- Full JVM unit-test task passed: `:app:testDebugUnitTest --console=plain` reported
+  `BUILD SUCCESSFUL in 53s`; the XML results contained 55 suites / 335 tests / 0 failures /
+  0 skipped tests.
+- Resolved AndroidX Navigation 2.9.8 sources were checked with `library-insight` and the cached
+  sources JAR. `NavBackStackEntry.savedStateHandle` is backed by the entry's SavedStateRegistry,
+  and `NavBackStackEntryImpl.saveState()` delegates to `performSave`, validating the route marker
+  for ordinary navigation state save/restore.
+- Fixed-point review (`6aa23f1...HEAD`) result: Standards 0 findings; Spec 0 findings. The remaining
+  instantaneous-process-kill limitation is already recorded under Deviations.
 - `git diff --check` passed after the initial integration.
 - No standalone Gradle compile task, APK build, device test, or push was run. The permitted JVM
   test task necessarily compiled the main and test Kotlin sources.
