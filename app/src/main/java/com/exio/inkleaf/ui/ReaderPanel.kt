@@ -28,6 +28,7 @@ internal enum class ReaderPanel {
     Chapters,
     Bookmarks,
     Tools,
+    Settings,
 }
 
 internal fun ReaderPanel.title(): String =
@@ -35,6 +36,7 @@ internal fun ReaderPanel.title(): String =
         ReaderPanel.Chapters -> "章节列表"
         ReaderPanel.Bookmarks -> "本书书签"
         ReaderPanel.Tools -> "当前页工具"
+        ReaderPanel.Settings -> "阅读设置"
     }
 
 @Composable

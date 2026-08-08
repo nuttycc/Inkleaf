@@ -1,6 +1,12 @@
 package com.exio.inkleaf.ui
 
+import androidx.compose.ui.Alignment
 import com.exio.inkleaf.data.ComicVolume
+import com.exio.inkleaf.data.ReaderPageDirection
+import com.exio.inkleaf.data.ReaderPageStatusColor
+import com.exio.inkleaf.data.ReaderPageStatusPosition
+import com.exio.inkleaf.data.ReaderSettings
+import com.exio.inkleaf.data.ReaderStageBackground
 
 internal enum class ReaderTransitionDirection {
     PREVIOUS,
@@ -11,6 +17,46 @@ internal fun readerPageTurnDelta(direction: ReaderTransitionDirection): Int =
     when (direction) {
         ReaderTransitionDirection.PREVIOUS -> -1
         ReaderTransitionDirection.NEXT -> 1
+    }
+
+internal fun readerTapTurnDirection(
+    pageDirection: ReaderPageDirection,
+    isLeftZone: Boolean,
+): ReaderTransitionDirection =
+    when (pageDirection) {
+        ReaderPageDirection.LEFT_TO_RIGHT ->
+            if (isLeftZone) ReaderTransitionDirection.PREVIOUS
+            else ReaderTransitionDirection.NEXT
+        ReaderPageDirection.RIGHT_TO_LEFT ->
+            if (isLeftZone) ReaderTransitionDirection.NEXT
+            else ReaderTransitionDirection.PREVIOUS
+    }
+
+internal fun readerPagerReverseLayout(pageDirection: ReaderPageDirection): Boolean =
+    pageDirection == ReaderPageDirection.RIGHT_TO_LEFT
+
+internal fun readerPageStatusAlignment(position: ReaderPageStatusPosition): Alignment =
+    when (position) {
+        ReaderPageStatusPosition.START -> Alignment.BottomStart
+        ReaderPageStatusPosition.CENTER -> Alignment.BottomCenter
+        ReaderPageStatusPosition.END -> Alignment.BottomEnd
+    }
+
+internal enum class ReaderPageStatusTone {
+    LIGHT_CONTENT,
+    DARK_CONTENT,
+}
+
+internal fun readerPageStatusTone(settings: ReaderSettings): ReaderPageStatusTone =
+    when (settings.pageStatusColor) {
+        ReaderPageStatusColor.WHITE -> ReaderPageStatusTone.LIGHT_CONTENT
+        ReaderPageStatusColor.BLACK -> ReaderPageStatusTone.DARK_CONTENT
+        ReaderPageStatusColor.AUTO ->
+            when (settings.stageBackground) {
+                ReaderStageBackground.BEIGE -> ReaderPageStatusTone.DARK_CONTENT
+                ReaderStageBackground.BLACK,
+                ReaderStageBackground.DARK_GRAY -> ReaderPageStatusTone.LIGHT_CONTENT
+            }
     }
 
 internal fun readerIsCurrentPageZoomed(
@@ -100,6 +146,10 @@ internal data class ReaderPresentationActions(
     val onSetCover: ((Int) -> Unit)?,
     val onSaveToGallery: ((Int) -> Unit)? = null,
     val onPageChanged: (ComicVolume, Int) -> Unit,
+    val onPageDirectionChanged: (ReaderPageDirection) -> Unit,
+    val onStageBackgroundChanged: (ReaderStageBackground) -> Unit,
+    val onPageStatusPositionChanged: (ReaderPageStatusPosition) -> Unit,
+    val onPageStatusColorChanged: (ReaderPageStatusColor) -> Unit,
     val onVolumeDisposed: (ComicVolume) -> Unit = {},
     val onVolumeTaskStarted: (ComicVolume) -> Boolean = { true },
     val onVolumeTaskFinished: (ComicVolume) -> Unit = {},
