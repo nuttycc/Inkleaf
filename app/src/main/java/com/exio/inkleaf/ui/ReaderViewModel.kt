@@ -14,6 +14,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import com.exio.inkleaf.InkleafApplication
 import com.exio.inkleaf.data.BookmarkRepository
@@ -71,6 +72,7 @@ class ReaderViewModel(
     app: Application,
     private val comicId: Long,
     private val initialPageOverride: Int? = null,
+    private val savedState: SavedStateHandle,
 ) : AndroidViewModel(app) {
     private val repo = ComicRepository(app)
     private val bookmarkRepo = BookmarkRepository(app)
@@ -135,6 +137,7 @@ class ReaderViewModel(
             override fun onPause(owner: LifecycleOwner) {
                 stopCheckpointLoop()
                 dispatchSessionEvent(ReadingSessionEvent.LeftInteractiveForeground)
+                flushPendingProgress()
             }
         }
 
@@ -168,14 +171,20 @@ class ReaderViewModel(
                         opened.close()
                         throw ComicOpenException("无法打开任何章节，PDF 文件可能已损坏或加密")
                     }
+                    // 进程重建后优先恢复 SavedStateHandle 里的实时页（比路由 initialPage
+                    // 和数据库 lastRead 都新）：路由参数冻结于打开那一刻，数据库进度
+                    // 有 500ms 节流窗口，只有导航状态随进程一起被保存。
+                    val livePage = savedState.get<Int>(KEY_LIVE_PAGE)
                     val startPage =
-                        initialPageOverride
+                        livePage
+                            ?: initialPageOverride
                             ?: opened.chapterPageToGlobal(
                                 comic.lastReadChapterIndex,
                                 comic.lastReadPage,
                             )
                     val safeStartPage = startPage.coerceIn(0, opened.totalPageCount - 1)
                     currentPage = safeStartPage
+                    savedState[KEY_LIVE_PAGE] = safeStartPage
                     dispatchSessionEvent(
                         ReadingSessionEvent.ReaderReady(positionSnapshot(opened, safeStartPage))
                     )
@@ -207,6 +216,8 @@ class ReaderViewModel(
             dispatchSessionEvent(
                 ReadingSessionEvent.PageVisible(positionSnapshot(opened, globalPage))
             )
+            // 实时页写入导航 SavedStateHandle：进程被回收后由导航状态原样恢复。
+            savedState[KEY_LIVE_PAGE] = globalPage
         }
         val progress = opened?.globalToChapterPage(globalPage) ?: ChapterProgress(0, globalPage)
         pendingProgress = progress
@@ -545,6 +556,28 @@ class ReaderViewModel(
         ProcessLifecycleOwner.get().lifecycle.removeObserver(processLifecycleObserver)
     }
 
+    /**
+     * 后台时把节流窗口内未落库的进度立即写盘，并把当前页写入 SavedStateHandle——
+     * 进程若在后台被系统回收，返回时仍能恢复到离开时的页面。
+     */
+    private fun flushPendingProgress() {
+        val latest = pendingProgress ?: return
+        pendingProgress = null
+        progressWriteJob?.cancel()
+        progressWriteJob = null
+        savedState[KEY_LIVE_PAGE] = currentPage
+        viewModelScope.launch {
+            withContext(NonCancellable) {
+                repo.saveProgress(
+                    comicId,
+                    comic?.sourceType ?: BookSourceType.EXTERNAL_ARCHIVE,
+                    latest.chapterIndex,
+                    latest.pageIndex,
+                )
+            }
+        }
+    }
+
     private fun startCheckpointLoop() {
         if (checkpointJob?.isActive == true || sessionEnded) return
         checkpointJob = viewModelScope.launch {
@@ -605,6 +638,9 @@ class ReaderViewModel(
     }
 
     companion object {
+        /** 进程重建恢复用的实时页码，存放在导航 SavedStateHandle。 */
+        private const val KEY_LIVE_PAGE = "reader_live_page"
+
         /** 缩略图解码目标宽度（px）：56dp 格子在 3x 屏上约 168px */
         private const val THUMB_TARGET_WIDTH = 168
 
