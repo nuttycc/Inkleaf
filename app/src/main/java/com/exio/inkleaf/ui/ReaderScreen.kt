@@ -247,8 +247,7 @@ internal fun SharedReaderScreen(
     errorActionLabel: String? = null,
 ) {
     var showControls by remember { mutableStateOf(false) }
-    val stageBackgroundColor = readerStageBackgroundColor(settings.stageBackground)
-    val stageContentColor = readerStageContentColor(settings.stageBackground)
+    val stagePalette = readerStagePalette(settings.stageBackground)
     val view = LocalView.current
     val window = (view.context as? Activity)?.window
     val exitReader = {
@@ -284,7 +283,7 @@ internal fun SharedReaderScreen(
         when (current) {
             ReaderPresentationState.Loading ->
                 LoadingView(
-                    contentColor = stageContentColor,
+                    contentColor = stagePalette.content,
                     modifier = Modifier.fillMaxSize(),
                 )
             is ReaderPresentationState.Error ->
@@ -297,8 +296,8 @@ internal fun SharedReaderScreen(
                             { action(exitReader) }
                         },
                     removeLabel = errorActionLabel,
-                    backgroundColor = stageBackgroundColor,
-                    contentColor = stageContentColor,
+                    backgroundColor = stagePalette.background,
+                    contentColor = stagePalette.content,
                     modifier = Modifier.fillMaxSize(),
                 )
 
@@ -312,6 +311,7 @@ internal fun SharedReaderScreen(
                     features = features,
                     actions = actions,
                     settings = settings,
+                    stagePalette = stagePalette,
                     chapterNavigation = chapterNavigation,
                     onBack = exitReader,
                     showControls = showControls,
@@ -320,7 +320,7 @@ internal fun SharedReaderScreen(
                 )
         }
     }
-    Box(modifier = modifier.fillMaxSize().background(stageBackgroundColor)) {
+    Box(modifier = modifier.fillMaxSize().background(stagePalette.background)) {
         if (chapterNavigation == null) {
             Crossfade(targetState = state, label = "reader-state", content = readerContent)
         } else {
@@ -346,14 +346,13 @@ private fun ComicPager(
     features: ReaderPresentationFeatures,
     actions: ReaderPresentationActions,
     settings: ReaderSettings,
+    stagePalette: ReaderStagePalette,
     chapterNavigation: ReaderChapterNavigation?,
     onBack: () -> Unit,
     showControls: Boolean,
     onToggleControls: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val stageBackgroundColor = readerStageBackgroundColor(settings.stageBackground)
-    val stageContentColor = readerStageContentColor(settings.stageBackground)
     var visibleChapterWindow by remember { mutableStateOf(chapterWindow) }
     val pagerChapterWindow = visibleChapterWindow
     val retainedVolumes =
@@ -672,7 +671,7 @@ private fun ComicPager(
                         ComicPage(
                             volume = content.volume,
                             page = item.pageIndex,
-                            contentColor = stageContentColor,
+                            contentColor = stagePalette.content,
                             pageStateKey = pageStateKey,
                             currentPageStateKey = currentPageStateKey,
                             cacheKeyPrefix = content.cacheKeyPrefix,
@@ -696,8 +695,8 @@ private fun ComicPager(
                     is ReaderChapterWindowItem.Boundary ->
                         ReaderChapterTransitionPage(
                             transition = item.transition,
-                            backgroundColor = stageBackgroundColor,
-                            contentColor = stageContentColor,
+                            backgroundColor = stagePalette.background,
+                            contentColor = stagePalette.content,
                             onRetry = {
                                 chapterNavigation?.onBoundaryRetry?.invoke(
                                     item.transition.direction
@@ -715,7 +714,7 @@ private fun ComicPager(
                 ComicPage(
                     volume = volume,
                     page = page,
-                    contentColor = stageContentColor,
+                    contentColor = stagePalette.content,
                     pageStateKey = pageStateKey,
                     currentPageStateKey = currentPageStateKey,
                     cacheKeyPrefix = cacheKeyPrefix,
@@ -759,10 +758,11 @@ private fun ComicPager(
                 } else {
                     pageCountLabel
                 }
+            val pageStatusTone = readerPageStatusTone(settings)
             ReaderPageStatus(
                 pageLabel = pageLabel,
-                contentColor = readerPageStatusContentColor(settings),
-                containerColor = readerPageStatusContainerColor(settings),
+                contentColor = readerPageStatusContentColor(pageStatusTone),
+                containerColor = readerPageStatusContainerColor(pageStatusTone),
                 modifier =
                     Modifier.align(readerPageStatusAlignment(settings.pageStatusPosition))
                         .navigationBarsPadding()
