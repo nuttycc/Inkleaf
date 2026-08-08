@@ -1,8 +1,10 @@
 package com.exio.inkleaf.ui
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 
 @Composable
@@ -30,6 +32,8 @@ fun OnlineReaderScreen(
             initialPageIndex = initialPageIndex,
         )
     }
+    val settingsViewModel: ReaderSettingsViewModel = viewModel()
+    val readerSettings by settingsViewModel.settings.collectAsStateWithLifecycle()
     val features =
         ReaderPresentationFeatures(
             thumbnails = viewModel.thumbnails,
@@ -49,6 +53,10 @@ fun OnlineReaderScreen(
             onSetCover = null,
             onSaveToGallery = viewModel::saveCurrentPageToGallery,
             onPageChanged = viewModel::saveProgress,
+            onPageDirectionChanged = settingsViewModel::setPageDirection,
+            onStageBackgroundChanged = settingsViewModel::setStageBackground,
+            onPageStatusPositionChanged = settingsViewModel::setPageStatusPosition,
+            onPageStatusColorChanged = settingsViewModel::setPageStatusColor,
             onVolumeDisposed = viewModel::releaseInactiveVolume,
             onVolumeTaskStarted = viewModel::acquireVolumeTask,
             onVolumeTaskFinished = viewModel::releaseVolumeTask,
@@ -61,6 +69,7 @@ fun OnlineReaderScreen(
         state = viewModel.state,
         features = features,
         actions = actions,
+        settings = readerSettings,
         chapterNavigation =
             ReaderChapterNavigation(
                 chapters = viewModel.readerChapters,

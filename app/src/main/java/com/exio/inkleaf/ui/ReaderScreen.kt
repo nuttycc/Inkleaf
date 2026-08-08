@@ -48,6 +48,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -109,6 +110,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
@@ -118,6 +120,8 @@ import com.exio.inkleaf.data.ComicOpenException
 import com.exio.inkleaf.data.ComicVolume
 import com.exio.inkleaf.data.PageRenderRequest
 import com.exio.inkleaf.data.ReaderPageCacheKey
+import com.exio.inkleaf.data.ReaderPageDirection
+import com.exio.inkleaf.data.ReaderSettings
 import kotlin.math.roundToInt
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
@@ -156,6 +160,8 @@ fun ReaderScreen(
         val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY]!!
         ReaderViewModel(app, comicId, initialPage)
     }
+    val settingsViewModel: ReaderSettingsViewModel = viewModel()
+    val readerSettings by settingsViewModel.settings.collectAsStateWithLifecycle()
     val bookmarksByKey =
         viewModel.resolvedBookmarks.associate { resolved ->
             "local:${resolved.bookmark.id}" to resolved.bookmark
@@ -203,6 +209,10 @@ fun ReaderScreen(
             onSetCover = viewModel::setCurrentPageAsCover,
             onSaveToGallery = viewModel::saveCurrentPageToGallery,
             onPageChanged = { _, page -> viewModel.saveProgress(page) },
+            onPageDirectionChanged = settingsViewModel::setPageDirection,
+            onStageBackgroundChanged = settingsViewModel::setStageBackground,
+            onPageStatusPositionChanged = settingsViewModel::setPageStatusPosition,
+            onPageStatusColorChanged = settingsViewModel::setPageStatusColor,
             readerMessage = viewModel.readerMessage,
             onReaderMessageConsumed = viewModel::consumeReaderMessage,
         )
@@ -211,6 +221,7 @@ fun ReaderScreen(
         state = presentationState,
         features = features,
         actions = actions,
+        settings = readerSettings,
         onExit = {
             viewModel.endReadingSession()
             onBack()
@@ -227,6 +238,7 @@ internal fun SharedReaderScreen(
     state: ReaderPresentationState,
     features: ReaderPresentationFeatures,
     actions: ReaderPresentationActions,
+    settings: ReaderSettings,
     onExit: () -> Unit,
     modifier: Modifier = Modifier,
     chapterNavigation: ReaderChapterNavigation? = null,
@@ -235,6 +247,7 @@ internal fun SharedReaderScreen(
     errorActionLabel: String? = null,
 ) {
     var showControls by remember { mutableStateOf(false) }
+    val stagePalette = readerStagePalette(settings.stageBackground)
     val view = LocalView.current
     val window = (view.context as? Activity)?.window
     val exitReader = {
@@ -268,7 +281,11 @@ internal fun SharedReaderScreen(
 
     val readerContent: @Composable (ReaderPresentationState) -> Unit = { current ->
         when (current) {
-            ReaderPresentationState.Loading -> LoadingView(Modifier.fillMaxSize())
+            ReaderPresentationState.Loading ->
+                LoadingView(
+                    contentColor = stagePalette.content,
+                    modifier = Modifier.fillMaxSize(),
+                )
             is ReaderPresentationState.Error ->
                 ErrorView(
                     message = current.message,
@@ -279,6 +296,8 @@ internal fun SharedReaderScreen(
                             { action(exitReader) }
                         },
                     removeLabel = errorActionLabel,
+                    backgroundColor = stagePalette.background,
+                    contentColor = stagePalette.content,
                     modifier = Modifier.fillMaxSize(),
                 )
 
@@ -291,6 +310,8 @@ internal fun SharedReaderScreen(
                     chapterWindow = current.chapterWindow,
                     features = features,
                     actions = actions,
+                    settings = settings,
+                    stagePalette = stagePalette,
                     chapterNavigation = chapterNavigation,
                     onBack = exitReader,
                     showControls = showControls,
@@ -299,7 +320,7 @@ internal fun SharedReaderScreen(
                 )
         }
     }
-    Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
+    Box(modifier = modifier.fillMaxSize().background(stagePalette.background)) {
         if (chapterNavigation == null) {
             Crossfade(targetState = state, label = "reader-state", content = readerContent)
         } else {
@@ -324,6 +345,8 @@ private fun ComicPager(
     chapterWindow: ReaderChapterWindow<ReaderWindowChapterContent>? = null,
     features: ReaderPresentationFeatures,
     actions: ReaderPresentationActions,
+    settings: ReaderSettings,
+    stagePalette: ReaderStagePalette,
     chapterNavigation: ReaderChapterNavigation?,
     onBack: () -> Unit,
     showControls: Boolean,
@@ -589,7 +612,12 @@ private fun ComicPager(
                 // 1x 时 Pager 接管单指拖动；放大后由当前页接管平移。
                 // 点按检测在移动超过阈值时自动作废，工具栏上的按钮/滑杆会消费
                 // 自己的事件，也不会误触发这里。
-                .pointerInput(pagerState.currentPage, pagerChapterWindow, zoomedPage) {
+                .pointerInput(
+                    pagerState.currentPage,
+                    pagerChapterWindow,
+                    zoomedPage,
+                    settings.pageDirection,
+                ) {
                     detectTapGestures(
                         onDoubleTap = { anchor ->
                             zoomToggleAnchor = anchor
@@ -600,8 +628,20 @@ private fun ComicPager(
                             val third = size.width / 3f
                             when {
                                 isCurrentPageZoomed && offset.x !in third..(third * 2) -> Unit
-                                offset.x < third -> turnPage(ReaderTransitionDirection.PREVIOUS)
-                                offset.x > third * 2 -> turnPage(ReaderTransitionDirection.NEXT)
+                                offset.x < third ->
+                                    turnPage(
+                                        readerTapTurnDirection(
+                                            pageDirection = settings.pageDirection,
+                                            isLeftZone = true,
+                                        )
+                                    )
+                                offset.x > third * 2 ->
+                                    turnPage(
+                                        readerTapTurnDirection(
+                                            pageDirection = settings.pageDirection,
+                                            isLeftZone = false,
+                                        )
+                                    )
                                 else -> onToggleControls()
                             }
                         },
@@ -611,6 +651,7 @@ private fun ComicPager(
         HorizontalPager(
             state = pagerState,
             beyondViewportPageCount = 1,
+            reverseLayout = readerPagerReverseLayout(settings.pageDirection),
             userScrollEnabled =
                 readerPagerUserScrollEnabled(
                     isTransitionPage = isTransitionPage,
@@ -630,6 +671,7 @@ private fun ComicPager(
                         ComicPage(
                             volume = content.volume,
                             page = item.pageIndex,
+                            contentColor = stagePalette.content,
                             pageStateKey = pageStateKey,
                             currentPageStateKey = currentPageStateKey,
                             cacheKeyPrefix = content.cacheKeyPrefix,
@@ -653,6 +695,8 @@ private fun ComicPager(
                     is ReaderChapterWindowItem.Boundary ->
                         ReaderChapterTransitionPage(
                             transition = item.transition,
+                            backgroundColor = stagePalette.background,
+                            contentColor = stagePalette.content,
                             onRetry = {
                                 chapterNavigation?.onBoundaryRetry?.invoke(
                                     item.transition.direction
@@ -670,6 +714,7 @@ private fun ComicPager(
                 ComicPage(
                     volume = volume,
                     page = page,
+                    contentColor = stagePalette.content,
                     pageStateKey = pageStateKey,
                     currentPageStateKey = currentPageStateKey,
                     cacheKeyPrefix = cacheKeyPrefix,
@@ -713,12 +758,15 @@ private fun ComicPager(
                 } else {
                     pageCountLabel
                 }
+            val pageStatusTone = readerPageStatusTone(settings)
             ReaderPageStatus(
                 pageLabel = pageLabel,
+                contentColor = readerPageStatusContentColor(pageStatusTone),
+                containerColor = readerPageStatusContainerColor(pageStatusTone),
                 modifier =
-                    Modifier.align(Alignment.BottomCenter)
+                    Modifier.align(readerPageStatusAlignment(settings.pageStatusPosition))
                         .navigationBarsPadding()
-                        .padding(bottom = 16.dp),
+                        .padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
             )
         }
 
@@ -749,6 +797,7 @@ private fun ComicPager(
             visible = showControls && !isTransitionPage && isCurrentVolumeActive,
             currentPage = currentRealPage,
             pageCount = currentVolume.totalPageCount,
+            pageDirection = settings.pageDirection,
             onPageSelected = { selectedPage ->
                 val target = windowIndexForCurrentChapterPage(selectedPage)
                 if (target >= 0) scope.launch { pagerState.scrollToPage(target) }
@@ -839,6 +888,14 @@ private fun ComicPager(
                                     }
                                 },
                         )
+                    ReaderPanel.Settings ->
+                        ReaderSettingsPanelContent(
+                            settings = settings,
+                            onPageDirectionChanged = actions.onPageDirectionChanged,
+                            onStageBackgroundChanged = actions.onStageBackgroundChanged,
+                            onPageStatusPositionChanged = actions.onPageStatusPositionChanged,
+                            onPageStatusColorChanged = actions.onPageStatusColorChanged,
+                        )
                 }
             },
             modifier = Modifier.align(Alignment.BottomCenter),
@@ -849,6 +906,8 @@ private fun ComicPager(
 @Composable
 private fun ReaderChapterTransitionPage(
     transition: ReaderChapterTransition,
+    backgroundColor: Color,
+    contentColor: Color,
     onRetry: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
@@ -857,7 +916,7 @@ private fun ReaderChapterTransitionPage(
     val chapterLabel = transition.chapterIndex?.let { "第 ${it + 1} 章" }.orEmpty()
     val boundary = transition.status == ReaderTransitionStatus.Boundary
     Column(
-        modifier = modifier.background(MaterialTheme.colorScheme.background),
+        modifier = modifier.background(backgroundColor),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
@@ -867,27 +926,41 @@ private fun ReaderChapterTransitionPage(
             } else {
                 "$directionLabel：$chapterLabel"
             },
+            color = contentColor,
             style = MaterialTheme.typography.headlineSmall,
             textAlign = TextAlign.Center,
         )
         if (transition.title.isNotBlank()) {
             Spacer(modifier = Modifier.height(8.dp))
-            Text(transition.title, style = MaterialTheme.typography.titleMedium)
+            Text(
+                text = transition.title,
+                color = contentColor,
+                style = MaterialTheme.typography.titleMedium,
+            )
         }
         Spacer(modifier = Modifier.height(12.dp))
         when (transition.status) {
             ReaderTransitionStatus.Loading -> {
-                CircularProgressIndicator()
+                CircularProgressIndicator(color = contentColor)
                 Spacer(modifier = Modifier.height(12.dp))
-                Text("正在加载$directionLabel")
+                Text("正在加载$directionLabel", color = contentColor)
             }
-            ReaderTransitionStatus.Ready -> Text("继续翻页进入")
+            ReaderTransitionStatus.Ready -> Text("继续翻页进入", color = contentColor)
             ReaderTransitionStatus.Error -> {
-                Text("${directionLabel}加载失败")
+                Text("${directionLabel}加载失败", color = contentColor)
                 Spacer(modifier = Modifier.height(12.dp))
-                Button(onClick = { onRetry?.invoke() }) { Text("重试") }
+                Button(
+                    onClick = { onRetry?.invoke() },
+                    colors =
+                        ButtonDefaults.buttonColors(
+                            containerColor = contentColor,
+                            contentColor = backgroundColor,
+                        ),
+                ) {
+                    Text("重试")
+                }
             }
-            ReaderTransitionStatus.Boundary -> Text("已经到达内容边界")
+            ReaderTransitionStatus.Boundary -> Text("已经到达内容边界", color = contentColor)
         }
     }
 }
@@ -967,6 +1040,7 @@ private fun ReaderBottomControls(
     visible: Boolean,
     currentPage: Int,
     pageCount: Int,
+    pageDirection: ReaderPageDirection,
     onPageSelected: (Int) -> Unit,
     chapterCount: Int,
     thumbnails: Map<Int, ImageBitmap>,
@@ -1028,6 +1102,7 @@ private fun ReaderBottomControls(
                     // 形成"滑杆粗跳 + 胶片看准了再点"的两级定位。
                     FilmstripRow(
                         pageCount = pageCount,
+                        pageDirection = pageDirection,
                         listState = filmstripListState,
                         thumbnails = thumbnails,
                         bookmarkPages = bookmarkPages,
@@ -1145,6 +1220,11 @@ internal enum class ReaderDockDestination(
         icon = MaterialSymbolsOutlinedR.drawable.materialsymbols_ic_handyman_outlined,
         panel = ReaderPanel.Tools,
     ),
+    Settings(
+        label = "设置",
+        icon = MaterialSymbolsOutlinedR.drawable.materialsymbols_ic_settings_outlined,
+        panel = ReaderPanel.Settings,
+    ),
 }
 
 internal fun readerDockDestinations(chapterCount: Int): List<ReaderDockDestination> = buildList {
@@ -1152,6 +1232,7 @@ internal fun readerDockDestinations(chapterCount: Int): List<ReaderDockDestinati
     if (shouldShowChapterMenu(chapterCount)) add(ReaderDockDestination.Chapters)
     add(ReaderDockDestination.Bookmarks)
     add(ReaderDockDestination.Tools)
+    add(ReaderDockDestination.Settings)
 }
 
 @Composable
@@ -1257,6 +1338,7 @@ internal fun ReaderDockItem(
 @Composable
 private fun FilmstripRow(
     pageCount: Int,
+    pageDirection: ReaderPageDirection,
     listState: LazyListState,
     thumbnails: Map<Int, ImageBitmap>,
     bookmarkPages: Set<Int>,
@@ -1269,8 +1351,8 @@ private fun FilmstripRow(
 ) {
     // 当前页变化时让对应缩略图保持居中。
     // 用户手动横滑浏览时 currentPage 不变，不会触发回滚，互不打架
-    var hasCentered by remember { mutableStateOf(false) }
-    LaunchedEffect(currentPage, isDragging) {
+    var hasCentered by remember(pageDirection) { mutableStateOf(false) }
+    LaunchedEffect(currentPage, isDragging, pageDirection) {
         // 首帧布局完成前 viewport 宽度为 0，算不出居中偏移，等它就绪
         snapshotFlow { listState.layoutInfo.viewportEndOffset }.first { it > 0 }
         val info = listState.layoutInfo
@@ -1311,6 +1393,7 @@ private fun FilmstripRow(
 
     LazyRow(
         state = listState,
+        reverseLayout = readerPagerReverseLayout(pageDirection),
         // 顶部留白给选中格的放大腾空间：缩放锚点在底边，80dp 高的格子
         // 放大 15% 全部向上生长（约 12dp）；可滚动容器会裁剪越界内容，
         // 不留白会被切平。底部不生长，只留 2dp 呼吸空隙
@@ -1451,6 +1534,7 @@ private fun readerColorOnDarkSurface(first: Color, second: Color): Color =
 private fun ComicPage(
     volume: ComicVolume,
     page: Int,
+    contentColor: Color,
     pageStateKey: ReaderPageStateKey,
     currentPageStateKey: ReaderPageStateKey?,
     cacheKeyPrefix: String,
@@ -1691,7 +1775,7 @@ private fun ComicPage(
                     is PageContent.Error -> {
                         Text(
                             text = c.message,
-                            color = Color.White,
+                            color = contentColor,
                             style = MaterialTheme.typography.bodyLarge,
                             textAlign = TextAlign.Center,
                             modifier = Modifier.padding(32.dp),
@@ -1701,7 +1785,7 @@ private fun ComicPage(
                     PageContent.Loading -> {
                         // 没有模糊垫底（预热未到/系统不支持）才显示转圈
                         if (!showBlurPlaceholder) {
-                            DelayedSpinner(showDelay = 200.milliseconds)
+                            DelayedSpinner(showDelay = 200.milliseconds, color = contentColor)
                         }
                     }
 
@@ -1710,13 +1794,13 @@ private fun ComicPage(
                         if (decodeFailureMessage != null) {
                             Text(
                                 text = requireNotNull(decodeFailureMessage),
-                                color = Color.White,
+                                color = contentColor,
                                 style = MaterialTheme.typography.bodyLarge,
                                 textAlign = TextAlign.Center,
                                 modifier = Modifier.padding(32.dp),
                             )
                         } else if (pagePainter == null) {
-                            DelayedSpinner(showDelay = 200.milliseconds)
+                            DelayedSpinner(showDelay = 200.milliseconds, color = contentColor)
                         } else {
                             Box(
                                 modifier = Modifier.fillMaxSize(),
@@ -1742,20 +1826,22 @@ private fun ComicPage(
 @Composable
 private fun ReaderPageStatus(
     pageLabel: String,
+    contentColor: Color,
+    containerColor: Color,
     modifier: Modifier = Modifier,
 ) {
     Row(
         modifier =
             modifier
                 .clearAndSetSemantics { contentDescription = pageLabel }
-                .background(Color.Black.copy(alpha = 0.78f), RoundedCornerShape(12.dp))
+                .background(containerColor, RoundedCornerShape(12.dp))
                 .padding(horizontal = 12.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             text = pageLabel,
-            color = Color.White,
+            color = contentColor,
             style = MaterialTheme.typography.labelLarge,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -1833,22 +1919,29 @@ private suspend fun loadOriginalPageContent(
  * 延迟显示的转圈：加载在 delayMillis 内完成就全程不显示。 "出现即消失的转圈"是闪烁感的主要来源——宁可短暂黑屏也不闪转圈， 这是 delayed spinner 的标准模式。
  */
 @Composable
-private fun DelayedSpinner(showDelay: Duration, modifier: Modifier = Modifier) {
+private fun DelayedSpinner(
+    showDelay: Duration,
+    modifier: Modifier = Modifier,
+    color: Color = Color.White,
+) {
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         delay(showDelay)
         visible = true
     }
     if (visible) {
-        CircularProgressIndicator(modifier = modifier, color = Color.White)
+        CircularProgressIndicator(modifier = modifier, color = color)
     }
 }
 
 @Composable
-private fun LoadingView(modifier: Modifier = Modifier) {
+private fun LoadingView(
+    contentColor: Color,
+    modifier: Modifier = Modifier,
+) {
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        // 400ms 内打开完成（小文件/缓存命中）就只是一段平滑的黑色过场
-        DelayedSpinner(showDelay = 400.milliseconds)
+        // 400ms 内打开完成（小文件/缓存命中）就只是一段平滑的 Stage 过场
+        DelayedSpinner(showDelay = 400.milliseconds, color = contentColor)
     }
 }
 
@@ -1859,6 +1952,8 @@ private fun ErrorView(
     backLabel: String,
     onRemove: (() -> Unit)?,
     removeLabel: String?,
+    backgroundColor: Color,
+    contentColor: Color,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -1866,15 +1961,24 @@ private fun ErrorView(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        // 阅读页统一黑底，文字要显式给亮色
-        Text(text = message, color = Color.White, style = MaterialTheme.typography.bodyLarge)
+        Text(text = message, color = contentColor, style = MaterialTheme.typography.bodyLarge)
         Spacer(modifier = Modifier.height(16.dp))
-        Button(onClick = onBack) {
+        Button(
+            onClick = onBack,
+            colors =
+                ButtonDefaults.buttonColors(
+                    containerColor = contentColor,
+                    contentColor = backgroundColor,
+                ),
+        ) {
             Text(backLabel)
         }
         if (onRemove != null && removeLabel != null) {
             Spacer(modifier = Modifier.height(8.dp))
-            OutlinedButton(onClick = onRemove) {
+            OutlinedButton(
+                onClick = onRemove,
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = contentColor),
+            ) {
                 Text(removeLabel)
             }
         }

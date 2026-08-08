@@ -11,6 +11,7 @@ class ReaderDockDestinationsTest {
                 ReaderDockDestination.Pages,
                 ReaderDockDestination.Bookmarks,
                 ReaderDockDestination.Tools,
+                ReaderDockDestination.Settings,
             ),
             readerDockDestinations(chapterCount = 1),
         )
@@ -24,6 +25,7 @@ class ReaderDockDestinationsTest {
                 ReaderDockDestination.Chapters,
                 ReaderDockDestination.Bookmarks,
                 ReaderDockDestination.Tools,
+                ReaderDockDestination.Settings,
             ),
             readerDockDestinations(chapterCount = 2),
         )
