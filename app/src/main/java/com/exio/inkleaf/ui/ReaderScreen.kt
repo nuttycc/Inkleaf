@@ -155,10 +155,16 @@ fun ReaderScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     initialPage: Int? = null,
+    resumeFromPersistedPosition: Boolean = false,
 ) {
     val viewModel: ReaderViewModel = viewModel {
         val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY]!!
-        ReaderViewModel(app, comicId, initialPage)
+        ReaderViewModel(
+            app = app,
+            comicId = comicId,
+            initialPageOverride = initialPage,
+            resumeFromPersistedPosition = resumeFromPersistedPosition,
+        )
     }
     val settingsViewModel: ReaderSettingsViewModel = viewModel()
     val readerSettings by settingsViewModel.settings.collectAsStateWithLifecycle()

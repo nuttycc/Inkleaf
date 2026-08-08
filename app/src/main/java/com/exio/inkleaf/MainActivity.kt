@@ -603,9 +603,19 @@ class MainActivity : AppCompatActivity() {
                         }
                         composable<ReaderRoute> { entry ->
                             val route = entry.toRoute<ReaderRoute>()
+                            val resumeFromPersistedPosition =
+                                remember(entry) {
+                                    entry.savedStateHandle.get<Boolean>(
+                                        READER_PROGRESS_ROUTE_STATE_KEY
+                                    ) == true
+                                }
+                            LaunchedEffect(entry) {
+                                entry.savedStateHandle.set(READER_PROGRESS_ROUTE_STATE_KEY, true)
+                            }
                             ReaderScreen(
                                 comicId = route.comicId,
                                 initialPage = route.initialPage,
+                                resumeFromPersistedPosition = resumeFromPersistedPosition,
                                 onBack = { outerNavController.popBackStack() },
                             )
                         }
@@ -698,6 +708,15 @@ class MainActivity : AppCompatActivity() {
                         }
                         composable<OnlineReaderRoute> { entry ->
                             val route = entry.toRoute<OnlineReaderRoute>()
+                            val resumeFromPersistedPosition =
+                                remember(entry) {
+                                    entry.savedStateHandle.get<Boolean>(
+                                        READER_PROGRESS_ROUTE_STATE_KEY
+                                    ) == true
+                                }
+                            LaunchedEffect(entry) {
+                                entry.savedStateHandle.set(READER_PROGRESS_ROUTE_STATE_KEY, true)
+                            }
                             OnlineReaderScreen(
                                 pluginId = route.pluginId,
                                 sourceId = route.sourceId,
@@ -706,6 +725,7 @@ class MainActivity : AppCompatActivity() {
                                 opaqueContextJson = route.opaqueContextJson,
                                 initialPageId = route.initialPageId,
                                 initialPageIndex = route.initialPageIndex,
+                                resumeFromPersistedPosition = resumeFromPersistedPosition,
                                 onBack = { outerNavController.popBackStack() },
                             )
                         }
@@ -750,5 +770,6 @@ class MainActivity : AppCompatActivity() {
         const val STATE_EXTERNAL_OPEN_SEQUENCE = "external_open_sequence"
         const val STATE_EXTERNAL_OPEN_ID = "external_open_id"
         const val STATE_EXTERNAL_OPEN_URI = "external_open_uri"
+        const val READER_PROGRESS_ROUTE_STATE_KEY = "reader_progress_route_state_initialized"
     }
 }
