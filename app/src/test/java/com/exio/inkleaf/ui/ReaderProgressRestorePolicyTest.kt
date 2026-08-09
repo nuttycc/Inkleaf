@@ -4,6 +4,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -104,6 +105,43 @@ class ReaderProgressRestorePolicyTest {
     }
 
     @Test
+    fun `flush serializes submissions made during an in-flight write`() = runBlocking {
+        val firstWriteStarted = CompletableDeferred<Unit>()
+        val releaseFirstWrite = CompletableDeferred<Unit>()
+        val secondWriteStarted = CompletableDeferred<Unit>()
+        val writes = mutableListOf<Int>()
+        val queue =
+            ReaderProgressWriteQueue<Int>(
+                scope = this,
+                delayMillis = 0L,
+            ) { value ->
+                when (value) {
+                    1 -> {
+                        firstWriteStarted.complete(Unit)
+                        releaseFirstWrite.await()
+                    }
+                    2 -> secondWriteStarted.complete(Unit)
+                }
+                writes += value
+            }
+
+        queue.submit(1)
+        firstWriteStarted.await()
+        val flushJob = launch(start = CoroutineStart.UNDISPATCHED) { queue.flush() }
+        queue.submit(2)
+        yield()
+
+        try {
+            assertFalse(secondWriteStarted.isCompleted)
+        } finally {
+            releaseFirstWrite.complete(Unit)
+        }
+        flushJob.join()
+
+        assertEquals(listOf(1, 2), writes)
+    }
+
+    @Test
     fun `final progress waits for an in-flight write and discards queued work`() = runBlocking {
         val writeStarted = CompletableDeferred<Unit>()
         val releaseWrite = CompletableDeferred<Unit>()
@@ -123,7 +161,8 @@ class ReaderProgressRestorePolicyTest {
         queue.submit(1)
         writeStarted.await()
         queue.submit(2)
-        val queuedJob = queue.cancel()
+        val queuedJob = queue.close()
+        queue.submit(4)
         val finalWrite =
             launch(start = CoroutineStart.UNDISPATCHED) {
                 queuedJob?.join()

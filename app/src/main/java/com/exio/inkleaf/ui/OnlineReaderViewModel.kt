@@ -166,7 +166,7 @@ internal class OnlineReaderViewModel(
 
             override fun onPause(owner: LifecycleOwner) {
                 pauseActiveSegment()
-                flushProgressAtLifecycleBoundary()
+                progressWriteQueue.flushBestEffort()
             }
         }
 
@@ -599,7 +599,6 @@ internal class OnlineReaderViewModel(
         state = ReaderPresentationState.Loading
         try {
             val snapshot = withContext(Dispatchers.IO) { repository.get(pluginId, sourceId) }
-            updateChapterNavigation(snapshot)
             val persistedPosition = snapshot?.position
             val persistedChapterId = persistedPosition?.chapterId
             val resolvedChapterId =
@@ -607,7 +606,7 @@ internal class OnlineReaderViewModel(
                     resumeFromPersistedPosition = resumeFromPersistedPosition,
                     requestedChapterId = activeChapterId,
                     persistedChapterId = persistedChapterId,
-                    availableChapterIds = chapterSummaries.map { it.chapterId }.toSet(),
+                    availableChapterIds = snapshot?.chapters.orEmpty().map { it.chapterId }.toSet(),
                 )
             val restoreChapterMetadata =
                 ReaderProgressRestorePolicy.shouldRestoreChapterMetadata(
@@ -622,8 +621,8 @@ internal class OnlineReaderViewModel(
                         ?.takeIf { it.chapterId == resolvedChapterId }
                         ?.chapterRevision
                 activeOpaqueContext = null
-                updateChapterNavigation(snapshot)
             }
+            updateChapterNavigation(snapshot)
             val chapter =
                 ChapterSummary(
                     chapterId = activeChapterId,
@@ -1607,19 +1606,6 @@ internal class OnlineReaderViewModel(
         ProcessLifecycleOwner.get().lifecycle.removeObserver(processLifecycleObserver)
     }
 
-    private fun flushProgressAtLifecycleBoundary() {
-        if (!progressWriteQueue.hasPending) return
-        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
-            try {
-                progressWriteQueue.flush()
-            } catch (error: CancellationException) {
-                throw error
-            } catch (_: Exception) {
-                // Progress persistence remains best-effort at lifecycle boundaries.
-            }
-        }
-    }
-
     private fun startActiveSegment() {
         if (!chapterReady || sessionEnded || activeSegmentStartedElapsedMs != null) return
         activeSegmentStartedElapsedMs = SystemClock.elapsedRealtime()
@@ -1642,20 +1628,11 @@ internal class OnlineReaderViewModel(
         val start = sessionStartLocation
         val end = locationForOrNull(finalPage) ?: sessionLatestLocation
         val endedAtMs = System.currentTimeMillis().coerceAtLeast(sessionStartedAtMs)
-        val queuedJob = progressWriteQueue.cancel()
+        val queuedJob = progressWriteQueue.close()
         applicationScope.launch {
             queuedJob?.join()
             if (end != null) {
-                runCatching {
-                    repository.recordPosition(
-                        pluginId = pluginId,
-                        sourceId = sourceId,
-                        chapterId = end.identity.chapter.chapterId,
-                        pageId = end.identity.pageId,
-                        pageIndex = end.pageIndex,
-                        chapterRevision = end.chapterRevision,
-                    )
-                }
+                runCatching { persistPositionOnIo(end) }
             }
             if (
                 id != null &&

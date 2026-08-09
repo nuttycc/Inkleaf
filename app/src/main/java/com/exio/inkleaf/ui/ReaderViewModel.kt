@@ -144,7 +144,7 @@ class ReaderViewModel(
             override fun onPause(owner: LifecycleOwner) {
                 stopCheckpointLoop()
                 dispatchSessionEvent(ReadingSessionEvent.LeftInteractiveForeground)
-                flushProgressAtLifecycleBoundary()
+                progressWriteQueue.flushBestEffort()
             }
         }
 
@@ -537,24 +537,11 @@ class ReaderViewModel(
         ProcessLifecycleOwner.get().lifecycle.removeObserver(processLifecycleObserver)
     }
 
-    private fun flushProgressAtLifecycleBoundary() {
-        if (!progressWriteQueue.hasPending) return
-        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
-            try {
-                progressWriteQueue.flush()
-            } catch (error: CancellationException) {
-                throw error
-            } catch (_: Exception) {
-                // Progress persistence remains best-effort at lifecycle boundaries.
-            }
-        }
-    }
-
     private fun persistCurrentProgressInApplicationScope() {
         val opened = volume ?: return
         val latest = opened.globalToChapterPage(currentPage)
         val sourceType = comic?.sourceType ?: BookSourceType.EXTERNAL_ARCHIVE
-        val queuedJob = progressWriteQueue.cancel()
+        val queuedJob = progressWriteQueue.close()
         applicationScope.launch(start = CoroutineStart.UNDISPATCHED) {
             queuedJob?.join()
             runCatching {
