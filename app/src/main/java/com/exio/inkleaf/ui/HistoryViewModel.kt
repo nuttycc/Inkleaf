@@ -221,7 +221,6 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
                                 val label =
                                     formatEndLocation(
                                         chapterTitle = volume.chapterTitle(loc.chapterIndex),
-                                        chapterIndex = loc.chapterIndex,
                                         pageIndex = loc.pageIndex,
                                     )
                                 eventChannel.send(
@@ -446,7 +445,7 @@ private fun HistoryRowProjection.toUi(): HistorySessionUi {
         id = id,
         title = title,
         coverPath = coverPath.takeIf { available },
-        endLocationLabel = formatEndLocation(endChapterTitle, endChapterIndex, endPageIndex),
+        endLocationLabel = formatEndLocation(endChapterTitle, endPageIndex),
         timeRangeLabel = formatTimeRange(startedAt, endedAt, timeZoneId),
         durationLabel = formatDuration(activeReadingMillis),
         comicId = comicId.takeIf { available },
@@ -462,11 +461,10 @@ private fun HistoryRowProjection.toUi(): HistorySessionUi {
 
 private fun formatEndLocation(
     chapterTitle: String,
-    chapterIndex: Int,
     pageIndex: Int,
 ): String {
-    val chapter = chapterTitle.ifBlank { "第 ${chapterIndex + 1} 章" }
-    return "$chapter · 第 ${pageIndex + 1} 页"
+    val page = "第 ${pageIndex + 1} 页"
+    return chapterTitle.takeIf(String::isNotBlank)?.let { "$it · $page" } ?: page
 }
 
 private fun formatTimeRange(startedAt: Long, endedAt: Long, zoneId: String): String {

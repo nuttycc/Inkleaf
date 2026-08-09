@@ -180,16 +180,15 @@ private fun ReaderBookmarkRow(
                 modifier = Modifier.weight(1f).padding(start = 12.dp, end = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                Text(
-                    text =
-                        bookmark.chapterTitle.ifBlank {
-                            "第 ${bookmark.chapterIndex + 1} 章"
-                        },
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                if (bookmark.chapterTitle.isNotBlank()) {
+                    Text(
+                        text = bookmark.chapterTitle,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
 
                 Text(
                     text =

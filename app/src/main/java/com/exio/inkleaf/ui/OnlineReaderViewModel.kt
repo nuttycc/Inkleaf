@@ -1738,7 +1738,7 @@ internal fun buildOnlineReaderChapterItems(
 ): List<ReaderChapterItem> = chapters.mapIndexed { index, chapter ->
     ReaderChapterItem(
         index = index,
-        title = chapter.title.ifBlank { "第 ${index + 1} 章" },
+        title = chapter.title.ifBlank { "未命名章节" },
         pageCount = null,
         isReadable = chapter.available,
     )

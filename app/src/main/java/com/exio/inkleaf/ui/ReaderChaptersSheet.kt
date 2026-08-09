@@ -57,7 +57,7 @@ private fun readerChapterItem(
     val normalizedPageCount = pageCount?.coerceAtLeast(0)
     return ReaderChapterItem(
         index = index,
-        title = title.ifBlank { "第 ${index + 1} 章" },
+        title = title.ifBlank { "未命名章节" },
         pageCount = normalizedPageCount,
         isReadable = (normalizedPageCount == null || normalizedPageCount > 0) && isReadable,
     )
@@ -273,21 +273,18 @@ internal fun ReaderChapterRow(
                         },
                 )
 
-                Text(
-                    text =
-                        if (chapter.isReadable) {
-                            "第 ${chapter.index + 1} 章"
-                        } else {
-                            "第 ${chapter.index + 1} 章 · 无法打开"
-                        },
-                    style = MaterialTheme.typography.labelSmall,
-                    color =
-                        if (isCurrent) {
-                            MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                )
+                if (!chapter.isReadable) {
+                    Text(
+                        text = "无法打开",
+                        style = MaterialTheme.typography.labelSmall,
+                        color =
+                            if (isCurrent) {
+                                MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                    )
+                }
             }
 
             val pageCount = chapter.pageCount

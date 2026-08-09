@@ -634,8 +634,8 @@ private fun BookmarkRow(
 }
 
 private fun bookmarkLocationLabel(bookmark: BookmarkEntity): String {
-    val chapter = bookmark.chapterTitle.ifBlank { "第 ${bookmark.chapterIndex + 1} 章" }
-    return "$chapter · 第 ${bookmark.pageIndex + 1} 页"
+    val page = "第 ${bookmark.pageIndex + 1} 页"
+    return bookmark.chapterTitle.takeIf(String::isNotBlank)?.let { "$it · $page" } ?: page
 }
 
 @Composable

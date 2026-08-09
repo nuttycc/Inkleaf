@@ -36,7 +36,7 @@ class ReaderChapterItemsTest {
             )
 
         assertEquals(listOf(0, 1, 2), items.map { it.index })
-        assertEquals("第 1 章", items[0].title)
+        assertEquals("未命名章节", items[0].title)
         assertEquals("Chapter 2", items[1].title)
         assertTrue(items[0].isReadable)
         assertFalse(items[1].isReadable)
@@ -56,7 +56,7 @@ class ReaderChapterItemsTest {
         val items = loadReaderChapterItems(volume)
 
         assertEquals(listOf(0, 1, 2, 3), items.map { it.index })
-        assertEquals("第 1 章", items[0].title)
+        assertEquals("未命名章节", items[0].title)
         assertEquals("第二章", items[1].title)
         assertEquals(listOf(0, 12, 0, 5), items.map { it.pageCount })
         assertEquals(listOf(false, true, false, true), items.map { it.isReadable })

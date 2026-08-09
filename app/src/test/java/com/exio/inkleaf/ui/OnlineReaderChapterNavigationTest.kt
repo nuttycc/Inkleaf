@@ -21,10 +21,28 @@ class OnlineReaderChapterNavigationTest {
         val items = buildOnlineReaderChapterItems(chapters)
 
         assertEquals(listOf(0, 1, 2), items.map { it.index })
-        assertEquals("第 1 章", items[0].title)
+        assertEquals("未命名章节", items[0].title)
         assertTrue(items[0].isReadable)
         assertNull(items[0].pageCount)
         assertFalse(items[2].isReadable)
+    }
+
+    @Test
+    fun `online chapter titles do not use list ordinals around extras`() {
+        val chaptersWithExtras =
+            (1..11).map { number ->
+                ChapterSummary(chapterId = "chapter-$number", title = "第 $number 话")
+            } +
+                listOf(
+                    ChapterSummary(chapterId = "extra-1", title = "番外 A"),
+                    ChapterSummary(chapterId = "extra-2", title = "番外 B"),
+                    ChapterSummary(chapterId = "chapter-12", title = "第 12 话"),
+                )
+
+        val items = buildOnlineReaderChapterItems(chaptersWithExtras)
+
+        assertEquals("番外 A", items[11].title)
+        assertEquals("第 12 话", items.last().title)
     }
 
     @Test
