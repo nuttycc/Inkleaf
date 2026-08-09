@@ -600,7 +600,8 @@ internal class OnlineReaderViewModel(
         try {
             val snapshot = withContext(Dispatchers.IO) { repository.get(pluginId, sourceId) }
             updateChapterNavigation(snapshot)
-            val persistedChapterId = snapshot?.position?.chapterId
+            val persistedPosition = snapshot?.position
+            val persistedChapterId = persistedPosition?.chapterId
             val resolvedChapterId =
                 ReaderProgressRestorePolicy.chapterId(
                     resumeFromPersistedPosition = resumeFromPersistedPosition,
@@ -608,12 +609,19 @@ internal class OnlineReaderViewModel(
                     persistedChapterId = persistedChapterId,
                     availableChapterIds = chapterSummaries.map { it.chapterId }.toSet(),
                 )
-            if (resolvedChapterId != activeChapterId) {
+            val restoreChapterMetadata =
+                ReaderProgressRestorePolicy.shouldRestoreChapterMetadata(
+                    resumeFromPersistedPosition = resumeFromPersistedPosition,
+                    resolvedChapterId = resolvedChapterId,
+                    persistedChapterId = persistedChapterId,
+                )
+            if (resolvedChapterId != activeChapterId || restoreChapterMetadata) {
                 activeChapterId = resolvedChapterId
-                snapshot?.position
-                    ?.takeIf { it.chapterId == resolvedChapterId }
-                    ?.chapterRevision
-                    ?.let { activeRequestedRevision = it }
+                activeRequestedRevision =
+                    persistedPosition
+                        ?.takeIf { it.chapterId == resolvedChapterId }
+                        ?.chapterRevision
+                activeOpaqueContext = null
                 updateChapterNavigation(snapshot)
             }
             val chapter =

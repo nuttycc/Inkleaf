@@ -6,6 +6,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ReaderProgressRestorePolicyTest {
@@ -58,6 +59,31 @@ class ReaderProgressRestorePolicyTest {
                 persistedChapterId = "chapter-2",
                 availableChapterIds = setOf("chapter-1", "chapter-2"),
             ),
+        )
+    }
+
+    @Test
+    fun `only restored routes refresh metadata for the durable chapter`() {
+        assertTrue(
+            ReaderProgressRestorePolicy.shouldRestoreChapterMetadata(
+                resumeFromPersistedPosition = true,
+                resolvedChapterId = "chapter-1",
+                persistedChapterId = "chapter-1",
+            )
+        )
+        assertFalse(
+            ReaderProgressRestorePolicy.shouldRestoreChapterMetadata(
+                resumeFromPersistedPosition = false,
+                resolvedChapterId = "chapter-1",
+                persistedChapterId = "chapter-1",
+            )
+        )
+        assertFalse(
+            ReaderProgressRestorePolicy.shouldRestoreChapterMetadata(
+                resumeFromPersistedPosition = true,
+                resolvedChapterId = "chapter-1",
+                persistedChapterId = "chapter-2",
+            )
         )
     }
 

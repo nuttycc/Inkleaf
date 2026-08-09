@@ -35,4 +35,11 @@ internal object ReaderProgressRestorePolicy {
         } else {
             requestedChapterId
         }
+
+    fun shouldRestoreChapterMetadata(
+        resumeFromPersistedPosition: Boolean,
+        resolvedChapterId: String,
+        persistedChapterId: String?,
+    ): Boolean =
+        resumeFromPersistedPosition && persistedChapterId == resolvedChapterId
 }
