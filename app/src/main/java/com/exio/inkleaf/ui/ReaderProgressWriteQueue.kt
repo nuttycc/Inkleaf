@@ -8,7 +8,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** Coalesces fast page changes and can durably drain the latest one at a lifecycle boundary. */
+/**
+ * Coalesces fast page changes and can durably drain the latest one at a lifecycle boundary.
+ *
+ * Call its state-mutating methods from one serialized coroutine context.
+ */
 internal class ReaderProgressWriteQueue<T>(
     private val scope: CoroutineScope,
     private val delayMillis: Long,
@@ -44,15 +48,20 @@ internal class ReaderProgressWriteQueue<T>(
     suspend fun flush() {
         job?.cancelAndJoin()
         job = null
+        // Drain any value left outside the worker so the lifecycle boundary remains durable.
         pending?.let { latest ->
             pending = null
             writeLatest(latest)
         }
     }
 
-    fun cancel() {
-        job?.cancel()
+    /** Discards queued work and returns the worker so a replacement write can await it. */
+    fun cancel(): Job? {
+        pending = null
+        val cancelledJob = job
         job = null
+        cancelledJob?.cancel()
+        return cancelledJob
     }
 
     private suspend fun writeLatest(value: T) {

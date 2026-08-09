@@ -1602,7 +1602,13 @@ internal class OnlineReaderViewModel(
     private fun flushProgressAtLifecycleBoundary() {
         if (!progressWriteQueue.hasPending) return
         viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
-            runCatching { progressWriteQueue.flush() }
+            try {
+                progressWriteQueue.flush()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                // Progress persistence remains best-effort at lifecycle boundaries.
+            }
         }
     }
 
@@ -1628,8 +1634,9 @@ internal class OnlineReaderViewModel(
         val start = sessionStartLocation
         val end = locationForOrNull(finalPage) ?: sessionLatestLocation
         val endedAtMs = System.currentTimeMillis().coerceAtLeast(sessionStartedAtMs)
-        progressWriteQueue.cancel()
+        val queuedJob = progressWriteQueue.cancel()
         applicationScope.launch {
+            queuedJob?.join()
             if (end != null) {
                 runCatching {
                     repository.recordPosition(

@@ -502,9 +502,9 @@ class ReaderViewModel(
     override fun onCleared() {
         stopCheckpointLoop()
         detachProcessLifecycle()
-        persistCurrentProgressInApplicationScope()
         // Unexpected disposal pauses the reading session; explicit Back already completed it.
         if (!sessionEnded) {
+            persistCurrentProgressInApplicationScope()
             dispatchTerminalSessionEvent(ReadingSessionEvent.LeftInteractiveForeground)
         }
         val closingVolume = volume
@@ -540,7 +540,13 @@ class ReaderViewModel(
     private fun flushProgressAtLifecycleBoundary() {
         if (!progressWriteQueue.hasPending) return
         viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
-            runCatching { progressWriteQueue.flush() }
+            try {
+                progressWriteQueue.flush()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                // Progress persistence remains best-effort at lifecycle boundaries.
+            }
         }
     }
 
@@ -548,8 +554,9 @@ class ReaderViewModel(
         val opened = volume ?: return
         val latest = opened.globalToChapterPage(currentPage)
         val sourceType = comic?.sourceType ?: BookSourceType.EXTERNAL_ARCHIVE
-        progressWriteQueue.cancel()
+        val queuedJob = progressWriteQueue.cancel()
         applicationScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            queuedJob?.join()
             runCatching {
                 repo.saveProgress(
                     comicId,
