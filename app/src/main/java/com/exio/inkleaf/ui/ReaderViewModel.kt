@@ -41,7 +41,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -71,6 +70,7 @@ class ReaderViewModel(
     app: Application,
     private val comicId: Long,
     private val initialPageOverride: Int? = null,
+    private val resumeFromPersistedPosition: Boolean = false,
 ) : AndroidViewModel(app) {
     private val repo = ComicRepository(app)
     private val bookmarkRepo = BookmarkRepository(app)
@@ -112,9 +112,18 @@ class ReaderViewModel(
     private var coverInFlight = false
     private var galleryExportInFlight = false
 
-    /** 待落库的最新阅读进度；null = 没有待写的进度（见 saveProgress 的节流说明） */
-    private var pendingProgress: ChapterProgress? = null
-    private var progressWriteJob: Job? = null
+    private val progressWriteQueue =
+        ReaderProgressWriteQueue<ChapterProgress>(
+            scope = viewModelScope,
+            delayMillis = PROGRESS_WRITE_INTERVAL_MS,
+        ) { latest ->
+            repo.saveProgress(
+                comicId,
+                comic?.sourceType ?: BookSourceType.EXTERNAL_ARCHIVE,
+                latest.chapterIndex,
+                latest.pageIndex,
+            )
+        }
 
     private var volume: ComicVolume? = null
     private var comic: ComicEntity? = null
@@ -135,6 +144,7 @@ class ReaderViewModel(
             override fun onPause(owner: LifecycleOwner) {
                 stopCheckpointLoop()
                 dispatchSessionEvent(ReadingSessionEvent.LeftInteractiveForeground)
+                flushProgressAtLifecycleBoundary()
             }
         }
 
@@ -168,12 +178,22 @@ class ReaderViewModel(
                         opened.close()
                         throw ComicOpenException("无法打开任何章节，PDF 文件可能已损坏或加密")
                     }
+                    val persistedPage =
+                        comic
+                            .takeIf { it.lastReadAt > 0L }
+                            ?.let {
+                                opened.chapterPageToGlobal(
+                                    it.lastReadChapterIndex,
+                                    it.lastReadPage,
+                                )
+                            }
                     val startPage =
-                        initialPageOverride
-                            ?: opened.chapterPageToGlobal(
-                                comic.lastReadChapterIndex,
-                                comic.lastReadPage,
-                            )
+                        ReaderProgressRestorePolicy.pageIndex(
+                            resumeFromPersistedPosition = resumeFromPersistedPosition,
+                            explicitPageIndex = initialPageOverride,
+                            persistedPageIndex = persistedPage,
+                            fallbackPageIndex = 0,
+                        )
                     val safeStartPage = startPage.coerceIn(0, opened.totalPageCount - 1)
                     currentPage = safeStartPage
                     dispatchSessionEvent(
@@ -196,7 +216,7 @@ class ReaderViewModel(
 
     /**
      * 进度写库按 trailing 节流：快速连翻/拖滑杆跳页时不逐页写——每次写库 都会让书架侧仍在订阅的 Room Flow 在后台重查一轮。窗口内只记最新进度，
-     * 到期写一次；退出阅读页取消协程时由 finally + NonCancellable 保证最后的进度必然落库。
+     * 到期写一次；进入后台或退出阅读页时会立即排空最新进度。
      *
      * UI 仍使用全局页码；内部按 (章节, 页) 落库。
      */
@@ -209,37 +229,7 @@ class ReaderViewModel(
             )
         }
         val progress = opened?.globalToChapterPage(globalPage) ?: ChapterProgress(0, globalPage)
-        pendingProgress = progress
-        if (progressWriteJob?.isActive == true) return
-        progressWriteJob = viewModelScope.launch {
-            try {
-                while (true) {
-                    delay(PROGRESS_WRITE_INTERVAL_MS.milliseconds)
-                    val latest = pendingProgress ?: break
-                    pendingProgress = null
-                    withContext(NonCancellable) {
-                        repo.saveProgress(
-                            comicId,
-                            comic?.sourceType ?: BookSourceType.EXTERNAL_ARCHIVE,
-                            latest.chapterIndex,
-                            latest.pageIndex,
-                        )
-                    }
-                }
-            } finally {
-                withContext(NonCancellable) {
-                    pendingProgress?.let { latest ->
-                        pendingProgress = null
-                        repo.saveProgress(
-                            comicId,
-                            comic?.sourceType ?: BookSourceType.EXTERNAL_ARCHIVE,
-                            latest.chapterIndex,
-                            latest.pageIndex,
-                        )
-                    }
-                }
-            }
-        }
+        progressWriteQueue.submit(progress)
     }
 
     /**
@@ -251,6 +241,7 @@ class ReaderViewModel(
         sessionEnded = true
         stopCheckpointLoop()
         detachProcessLifecycle()
+        persistCurrentProgressInApplicationScope()
         dispatchTerminalSessionEvent(ReadingSessionEvent.LeaveReader(reason))
     }
 
@@ -513,6 +504,7 @@ class ReaderViewModel(
         detachProcessLifecycle()
         // Unexpected disposal pauses the reading session; explicit Back already completed it.
         if (!sessionEnded) {
+            persistCurrentProgressInApplicationScope()
             dispatchTerminalSessionEvent(ReadingSessionEvent.LeftInteractiveForeground)
         }
         val closingVolume = volume
@@ -543,6 +535,37 @@ class ReaderViewModel(
         if (!processLifecycleAttached) return
         processLifecycleAttached = false
         ProcessLifecycleOwner.get().lifecycle.removeObserver(processLifecycleObserver)
+    }
+
+    private fun flushProgressAtLifecycleBoundary() {
+        if (!progressWriteQueue.hasPending) return
+        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            try {
+                progressWriteQueue.flush()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                // Progress persistence remains best-effort at lifecycle boundaries.
+            }
+        }
+    }
+
+    private fun persistCurrentProgressInApplicationScope() {
+        val opened = volume ?: return
+        val latest = opened.globalToChapterPage(currentPage)
+        val sourceType = comic?.sourceType ?: BookSourceType.EXTERNAL_ARCHIVE
+        val queuedJob = progressWriteQueue.cancel()
+        applicationScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            queuedJob?.join()
+            runCatching {
+                repo.saveProgress(
+                    comicId,
+                    sourceType,
+                    latest.chapterIndex,
+                    latest.pageIndex,
+                )
+            }
+        }
     }
 
     private fun startCheckpointLoop() {

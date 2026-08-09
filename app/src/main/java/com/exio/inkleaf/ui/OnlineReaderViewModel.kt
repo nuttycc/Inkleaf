@@ -56,7 +56,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
-import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.joinAll
@@ -76,6 +75,7 @@ internal class OnlineReaderViewModel(
     opaqueContextJson: String?,
     private val initialPageId: String?,
     private val initialPageIndex: Int?,
+    private val resumeFromPersistedPosition: Boolean = false,
 ) : AndroidViewModel(app) {
     private val application = getApplication<InkleafApplication>()
     private val repository = application.onlineContentRepository
@@ -127,8 +127,13 @@ internal class OnlineReaderViewModel(
     private val favoriteMutationMutex = Mutex()
     private var galleryExportInFlight = false
 
-    private var pendingProgressPage: Int? = null
-    private var progressWriteJob: Job? = null
+    private val progressWriteQueue =
+        ReaderProgressWriteQueue<OnlinePageLocation>(
+            scope = viewModelScope,
+            delayMillis = PROGRESS_WRITE_INTERVAL_MS,
+        ) { location ->
+            withContext(Dispatchers.IO) { persistPositionOnIo(location) }
+        }
     private var chapterLoadJob: Job? = null
     private var descriptorRefreshJob: Job? = null
     private val pagePrefetchJobs = mutableSetOf<Job>()
@@ -161,6 +166,7 @@ internal class OnlineReaderViewModel(
 
             override fun onPause(owner: LifecycleOwner) {
                 pauseActiveSegment()
+                flushProgressAtLifecycleBoundary()
             }
         }
 
@@ -426,26 +432,9 @@ internal class OnlineReaderViewModel(
         currentPage = page
         schedulePagePrefetch(opened, page, direction)
         lastPageByChapterId[activeChapterId] = page
-        sessionLatestLocation = locationFor(page)
-        pendingProgressPage = page
-        if (progressWriteJob?.isActive == true) return
-        progressWriteJob = viewModelScope.launch {
-            try {
-                while (true) {
-                    delay(PROGRESS_WRITE_INTERVAL_MS.milliseconds)
-                    val latest = pendingProgressPage ?: break
-                    pendingProgressPage = null
-                    persistPosition(latest)
-                }
-            } finally {
-                withContext(NonCancellable + Dispatchers.IO) {
-                    pendingProgressPage?.let { latest ->
-                        pendingProgressPage = null
-                        persistPositionOnIo(latest)
-                    }
-                }
-            }
-        }
+        val location = locationFor(page)
+        sessionLatestLocation = location
+        progressWriteQueue.submit(location)
     }
 
     fun releaseInactiveVolume(disposed: ComicVolume) {
@@ -611,6 +600,30 @@ internal class OnlineReaderViewModel(
         try {
             val snapshot = withContext(Dispatchers.IO) { repository.get(pluginId, sourceId) }
             updateChapterNavigation(snapshot)
+            val persistedPosition = snapshot?.position
+            val persistedChapterId = persistedPosition?.chapterId
+            val resolvedChapterId =
+                ReaderProgressRestorePolicy.chapterId(
+                    resumeFromPersistedPosition = resumeFromPersistedPosition,
+                    requestedChapterId = activeChapterId,
+                    persistedChapterId = persistedChapterId,
+                    availableChapterIds = chapterSummaries.map { it.chapterId }.toSet(),
+                )
+            val restoreChapterMetadata =
+                ReaderProgressRestorePolicy.shouldRestoreChapterMetadata(
+                    resumeFromPersistedPosition = resumeFromPersistedPosition,
+                    resolvedChapterId = resolvedChapterId,
+                    persistedChapterId = persistedChapterId,
+                )
+            if (resolvedChapterId != activeChapterId || restoreChapterMetadata) {
+                activeChapterId = resolvedChapterId
+                activeRequestedRevision =
+                    persistedPosition
+                        ?.takeIf { it.chapterId == resolvedChapterId }
+                        ?.chapterRevision
+                activeOpaqueContext = null
+                updateChapterNavigation(snapshot)
+            }
             val chapter =
                 ChapterSummary(
                     chapterId = activeChapterId,
@@ -785,7 +798,8 @@ internal class OnlineReaderViewModel(
             volume = candidate
             currentPage = startPage
             lastPageByChapterId[activeChapterId] = startPage
-            sessionLatestLocation = locationFor(startPage)
+            val committedLocation = locationFor(startPage)
+            sessionLatestLocation = committedLocation
             state =
                 ReaderPresentationState.Ready(
                     volume = candidate,
@@ -795,6 +809,9 @@ internal class OnlineReaderViewModel(
                 )
             publishReaderWindow()
             committed = true
+            withContext(NonCancellable + Dispatchers.IO) {
+                runCatching { persistPositionOnIo(committedLocation) }
+            }
             chapterReady = true
             resumeActiveSegmentIfProcessResumed()
             prewarmThumbnails(candidate, startPage)
@@ -1241,18 +1258,15 @@ internal class OnlineReaderViewModel(
     }
 
     private suspend fun flushCurrentProgress() {
-        val page = pendingProgressPage ?: currentPage
-        pendingProgressPage = null
-        progressWriteJob?.cancelAndJoin()
-        progressWriteJob = null
-        if (volume != null) {
-            try {
-                withContext(Dispatchers.IO) { persistPositionOnIo(page) }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (_: Exception) {
-                // A position write failure must not prevent the requested chapter from opening.
-            }
+        val location = locationForOrNull(currentPage)
+        if (location == null) return
+        progressWriteQueue.submit(location)
+        try {
+            progressWriteQueue.flush()
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            // A position write failure must not prevent the requested chapter from opening.
         }
     }
 
@@ -1286,39 +1300,55 @@ internal class OnlineReaderViewModel(
         if (sessionId != null && rememberedPage != null && rememberedPage in opened.pages.indices) {
             return RestoredOnlinePage(rememberedPage, stale = false)
         }
-        initialPageId
-            ?.takeIf { sessionId == null && activeChapterId == initialChapterId }
-            ?.let { pageId ->
-                val exact = opened.pages.indexOfFirst { it.pageId == pageId }
-                if (exact >= 0) return RestoredOnlinePage(exact, stale = false)
-                initialPageIndex
-                    ?.takeIf { it in opened.pages.indices }
-                    ?.let {
-                        return RestoredOnlinePage(it, stale = true)
+        val explicitPage =
+            if (sessionId == null && activeChapterId == initialChapterId) {
+                initialPageId
+                    ?.let { pageId ->
+                        val exact = opened.pages.indexOfFirst { it.pageId == pageId }
+                        if (exact >= 0) RestoredOnlinePage(exact, stale = false)
+                        else {
+                            initialPageIndex
+                                ?.takeIf { it in opened.pages.indices }
+                                ?.let { RestoredOnlinePage(it, stale = true) }
+                        }
                     }
+                    ?: initialPageIndex
+                        ?.takeIf { it in opened.pages.indices }
+                        ?.let {
+                            RestoredOnlinePage(
+                                page = it,
+                                stale = activeRequestedRevision != currentRevision,
+                            )
+                        }
+            } else {
+                null
             }
-        initialPageIndex
-            ?.takeIf {
-                sessionId == null &&
-                    activeChapterId == initialChapterId &&
-                    it in opened.pages.indices
+        val persistedPage =
+            saved
+                ?.takeIf { it.chapterId == activeChapterId }
+                ?.let {
+                    resolveOnlinePageReference(
+                        pageId = it.pageId,
+                        fallbackPageIndex = it.pageIndex,
+                        fallbackChapterRevision = it.chapterRevision,
+                        currentChapterRevision = currentRevision,
+                        pages = opened.pages,
+                    )
+                }
+        val page =
+            ReaderProgressRestorePolicy.pageIndex(
+                resumeFromPersistedPosition = resumeFromPersistedPosition,
+                explicitPageIndex = explicitPage?.page,
+                persistedPageIndex = persistedPage,
+                fallbackPageIndex = 0,
+            )
+        val stale =
+            if (resumeFromPersistedPosition && persistedPage != null) {
+                false
+            } else {
+                explicitPage?.takeIf { it.page == page }?.stale == true
             }
-            ?.let { page ->
-                return RestoredOnlinePage(
-                    page = page,
-                    stale = activeRequestedRevision != currentRevision,
-                )
-        }
-        if (saved == null || saved.chapterId != activeChapterId) return RestoredOnlinePage(0, false)
-        val restored =
-            resolveOnlinePageReference(
-                pageId = saved.pageId,
-                fallbackPageIndex = saved.pageIndex,
-                fallbackChapterRevision = saved.chapterRevision,
-                currentChapterRevision = currentRevision,
-                pages = opened.pages,
-            ) ?: 0
-        return RestoredOnlinePage(restored, stale = false)
+        return RestoredOnlinePage(page, stale)
     }
 
     private fun restorePageForChapter(
@@ -1542,16 +1572,11 @@ internal class OnlineReaderViewModel(
         )
     }
 
-    private suspend fun persistPosition(page: Int) {
-        withContext(Dispatchers.IO) { persistPositionOnIo(page) }
-    }
-
-    private fun persistPositionOnIo(page: Int) {
-        val location = locationForOrNull(page) ?: return
+    private fun persistPositionOnIo(location: OnlinePageLocation) {
         repository.recordPosition(
             pluginId = pluginId,
             sourceId = sourceId,
-            chapterId = activeChapterId,
+            chapterId = location.identity.chapter.chapterId,
             pageId = location.identity.pageId,
             pageIndex = location.pageIndex,
             chapterRevision = location.chapterRevision,
@@ -1582,6 +1607,19 @@ internal class OnlineReaderViewModel(
         ProcessLifecycleOwner.get().lifecycle.removeObserver(processLifecycleObserver)
     }
 
+    private fun flushProgressAtLifecycleBoundary() {
+        if (!progressWriteQueue.hasPending) return
+        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            try {
+                progressWriteQueue.flush()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                // Progress persistence remains best-effort at lifecycle boundaries.
+            }
+        }
+    }
+
     private fun startActiveSegment() {
         if (!chapterReady || sessionEnded || activeSegmentStartedElapsedMs != null) return
         activeSegmentStartedElapsedMs = SystemClock.elapsedRealtime()
@@ -1599,15 +1637,14 @@ internal class OnlineReaderViewModel(
         sessionEnded = true
         pauseActiveSegment()
         detachProcessLifecycle()
-        val finalPage = pendingProgressPage ?: currentPage
-        pendingProgressPage = null
-        progressWriteJob?.cancel()
-        progressWriteJob = null
+        val finalPage = currentPage
         val id = sessionId
         val start = sessionStartLocation
         val end = locationForOrNull(finalPage) ?: sessionLatestLocation
         val endedAtMs = System.currentTimeMillis().coerceAtLeast(sessionStartedAtMs)
+        val queuedJob = progressWriteQueue.cancel()
         applicationScope.launch {
+            queuedJob?.join()
             if (end != null) {
                 runCatching {
                     repository.recordPosition(

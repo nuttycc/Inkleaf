@@ -16,6 +16,7 @@ fun OnlineReaderScreen(
     opaqueContextJson: String?,
     initialPageId: String? = null,
     initialPageIndex: Int? = null,
+    resumeFromPersistedPosition: Boolean = false,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -30,6 +31,7 @@ fun OnlineReaderScreen(
             opaqueContextJson = opaqueContextJson,
             initialPageId = initialPageId,
             initialPageIndex = initialPageIndex,
+            resumeFromPersistedPosition = resumeFromPersistedPosition,
         )
     }
     val settingsViewModel: ReaderSettingsViewModel = viewModel()
