@@ -81,6 +81,33 @@ internal data class ReaderChapterTransition(
     val status: ReaderTransitionStatus,
 )
 
+internal enum class ReaderBottomControlsMode {
+    HIDDEN,
+    PAGE,
+    TRANSITION,
+}
+
+internal fun readerBottomControlsMode(
+    showControls: Boolean,
+    isTransitionPage: Boolean,
+    isCurrentVolumeActive: Boolean,
+): ReaderBottomControlsMode =
+    when {
+        !showControls -> ReaderBottomControlsMode.HIDDEN
+        isTransitionPage -> ReaderBottomControlsMode.TRANSITION
+        isCurrentVolumeActive -> ReaderBottomControlsMode.PAGE
+        else -> ReaderBottomControlsMode.HIDDEN
+    }
+
+internal fun readerTransitionHeading(transition: ReaderChapterTransition): String =
+    when {
+        transition.status == ReaderTransitionStatus.Boundary &&
+            transition.direction == ReaderTransitionDirection.NEXT -> "没有下一章"
+        transition.status == ReaderTransitionStatus.Boundary -> "没有上一章"
+        transition.direction == ReaderTransitionDirection.NEXT -> "下一章"
+        else -> "上一章"
+    }
+
 internal fun readerPagerUserScrollEnabled(
     isTransitionPage: Boolean,
     isZoomed: Boolean,

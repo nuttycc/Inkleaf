@@ -42,6 +42,64 @@ class ReaderSettingsPresentationTest {
     }
 
     @Test
+    fun `bottom controls switch between page and transition content`() {
+        assertEquals(
+            ReaderBottomControlsMode.HIDDEN,
+            readerBottomControlsMode(
+                showControls = false,
+                isTransitionPage = true,
+                isCurrentVolumeActive = true,
+            ),
+        )
+        assertEquals(
+            ReaderBottomControlsMode.PAGE,
+            readerBottomControlsMode(
+                showControls = true,
+                isTransitionPage = false,
+                isCurrentVolumeActive = true,
+            ),
+        )
+        assertEquals(
+            ReaderBottomControlsMode.HIDDEN,
+            readerBottomControlsMode(
+                showControls = true,
+                isTransitionPage = false,
+                isCurrentVolumeActive = false,
+            ),
+        )
+        assertEquals(
+            ReaderBottomControlsMode.TRANSITION,
+            readerBottomControlsMode(
+                showControls = true,
+                isTransitionPage = true,
+                isCurrentVolumeActive = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `transition heading never derives a chapter ordinal`() {
+        val transition =
+            ReaderChapterTransition(
+                direction = ReaderTransitionDirection.NEXT,
+                chapterIndex = 14,
+                title = "第 12 话",
+                status = ReaderTransitionStatus.Ready,
+            )
+
+        assertEquals("下一章", readerTransitionHeading(transition))
+        assertEquals(
+            "没有上一章",
+            readerTransitionHeading(
+                transition.copy(
+                    direction = ReaderTransitionDirection.PREVIOUS,
+                    status = ReaderTransitionStatus.Boundary,
+                )
+            ),
+        )
+    }
+
+    @Test
     fun `page status positions map to bottom alignments`() {
         assertEquals(
             androidx.compose.ui.Alignment.BottomStart,

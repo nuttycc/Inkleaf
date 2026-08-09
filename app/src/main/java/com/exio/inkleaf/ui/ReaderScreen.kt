@@ -418,7 +418,15 @@ private fun ComicPager(
     val currentRealPage = currentContextPage?.pageIndex ?: pagerState.currentPage
     val currentVolume = currentContextPage?.chapter?.payload?.volume ?: volume
     val isCurrentVolumeActive = actions.isVolumeActive(currentVolume)
-    val isTransitionPage = currentWindowItem is ReaderChapterWindowItem.Boundary
+    val currentTransition =
+        (currentWindowItem as? ReaderChapterWindowItem.Boundary)?.transition
+    val isTransitionPage = currentTransition != null
+    val bottomControlsMode =
+        readerBottomControlsMode(
+            showControls = showControls,
+            isTransitionPage = isTransitionPage,
+            isCurrentVolumeActive = isCurrentVolumeActive,
+        )
     val currentPageTarget =
         currentWindowPage?.let { page ->
             ReaderPageTarget(
@@ -787,9 +795,13 @@ private fun ComicPager(
             isZoomed = !isTransitionPage && isCurrentPageZoomed,
             onBack = onBack,
             onToggleBookmark =
-                actions.onToggleBookmark?.let { toggle ->
-                    {
-                        if (actions.isVolumeActive(currentVolume)) toggle(currentRealPage)
+                if (isTransitionPage) {
+                    null
+                } else {
+                    actions.onToggleBookmark?.let { toggle ->
+                        {
+                            if (actions.isVolumeActive(currentVolume)) toggle(currentRealPage)
+                        }
                     }
                 },
             onResetZoom = {
@@ -800,7 +812,14 @@ private fun ComicPager(
         )
 
         ReaderBottomControls(
-            visible = showControls && !isTransitionPage && isCurrentVolumeActive,
+            visible = bottomControlsMode != ReaderBottomControlsMode.HIDDEN,
+            transition = currentTransition,
+            onTransitionRetry =
+                currentTransition?.let { transition ->
+                    {
+                        chapterNavigation?.onBoundaryRetry?.invoke(transition.direction)
+                    }
+                },
             currentPage = currentRealPage,
             pageCount = currentVolume.totalPageCount,
             pageDirection = settings.pageDirection,
@@ -919,19 +938,13 @@ private fun ReaderChapterTransitionPage(
 ) {
     val directionLabel =
         if (transition.direction == ReaderTransitionDirection.NEXT) "下一章" else "上一章"
-    val chapterLabel = transition.chapterIndex?.let { "第 ${it + 1} 章" }.orEmpty()
-    val boundary = transition.status == ReaderTransitionStatus.Boundary
     Column(
         modifier = modifier.background(backgroundColor),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
         Text(
-            text = if (boundary) {
-                if (transition.direction == ReaderTransitionDirection.NEXT) "没有下一章" else "没有上一章"
-            } else {
-                "$directionLabel：$chapterLabel"
-            },
+            text = readerTransitionHeading(transition),
             color = contentColor,
             style = MaterialTheme.typography.headlineSmall,
             textAlign = TextAlign.Center,
@@ -1038,12 +1051,14 @@ private fun ReaderTopBar(
     }
 }
 
-/** Compact reader console with always-visible page navigation and attached book tools. */
+/** Shared reader bottom Chrome for page controls and chapter-transition status. */
 // Slider 的 thumb/track 自定义插槽在 M3 里仍标记为实验性 API
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ReaderBottomControls(
     visible: Boolean,
+    transition: ReaderChapterTransition?,
+    onTransitionRetry: (() -> Unit)?,
     currentPage: Int,
     pageCount: Int,
     pageDirection: ReaderPageDirection,
@@ -1085,117 +1100,175 @@ private fun ReaderBottomControls(
                     .padding(vertical = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            ReaderAttachedPanel(
-                panel = activePanel,
-                accent = accent,
-                content = attachedContent,
-                modifier =
-                    if (activePanel == ReaderPanel.Tools) {
-                        Modifier
-                    } else {
-                        Modifier.fillMaxHeight(0.5f)
-                    },
-            )
+            if (transition != null) {
+                ReaderTransitionBottomContent(
+                    transition = transition,
+                    onRetry = onTransitionRetry,
+                    accent = accent,
+                )
+            } else {
+                ReaderAttachedPanel(
+                    panel = activePanel,
+                    accent = accent,
+                    content = attachedContent,
+                    modifier =
+                        if (activePanel == ReaderPanel.Tools) {
+                            Modifier
+                        } else {
+                            Modifier.fillMaxHeight(0.5f)
+                        },
+                )
 
-            if (activePanel == null) {
-                Column {
-                    // 拖动中的临时值；null = 未在拖动，滑杆跟随真实页码。
-                    // 松手才真正跳页：拖动中实时翻页会狂触发图片加载
-                    var draggingValue by remember { mutableStateOf<Float?>(null) }
-                    val shownPage = draggingValue?.roundToInt() ?: currentPage
+                if (activePanel == null) {
+                    Column {
+                        // 拖动中的临时值；null = 未在拖动，滑杆跟随真实页码。
+                        // 松手才真正跳页：拖动中实时翻页会狂触发图片加载
+                        var draggingValue by remember { mutableStateOf<Float?>(null) }
+                        val shownPage = draggingValue?.roundToInt() ?: currentPage
 
-                    // 胶片条与滑杆共享 shownPage：拖滑杆时胶片实时跟随滚动，
-                    // 形成"滑杆粗跳 + 胶片看准了再点"的两级定位。
-                    FilmstripRow(
-                        pageCount = pageCount,
-                        pageDirection = pageDirection,
-                        listState = filmstripListState,
-                        thumbnails = thumbnails,
-                        bookmarkPages = bookmarkPages,
-                        onNeedThumbnail = onNeedThumbnail,
-                        currentPage = shownPage,
-                        accent = accent,
-                        isDragging = draggingValue != null,
-                        onPageSelected = onPageSelected,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    // 页码在滑杆两端的单行布局：当前页 | 粗轨道滑杆 | 总页数。
-                    // 比"页码单独一行 + 滑杆"省一行高度，也是控制态下唯一的页码来源
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                    ) {
-                        Text(
-                            text = "${shownPage + 1}",
-                            color = Color.White,
-                            style = MaterialTheme.typography.labelLarge,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.widthIn(min = 36.dp),
+                        // 胶片条与滑杆共享 shownPage：拖滑杆时胶片实时跟随滚动，
+                        // 形成"滑杆粗跳 + 胶片看准了再点"的两级定位。
+                        FilmstripRow(
+                            pageCount = pageCount,
+                            pageDirection = pageDirection,
+                            listState = filmstripListState,
+                            thumbnails = thumbnails,
+                            bookmarkPages = bookmarkPages,
+                            onNeedThumbnail = onNeedThumbnail,
+                            currentPage = shownPage,
+                            accent = accent,
+                            isDragging = draggingValue != null,
+                            onPageSelected = onPageSelected,
+                            modifier = Modifier.fillMaxWidth(),
                         )
-                        Slider(
-                            value = draggingValue ?: currentPage.toFloat(),
-                            onValueChange = { draggingValue = it },
-                            onValueChangeFinished = {
-                                draggingValue?.let { value ->
-                                    onPageSelected(value.roundToInt())
-                                    draggingValue = null
-                                }
-                            },
-                            valueRange = 0f..(pageCount - 1).coerceAtLeast(0).toFloat(),
-                            thumb = {
-                                Box(
-                                    modifier =
-                                        Modifier.size(width = 5.dp, height = 28.dp)
-                                            .clip(RoundedCornerShape(2.5.dp))
-                                            .background(Color.White)
-                                )
-                            },
-                            track = {
-                                val fraction =
-                                    if (pageCount > 1) {
-                                        (draggingValue ?: currentPage.toFloat()) /
-                                            (pageCount - 1)
-                                    } else {
-                                        0f
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // 页码在滑杆两端的单行布局：当前页 | 粗轨道滑杆 | 总页数。
+                        // 比"页码单独一行 + 滑杆"省一行高度，也是控制态下唯一的页码来源
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                        ) {
+                            Text(
+                                text = "${shownPage + 1}",
+                                color = Color.White,
+                                style = MaterialTheme.typography.labelLarge,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.widthIn(min = 36.dp),
+                            )
+                            Slider(
+                                value = draggingValue ?: currentPage.toFloat(),
+                                onValueChange = { draggingValue = it },
+                                onValueChangeFinished = {
+                                    draggingValue?.let { value ->
+                                        onPageSelected(value.roundToInt())
+                                        draggingValue = null
                                     }
-                                Box(modifier = Modifier.fillMaxWidth().height(14.dp)) {
+                                },
+                                valueRange = 0f..(pageCount - 1).coerceAtLeast(0).toFloat(),
+                                thumb = {
                                     Box(
                                         modifier =
-                                            Modifier.matchParentSize()
-                                                .clip(RoundedCornerShape(7.dp))
-                                                .background(Color.White.copy(alpha = 0.25f))
+                                            Modifier.size(width = 5.dp, height = 28.dp)
+                                                .clip(RoundedCornerShape(2.5.dp))
+                                                .background(Color.White)
                                     )
-                                    Box(
-                                        modifier =
-                                            Modifier.fillMaxWidth(fraction)
-                                                .fillMaxHeight()
-                                                .clip(RoundedCornerShape(7.dp))
-                                                .background(accent)
-                                    )
-                                }
-                            },
-                            modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
-                        )
-                        Text(
-                            text = "$pageCount",
-                            color = Color.White.copy(alpha = 0.7f),
-                            style = MaterialTheme.typography.labelLarge,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.widthIn(min = 36.dp),
-                        )
+                                },
+                                track = {
+                                    val fraction =
+                                        if (pageCount > 1) {
+                                            (draggingValue ?: currentPage.toFloat()) /
+                                                (pageCount - 1)
+                                        } else {
+                                            0f
+                                        }
+                                    Box(modifier = Modifier.fillMaxWidth().height(14.dp)) {
+                                        Box(
+                                            modifier =
+                                                Modifier.matchParentSize()
+                                                    .clip(RoundedCornerShape(7.dp))
+                                                    .background(Color.White.copy(alpha = 0.25f))
+                                        )
+                                        Box(
+                                            modifier =
+                                                Modifier.fillMaxWidth(fraction)
+                                                    .fillMaxHeight()
+                                                    .clip(RoundedCornerShape(7.dp))
+                                                    .background(accent)
+                                        )
+                                    }
+                                },
+                                modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
+                            )
+                            Text(
+                                text = "$pageCount",
+                                color = Color.White.copy(alpha = 0.7f),
+                                style = MaterialTheme.typography.labelLarge,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.widthIn(min = 36.dp),
+                            )
+                        }
                     }
                 }
-            }
 
-            ReaderDockRow(
-                destinations = readerDockDestinations(chapterCount),
-                activePanel = activePanel,
-                accent = accent,
-                onPagesClick = onPagesSelected,
-                onPanelSelected = onPanelSelected,
+                ReaderDockRow(
+                    destinations = readerDockDestinations(chapterCount),
+                    activePanel = activePanel,
+                    accent = accent,
+                    onPagesClick = onPagesSelected,
+                    onPanelSelected = onPanelSelected,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReaderTransitionBottomContent(
+    transition: ReaderChapterTransition,
+    onRetry: (() -> Unit)?,
+    accent: Color,
+    modifier: Modifier = Modifier,
+) {
+    val statusLabel =
+        when (transition.status) {
+            ReaderTransitionStatus.Loading -> "正在加载"
+            ReaderTransitionStatus.Ready -> "继续翻页进入"
+            ReaderTransitionStatus.Error -> "加载失败"
+            ReaderTransitionStatus.Boundary -> "已经到达内容边界"
+        }
+    Row(
+        modifier = modifier.fillMaxWidth().height(60.dp).padding(horizontal = 20.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                text = readerTransitionHeading(transition),
+                color = Color.White,
+                style = MaterialTheme.typography.titleSmall,
             )
+            Text(
+                text = statusLabel,
+                color = Color.White.copy(alpha = 0.7f),
+                style = MaterialTheme.typography.labelMedium,
+            )
+        }
+        when (transition.status) {
+            ReaderTransitionStatus.Loading ->
+                CircularProgressIndicator(
+                    color = accent,
+                    strokeWidth = 2.dp,
+                    modifier = Modifier.size(22.dp),
+                )
+            ReaderTransitionStatus.Error ->
+                if (onRetry != null) {
+                    TextButton(onClick = onRetry) { Text("重试", color = accent) }
+                }
+            ReaderTransitionStatus.Ready,
+            ReaderTransitionStatus.Boundary -> Unit
         }
     }
 }
