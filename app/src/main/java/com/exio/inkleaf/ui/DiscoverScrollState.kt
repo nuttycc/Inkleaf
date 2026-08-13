@@ -133,6 +133,23 @@ fun resolveDiscoverScrollTarget(
     return DiscoverScrollTarget(nearest.value.gridIndex, anchor.scrollOffset)
 }
 
+/** 返回顶部按钮的显隐阈值：首个可见条目越过该索引（滚过首屏）才出现，避免一滚动就弹按钮。 */
+const val SCROLL_TO_TOP_VISIBLE_INDEX = 2
+
+/** 深列表滚回顶部时，若首个可见条目已越过该索引，则瞬移而非动画，避免 animateScrollToItem 逐格爬行。 */
+const val SCROLL_TO_TOP_ANIMATE_INDEX_LIMIT = 30
+
+/**
+ * 返回顶部按钮是否显示。首个可见条目越过 [SCROLL_TO_TOP_VISIBLE_INDEX]，或恰好停在该条目
+ * 且已滚出部分内容，即视为滚离顶部。
+ */
+fun shouldShowScrollToTop(
+    firstVisibleItemIndex: Int,
+    firstVisibleItemScrollOffset: Int,
+): Boolean =
+    firstVisibleItemIndex > SCROLL_TO_TOP_VISIBLE_INDEX ||
+        (firstVisibleItemIndex == SCROLL_TO_TOP_VISIBLE_INDEX && firstVisibleItemScrollOffset > 0)
+
 /** Access-ordered in-memory retention for the current navigation entry. */
 class DiscoverScrollAnchorStore(private val maxEntries: Int = 32) {
     init {

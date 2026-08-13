@@ -1,7 +1,12 @@
 package com.exio.inkleaf.ui
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -51,6 +56,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
@@ -63,6 +69,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -97,6 +104,7 @@ import com.exio.inkleaf.plugin.PluginFilterDescriptor
 import com.exio.inkleaf.plugin.PluginHealth
 import com.exio.inkleaf.plugin.PluginSearchResult
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 /** 距列表末尾还有这么多条目时就预取下一页，滚动到底之前内容已经补上。 */
 private const val LOAD_MORE_PREFETCH = 6
@@ -381,6 +389,18 @@ fun PluginDiscoverScreen(
         }
     }
 
+    // 返回顶部：派生状态只在跨过阈值那一刻发信号，滚动每一帧不触发重组。
+    // gridState 按上下文重建，派生值必须跟随同一个 state。
+    val showScrollToTop by remember(gridState) {
+        derivedStateOf {
+            shouldShowScrollToTop(
+                firstVisibleItemIndex = gridState.firstVisibleItemIndex,
+                firstVisibleItemScrollOffset = gridState.firstVisibleItemScrollOffset,
+            )
+        }
+    }
+    val scrollToTopScope = rememberCoroutineScope()
+
     Scaffold(
         modifier = modifier,
         topBar = {
@@ -465,6 +485,35 @@ fun PluginDiscoverScreen(
                                 },
                             )
                         }
+                }
+            }
+        },
+        floatingActionButton = {
+            AnimatedVisibility(
+                visible = showScrollToTop,
+                enter = fadeIn() + scaleIn(),
+                exit = fadeOut() + scaleOut(),
+            ) {
+                SmallFloatingActionButton(
+                    onClick = {
+                        scrollToTopScope.launch {
+                            if (gridState.firstVisibleItemIndex > SCROLL_TO_TOP_ANIMATE_INDEX_LIMIT) {
+                                // 深列表：瞬移到顶，避免动画逐格爬过几十上百个条目
+                                gridState.scrollToItem(0)
+                            } else {
+                                gridState.animateScrollToItem(0)
+                            }
+                        }
+                    },
+                ) {
+                    Icon(
+                        painter =
+                            painterResource(
+                                MaterialSymbolsOutlinedR.drawable
+                                    .materialsymbols_ic_arrow_upward_outlined
+                            ),
+                        contentDescription = "返回顶部",
+                    )
                 }
             }
         },

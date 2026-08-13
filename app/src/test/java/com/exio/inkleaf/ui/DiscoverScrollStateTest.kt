@@ -167,6 +167,36 @@ class DiscoverScrollStateTest {
     }
 
     @Test
+    fun `scroll to top is hidden at the very top`() {
+        assertFalse(shouldShowScrollToTop(firstVisibleItemIndex = 0, firstVisibleItemScrollOffset = 0))
+    }
+
+    @Test
+    fun `scroll to top stays hidden before the visible threshold`() {
+        assertFalse(shouldShowScrollToTop(firstVisibleItemIndex = 1, firstVisibleItemScrollOffset = 0))
+    }
+
+    @Test
+    fun `scroll to top is hidden on the threshold item before it scrolls out`() {
+        assertFalse(shouldShowScrollToTop(firstVisibleItemIndex = 2, firstVisibleItemScrollOffset = 0))
+    }
+
+    @Test
+    fun `scroll to top shows once the threshold item starts scrolling out`() {
+        assertTrue(shouldShowScrollToTop(firstVisibleItemIndex = 2, firstVisibleItemScrollOffset = 1))
+    }
+
+    @Test
+    fun `scroll to top shows beyond the threshold`() {
+        assertTrue(shouldShowScrollToTop(firstVisibleItemIndex = 3, firstVisibleItemScrollOffset = 0))
+    }
+
+    @Test
+    fun `scroll to top shows deep in the list`() {
+        assertTrue(shouldShowScrollToTop(firstVisibleItemIndex = 100, firstVisibleItemScrollOffset = 240))
+    }
+
+    @Test
     fun `scroll anchor store access refreshes LRU order`() {
         val store = DiscoverScrollAnchorStore()
         val contexts =
