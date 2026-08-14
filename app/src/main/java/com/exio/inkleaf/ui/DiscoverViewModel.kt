@@ -28,6 +28,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
@@ -94,6 +95,18 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _feeds = MutableStateFlow<List<Feed>>(emptyList())
     val feeds: StateFlow<List<Feed>> = _feeds.asStateFlow()
+
+    /** 各源分类 chips 的自定义顺序：pluginId -> 有序 feed key 列表。初始值来自 DataStore。 */
+    private val _feedOrder = MutableStateFlow<Map<String, List<String>>>(emptyMap())
+    val feedOrder: StateFlow<Map<String, List<String>>> = _feedOrder.asStateFlow()
+
+    init {
+        // 只读一次：此后顺序的变更都经由 moveFeed 同步写入内存并异步落盘，
+        // 持续订阅反而会在用户拖动与 DataStore 发射之间产生覆盖竞态
+        viewModelScope.launch {
+            _feedOrder.value = settingsRepo.feedOrder.first()
+        }
+    }
 
     private val _isLoadingFeeds = MutableStateFlow(false)
     val isLoadingFeeds: StateFlow<Boolean> = _isLoadingFeeds.asStateFlow()
@@ -320,6 +333,26 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
             } finally {
                 if (generation == feedLoadGeneration) _isLoadingFeeds.value = false
             }
+        }
+    }
+
+    /**
+     * 拖拽落位：把 fromKey 移到 toKey 的槽位（与 reorderable 的 onMove 语义一致）。
+     * 只重排同一源内的分类，跨源拖动由调用方保证不会发生。
+     */
+    fun moveFeed(fromKey: String, toKey: String) {
+        val feeds = _feeds.value
+        val from = feeds.firstOrNull { it.key == fromKey } ?: return
+        val to = feeds.firstOrNull { it.key == toKey } ?: return
+        if (from.pluginId != to.pluginId) return
+        val pluginId = from.pluginId
+        val pluginFeedKeys = feeds.filter { it.pluginId == pluginId }.map { it.key }
+        val currentOrder = applyUserOrder(pluginFeedKeys, _feedOrder.value[pluginId].orEmpty())
+        val nextOrder = moveFeedKey(currentOrder, fromKey, toKey)
+        if (nextOrder === currentOrder) return
+        _feedOrder.value = _feedOrder.value + (pluginId to nextOrder)
+        viewModelScope.launch {
+            settingsRepo.setFeedOrder(pluginId, nextOrder)
         }
     }
 
@@ -691,5 +724,29 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
     private companion object {
         const val MAX_BROWSE_SESSIONS = 32
         const val MAX_SCROLL_CONTEXTS = 32
+    }
+}
+
+/**
+ * 把用户自定义顺序应用到 key 列表：已记录的 key 按用户顺序排列，未记录的
+ * （插件新增分类）保持发现时的相对顺序追加到末尾。sortedBy 是稳定排序。
+ */
+internal fun applyUserOrder(keys: List<String>, userOrder: List<String>): List<String> {
+    if (userOrder.isEmpty()) return keys
+    val rank = userOrder.withIndex().associate { it.value to it.index }
+    return keys.sortedBy { rank[it] ?: Int.MAX_VALUE }
+}
+
+/**
+ * 拖拽落位：fromKey 占据 toKey 的位置，其余相对顺序不变。
+ * 任一 key 缺失或两者相同（或顺序已经如此）时原样返回。
+ */
+internal fun moveFeedKey(order: List<String>, fromKey: String, toKey: String): List<String> {
+    val fromIndex = order.indexOf(fromKey)
+    val toIndex = order.indexOf(toKey)
+    if (fromIndex < 0 || toIndex < 0 || fromIndex == toIndex) return order
+    return order.toMutableList().apply {
+        removeAt(fromIndex)
+        add(toIndex, fromKey)
     }
 }
