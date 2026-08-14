@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.json.Json
 
 /** 同名 DataStore 全局只能创建一次：顶层属性委托单例（同 shelfDataStore） */
 private val Context.discoverDataStore by preferencesDataStore(name = "discover_settings")
@@ -48,8 +49,36 @@ class DiscoverSettingsRepository(context: Context) {
         dataStore.edit { it[KEY_COLUMNS] = value.name }
     }
 
+    /** 各源分类 chips 的自定义顺序：pluginId -> 有序 feed key 列表。 */
+    val feedOrder: Flow<Map<String, List<String>>> =
+        dataStore.data.map { prefs ->
+            prefs[KEY_FEED_ORDER]?.let(::decodeFeedOrder) ?: emptyMap()
+        }
+
+    suspend fun setFeedOrder(pluginId: String, keys: List<String>) {
+        dataStore.edit { prefs ->
+            val current = prefs[KEY_FEED_ORDER]?.let(::decodeFeedOrder) ?: emptyMap()
+            prefs[KEY_FEED_ORDER] = encodeFeedOrder(current + (pluginId to keys))
+        }
+    }
+
     private companion object {
         val KEY_LAYOUT = stringPreferencesKey("layout_mode")
         val KEY_COLUMNS = stringPreferencesKey("grid_columns")
+        val KEY_FEED_ORDER = stringPreferencesKey("feed_order")
     }
 }
+
+private val feedOrderJson = Json
+
+/** JSON 编码保序：Preferences 的 stringSet 不保证顺序，feed key 列表必须按数组存。 */
+internal fun encodeFeedOrder(order: Map<String, List<String>>): String =
+    feedOrderJson.encodeToString(order)
+
+internal fun decodeFeedOrder(raw: String): Map<String, List<String>> =
+    try {
+        feedOrderJson.decodeFromString<Map<String, List<String>>>(raw)
+    } catch (_: Exception) {
+        // 历史损坏或格式不兼容时回到默认顺序，不阻塞浏览
+        emptyMap()
+    }
