@@ -480,6 +480,9 @@ fun PluginDiscoverScreen(
                             viewModel.selectFeed(application.pluginBrowseRepository, feedKey)
                         },
                         onMoveFeed = viewModel::moveFeed,
+                        onDragSettled = {
+                            viewModel.onCategoryDragFinished(application.pluginBrowseRepository)
+                        },
                     )
                     selectedFeed
                         ?.descriptor
@@ -801,6 +804,7 @@ private fun FeedCategoryChips(
     selectedFeedKey: String?,
     onSelect: (String) -> Unit,
     onMoveFeed: (fromKey: String, toKey: String) -> Unit,
+    onDragSettled: () -> Unit,
 ) {
     val listState = rememberLazyListState()
     val hapticFeedback = LocalHapticFeedback.current
@@ -849,6 +853,7 @@ private fun FeedCategoryChips(
                             onDragStopped = {
                                 isReordering = false
                                 hapticFeedback.performHapticFeedback(HapticFeedbackType.GestureEnd)
+                                onDragSettled()
                             },
                         ).graphicsLayer {
                             // 拖动中的 chip 轻微放大并投影，与其余 chips 区分层级
