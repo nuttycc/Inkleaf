@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyGridLayoutInfo
@@ -79,11 +80,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -104,6 +107,8 @@ import com.exio.inkleaf.plugin.PluginFilterDescriptor
 import com.exio.inkleaf.plugin.PluginHealth
 import com.exio.inkleaf.plugin.PluginSearchResult
 import kotlinx.coroutines.flow.first
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
 import kotlinx.coroutines.launch
 
 /** 距列表末尾还有这么多条目时就预取下一页，滚动到底之前内容已经补上。 */
@@ -211,9 +216,16 @@ fun PluginDiscoverScreen(
     // 源与分类分两级：源占标题位，chips 只列当前源的分类。拉平成一行时
     // 多个源都有"最新""热门"，chip 文字完全相同却指向不同的源
     val sources = remember(feeds) { feeds.distinctBy { it.pluginId } }
+    val feedOrder by viewModel.feedOrder.collectAsStateWithLifecycle()
+    // 分类 chips 顺序 = 用户长按拖动的自定义顺序；插件新增分类按发现顺序追加到末尾
     val currentSourceFeeds =
-        remember(feeds, selectedFeed) {
-            feeds.filter { it.pluginId == selectedFeed?.pluginId }
+        remember(feeds, selectedFeed, feedOrder) {
+            val pluginFeeds = feeds.filter { it.pluginId == selectedFeed?.pluginId }
+            val byKey = pluginFeeds.associateBy { it.key }
+            applyUserOrder(
+                keys = pluginFeeds.map { it.key },
+                userOrder = feedOrder[selectedFeed?.pluginId].orEmpty(),
+            ).mapNotNull { byKey[it] }
         }
 
     val contentAlpha = remember { Animatable(1f) }
@@ -467,6 +479,7 @@ fun PluginDiscoverScreen(
                         onSelect = { feedKey ->
                             viewModel.selectFeed(application.pluginBrowseRepository, feedKey)
                         },
+                        onMoveFeed = viewModel::moveFeed,
                     )
                     selectedFeed
                         ?.descriptor
@@ -781,35 +794,71 @@ private fun DiscoverSearchTopBar(
     )
 }
 
-/** 当前源的分类 chips。 */
+/** 当前源的分类 chips，支持长按拖动自定义顺序（与图册编辑页同一套手势）。 */
 @Composable
 private fun FeedCategoryChips(
     feeds: List<DiscoverViewModel.Feed>,
     selectedFeedKey: String?,
     onSelect: (String) -> Unit,
+    onMoveFeed: (fromKey: String, toKey: String) -> Unit,
 ) {
+    val listState = rememberLazyListState()
+    val hapticFeedback = LocalHapticFeedback.current
+    var isReordering by remember { mutableStateOf(false) }
+    val reorderableState =
+        rememberReorderableLazyListState(listState) { from, to ->
+            val fromKey = from.key as? String
+            val toKey = to.key as? String
+            if (fromKey != null && toKey != null && fromKey != toKey) {
+                onMoveFeed(fromKey, toKey)
+                hapticFeedback.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick)
+            }
+        }
+
     LazyRow(
+        state = listState,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
         items(feeds, key = { it.key }) { feed ->
-            val isSelected = feed.key == selectedFeedKey
-            FilterChip(
-                selected = isSelected,
-                onClick = { onSelect(feed.key) },
-                label = { Text(feed.descriptor.title) },
-                leadingIcon =
-                    if (isSelected) {
-                        {
-                            Icon(
-                                Icons.Default.Check,
-                                contentDescription = null,
-                                modifier = Modifier.size(FilterChipDefaults.IconSize),
-                            )
-                        }
-                    } else null,
-            )
+            ReorderableItem(state = reorderableState, key = feed.key) { isDragging ->
+                val isSelected = feed.key == selectedFeedKey
+                FilterChip(
+                    selected = isSelected,
+                    onClick = { if (!isReordering) onSelect(feed.key) },
+                    label = { Text(feed.descriptor.title) },
+                    leadingIcon =
+                        if (isSelected) {
+                            {
+                                Icon(
+                                    Icons.Default.Check,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(FilterChipDefaults.IconSize),
+                                )
+                            }
+                        } else null,
+                    modifier =
+                        Modifier.longPressDraggableHandle(
+                            onDragStarted = {
+                                isReordering = true
+                                hapticFeedback.performHapticFeedback(
+                                    HapticFeedbackType.GestureThresholdActivate
+                                )
+                            },
+                            onDragStopped = {
+                                isReordering = false
+                                hapticFeedback.performHapticFeedback(HapticFeedbackType.GestureEnd)
+                            },
+                        ).graphicsLayer {
+                            // 拖动中的 chip 轻微放大并投影，与其余 chips 区分层级
+                            val scale = if (isDragging) 1.06f else 1f
+                            scaleX = scale
+                            scaleY = scale
+                            shadowElevation = if (isDragging) 8f else 0f
+                        },
+                )
+            }
         }
     }
 }
