@@ -1,5 +1,6 @@
 package com.exio.inkleaf.ui
 
+import com.exio.inkleaf.plugin.PluginFeedDescriptor
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
 import org.junit.Test
@@ -74,4 +75,46 @@ class DiscoverFeedOrderTest {
         assertSame(order, moveFeedKey(order, "a", "missing"))
         assertSame(order, moveFeedKey(order, "missing", "a"))
     }
+
+    @Test
+    fun `default selection without user order is the first plugin feed`() {
+        val feeds = feedsOf("p1" to listOf("latest", "hot"), "p2" to listOf("top"))
+
+        val ordered = applyUserOrderToFeeds(feeds, emptyMap())
+
+        assertEquals(listOf("p1:latest", "p1:hot", "p2:top"), ordered.map { it.key })
+    }
+
+    @Test
+    fun `default selection follows per-plugin user order while keeping plugin order`() {
+        val feeds = feedsOf("p1" to listOf("latest", "hot", "new"), "p2" to listOf("top", "rank"))
+        // userOrder 存的是完整 feed key（"pluginId:feedId"），与 moveFeed 持久化的格式一致
+        val userOrder = mapOf("p1" to listOf("p1:new", "p1:latest"), "p2" to listOf("p2:rank"))
+
+        val ordered = applyUserOrderToFeeds(feeds, userOrder)
+
+        assertEquals(listOf("p1:new", "p1:latest", "p1:hot", "p2:rank", "p2:top"), ordered.map { it.key })
+    }
+
+    @Test
+    fun `user order entries for removed or unknown plugins are ignored`() {
+        val feeds = feedsOf("p1" to listOf("latest"))
+        val userOrder = mapOf("p1" to listOf("p1:latest"), "gone" to listOf("gone:x"))
+
+        val ordered = applyUserOrderToFeeds(feeds, userOrder)
+
+        assertEquals(listOf("p1:latest"), ordered.map { it.key })
+    }
+
+    private fun feedsOf(vararg pluginFeeds: Pair<String, List<String>>): List<DiscoverViewModel.Feed> =
+        pluginFeeds.flatMap { (pluginId, feedIds) ->
+            feedIds.map { feedId ->
+                DiscoverViewModel.Feed(
+                    pluginId = pluginId,
+                    pluginName = pluginId,
+                    pluginVersion = "1.0.0",
+                    descriptor = PluginFeedDescriptor(id = feedId, title = feedId),
+                )
+            }
+        }
 }

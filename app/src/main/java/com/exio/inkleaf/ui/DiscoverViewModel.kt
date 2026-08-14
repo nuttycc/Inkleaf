@@ -203,9 +203,13 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
         ensureCurrentBrowseFresh(browseRepository)
     }
 
-    /** 切换当前源：落到该源的第一个内容流上 */
+    /** 切换当前源：落到该源自定义排序后的第一个内容流上 */
     fun selectSource(repository: PluginBrowseRepository, pluginId: String) {
-        val target = _feeds.value.firstOrNull { it.pluginId == pluginId } ?: return
+        val target =
+            applyUserOrderToFeeds(
+                feeds = _feeds.value.filter { it.pluginId == pluginId },
+                userOrder = _feedOrder.value,
+            ).firstOrNull() ?: return
         selectFeed(repository, target.key)
     }
 
@@ -319,9 +323,9 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
                             .takeIf { it.isNotEmpty() }
                             ?.joinToString("\n")
                     _feeds.value = discoveredFeeds
+                    // 默认选中 = 用户自定义排序后的第一个：重排后进入或刷新，落点总是第一位
                     val selected =
-                        discoveredFeeds.firstOrNull { it.key == _selectedFeedKey.value }
-                            ?: discoveredFeeds.firstOrNull()
+                        applyUserOrderToFeeds(discoveredFeeds, _feedOrder.value).firstOrNull()
                     if (
                         selected?.key != _selectedFeedKey.value ||
                             selected?.pluginVersion != previousSelected?.pluginVersion ||
@@ -350,9 +354,31 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
         val currentOrder = applyUserOrder(pluginFeedKeys, _feedOrder.value[pluginId].orEmpty())
         val nextOrder = moveFeedKey(currentOrder, fromKey, toKey)
         if (nextOrder === currentOrder) return
+        // 本拖动手势内顺序真的变过：落位收尾时才允许把选中切到第一位。
+        // 拖出去又拖回原位这种"变了又变回去"的收尾不算重排，不应动选中。
+        feedOrderMutatedThisGesture = true
         _feedOrder.value = _feedOrder.value + (pluginId to nextOrder)
         viewModelScope.launch {
             settingsRepo.setFeedOrder(pluginId, nextOrder)
+        }
+    }
+
+    /**
+     * 拖拽落位后的收尾：当前源的自定义排序可能已变化，把选中同步到该源排序后的第一个，
+     * 这样"重排后默认选中总是第一位"。拖动过程中不切选中，避免每拖过一个分类就重载一次内容。
+     */
+    fun onCategoryDragFinished(repository: PluginBrowseRepository) {
+        val mutated = feedOrderMutatedThisGesture
+        feedOrderMutatedThisGesture = false
+        if (!mutated) return
+        val current = selectedFeed() ?: return
+        val first =
+            applyUserOrderToFeeds(
+                feeds = _feeds.value.filter { it.pluginId == current.pluginId },
+                userOrder = _feedOrder.value,
+            ).firstOrNull() ?: return
+        if (first.key != _selectedFeedKey.value) {
+            selectFeed(repository, first.key)
         }
     }
 
@@ -721,6 +747,9 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
             .also { browseFiltersByFeed[sessionKey] = it }
     }
 
+    /** 本拖动手势内自定义顺序是否真的变化过（由 moveFeed 置位、落位收尾清零）。 */
+    private var feedOrderMutatedThisGesture = false
+
     private companion object {
         const val MAX_BROWSE_SESSIONS = 32
         const val MAX_SCROLL_CONTEXTS = 32
@@ -749,4 +778,22 @@ internal fun moveFeedKey(order: List<String>, fromKey: String, toKey: String): L
         removeAt(fromIndex)
         add(toIndex, fromKey)
     }
+}
+
+/**
+ * 把各源分类按用户自定义顺序重排后拍平，保持插件顺序；
+ * 未记录自定义顺序的分类按发现顺序追加到所在源的末尾。
+ */
+internal fun applyUserOrderToFeeds(
+    feeds: List<DiscoverViewModel.Feed>,
+    userOrder: Map<String, List<String>>,
+): List<DiscoverViewModel.Feed> {
+    if (feeds.isEmpty() || userOrder.isEmpty()) return feeds
+    return feeds
+        .groupBy { it.pluginId }
+        .flatMap { (pluginId, pluginFeeds) ->
+            val byKey = pluginFeeds.associateBy { it.key }
+            applyUserOrder(pluginFeeds.map { it.key }, userOrder[pluginId].orEmpty())
+                .mapNotNull { byKey[it] }
+        }
 }
