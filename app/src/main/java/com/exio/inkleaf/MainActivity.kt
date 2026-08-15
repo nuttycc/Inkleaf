@@ -543,8 +543,13 @@ class MainActivity : AppCompatActivity() {
                                                     ReaderRoute(comicId, page)
                                                 )
                                             },
-                                            onOpenOnlineSession = { target ->
-                                                outerNavController.navigate(target.toRoute())
+                                            onOpenOnlineComic = { pluginId, sourceId ->
+                                                outerNavController.navigate(
+                                                    OnlineComicRoute(
+                                                        pluginId = pluginId,
+                                                        sourceId = sourceId,
+                                                    )
+                                                )
                                             },
                                         )
                                     }

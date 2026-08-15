@@ -71,7 +71,7 @@ import java.io.File
 @Composable
 fun HistoryScreen(
     onOpenSession: (comicId: Long, page: Int) -> Unit,
-    onOpenOnlineSession: (OnlineReaderTarget) -> Unit,
+    onOpenOnlineComic: (pluginId: String, sourceId: String) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: HistoryViewModel = viewModel(),
 ) {
@@ -147,7 +147,7 @@ fun HistoryScreen(
                                 DropdownMenu(
                                     expanded = menuOpen,
                                     onDismissRequest = { menuOpen = false },
-                                ) {
+                                    ) {
                                     DropdownMenuItem(
                                         text = { Text("清空历史") },
                                         onClick = {
@@ -184,7 +184,7 @@ fun HistoryScreen(
                     onOpen = viewModel::continueReading,
                     onDelete = { viewModel.deleteSession(it.id) },
                     onOpenOnline = { session ->
-                        viewModel.openOnlineSession(session, onOpenOnlineSession)
+                        viewModel.openOnlineSession(session, onOpenOnlineComic)
                     },
                     onDeleteOnline = viewModel::deleteOnlineSession,
                     modifier = Modifier.fillMaxSize().padding(innerPadding),

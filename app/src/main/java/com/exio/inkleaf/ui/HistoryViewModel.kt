@@ -340,10 +340,10 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
 
     internal fun openOnlineSession(
         session: OnlineHistorySessionUi,
-        onOpen: (OnlineReaderTarget) -> Unit,
+        onOpen: (pluginId: String, sourceId: String) -> Unit,
     ) {
         if (session.availability.canOpenReader()) {
-            onOpen(session.target)
+            onOpen(session.target.pluginId, session.target.sourceId)
         } else {
             viewModelScope.launch {
                 eventChannel.send(HistoryEvent.Message(session.availability.displayLabel()))
