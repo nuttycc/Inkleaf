@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -18,6 +19,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -46,6 +50,8 @@ import com.exio.inkleaf.R
 internal fun ColumnScope.ReaderBookmarksPanelContent(
     bookmarks: List<ReaderBookmarkItem>,
     thumbnails: Map<Int, ImageBitmap>,
+    isCurrentBookmarked: Boolean,
+    onToggleBookmark: (() -> Unit)?,
     onNeedThumbnail: (Int) -> Unit,
     onSelect: (Int) -> Unit,
     removalsInFlight: Set<String>,
@@ -62,12 +68,47 @@ internal fun ColumnScope.ReaderBookmarksPanelContent(
                 ReaderPanel.Bookmarks.title()
             } else {
                 "${ReaderPanel.Bookmarks.title()} · ${orderedBookmarks.size}"
-            }
+            },
+        action =
+            if (onToggleBookmark != null) {
+                {
+                    FilterChip(
+                        selected = isCurrentBookmarked,
+                        onClick = onToggleBookmark,
+                        leadingIcon = {
+                            Icon(
+                                painter =
+                                    painterResource(
+                                        if (isCurrentBookmarked) {
+                                            R.drawable.ic_bookmark
+                                        } else {
+                                            R.drawable.ic_bookmark_border
+                                        }
+                                    ),
+                                contentDescription = null,
+                                modifier = Modifier.size(FilterChipDefaults.IconSize),
+                            )
+                        },
+                        label = {
+                            Text(
+                                text = if (isCurrentBookmarked) "当前页已标记" else "标记当前页",
+                                style = MaterialTheme.typography.labelMedium,
+                            )
+                        },
+                        shape = RoundedCornerShape(16.dp),
+                    )
+                }
+            } else {
+                null
+            },
     )
     ReaderAttachedPanelDivider()
     Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
         if (orderedBookmarks.isEmpty()) {
-            ReaderBookmarksEmptyState()
+            ReaderBookmarksEmptyState(
+                isCurrentBookmarked = isCurrentBookmarked,
+                onToggleBookmark = onToggleBookmark,
+            )
         } else {
             LazyColumn(
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
@@ -227,11 +268,14 @@ private fun ReaderBookmarkRow(
 }
 
 @Composable
-private fun ReaderBookmarksEmptyState() {
+private fun ReaderBookmarksEmptyState(
+    isCurrentBookmarked: Boolean,
+    onToggleBookmark: (() -> Unit)?,
+) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 32.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 28.dp),
     ) {
         Icon(
             painter = painterResource(R.drawable.ic_bookmark_border),
@@ -246,11 +290,33 @@ private fun ReaderBookmarksEmptyState() {
             modifier = Modifier.fillMaxWidth(),
         )
         Text(
-            text = "点按顶栏书签按钮即可添加。",
+            text = "将当前页面添加为书签，方便随时快速回顾。",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodyMedium,
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
+        if (onToggleBookmark != null) {
+            Spacer(modifier = Modifier.height(4.dp))
+            FilledTonalButton(
+                onClick = onToggleBookmark,
+                shape = RoundedCornerShape(16.dp),
+            ) {
+                Icon(
+                    painter =
+                        painterResource(
+                            if (isCurrentBookmarked) {
+                                R.drawable.ic_bookmark
+                            } else {
+                                R.drawable.ic_bookmark_border
+                            }
+                        ),
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(if (isCurrentBookmarked) "已标记当前页 (点击取消)" else "添加当前页为书签")
+            }
+        }
     }
 }

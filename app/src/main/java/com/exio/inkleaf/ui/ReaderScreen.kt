@@ -784,26 +784,28 @@ private fun ComicPager(
             )
         }
 
+        val isCurrentPageBookmarked =
+            !isTransitionPage &&
+                currentPageStateKey != null &&
+                (currentPageStateKey in features.bookmarkPageKeys ||
+                    (pagerChapterWindow == null && currentRealPage in features.bookmarkPages))
+
+        val onToggleBookmarkAction: (() -> Unit)? =
+            if (isTransitionPage || currentPageStateKey == null) {
+                null
+            } else {
+                actions.onToggleBookmark?.let { toggle ->
+                    {
+                        if (actions.isVolumeActive(currentVolume)) toggle(currentRealPage)
+                    }
+                }
+            }
+
         ReaderTopBar(
             visible = showControls,
             title = title,
-            isBookmarked =
-                !isTransitionPage &&
-                    currentPageStateKey != null &&
-                    (currentPageStateKey in features.bookmarkPageKeys ||
-                        (pagerChapterWindow == null && currentRealPage in features.bookmarkPages)),
             isZoomed = !isTransitionPage && isCurrentPageZoomed,
             onBack = onBack,
-            onToggleBookmark =
-                if (isTransitionPage) {
-                    null
-                } else {
-                    actions.onToggleBookmark?.let { toggle ->
-                        {
-                            if (actions.isVolumeActive(currentVolume)) toggle(currentRealPage)
-                        }
-                    }
-                },
             onResetZoom = {
                 zoomResetPage = currentPageStateKey
                 zoomResetRequest++
@@ -821,6 +823,7 @@ private fun ComicPager(
                     }
                 },
             currentPage = currentRealPage,
+            isCurrentPageBookmarked = isCurrentPageBookmarked,
             pageCount = currentVolume.totalPageCount,
             pageDirection = settings.pageDirection,
             onPageSelected = { selectedPage ->
@@ -865,6 +868,8 @@ private fun ComicPager(
                         ReaderBookmarksPanelContent(
                             bookmarks = features.bookmarks,
                             thumbnails = features.thumbnails,
+                            isCurrentBookmarked = isCurrentPageBookmarked,
+                            onToggleBookmark = onToggleBookmarkAction,
                             onNeedThumbnail = { page ->
                                 if (actions.isVolumeActive(currentVolume)) actions.onNeedThumbnail(page)
                             },
@@ -989,10 +994,8 @@ private fun ReaderChapterTransitionPage(
 private fun ReaderTopBar(
     visible: Boolean,
     title: String,
-    isBookmarked: Boolean,
     isZoomed: Boolean,
     onBack: () -> Unit,
-    onToggleBookmark: (() -> Unit)?,
     onResetZoom: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -1002,7 +1005,6 @@ private fun ReaderTopBar(
         exit = slideOutVertically { -it } + fadeOut(),
         modifier = modifier,
     ) {
-        val accent = readerAccentColor()
         Row(
             modifier =
                 Modifier.fillMaxWidth()
@@ -1031,22 +1033,6 @@ private fun ReaderTopBar(
                     Text(text = "100%", color = Color.White)
                 }
             }
-            if (onToggleBookmark != null) {
-                IconButton(onClick = onToggleBookmark) {
-                    Icon(
-                        painter =
-                            painterResource(
-                                if (isBookmarked) {
-                                    R.drawable.ic_bookmark
-                                } else {
-                                    R.drawable.ic_bookmark_border
-                                }
-                            ),
-                        contentDescription = if (isBookmarked) "移除当前页书签" else "添加当前页书签",
-                        tint = if (isBookmarked) accent else Color.White,
-                    )
-                }
-            }
         }
     }
 }
@@ -1060,6 +1046,7 @@ private fun ReaderBottomControls(
     transition: ReaderChapterTransition?,
     onTransitionRetry: (() -> Unit)?,
     currentPage: Int,
+    isCurrentPageBookmarked: Boolean,
     pageCount: Int,
     pageDirection: ReaderPageDirection,
     onPageSelected: (Int) -> Unit,
@@ -1215,6 +1202,7 @@ private fun ReaderBottomControls(
                     destinations = readerDockDestinations(chapterCount),
                     activePanel = activePanel,
                     accent = accent,
+                    isBookmarked = isCurrentPageBookmarked,
                     onPagesClick = onPagesSelected,
                     onPanelSelected = onPanelSelected,
                 )
@@ -1319,6 +1307,7 @@ private fun ReaderDockRow(
     destinations: List<ReaderDockDestination>,
     activePanel: ReaderPanel?,
     accent: Color,
+    isBookmarked: Boolean,
     onPagesClick: () -> Unit,
     onPanelSelected: (ReaderPanel) -> Unit,
 ) {
@@ -1340,6 +1329,7 @@ private fun ReaderDockRow(
                     destination = destination,
                     selected = activePanel == panel,
                     accent = accent,
+                    isBookmarked = isBookmarked,
                     onClick =
                         if (panel != null) {
                             { onPanelSelected(panel) }
@@ -1360,20 +1350,36 @@ internal fun ReaderDockItem(
     accent: Color,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    isBookmarked: Boolean = false,
 ) {
+    val isHighlightedBookmark = destination == ReaderDockDestination.Bookmarks && isBookmarked
     val indicatorColor by
         animateColorAsState(
-            targetValue = if (selected) accent.copy(alpha = 0.28f) else Color.Transparent,
+            targetValue =
+                when {
+                    selected -> accent.copy(alpha = 0.28f)
+                    isHighlightedBookmark -> accent.copy(alpha = 0.12f)
+                    else -> Color.Transparent
+                },
             label = "dock-item-indicator",
         )
     val iconTint by
         animateColorAsState(
-            targetValue = if (selected) accent else Color.White.copy(alpha = 0.75f),
+            targetValue =
+                when {
+                    selected || isHighlightedBookmark -> accent
+                    else -> Color.White.copy(alpha = 0.75f)
+                },
             label = "dock-item-icon",
         )
     val textColor by
         animateColorAsState(
-            targetValue = if (selected) Color.White else Color.White.copy(alpha = 0.65f),
+            targetValue =
+                when {
+                    selected -> Color.White
+                    isHighlightedBookmark -> accent.copy(alpha = 0.9f)
+                    else -> Color.White.copy(alpha = 0.65f)
+                },
             label = "dock-item-text",
         )
 
@@ -1396,7 +1402,14 @@ internal fun ReaderDockItem(
                     .background(indicatorColor),
         ) {
             Icon(
-                painter = painterResource(destination.icon),
+                painter =
+                    painterResource(
+                        if (isHighlightedBookmark) {
+                            R.drawable.ic_bookmark
+                        } else {
+                            destination.icon
+                        }
+                    ),
                 contentDescription = null,
                 tint = iconTint,
                 modifier = Modifier.size(20.dp),
@@ -1407,7 +1420,8 @@ internal fun ReaderDockItem(
             text = destination.label,
             color = textColor,
             style = MaterialTheme.typography.labelSmall,
-            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+            fontWeight =
+                if (selected || isHighlightedBookmark) FontWeight.Bold else FontWeight.Normal,
             maxLines = 1,
         )
     }
