@@ -61,6 +61,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
+import com.composables.icons.materialsymbols.outlined.R as MaterialSymbolsOutlinedR
 import com.exio.inkleaf.InkleafApplication
 import com.exio.inkleaf.R
 import com.exio.inkleaf.plugin.ChapterSummary
@@ -250,7 +251,10 @@ fun OnlineComicScreen(
                                             ) {
                                                 Icon(
                                                     painter =
-                                                        painterResource(R.drawable.ic_bookmark),
+                                                        painterResource(
+                                                            MaterialSymbolsOutlinedR.drawable
+                                                                .materialsymbols_ic_library_add_check_outlined
+                                                        ),
                                                     contentDescription = "已在书架",
                                                     modifier = Modifier.size(16.dp),
                                                 )
@@ -272,7 +276,8 @@ fun OnlineComicScreen(
                                                 Icon(
                                                     painter =
                                                         painterResource(
-                                                            R.drawable.ic_bookmark_border
+                                                            MaterialSymbolsOutlinedR.drawable
+                                                                .materialsymbols_ic_library_add_outlined
                                                         ),
                                                     contentDescription = "加入书架",
                                                     modifier = Modifier.size(16.dp),
