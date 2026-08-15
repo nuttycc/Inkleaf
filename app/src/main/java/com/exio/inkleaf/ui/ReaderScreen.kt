@@ -1301,7 +1301,7 @@ internal enum class ReaderDockDestination(
     ),
     Settings(
         label = "设置",
-        icon = MaterialSymbolsOutlinedR.drawable.materialsymbols_ic_settings_outlined,
+        icon = MaterialSymbolsOutlinedR.drawable.materialsymbols_ic_tune_outlined,
         panel = ReaderPanel.Settings,
     ),
 }
