@@ -6,6 +6,10 @@
   const BROWSE_PLATFORM = "3";
   const MAX_SEARCH_LIMIT = 21;
   const CHAPTER_PAGE_LIMIT = 500;
+  // 拷贝系线路会按 UA 与 version 头做门禁：非浏览器/非客户端 UA 直接返回纯文本 "error"，
+  // 过旧的 version 会触发 210。以下对齐官方 App 值（社区客户端 copymanga-downloader 已验证可用）。
+  const COPY_APP_USER_AGENT = "COPY/3.0.0";
+  const COPY_APP_VERSION = "2025.08.15";
 
   // Keep verified route knowledge in the plugin package so endpoint changes do not leak into
   // Android UI or become part of the host contract.
@@ -17,6 +21,7 @@
     { id: "https://api.2025copy.com/api/v3", title: "大陆专线 3" },
     { id: "https://api.mangacopy.com/api/v3", title: "国际服" },
     { id: "https://api.copy2000.online/api/v3", title: "国际服 1" },
+    { id: "https://api.copy202601.com/api/v3", title: "国际服 2 · 2026 新站" },
     { id: "https://mapi.hotmangasd.com/api/v3", title: "热辣漫画线路 1" },
     { id: "https://mapi.hotmangasf.com/api/v3", title: "热辣漫画线路 3" },
     { id: "https://mapi.hotmangasg.com/api/v3", title: "热辣漫画线路 4" },
@@ -100,16 +105,21 @@
   }
 
   function apiHeaders(active) {
-    const hotManga = isHotMangaApiBase(active.apiBase);
     const headers = {
       Accept: "application/json",
       "Accept-Language": "en-US,en;q=0.9,zh-TW;q=0.8,zh;q=0.7",
-      version: hotManga ? "2025.02.12" : "2025.05.09",
-      Origin: hotManga ? "https://m.relamanhua.org" : "https://2025copy.com",
       platform: PLATFORM,
-      webp: hotManga ? "1" : "0"
+      webp: "1"
     };
-    if (!hotManga) headers.region = "0";
+    if (isHotMangaApiBase(active.apiBase)) {
+      headers.version = "2025.02.12";
+      headers.Origin = "https://m.relamanhua.org";
+      return headers;
+    }
+    // 拷贝系线路：模拟官方客户端，去掉 Origin，改用官方 UA/版本/region。
+    headers["User-Agent"] = COPY_APP_USER_AGENT;
+    headers.version = COPY_APP_VERSION;
+    headers.region = "1";
     return headers;
   }
 
@@ -690,6 +700,13 @@
       const urls = chapterImageUrls(chapter);
       if (!urls.length) throw pluginError("NOT_FOUND", "No readable images found for this chapter", false);
       const active = await settings();
+      const imageHeaders = {
+        Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8"
+      };
+      // 拷贝系图片 CDN 同样校验 UA，与接口请求保持一致。
+      if (!isHotMangaApiBase(active.apiBase)) {
+        imageHeaders["User-Agent"] = COPY_APP_USER_AGENT;
+      }
       return {
         sourceId: sourceId,
         chapterId: chapterId,
@@ -700,7 +717,7 @@
             index: index,
             // CopyComic uses a .c<width>x suffix for resized images; removing it requests source.
             url: active.originalImage ? url.replace(/\.c[0-9]+x\./, ".") : url,
-            headers: { Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8" }
+            headers: imageHeaders
           };
         })
       };

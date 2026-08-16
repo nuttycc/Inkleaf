@@ -88,7 +88,7 @@ async function run() {
     return setting.id === "apiDomain";
   });
   assert.ok(routeSetting, "API route setting must be present");
-  assert.equal(routeSetting.options.length, 13);
+  assert.equal(routeSetting.options.length, 14);
   assert.equal(routeSetting.defaultValue, "https://api.manga2025.com/api/v3");
   assert.deepEqual(descriptor.settings.map(function (setting) { return setting.id; }), [
     "apiDomain", "originalImage"
@@ -101,6 +101,7 @@ async function run() {
     "https://api.2025copy.com/api/v3",
     "https://api.mangacopy.com/api/v3",
     "https://api.copy2000.online/api/v3",
+    "https://api.copy202601.com/api/v3",
     "https://mapi.hotmangasd.com/api/v3",
     "https://mapi.hotmangasf.com/api/v3",
     "https://mapi.hotmangasg.com/api/v3",
@@ -111,13 +112,17 @@ async function run() {
 
   router = function (request) {
     assert.ok(request.url.startsWith(testApiBase + "/"));
-    assert.equal(request.headers.version, isHotMangaProfile ? "2025.02.12" : "2025.05.09");
+    assert.equal(request.headers.version, isHotMangaProfile ? "2025.02.12" : "2025.08.15");
     assert.equal(
       request.headers.Origin,
-      isHotMangaProfile ? "https://m.relamanhua.org" : "https://2025copy.com"
+      isHotMangaProfile ? "https://m.relamanhua.org" : undefined
     );
-    assert.equal(request.headers.webp, isHotMangaProfile ? "1" : "0");
-    assert.equal(request.headers.region, isHotMangaProfile ? undefined : "0");
+    assert.equal(
+      request.headers["User-Agent"],
+      isHotMangaProfile ? undefined : "COPY/3.0.0"
+    );
+    assert.equal(request.headers.webp, "1");
+    assert.equal(request.headers.region, isHotMangaProfile ? undefined : "1");
     assert.equal(request.headers.platform, "1");
     assert.equal(request.headers.Authorization, undefined);
     assert.equal(request.headers["sec-fetch-mode"], undefined);
@@ -348,6 +353,11 @@ async function run() {
   }, {});
   assert.equal(pageRequests.length, 2, "404 must try the alternate chapter endpoint");
   assert.equal(pages.pages[0].url, "https://img.example/page-b.webp");
+  assert.equal(
+    pages.pages[0].headers["User-Agent"],
+    isHotMangaProfile ? undefined : "COPY/3.0.0"
+  );
+  assert.equal(pages.pages[0].headers.Accept, "image/avif,image/webp,image/apng,image/*,*/*;q=0.8");
   assert.equal(
     pages.pages[1].url,
     testOriginalImage
