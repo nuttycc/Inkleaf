@@ -14,21 +14,36 @@ import java.net.ProxySelector
 import java.net.SocketAddress
 import java.net.URI
 import java.net.UnknownHostException
+import java.util.concurrent.TimeUnit
 import javax.net.SocketFactory
 import okhttp3.Call
 import okhttp3.Dns
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Response
+import okhttp3.dnsoverhttps.DnsOverHttps
 
 /** Network boundary shared by plugin-controlled requests. */
 internal object PluginNetworkPolicy {
     private val debugOverlayInterceptor = DebugOverlayNetworkInterceptor(maxBodySize = 0L)
-    private val strictDns: Dns =
-        object : Dns {
-            override fun lookup(hostname: String): List<InetAddress> =
-                requirePublicAddresses(hostname, Dns.SYSTEM.lookup(hostname))
-        }
+
+    /** 插件流量的默认解析器：系统 DNS 优先，失败/空答案/私网回答时走 DoH 兜底。 DoH 端点用 IP 字面量，避免 bootstrap 解析本身被污染。 */
+    private val dohFallbackDns: Dns by lazy { DohFallbackDns(Dns.SYSTEM, dohResolver) }
+    private val dohResolver: Dns by lazy {
+        DnsOverHttps.Builder()
+            .client(
+                OkHttpClient.Builder()
+                    .callTimeout(DOH_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                    .build()
+            )
+            .url(DOH_RESOLVER_URL.toHttpUrl())
+            .bootstrapDnsHosts(
+                InetAddress.getByName(DOH_BOOTSTRAP_HOST_PRIMARY),
+                InetAddress.getByName(DOH_BOOTSTRAP_HOST_SECONDARY),
+            )
+            .build()
+    }
 
     fun createCallFactory(
         context: Context?,
@@ -36,10 +51,7 @@ internal object PluginNetworkPolicy {
         followSslRedirects: Boolean,
     ): Call.Factory {
         val builder =
-            client
-                .newBuilder()
-                .dns(strictDns)
-                .addInterceptor(debugOverlayInterceptor)
+            client.newBuilder().dns(dohFallbackDns).addInterceptor(debugOverlayInterceptor)
         val policyBuilder =
             builder
                 .addInterceptor(hostValidationInterceptor())
@@ -49,7 +61,8 @@ internal object PluginNetworkPolicy {
                 .followSslRedirects(client.followSslRedirects && followSslRedirects)
         if (context != null) {
             val appContext = context.applicationContext ?: context
-            appContext.getSystemService(ConnectivityManager::class.java)?.let { connectivityManager ->
+            appContext.getSystemService(ConnectivityManager::class.java)?.let { connectivityManager
+                ->
                 policyBuilder.addInterceptor(VpnNetworkInterceptor(connectivityManager))
             }
         }
@@ -149,16 +162,13 @@ internal object PluginNetworkPolicy {
             override fun connectFailed(uri: URI?, sa: SocketAddress?, ioe: IOException?) = Unit
         }
 
-    private class VpnNetworkInterceptor(
-        private val connectivityManager: ConnectivityManager,
-    ) : Interceptor {
+    private class VpnNetworkInterceptor(private val connectivityManager: ConnectivityManager) :
+        Interceptor {
         @Volatile private var binding: VpnBinding? = null
 
         override fun intercept(chain: Interceptor.Chain): Response {
             val request = chain.request()
-            val network =
-                activeVpnNetwork(connectivityManager)
-                    ?: return chain.proceed(request)
+            val network = activeVpnNetwork(connectivityManager) ?: return chain.proceed(request)
             val binding = bindingFor(network)
             if (activeVpnNetwork(connectivityManager) != network) {
                 throw UnknownHostException("VPN changed before request: ${request.url.host}")
@@ -175,11 +185,12 @@ internal object PluginNetworkPolicy {
                 ?: synchronized(this) {
                     binding?.takeIf { it.network == network }
                         ?: VpnBinding(
-                            network = network,
-                            dns = vpnDns(connectivityManager, network),
-                            proxySelector = validatingProxySelector(connectivityManager, network),
-                            socketFactory = network.socketFactory,
-                        )
+                                network = network,
+                                dns = vpnDns(connectivityManager, network),
+                                proxySelector =
+                                    validatingProxySelector(connectivityManager, network),
+                                socketFactory = network.socketFactory,
+                            )
                             .also { binding = it }
                 }
     }
@@ -248,6 +259,10 @@ internal object PluginNetworkPolicy {
         return true
     }
 
+    private const val DOH_RESOLVER_URL = "https://1.1.1.1/dns-query"
+    private const val DOH_BOOTSTRAP_HOST_PRIMARY = "1.1.1.1"
+    private const val DOH_BOOTSTRAP_HOST_SECONDARY = "1.0.0.1"
+    private const val DOH_CALL_TIMEOUT_SECONDS = 4L
     private const val MAX_HEADER_COUNT = 64
     private const val MAX_HEADER_NAME_LENGTH = 256
     private const val MAX_HEADER_VALUE_LENGTH = 16 * 1024

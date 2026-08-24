@@ -70,6 +70,7 @@ ahmer-pdfium = { group = "io.github.ahmerafzal1", name = "ahmer-pdfium", version
 reorderable = { module = "sh.calvin.reorderable:reorderable", version.ref = "reorderable" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
+okhttp-dnsoverhttps = { group = "com.squareup.okhttp3", name = "okhttp-dnsoverhttps", version.ref = "okhttp" }
 androidx-javascriptengine = { group = "androidx.javascriptengine", name = "javascriptengine", version.ref = "javascriptengine" }
 debugoverlay = { module = "com.ms-square:debugoverlay", version.ref = "debugoverlay" }
 debugoverlay-okhttp = { module = "com.ms-square:debugoverlay-extension-okhttp", version.ref = "debugoverlay" }
