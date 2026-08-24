@@ -112,7 +112,8 @@ class OnlineChapterVolumeTest {
             val identity = cacheIdentity()
             val cache = OnlinePageCache(root)
             val pages = response(listOf("page-1")).pages
-            val key = OnlinePageCacheKey.create(identity, onlinePageIdentities(REVISION, pages).single())
+            val key =
+                OnlinePageCacheKey.create(identity, onlinePageIdentities(REVISION, pages).single())
             cache.getOrLoad(key, OnlinePageLoadPriority.FOREGROUND) { byteArrayOf(1, 2, 3) }
             val factory = callFactory(HttpOutcome(200, byteArrayOf(4, 5, 6)))
             val volume = volume(pages, cache, identity, factory)
@@ -155,16 +156,14 @@ class OnlineChapterVolumeTest {
                     factory,
                 )
             try {
-                val page =
-                    async(start = CoroutineStart.UNDISPATCHED) { volume.loadPageBytes(0) }
+                val page = async(start = CoroutineStart.UNDISPATCHED) { volume.loadPageBytes(0) }
                 assertTrue(started.await(TEST_TIMEOUT_MS, TimeUnit.MILLISECONDS))
                 val thumbnail =
                     async(start = CoroutineStart.UNDISPATCHED) {
                         volume.loadThumbnailPageBytes(0)
                     }
                 release.countDown()
-                val results =
-                    withTimeout(TEST_TIMEOUT_MS) { listOf(page, thumbnail).awaitAll() }
+                val results = withTimeout(TEST_TIMEOUT_MS) { listOf(page, thumbnail).awaitAll() }
                 assertTrue(results.all { it.contentEquals(byteArrayOf(7, 8, 9)) })
                 assertEquals(1, factory.calls.get())
             } finally {
@@ -182,7 +181,10 @@ class OnlineChapterVolumeTest {
         val speculativeRoot = Files.createTempDirectory("online-volume-speculative").toFile()
         try {
             val foregroundFactory =
-                callFactory(FailureOutcome(IOException("temporary")), HttpOutcome(200, byteArrayOf(1)))
+                callFactory(
+                    FailureOutcome(IOException("temporary")),
+                    HttpOutcome(200, byteArrayOf(1)),
+                )
             val foreground =
                 volume(
                     response(listOf("page-1")).pages,
@@ -198,7 +200,10 @@ class OnlineChapterVolumeTest {
             }
 
             val speculativeFactory =
-                callFactory(FailureOutcome(IOException("temporary")), HttpOutcome(200, byteArrayOf(2)))
+                callFactory(
+                    FailureOutcome(IOException("temporary")),
+                    HttpOutcome(200, byteArrayOf(2)),
+                )
             val speculative =
                 volume(
                     response(listOf("page-1")).pages,
@@ -319,7 +324,7 @@ class OnlineChapterVolumeTest {
                 assertFalse(volume.invalidatePage(0))
                 assertTrue(
                     volume.replaceDescriptors(
-                        OnlineChapterRefresh(response(listOf("page-1")).pages, cacheIdentity()),
+                        OnlineChapterRefresh(response(listOf("page-1")).pages, cacheIdentity())
                     )
                 )
                 // The replacement brings fresh bytes, so the page may be retried once more.
@@ -357,12 +362,16 @@ class OnlineChapterVolumeTest {
             volume.close()
             assertTrue(
                 volume.replaceDescriptors(
-                    OnlineChapterRefresh(response(listOf("page-1")).pages, replacement),
+                    OnlineChapterRefresh(response(listOf("page-1")).pages, replacement)
                 )
             )
             // The closed volume must not leak cache protection for the replacement identity.
-            assertFalse(cache.isProtected(cache.pageFile(OnlinePageCacheKey.create(replacement, "page-1"))))
-            assertFalse(cache.isProtected(cache.pageFile(OnlinePageCacheKey.create(identity, "page-1"))))
+            assertFalse(
+                cache.isProtected(cache.pageFile(OnlinePageCacheKey.create(replacement, "page-1")))
+            )
+            assertFalse(
+                cache.isProtected(cache.pageFile(OnlinePageCacheKey.create(identity, "page-1")))
+            )
         } finally {
             root.deleteRecursively()
         }
@@ -423,6 +432,85 @@ class OnlineChapterVolumeTest {
         }
     }
 
+    @Test
+    fun `foreground network failures back off and then succeed`() = runBlocking {
+        val root = Files.createTempDirectory("online-volume-backoff-recover").toFile()
+        try {
+            val factory =
+                callFactory(
+                    FailureOutcome(IOException("Unable to resolve host")),
+                    FailureOutcome(IOException("Connection reset")),
+                    HttpOutcome(200, byteArrayOf(9)),
+                )
+            val volume =
+                volume(
+                    response(listOf("page-1")).pages,
+                    OnlinePageCache(root),
+                    cacheIdentity(),
+                    factory,
+                    retryDelaysMillis = listOf(1, 1),
+                )
+            try {
+                assertEquals(listOf(9), volume.loadPageBytes(0).map { it.toInt() })
+                assertEquals(3, factory.calls.get())
+            } finally {
+                volume.close()
+            }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `foreground network failures give up after the backoff budget`() = runBlocking {
+        val root = Files.createTempDirectory("online-volume-backoff-exhaust").toFile()
+        try {
+            val factory = callFactory(FailureOutcome(IOException("Unable to resolve host")))
+            val volume =
+                volume(
+                    response(listOf("page-1")).pages,
+                    OnlinePageCache(root),
+                    cacheIdentity(),
+                    factory,
+                    retryDelaysMillis = listOf(1, 1),
+                )
+            try {
+                val error = runCatching { volume.loadPageBytes(0) }.exceptionOrNull()
+                assertTrue(error is ComicOpenException)
+                assertEquals(3, factory.calls.get())
+            } finally {
+                volume.close()
+            }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `speculative loads do not retry network failures`() = runBlocking {
+        val root = Files.createTempDirectory("online-volume-speculative").toFile()
+        try {
+            val factory = callFactory(FailureOutcome(IOException("Unable to resolve host")))
+            val volume =
+                volume(
+                    response(listOf("page-1")).pages,
+                    OnlinePageCache(root),
+                    cacheIdentity(),
+                    factory,
+                    retryDelaysMillis = listOf(1, 1),
+                )
+            try {
+                val error = runCatching { volume.loadThumbnailPageBytes(0) }.exceptionOrNull()
+                assertTrue(error is ComicOpenException)
+                assertEquals(1, factory.calls.get())
+            } finally {
+                volume.close()
+            }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
     private fun response(
         pageIds: List<String?>,
         urlSuffix: String = "",
@@ -472,6 +560,7 @@ class OnlineChapterVolumeTest {
         identity: OnlinePageCacheIdentity,
         client: Call.Factory,
         refreshChapter: (suspend () -> OnlineChapterRefresh?)? = null,
+        retryDelaysMillis: List<Long> = listOf(500, 2_000),
     ): OnlineChapterVolume =
         OnlineChapterVolume(
             chapterId = CHAPTER_ID,
@@ -482,6 +571,7 @@ class OnlineChapterVolumeTest {
             cache = cache,
             initialCacheIdentity = identity,
             refreshChapter = refreshChapter,
+            networkRetryDelaysMillis = retryDelaysMillis,
         )
 
     private fun cacheIdentity(): OnlinePageCacheIdentity =
@@ -508,7 +598,9 @@ class OnlineChapterVolumeTest {
                             outcome.started?.countDown()
                             outcome.release?.let { gate ->
                                 if (!gate.await(TEST_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
-                                    throw IOException("Timed out waiting to release the fake response")
+                                    throw IOException(
+                                        "Timed out waiting to release the fake response"
+                                    )
                                 }
                             }
                             Response.Builder()

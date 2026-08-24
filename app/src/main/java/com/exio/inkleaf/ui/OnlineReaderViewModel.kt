@@ -678,7 +678,10 @@ internal class OnlineReaderViewModel(
                     )
                 }
             }
-            state = ReaderPresentationState.Error(error.toContentLoadError())
+            state =
+                ReaderPresentationState.Error(
+                    error.toContentLoadError(isNetworkAvailable = application.isNetworkAvailable())
+                )
         }
     }
 
