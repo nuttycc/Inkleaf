@@ -209,15 +209,8 @@ internal class OnlineComicViewModel(
                 markUnavailable(error)
                 _state.value =
                     _state.value.copy(
-                        errorMessage =
-                            error.toContentLoadError().let { presentation ->
-                                // 插件自带的错误文案往往比通用分类更具体，未知类别时保留原文
-                                if (presentation.kind == ContentLoadErrorKind.UNKNOWN) {
-                                    error.message ?: "加载漫画详情失败"
-                                } else {
-                                    presentation.message
-                                }
-                            }
+                        // 分类器对未知类别保留原始文案（插件自带的往往更具体）
+                        errorMessage = error.toContentLoadError().message
                     )
             } finally {
                 if (generation == refreshGeneration) {

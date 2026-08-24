@@ -31,7 +31,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.composables.icons.materialsymbols.outlined.R as MaterialSymbolsOutlinedR
 
-/** 按失败类别选择 Material Symbols 图标，阅读器与详情页共用。 */
+/** 按失败类别选择 Material Symbols 图标，供阅读器各错误态使用。 */
 internal fun ContentLoadErrorKind.errorIconRes(): Int =
     when (this) {
         ContentLoadErrorKind.NO_NETWORK ->

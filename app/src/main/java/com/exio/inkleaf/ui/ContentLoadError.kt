@@ -1,5 +1,6 @@
 package com.exio.inkleaf.ui
 
+import com.exio.inkleaf.data.ComicOpenException
 import com.exio.inkleaf.plugin.PluginErrorCode
 import com.exio.inkleaf.plugin.PluginRpcException
 import java.net.ConnectException
@@ -68,8 +69,10 @@ fun Throwable.toContentLoadError(isNetworkAvailable: Boolean = true): ContentLoa
                     retryable = false,
                 )
             PluginErrorCode.TIMEOUT -> presentation(ContentLoadErrorKind.TIMEOUT, this)
-            PluginErrorCode.HTTP -> presentation(ContentLoadErrorKind.HTTP_REJECTED, this)
-            PluginErrorCode.NETWORK -> classifyChain(this).withConnectionFallback()
+            PluginErrorCode.HTTP ->
+                classifyChain(this).withFallback(ContentLoadErrorKind.HTTP_REJECTED)
+            PluginErrorCode.NETWORK ->
+                classifyChain(this).withFallback(ContentLoadErrorKind.CONNECTION_FAILED)
             else -> presentation(ContentLoadErrorKind.PLUGIN, this)
         }
     }
@@ -79,9 +82,13 @@ fun Throwable.toContentLoadError(isNetworkAvailable: Boolean = true): ContentLoa
 private val HTTP_CODE = Regex("HTTP (\\d{3})")
 private const val MAX_CAUSE_CHAIN = 10
 
-/** 沿 cause 链按异常类型分类；类型未命中时退回消息文本信号。 */
+/** 沿 cause 链按异常类型分类；结构化状态码优先，类型未命中时退回消息文本信号。 */
 private fun classifyChain(error: Throwable): ContentLoadError {
     val chain = causeChain(error)
+    // 结构化 HTTP 状态码优先于任何文本信号：上游改文案不影响分类
+    val structuredCode =
+        chain.filterIsInstance<ComicOpenException>().firstNotNullOfOrNull { it.httpCode }
+    if (structuredCode != null) return httpCodeError(structuredCode, error)
     for (node in chain) {
         when (node) {
             is UnknownHostException ->
@@ -100,25 +107,26 @@ private fun classifyChain(error: Throwable): ContentLoadError {
     val httpCode = messages.firstNotNullOfOrNull { message ->
         HTTP_CODE.find(message)?.groupValues?.get(1)?.toIntOrNull()
     }
-    if (httpCode != null) {
-        val kind =
-            when {
-                httpCode == 429 -> ContentLoadErrorKind.RATE_LIMITED
-                httpCode == 404 -> ContentLoadErrorKind.CONTENT_MISSING
-                else -> ContentLoadErrorKind.HTTP_REJECTED
-            }
-        return presentation(kind, error, retryable = kind != ContentLoadErrorKind.CONTENT_MISSING)
-    }
-    return presentation(ContentLoadErrorKind.UNKNOWN, error)
+    if (httpCode != null) return httpCodeError(httpCode, error)
+    // 未知类别保留原始 message（上游抛出的文案通常已可读），为空才退回通用文案
+    val fallback = presentation(ContentLoadErrorKind.UNKNOWN, error)
+    return if (error.message.isNullOrBlank()) fallback else fallback.copy(message = error.message!!)
 }
 
-private fun ContentLoadError.withConnectionFallback(): ContentLoadError =
-    if (kind == ContentLoadErrorKind.UNKNOWN) {
-        copy(
-            kind = ContentLoadErrorKind.CONNECTION_FAILED,
-            message = "连接失败",
-            hint = "站点可能拒绝了当前网络的访问，可尝试更换网络或代理",
-        )
+private fun httpCodeError(code: Int, error: Throwable): ContentLoadError {
+    val kind =
+        when {
+            code == 429 -> ContentLoadErrorKind.RATE_LIMITED
+            code == 404 -> ContentLoadErrorKind.CONTENT_MISSING
+            else -> ContentLoadErrorKind.HTTP_REJECTED
+        }
+    return presentation(kind, error, retryable = kind != ContentLoadErrorKind.CONTENT_MISSING)
+}
+
+/** 链上没有更具体信号时，把 UNKNOWN 兜底成指定的网络类类别。 */
+private fun ContentLoadError.withFallback(kind: ContentLoadErrorKind): ContentLoadError =
+    if (this.kind == ContentLoadErrorKind.UNKNOWN) {
+        copy(kind = kind, message = kind.defaultMessage(), hint = kind.defaultHint())
     } else {
         this
     }

@@ -172,15 +172,34 @@ class ContentLoadErrorTest {
     }
 
     @Test
-    fun `unknown failures stay generic but keep the technical chain`() {
+    fun `unknown failures keep the original message and the technical chain`() {
         val error = ComicOpenException("页面图像超过大小限制")
 
         val presentation = error.toContentLoadError()
 
         assertEquals(ContentLoadErrorKind.UNKNOWN, presentation.kind)
-        assertEquals("加载失败", presentation.message)
+        assertEquals("页面图像超过大小限制", presentation.message)
         assertNull(presentation.hint)
         assertTrue(presentation.technicalDetail.contains("页面图像超过大小限制"))
+    }
+
+    @Test
+    fun `structured http code classifies even when the message is reworded`() {
+        val rateLimited = ComicOpenException("自定义文案", httpCode = 429)
+        val missing = ComicOpenException("自定义文案", httpCode = 404)
+
+        assertEquals(ContentLoadErrorKind.RATE_LIMITED, rateLimited.toContentLoadError().kind)
+        val missingPresentation = missing.toContentLoadError()
+        assertEquals(ContentLoadErrorKind.CONTENT_MISSING, missingPresentation.kind)
+        assertFalse(missingPresentation.retryable)
+    }
+
+    @Test
+    fun `plugin http code scans the chain for rate limiting`() {
+        val error =
+            PluginRpcException(error = PluginRpcError(PluginErrorCode.HTTP, "页面请求失败（HTTP 429）"))
+
+        assertEquals(ContentLoadErrorKind.RATE_LIMITED, error.toContentLoadError().kind)
     }
 
     @Test

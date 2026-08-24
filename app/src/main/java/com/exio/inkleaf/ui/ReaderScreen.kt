@@ -97,6 +97,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
@@ -1882,6 +1883,7 @@ private fun ComicPage(
                                 Modifier.fillMaxSize().clickable(
                                     interactionSource = remember { MutableInteractionSource() },
                                     indication = null,
+                                    role = Role.Button,
                                 ) {
                                     pageRetryRequest += 1
                                 }

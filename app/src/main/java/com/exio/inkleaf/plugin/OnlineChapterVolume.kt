@@ -252,7 +252,7 @@ internal class OnlineChapterVolume(
                     when {
                         waitMillis != null -> {
                             if (waitMillis > MAX_RETRY_AFTER_MS) {
-                                throw ComicOpenException("请求过于频繁，请稍后重试")
+                                throw ComicOpenException("请求过于频繁，请稍后重试", httpCode = 429)
                             }
                             delay(waitMillis.milliseconds)
                         }
@@ -353,7 +353,8 @@ internal class OnlineChapterVolume(
         val code: Int,
         val retryAfterMillis: Long?,
     ) : Exception() {
-        fun toComicOpenException(): ComicOpenException = ComicOpenException("页面请求失败（HTTP $code）")
+        fun toComicOpenException(): ComicOpenException =
+            ComicOpenException("页面请求失败（HTTP $code）", httpCode = code)
     }
 
     private companion object {
