@@ -87,9 +87,9 @@ fun OnlineReaderScreen(
             viewModel.endReadingSession()
             onBack()
         },
-        onErrorAction = { _ -> viewModel.reload() },
+        onErrorRetry = viewModel::reload,
+        errorRetryLabel = "重试",
         errorBackLabel = "返回漫画",
-        errorActionLabel = "重试",
         modifier = modifier,
     )
 }

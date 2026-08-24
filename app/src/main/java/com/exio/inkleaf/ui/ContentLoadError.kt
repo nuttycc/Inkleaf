@@ -30,6 +30,14 @@ data class ContentLoadError(
     val retryable: Boolean = true,
 )
 
+/** 本地/未分类错误的直通呈现：message 已是可读文案，原样作为标题展示。 */
+fun plainContentLoadError(message: String): ContentLoadError =
+    ContentLoadError(
+        kind = ContentLoadErrorKind.UNKNOWN,
+        message = message,
+        technicalDetail = message,
+    )
+
 /**
  * 把任意加载失败异常归类为界面可呈现的 [ContentLoadError]。
  *
