@@ -1754,7 +1754,9 @@ private fun ComicPage(
                     key2 = decodeRetryRequest,
                 ) {
                     if (!onVolumeTaskStarted(volume)) {
-                        value = PageContent.Error(plainContentLoadError("本页资源已释放"))
+                        // 卷已释放时重试必然复现，不提供重试入口
+                        value =
+                            PageContent.Error(plainContentLoadError("本页资源已释放", retryable = false))
                         return@produceState
                     }
                     value =

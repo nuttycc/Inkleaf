@@ -433,8 +433,34 @@ class OnlineChapterVolumeTest {
     }
 
     @Test
+    fun `excessive retry after on 5xx preserves the status code`() = runBlocking {
+        val root = Files.createTempDirectory("online-volume-retry-after-5xx").toFile()
+        try {
+            val factory = callFactory(HttpOutcome(503, headers = mapOf("Retry-After" to "60")))
+            val volume =
+                volume(
+                    response(listOf("page-1")).pages,
+                    OnlinePageCache(root),
+                    cacheIdentity(),
+                    factory,
+                )
+            try {
+                val error = runCatching { volume.loadPageBytes(0) }.exceptionOrNull()
+                assertTrue(error is ComicOpenException)
+                assertEquals(503, (error as ComicOpenException).httpCode)
+                assertTrue(error.message!!.contains("503"))
+            } finally {
+                volume.close()
+            }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun `foreground network failures back off and then succeed`() = runBlocking {
         val root = Files.createTempDirectory("online-volume-backoff-recover").toFile()
+        val observedDelays = mutableListOf<Long>()
         try {
             val factory =
                 callFactory(
@@ -448,11 +474,14 @@ class OnlineChapterVolumeTest {
                     OnlinePageCache(root),
                     cacheIdentity(),
                     factory,
-                    retryDelaysMillis = listOf(1, 1),
+                    retryDelaysMillis = listOf(500, 2_000),
+                    retryDelay = { observedDelays.add(it) },
                 )
             try {
                 assertEquals(listOf(9), volume.loadPageBytes(0).map { it.toInt() })
                 assertEquals(3, factory.calls.get())
+                // 两次退避都按配置值真实执行，而非立即重试
+                assertEquals(listOf(500L, 2_000L), observedDelays)
             } finally {
                 volume.close()
             }
@@ -464,6 +493,7 @@ class OnlineChapterVolumeTest {
     @Test
     fun `foreground network failures give up after the backoff budget`() = runBlocking {
         val root = Files.createTempDirectory("online-volume-backoff-exhaust").toFile()
+        val observedDelays = mutableListOf<Long>()
         try {
             val factory = callFactory(FailureOutcome(IOException("Unable to resolve host")))
             val volume =
@@ -472,12 +502,14 @@ class OnlineChapterVolumeTest {
                     OnlinePageCache(root),
                     cacheIdentity(),
                     factory,
-                    retryDelaysMillis = listOf(1, 1),
+                    retryDelaysMillis = listOf(500, 2_000),
+                    retryDelay = { observedDelays.add(it) },
                 )
             try {
                 val error = runCatching { volume.loadPageBytes(0) }.exceptionOrNull()
                 assertTrue(error is ComicOpenException)
                 assertEquals(3, factory.calls.get())
+                assertEquals(listOf(500L, 2_000L), observedDelays)
             } finally {
                 volume.close()
             }
@@ -561,6 +593,7 @@ class OnlineChapterVolumeTest {
         client: Call.Factory,
         refreshChapter: (suspend () -> OnlineChapterRefresh?)? = null,
         retryDelaysMillis: List<Long> = listOf(500, 2_000),
+        retryDelay: suspend (Long) -> Unit = {},
     ): OnlineChapterVolume =
         OnlineChapterVolume(
             chapterId = CHAPTER_ID,
@@ -572,6 +605,7 @@ class OnlineChapterVolumeTest {
             initialCacheIdentity = identity,
             refreshChapter = refreshChapter,
             networkRetryDelaysMillis = retryDelaysMillis,
+            retryDelay = retryDelay,
         )
 
     private fun cacheIdentity(): OnlinePageCacheIdentity =

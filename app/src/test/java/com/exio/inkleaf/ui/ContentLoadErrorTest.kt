@@ -143,6 +143,49 @@ class ContentLoadErrorTest {
     }
 
     @Test
+    fun `wrapped plugin not found classifies through the chain`() {
+        val error =
+            RuntimeException(
+                "outer wrapper",
+                PluginRpcException(PluginRpcError(PluginErrorCode.NOT_FOUND, "chapter gone")),
+            )
+
+        val presentation = error.toContentLoadError()
+
+        assertEquals(ContentLoadErrorKind.CONTENT_MISSING, presentation.kind)
+        assertFalse(presentation.retryable)
+        assertTrue(presentation.technicalDetail.contains("outer wrapper"))
+    }
+
+    @Test
+    fun `wrapped plugin auth required is not retryable`() {
+        val error =
+            RuntimeException(
+                "outer wrapper",
+                PluginRpcException(PluginRpcError(PluginErrorCode.AUTH_REQUIRED, "login required")),
+            )
+
+        val presentation = error.toContentLoadError()
+
+        assertEquals(ContentLoadErrorKind.PLUGIN, presentation.kind)
+        assertFalse(presentation.retryable)
+    }
+
+    @Test
+    fun `wrapped plugin network error still inspects the cause chain`() {
+        val error =
+            RuntimeException(
+                "outer wrapper",
+                PluginRpcException(
+                    error = PluginRpcError(PluginErrorCode.NETWORK, "request failed"),
+                    cause = UnknownHostException("Unable to resolve host mapi.hotmangasf.com"),
+                ),
+            )
+
+        assertEquals(ContentLoadErrorKind.DNS_UNRESOLVED, error.toContentLoadError().kind)
+    }
+
+    @Test
     fun `rpc timeout classifies as timeout`() {
         val error = PluginRpcException(error = PluginRpcError(PluginErrorCode.TIMEOUT, "timed out"))
 

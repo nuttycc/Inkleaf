@@ -45,6 +45,7 @@ internal class OnlineChapterVolume(
     initialCacheIdentity: OnlinePageCacheIdentity,
     private val refreshChapter: (suspend () -> OnlineChapterRefresh?)? = null,
     private val networkRetryDelaysMillis: List<Long> = DEFAULT_NETWORK_RETRY_DELAYS_MILLIS,
+    private val retryDelay: suspend (Long) -> Unit = { delay(it) },
 ) : ComicVolume {
     private val closed = AtomicBoolean(false)
     private val calls = ConcurrentHashMap.newKeySet<Call>()
@@ -240,7 +241,7 @@ internal class OnlineChapterVolume(
                         networkAttempt < networkRetryDelaysMillis.size
                 ) {
                     // DNS/连接类失败立即重试几乎必然复现，退避后才有恢复机会
-                    delay(networkRetryDelaysMillis[networkAttempt].milliseconds)
+                    retryDelay(networkRetryDelaysMillis[networkAttempt])
                     networkAttempt += 1
                     continue
                 }
@@ -252,7 +253,16 @@ internal class OnlineChapterVolume(
                     when {
                         waitMillis != null -> {
                             if (waitMillis > MAX_RETRY_AFTER_MS) {
-                                throw ComicOpenException("请求过于频繁，请稍后重试", httpCode = 429)
+                                // Retry-After 同样出现在 5xx 上：保留真实状态码，避免 503 被误分类为限流
+                                throw ComicOpenException(
+                                    message =
+                                        if (error.code == 429) {
+                                            "请求过于频繁，请稍后重试"
+                                        } else {
+                                            "页面请求失败（HTTP ${error.code}）"
+                                        },
+                                    httpCode = error.code,
+                                )
                             }
                             delay(waitMillis.milliseconds)
                         }

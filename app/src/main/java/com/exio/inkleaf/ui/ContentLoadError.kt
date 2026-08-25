@@ -32,11 +32,12 @@ data class ContentLoadError(
 )
 
 /** 本地/未分类错误的直通呈现：message 已是可读文案，原样作为标题展示。 */
-fun plainContentLoadError(message: String): ContentLoadError =
+fun plainContentLoadError(message: String, retryable: Boolean = true): ContentLoadError =
     ContentLoadError(
         kind = ContentLoadErrorKind.UNKNOWN,
         message = message,
         technicalDetail = message,
+        retryable = retryable,
     )
 
 /**
@@ -48,8 +49,11 @@ fun plainContentLoadError(message: String): ContentLoadError =
  */
 fun Throwable.toContentLoadError(isNetworkAvailable: Boolean = true): ContentLoadError {
     if (!isNetworkAvailable) return presentation(ContentLoadErrorKind.NO_NETWORK, this)
-    if (this is PluginRpcException) {
-        return when (error.code) {
+    // 语义化插件错误码优先于通用链分类；包裹在其它异常内层时同样生效
+    val pluginCode =
+        causeChain(this).filterIsInstance<PluginRpcException>().firstOrNull()?.error?.code
+    if (pluginCode != null) {
+        return when (pluginCode) {
             PluginErrorCode.NOT_FOUND ->
                 presentation(ContentLoadErrorKind.CONTENT_MISSING, this, retryable = false)
             PluginErrorCode.AUTH_REQUIRED ->
