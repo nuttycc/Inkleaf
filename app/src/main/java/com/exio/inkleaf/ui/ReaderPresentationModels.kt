@@ -25,11 +25,9 @@ internal fun readerTapTurnDirection(
 ): ReaderTransitionDirection =
     when (pageDirection) {
         ReaderPageDirection.LEFT_TO_RIGHT ->
-            if (isLeftZone) ReaderTransitionDirection.PREVIOUS
-            else ReaderTransitionDirection.NEXT
+            if (isLeftZone) ReaderTransitionDirection.PREVIOUS else ReaderTransitionDirection.NEXT
         ReaderPageDirection.RIGHT_TO_LEFT ->
-            if (isLeftZone) ReaderTransitionDirection.NEXT
-            else ReaderTransitionDirection.PREVIOUS
+            if (isLeftZone) ReaderTransitionDirection.NEXT else ReaderTransitionDirection.PREVIOUS
     }
 
 internal fun readerPagerReverseLayout(pageDirection: ReaderPageDirection): Boolean =
@@ -116,7 +114,7 @@ internal fun readerPagerUserScrollEnabled(
 internal sealed interface ReaderPresentationState {
     data object Loading : ReaderPresentationState
 
-    data class Error(val message: String) : ReaderPresentationState
+    data class Error(val error: ContentLoadError) : ReaderPresentationState
 
     data class Ready(
         val volume: ComicVolume,
@@ -137,8 +135,8 @@ internal data class ReaderPresentationFeatures(
     val bookmarkPages: Set<Int> = emptySet(),
     val bookmarks: List<ReaderBookmarkItem> = emptyList(),
     val favoritePages: Set<Int> = emptySet(),
-    val thumbnailsByKey:
-        Map<ReaderPageStateKey, androidx.compose.ui.graphics.ImageBitmap> = emptyMap(),
+    val thumbnailsByKey: Map<ReaderPageStateKey, androidx.compose.ui.graphics.ImageBitmap> =
+        emptyMap(),
     val bookmarkPageKeys: Set<ReaderPageStateKey> = emptySet(),
     val favoritePageKeys: Set<ReaderPageStateKey> = emptySet(),
 )

@@ -16,6 +16,7 @@ import com.exio.inkleaf.plugin.PluginChapterRequest
 import com.exio.inkleaf.plugin.PluginContentCodec
 import com.exio.inkleaf.plugin.PluginDetailRequest
 import com.exio.inkleaf.plugin.PluginRpcException
+import java.nio.charset.StandardCharsets
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -30,7 +31,6 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.JsonElement
-import java.nio.charset.StandardCharsets
 
 internal data class OnlineComicUiState(
     val sourceName: String,
@@ -129,9 +129,7 @@ internal class OnlineComicViewModel(
                     _state.value =
                         _state.value.copy(
                             isBookmarked = persistedBookmarkState,
-                            errorMessage =
-                                error.message?.let { "书架状态保存失败：$it" }
-                                    ?: "书架状态保存失败",
+                            errorMessage = error.message?.let { "书架状态保存失败：$it" } ?: "书架状态保存失败",
                         )
                 }
             }
@@ -211,7 +209,8 @@ internal class OnlineComicViewModel(
                 markUnavailable(error)
                 _state.value =
                     _state.value.copy(
-                        errorMessage = error.message ?: "加载漫画详情失败",
+                        // 分类器对未知类别保留原始文案（插件自带的往往更具体）
+                        errorMessage = error.toContentLoadError().message
                     )
             } finally {
                 if (generation == refreshGeneration) {
@@ -295,9 +294,7 @@ internal fun OnlineComicRecord?.isFresh(
     val record = this ?: return false
     if (record.availability != OnlineAvailability.AVAILABLE) return false
     if (
-        record.detail == null ||
-            record.detailFetchedAtMs <= 0L ||
-            record.chaptersFetchedAtMs <= 0L
+        record.detail == null || record.detailFetchedAtMs <= 0L || record.chaptersFetchedAtMs <= 0L
     ) {
         return false
     }
@@ -339,9 +336,12 @@ internal fun ComicSummary.toRouteSeed() =
         coverReferer =
             cover?.takeIf { it.headers.isEmpty() }?.referer?.takeUtf8(MAX_ROUTE_REFERER_BYTES),
         tags =
-            tags.take(MAX_ROUTE_SEED_TAGS).map { it.takeUtf8(MAX_ROUTE_TAG_BYTES) }.filter {
-                it.isNotBlank()
-            },
+            tags
+                .take(MAX_ROUTE_SEED_TAGS)
+                .map { it.takeUtf8(MAX_ROUTE_TAG_BYTES) }
+                .filter {
+                    it.isNotBlank()
+                },
     )
 
 private fun String.takeUtf8(maxBytes: Int): String {

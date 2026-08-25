@@ -4,8 +4,8 @@ import android.app.Activity
 import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.annotation.DrawableRes
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -21,6 +21,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -54,7 +55,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -97,6 +97,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
@@ -175,7 +176,8 @@ fun ReaderScreen(
     val presentationState =
         when (val state = viewModel.state) {
             ReaderUiState.Loading -> ReaderPresentationState.Loading
-            is ReaderUiState.Error -> ReaderPresentationState.Error(state.message)
+            is ReaderUiState.Error ->
+                ReaderPresentationState.Error(plainContentLoadError(state.message))
             is ReaderUiState.Ready ->
                 ReaderPresentationState.Ready(
                     volume = state.volume,
@@ -248,6 +250,8 @@ internal fun SharedReaderScreen(
     onExit: () -> Unit,
     modifier: Modifier = Modifier,
     chapterNavigation: ReaderChapterNavigation? = null,
+    onErrorRetry: (() -> Unit)? = null,
+    errorRetryLabel: String? = null,
     onErrorAction: ((() -> Unit) -> Unit)? = null,
     errorBackLabel: String = "返回",
     errorActionLabel: String? = null,
@@ -293,17 +297,19 @@ internal fun SharedReaderScreen(
                     modifier = Modifier.fillMaxSize(),
                 )
             is ReaderPresentationState.Error ->
-                ErrorView(
-                    message = current.message,
+                ReaderErrorContent(
+                    error = current.error,
+                    backgroundColor = stagePalette.background,
+                    contentColor = stagePalette.content,
                     onBack = exitReader,
                     backLabel = errorBackLabel,
-                    onRemove =
+                    onRetry = onErrorRetry,
+                    retryLabel = errorRetryLabel,
+                    onAction =
                         onErrorAction?.let { action ->
                             { action(exitReader) }
                         },
-                    removeLabel = errorActionLabel,
-                    backgroundColor = stagePalette.background,
-                    contentColor = stagePalette.content,
+                    actionLabel = errorActionLabel,
                     modifier = Modifier.fillMaxSize(),
                 )
 
@@ -363,11 +369,11 @@ private fun ComicPager(
     val pagerChapterWindow = visibleChapterWindow
     val retainedVolumes =
         remember(pagerChapterWindow, volume) {
-            pagerChapterWindow?.items
+            pagerChapterWindow
+                ?.items
                 ?.mapNotNull { it as? ReaderChapterWindowItem.Page<ReaderWindowChapterContent> }
                 ?.map { it.chapter.payload.volume }
-                ?.distinct()
-                ?: listOf(volume)
+                ?.distinct() ?: listOf(volume)
         }
     DisposableEffect(retainedVolumes) {
         onDispose { retainedVolumes.forEach(actions.onVolumeDisposed) }
@@ -376,10 +382,11 @@ private fun ComicPager(
     val initialPagerPage =
         remember(pagerChapterWindow, startPage) {
             readerWindowIndexForChapterPage(
-                window = pagerChapterWindow,
-                chapterId = pagerChapterWindow?.activeChapterId,
-                pageIndex = startPage,
-            ).takeIf { it >= 0 } ?: startPage
+                    window = pagerChapterWindow,
+                    chapterId = pagerChapterWindow?.activeChapterId,
+                    pageIndex = startPage,
+                )
+                .takeIf { it >= 0 } ?: startPage
         }
     val pagerState =
         rememberPagerState(
@@ -390,8 +397,7 @@ private fun ComicPager(
         )
     // A gesture must use one immutable item set so it cannot cross a newly revealed boundary.
     LaunchedEffect(chapterWindow, pagerState) {
-        snapshotFlow { pagerState.isScrollInProgress }
-            .first(::canAdoptReaderChapterWindow)
+        snapshotFlow { pagerState.isScrollInProgress }.first(::canAdoptReaderChapterWindow)
         val oldWindow = visibleChapterWindow
         val nextWindow = chapterWindow
         val adoption =
@@ -418,8 +424,7 @@ private fun ComicPager(
     val currentRealPage = currentContextPage?.pageIndex ?: pagerState.currentPage
     val currentVolume = currentContextPage?.chapter?.payload?.volume ?: volume
     val isCurrentVolumeActive = actions.isVolumeActive(currentVolume)
-    val currentTransition =
-        (currentWindowItem as? ReaderChapterWindowItem.Boundary)?.transition
+    val currentTransition = (currentWindowItem as? ReaderChapterWindowItem.Boundary)?.transition
     val isTransitionPage = currentTransition != null
     val bottomControlsMode =
         readerBottomControlsMode(
@@ -434,19 +439,20 @@ private fun ComicPager(
                 volume = page.chapter.payload.volume,
                 page = page.pageIndex,
             )
-        } ?: if (!isTransitionPage && currentRealPage in 0 until volume.totalPageCount) {
-            ReaderPageTarget(
-                key =
-                    ReaderPageStateKey(
-                        cacheKeyPrefix,
-                        volume.pageIdentity(currentRealPage) ?: "index:$currentRealPage",
-                    ),
-                volume = volume,
-                page = currentRealPage,
-            )
-        } else {
-            null
         }
+            ?: if (!isTransitionPage && currentRealPage in 0 until volume.totalPageCount) {
+                ReaderPageTarget(
+                    key =
+                        ReaderPageStateKey(
+                            cacheKeyPrefix,
+                            volume.pageIdentity(currentRealPage) ?: "index:$currentRealPage",
+                        ),
+                    volume = volume,
+                    page = currentRealPage,
+                )
+            } else {
+                null
+            }
     val currentPageStateKey = currentPageTarget?.key
 
     var zoomedPage by remember { mutableStateOf<ReaderPageStateKey?>(null) }
@@ -578,37 +584,40 @@ private fun ComicPager(
     val latestVisibleChapterWindow by rememberUpdatedState(visibleChapterWindow)
     val latestChapterNavigation by rememberUpdatedState(chapterNavigation)
     LaunchedEffect(pagerState) {
-        snapshotFlow { pagerState.settledPage to pagerState.isScrollInProgress }.collect {
-            (settledPage, inProgress) ->
-            if (inProgress) return@collect
-            val window = latestVisibleChapterWindow ?: return@collect
-            val item = window.items.getOrNull(settledPage) ?: return@collect
-            when (item) {
-                is ReaderChapterWindowItem.Page<*> -> {
-                    val content = item.chapter.payload as ReaderWindowChapterContent
-                    latestChapterNavigation?.onWindowPageSettled?.invoke(item.pageKey)
-                    if (actions.isVolumeActive(content.volume)) {
-                        if (item.pageIndex == 0) {
-                            latestChapterNavigation?.onReachedFirstPage?.invoke()
-                        }
-                        if (item.pageIndex == item.chapter.pageIdentities.lastIndex) {
-                            latestChapterNavigation?.onReachedLastPage?.invoke()
+        snapshotFlow { pagerState.settledPage to pagerState.isScrollInProgress }
+            .collect { (settledPage, inProgress) ->
+                if (inProgress) return@collect
+                val window = latestVisibleChapterWindow ?: return@collect
+                val item = window.items.getOrNull(settledPage) ?: return@collect
+                when (item) {
+                    is ReaderChapterWindowItem.Page<*> -> {
+                        val content = item.chapter.payload as ReaderWindowChapterContent
+                        latestChapterNavigation?.onWindowPageSettled?.invoke(item.pageKey)
+                        if (actions.isVolumeActive(content.volume)) {
+                            if (item.pageIndex == 0) {
+                                latestChapterNavigation?.onReachedFirstPage?.invoke()
+                            }
+                            if (item.pageIndex == item.chapter.pageIdentities.lastIndex) {
+                                latestChapterNavigation?.onReachedLastPage?.invoke()
+                            }
                         }
                     }
-                }
-                is ReaderChapterWindowItem.Boundary -> {
-                    latestChapterNavigation?.onBoundarySettled?.invoke(item.transition.direction)
+                    is ReaderChapterWindowItem.Boundary -> {
+                        latestChapterNavigation
+                            ?.onBoundarySettled
+                            ?.invoke(item.transition.direction)
+                    }
                 }
             }
-        }
     }
 
     // Single-volume readers still report their chapter-local page index directly.
     LaunchedEffect(pagerState, volume, pagerChapterWindow) {
         if (pagerChapterWindow != null) return@LaunchedEffect
-        snapshotFlow { pagerState.currentPage }.collect { page ->
-            actions.onPageChanged(volume, page)
-        }
+        snapshotFlow { pagerState.currentPage }
+            .collect { page ->
+                actions.onPageChanged(volume, page)
+            }
     }
 
     val bottomControlsHeight = with(LocalDensity.current) { bottomControlsHeightPx.toDp() }
@@ -691,7 +700,9 @@ private fun ComicPager(
                             cacheKeyPrefix = content.cacheKeyPrefix,
                             thumbnail =
                                 features.thumbnailsByKey[pageStateKey]
-                                    ?: features.thumbnails[item.pageIndex].takeIf { isActiveVolume },
+                                    ?: features.thumbnails[item.pageIndex].takeIf {
+                                        isActiveVolume
+                                    },
                             zoomToggleRequest = zoomToggleRequest,
                             zoomResetRequest = zoomResetRequest,
                             zoomTogglePage = zoomTogglePage,
@@ -712,9 +723,9 @@ private fun ComicPager(
                             backgroundColor = stagePalette.background,
                             contentColor = stagePalette.content,
                             onRetry = {
-                                chapterNavigation?.onBoundaryRetry?.invoke(
-                                    item.transition.direction
-                                )
+                                chapterNavigation
+                                    ?.onBoundaryRetry
+                                    ?.invoke(item.transition.direction)
                             },
                             modifier = Modifier.fillMaxSize(),
                         )
@@ -760,11 +771,7 @@ private fun ComicPager(
                     ),
         )
 
-        if (
-            !showControls &&
-                !isTransitionPage &&
-                snackbarHostState.currentSnackbarData == null
-        ) {
+        if (!showControls && !isTransitionPage && snackbarHostState.currentSnackbarData == null) {
             val pageCountLabel = "${currentRealPage + 1} / ${currentVolume.totalPageCount}"
             val pageLabel =
                 if (readerChapterCount > 1) {
@@ -871,7 +878,8 @@ private fun ComicPager(
                             isCurrentBookmarked = isCurrentPageBookmarked,
                             onToggleBookmark = onToggleBookmarkAction,
                             onNeedThumbnail = { page ->
-                                if (actions.isVolumeActive(currentVolume)) actions.onNeedThumbnail(page)
+                                if (actions.isVolumeActive(currentVolume))
+                                    actions.onNeedThumbnail(page)
                             },
                             onSelect = { page ->
                                 activePanel = null
@@ -1063,8 +1071,7 @@ private fun ReaderBottomControls(
 ) {
     val accent = readerAccentColor()
     // Keep the exact filmstrip position while another dock tab replaces the page content.
-    val filmstripListState =
-        rememberLazyListState(initialFirstVisibleItemIndex = currentPage)
+    val filmstripListState = rememberLazyListState(initialFirstVisibleItemIndex = currentPage)
 
     AnimatedVisibility(
         visible = visible,
@@ -1648,6 +1655,8 @@ private fun ComicPage(
     var viewportSize by remember(pageStateKey) { mutableStateOf(IntSize.Zero) }
     var useZoomedPdfRender by remember(pageStateKey) { mutableStateOf(false) }
     var decodeRetryRequest by remember(pageStateKey) { mutableIntStateOf(0) }
+    // 网络类失败的手动重试：点击错误页触发 produceState 重跑（滑走再滑回的显式替代）
+    var pageRetryRequest by remember(pageStateKey) { mutableIntStateOf(0) }
     var decodeFailureMessage by remember(pageStateKey) { mutableStateOf<String?>(null) }
     val isCurrentPage = pageStateKey == currentPageStateKey
     fun resetZoom() {
@@ -1738,31 +1747,35 @@ private fun ComicPage(
         )
     val content by
         key(contentKeys.stateReset) {
-            produceState<PageContent>(
-                initialValue = PageContent.Loading,
-                key1 = contentKeys.producerRestart,
-                key2 = decodeRetryRequest,
-            ) {
-                if (!onVolumeTaskStarted(volume)) {
-                    value = PageContent.Error("本页资源已释放")
-                    return@produceState
-                }
-                value =
-                    try {
-                        if (volume.supportsTargetedPageBitmap && pageRenderRequest == null) {
-                            PageContent.Loading
-                        } else {
-                            loadOriginalPageContent(volume, page, pageRenderRequest)
-                        }
-                    } catch (cancelled: CancellationException) {
-                        throw cancelled
-                    } catch (e: ComicOpenException) {
-                        PageContent.Error(e.message ?: "本页无法打开")
-                    } catch (_: Exception) {
-                        PageContent.Error("本页无法打开")
-                    } finally {
-                        onVolumeTaskFinished(volume)
+            key(pageRetryRequest) {
+                produceState<PageContent>(
+                    initialValue = PageContent.Loading,
+                    key1 = contentKeys.producerRestart,
+                    key2 = decodeRetryRequest,
+                ) {
+                    if (!onVolumeTaskStarted(volume)) {
+                        // 卷已释放时重试必然复现，不提供重试入口
+                        value =
+                            PageContent.Error(plainContentLoadError("本页资源已释放", retryable = false))
+                        return@produceState
                     }
+                    value =
+                        try {
+                            if (volume.supportsTargetedPageBitmap && pageRenderRequest == null) {
+                                PageContent.Loading
+                            } else {
+                                loadOriginalPageContent(volume, page, pageRenderRequest)
+                            }
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (e: ComicOpenException) {
+                            PageContent.Error(e.toContentLoadError())
+                        } catch (_: Exception) {
+                            PageContent.Error(plainContentLoadError("本页无法打开"))
+                        } finally {
+                            onVolumeTaskFinished(volume)
+                        }
+                }
             }
         }
 
@@ -1866,13 +1879,55 @@ private fun ComicPage(
             val pageArtwork: @Composable () -> Unit = {
                 when (val c = content) {
                     is PageContent.Error -> {
-                        Text(
-                            text = c.message,
-                            color = contentColor,
-                            style = MaterialTheme.typography.bodyLarge,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.padding(32.dp),
-                        )
+                        // 可重试的错误（网络类）整页可点；不可重试（解码/内容缺失）只给解释
+                        val columnModifier =
+                            if (c.error.retryable) {
+                                Modifier.fillMaxSize().clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null,
+                                    role = Role.Button,
+                                ) {
+                                    pageRetryRequest += 1
+                                }
+                            } else {
+                                Modifier.fillMaxSize()
+                            }
+                        Column(
+                            modifier = columnModifier.padding(32.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                        ) {
+                            Icon(
+                                painter = painterResource(c.error.kind.errorIconRes()),
+                                contentDescription = null,
+                                tint = contentColor.copy(alpha = 0.85f),
+                                modifier = Modifier.size(40.dp),
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text(
+                                text = c.error.message,
+                                color = contentColor,
+                                style = MaterialTheme.typography.bodyLarge,
+                                textAlign = TextAlign.Center,
+                            )
+                            c.error.hint?.let { hint ->
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = hint,
+                                    color = contentColor.copy(alpha = 0.7f),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    textAlign = TextAlign.Center,
+                                )
+                            }
+                            if (c.error.retryable) {
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Text(
+                                    text = "点击重试",
+                                    color = contentColor.copy(alpha = 0.6f),
+                                    style = MaterialTheme.typography.labelMedium,
+                                )
+                            }
+                        }
                     }
 
                     PageContent.Loading -> {
@@ -1992,7 +2047,7 @@ private sealed interface PageContent {
 
     class Bytes(val bytes: ByteArray) : PageContent
 
-    data class Error(val message: String) : PageContent
+    data class Error(val error: ContentLoadError) : PageContent
 }
 
 private suspend fun loadOriginalPageContent(
@@ -2035,45 +2090,5 @@ private fun LoadingView(
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         // 400ms 内打开完成（小文件/缓存命中）就只是一段平滑的 Stage 过场
         DelayedSpinner(showDelay = 400.milliseconds, color = contentColor)
-    }
-}
-
-@Composable
-private fun ErrorView(
-    message: String,
-    onBack: () -> Unit,
-    backLabel: String,
-    onRemove: (() -> Unit)?,
-    removeLabel: String?,
-    backgroundColor: Color,
-    contentColor: Color,
-    modifier: Modifier = Modifier,
-) {
-    Column(
-        modifier = modifier,
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Text(text = message, color = contentColor, style = MaterialTheme.typography.bodyLarge)
-        Spacer(modifier = Modifier.height(16.dp))
-        Button(
-            onClick = onBack,
-            colors =
-                ButtonDefaults.buttonColors(
-                    containerColor = contentColor,
-                    contentColor = backgroundColor,
-                ),
-        ) {
-            Text(backLabel)
-        }
-        if (onRemove != null && removeLabel != null) {
-            Spacer(modifier = Modifier.height(8.dp))
-            OutlinedButton(
-                onClick = onRemove,
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = contentColor),
-            ) {
-                Text(removeLabel)
-            }
-        }
     }
 }

@@ -26,10 +26,10 @@ import com.exio.inkleaf.data.OnlineContentIdentity
 import com.exio.inkleaf.data.OnlinePageCacheIdentity
 import com.exio.inkleaf.data.OnlinePageIdentity
 import com.exio.inkleaf.data.OnlinePageLocation
-import com.exio.inkleaf.data.ReadingSessionRules
 import com.exio.inkleaf.data.ReaderCache
-import com.exio.inkleaf.data.saveImageBytesToGallery
+import com.exio.inkleaf.data.ReadingSessionRules
 import com.exio.inkleaf.data.sanitizeFileName
+import com.exio.inkleaf.data.saveImageBytesToGallery
 import com.exio.inkleaf.plugin.ChapterSummary
 import com.exio.inkleaf.plugin.OnlineAvailability
 import com.exio.inkleaf.plugin.OnlineChapterRefresh
@@ -48,7 +48,6 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.util.TimeZone
 import java.util.UUID
-import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.minutes
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
@@ -140,7 +139,8 @@ internal class OnlineReaderViewModel(
     private var pagePrefetchDirection = 0
     private var pagePrefetchMetered = true
     private val transitionLoadJobs = mutableMapOf<ReaderTransitionDirection, Job>()
-    private val transitionStatuses = mutableMapOf<ReaderTransitionDirection, ReaderTransitionStatus>()
+    private val transitionStatuses =
+        mutableMapOf<ReaderTransitionDirection, ReaderTransitionStatus>()
     private val revealedAdjacentChapters = mutableSetOf<ReaderTransitionDirection>()
     private val lastPageByChapterId = mutableMapOf<String, Int>()
 
@@ -216,14 +216,11 @@ internal class OnlineReaderViewModel(
     fun onWindowPageSettled(pageKey: ReaderChapterPageKey) {
         val ready = state as? ReaderPresentationState.Ready ?: return
         val windowItem =
-            ready.chapterWindow?.items
-                ?.firstOrNull {
-                    it is ReaderChapterWindowItem.Page<*> && it.pageKey == pageKey
-                }
-                ?: return
+            ready.chapterWindow?.items?.firstOrNull {
+                it is ReaderChapterWindowItem.Page<*> && it.pageKey == pageKey
+            } ?: return
         @Suppress("UNCHECKED_CAST")
-        val page =
-            windowItem as ReaderChapterWindowItem.Page<ReaderWindowChapterContent>
+        val page = windowItem as ReaderChapterWindowItem.Page<ReaderWindowChapterContent>
         val settledEffect = readerSettledPageEffect(activeChapterId, page)
         if (settledEffect == ReaderSettledPageEffect.None) {
             saveProgress(page.chapter.payload.volume, page.pageIndex)
@@ -239,22 +236,22 @@ internal class OnlineReaderViewModel(
             }
         val prepared =
             preloadedChapter(
-                if (direction == ChapterSwitchDirection.NEXT) {
-                    ReaderTransitionDirection.NEXT
-                } else {
-                    ReaderTransitionDirection.PREVIOUS
-                }
-            )?.takeIf { it.chapter.chapterId == commit.chapterId } ?: return
-        chapterLoadJob =
-            viewModelScope.launch {
-                prepareAndCommitChapter(
-                    chapter = prepared.chapter,
-                    index = prepared.index,
-                    direction = direction,
-                    prebuilt = prepared,
-                    settledPage = commit.pageIndex,
+                    if (direction == ChapterSwitchDirection.NEXT) {
+                        ReaderTransitionDirection.NEXT
+                    } else {
+                        ReaderTransitionDirection.PREVIOUS
+                    }
                 )
-            }
+                ?.takeIf { it.chapter.chapterId == commit.chapterId } ?: return
+        chapterLoadJob = viewModelScope.launch {
+            prepareAndCommitChapter(
+                chapter = prepared.chapter,
+                index = prepared.index,
+                direction = direction,
+                prebuilt = prepared,
+                settledPage = commit.pageIndex,
+            )
+        }
     }
 
     private fun loadTransitionChapter(direction: ReaderTransitionDirection) {
@@ -268,40 +265,39 @@ internal class OnlineReaderViewModel(
             publishReaderWindow()
             return
         }
-        val loadJob =
-            viewModelScope.launch {
-                try {
-                    val cached =
-                        if (direction == ReaderTransitionDirection.NEXT) preloadedNext
-                        else preloadedPrevious
-                    val prepared =
-                        cached?.takeIf { it.index == targetIndex }
-                            ?: fetchChapterVolume(target.first).let { (volume, revision) ->
-                                PreloadedChapter(volume, targetIndex, target.first, revision)
-                            }
-                    if (direction == ReaderTransitionDirection.NEXT) {
-                        preloadedNext
-                            ?.takeIf { it.volume !== prepared.volume }
-                            ?.volume
-                            ?.let(::closeVolumeWhenUnused)
-                        preloadedNext = prepared
-                    } else {
-                        preloadedPrevious
-                            ?.takeIf { it.volume !== prepared.volume }
-                            ?.volume
-                            ?.let(::closeVolumeWhenUnused)
-                        preloadedPrevious = prepared
-                    }
-                    scheduleAdjacentPagePrefetch(prepared, direction)
-                    transitionStatuses[direction] = ReaderTransitionStatus.Ready
-                    publishReaderWindow()
-                } catch (error: CancellationException) {
-                    throw error
-                } catch (_: Exception) {
-                    transitionStatuses[direction] = ReaderTransitionStatus.Error
-                    publishReaderWindow()
+        val loadJob = viewModelScope.launch {
+            try {
+                val cached =
+                    if (direction == ReaderTransitionDirection.NEXT) preloadedNext
+                    else preloadedPrevious
+                val prepared =
+                    cached?.takeIf { it.index == targetIndex }
+                        ?: fetchChapterVolume(target.first).let { (volume, revision) ->
+                            PreloadedChapter(volume, targetIndex, target.first, revision)
+                        }
+                if (direction == ReaderTransitionDirection.NEXT) {
+                    preloadedNext
+                        ?.takeIf { it.volume !== prepared.volume }
+                        ?.volume
+                        ?.let(::closeVolumeWhenUnused)
+                    preloadedNext = prepared
+                } else {
+                    preloadedPrevious
+                        ?.takeIf { it.volume !== prepared.volume }
+                        ?.volume
+                        ?.let(::closeVolumeWhenUnused)
+                    preloadedPrevious = prepared
                 }
+                scheduleAdjacentPagePrefetch(prepared, direction)
+                transitionStatuses[direction] = ReaderTransitionStatus.Ready
+                publishReaderWindow()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                transitionStatuses[direction] = ReaderTransitionStatus.Error
+                publishReaderWindow()
             }
+        }
         transitionLoadJobs[direction] = loadJob
         loadJob.invokeOnCompletion {
             if (transitionLoadJobs[direction] === loadJob) {
@@ -617,9 +613,7 @@ internal class OnlineReaderViewModel(
             if (resolvedChapterId != activeChapterId || restoreChapterMetadata) {
                 activeChapterId = resolvedChapterId
                 activeRequestedRevision =
-                    persistedPosition
-                        ?.takeIf { it.chapterId == resolvedChapterId }
-                        ?.chapterRevision
+                    persistedPosition?.takeIf { it.chapterId == resolvedChapterId }?.chapterRevision
                 activeOpaqueContext = null
             }
             updateChapterNavigation(snapshot)
@@ -684,7 +678,10 @@ internal class OnlineReaderViewModel(
                     )
                 }
             }
-            state = ReaderPresentationState.Error(error.message ?: "加载页面失败")
+            state =
+                ReaderPresentationState.Error(
+                    error.toContentLoadError(isNetworkAvailable = application.isNetworkAvailable())
+                )
         }
     }
 
@@ -837,8 +834,9 @@ internal class OnlineReaderViewModel(
                 chapterReady = volume != null
                 resumeActiveSegmentIfProcessResumed()
             }
-            if (direction == ChapterSwitchDirection.NEXT ||
-                direction == ChapterSwitchDirection.PREVIOUS
+            if (
+                direction == ChapterSwitchDirection.NEXT ||
+                    direction == ChapterSwitchDirection.PREVIOUS
             ) {
                 val transitionDirection =
                     if (direction == ChapterSwitchDirection.NEXT) {
@@ -850,8 +848,7 @@ internal class OnlineReaderViewModel(
                 revealedAdjacentChapters -= transitionDirection
                 publishReaderWindow()
             } else if (direction == ChapterSwitchDirection.MANUAL) {
-                readerMessage =
-                    error.message?.let { "无法切换章节：$it" } ?: "无法切换章节"
+                readerMessage = error.message?.let { "无法切换章节：$it" } ?: "无法切换章节"
             }
         } finally {
             if (!committed) prepared?.let(::closeVolumeWhenUnused)
@@ -943,7 +940,8 @@ internal class OnlineReaderViewModel(
 
     private suspend fun activePluginVersion(): String =
         withContext(Dispatchers.IO) {
-            application.pluginManager.installed()
+            application.pluginManager
+                .installed()
                 .firstOrNull { it.state.pluginId == pluginId }
                 ?.let { installed ->
                     installed.state.activeVersion ?: installed.manifest?.version
@@ -978,110 +976,108 @@ internal class OnlineReaderViewModel(
         opened: OnlineChapterVolume,
     ) {
         descriptorRefreshJob?.cancel()
-        descriptorRefreshJob =
-            viewModelScope.launch {
-                delay(MANIFEST_TTL)
-                if (volume !== opened || activeChapterId != chapter.chapterId) return@launch
-                try {
-                    val request = pagesRequest(chapter)
-                    val fetched = fetchPages(request)
-                    val response = fetched.response
-                    if (response.pages.isEmpty()) return@launch
-                    val revision =
-                        resolveOnlineChapterRevision(chapter.chapterId, chapter.revision, response)
-                    if (volume !== opened || currentRevision != opened.sourceRevision) return@launch
-                    if (revision == opened.sourceRevision) {
-                        val pageIdentities = onlinePageIdentities(revision, response.pages)
-                        val identity =
-                            cacheIdentity(
-                                fetched.pluginVersion,
-                                response,
-                                chapter.chapterId,
-                                revision,
-                            )
-                        val previousCacheKeyPrefix = opened.cacheKeyPrefix
-                        if (opened.replaceDescriptors(OnlineChapterRefresh(response.pages, identity))) {
-                            application.onlinePageCache.writeManifest(
-                                identity = identity,
-                                pageIdentities = pageIdentities,
-                                fetchedAtMs = fetched.fetchedAtMs,
-                            )
-                            if (opened.cacheKeyPrefix != previousCacheKeyPrefix) {
-                                cancelThumbnailJobs()
-                                thumbnails.clear()
-                                thumbnailsByKey.clear()
-                                prewarmThumbnails(opened, currentPage)
-                            }
-                            publishReaderWindow()
+        descriptorRefreshJob = viewModelScope.launch {
+            delay(MANIFEST_TTL)
+            if (volume !== opened || activeChapterId != chapter.chapterId) return@launch
+            try {
+                val request = pagesRequest(chapter)
+                val fetched = fetchPages(request)
+                val response = fetched.response
+                if (response.pages.isEmpty()) return@launch
+                val revision =
+                    resolveOnlineChapterRevision(chapter.chapterId, chapter.revision, response)
+                if (volume !== opened || currentRevision != opened.sourceRevision) return@launch
+                if (revision == opened.sourceRevision) {
+                    val pageIdentities = onlinePageIdentities(revision, response.pages)
+                    val identity =
+                        cacheIdentity(
+                            fetched.pluginVersion,
+                            response,
+                            chapter.chapterId,
+                            revision,
+                        )
+                    val previousCacheKeyPrefix = opened.cacheKeyPrefix
+                    if (opened.replaceDescriptors(OnlineChapterRefresh(response.pages, identity))) {
+                        application.onlinePageCache.writeManifest(
+                            identity = identity,
+                            pageIdentities = pageIdentities,
+                            fetchedAtMs = fetched.fetchedAtMs,
+                        )
+                        if (opened.cacheKeyPrefix != previousCacheKeyPrefix) {
+                            cancelThumbnailJobs()
+                            thumbnails.clear()
+                            thumbnailsByKey.clear()
+                            prewarmThumbnails(opened, currentPage)
                         }
-                        return@launch
+                        publishReaderWindow()
                     }
+                    return@launch
+                }
 
-                    val chapterIndex = currentChapterIndex
-                    if (chapterIndex < 0) return@launch
-                    val refreshedChapter = chapter.copy(revision = revision)
-                    val refreshedRequest = request.copy(revision = revision)
-                    val (candidate, candidateRevision) =
-                        createChapterVolume(refreshedChapter, refreshedRequest, fetched)
-                    if (volume !== opened || activeChapterId != chapter.chapterId) {
-                        closeVolumeWhenUnused(candidate)
-                        return@launch
-                    }
-                    val targetPage =
-                        candidate.findPageByIdentity(opened.pageIdentity(currentPage))
-                            ?: currentPage.coerceIn(0, candidate.totalPageCount - 1)
-                    descriptorRefreshJob = null
-                    // Serialize the commit with chapter switches: while a chapter load is in
-                    // flight the refresh must not commit on top of it, and the commit itself
-                    // must claim chapterLoadJob so switches cannot enter prepareAndCommitChapter
-                    // concurrently. coroutineScope keeps the commit a structured child of this
-                    // descriptor job: cancelling the revalidation also cancels an in-flight
-                    // commit, and async/await keeps commit failures in this try/catch.
-                    if (chapterLoadJob?.isActive == true) {
-                        closeVolumeWhenUnused(candidate)
-                        return@launch
-                    }
-                    coroutineScope {
-                        val commitJob =
-                            async(start = CoroutineStart.LAZY) {
-                                prepareAndCommitChapter(
-                                    chapter = refreshedChapter,
-                                    index = chapterIndex,
-                                    direction = ChapterSwitchDirection.REFRESH,
-                                    prebuilt =
-                                        PreloadedChapter(
-                                            candidate,
-                                            chapterIndex,
-                                            refreshedChapter,
-                                            candidateRevision,
-                                        ),
-                                    settledPage = targetPage,
-                                )
-                            }
-                        chapterLoadJob = commitJob
-                        commitJob.start()
-                        commitJob.await()
-                    }
-                } catch (error: CancellationException) {
-                    throw error
-                } catch (_: Exception) {
-                    // Stale descriptors and already cached pages remain readable after refresh failure.
-                } finally {
-                    if (coroutineContext[Job]?.isActive == true &&
+                val chapterIndex = currentChapterIndex
+                if (chapterIndex < 0) return@launch
+                val refreshedChapter = chapter.copy(revision = revision)
+                val refreshedRequest = request.copy(revision = revision)
+                val (candidate, candidateRevision) =
+                    createChapterVolume(refreshedChapter, refreshedRequest, fetched)
+                if (volume !== opened || activeChapterId != chapter.chapterId) {
+                    closeVolumeWhenUnused(candidate)
+                    return@launch
+                }
+                val targetPage =
+                    candidate.findPageByIdentity(opened.pageIdentity(currentPage))
+                        ?: currentPage.coerceIn(0, candidate.totalPageCount - 1)
+                descriptorRefreshJob = null
+                // Serialize the commit with chapter switches: while a chapter load is in
+                // flight the refresh must not commit on top of it, and the commit itself
+                // must claim chapterLoadJob so switches cannot enter prepareAndCommitChapter
+                // concurrently. coroutineScope keeps the commit a structured child of this
+                // descriptor job: cancelling the revalidation also cancels an in-flight
+                // commit, and async/await keeps commit failures in this try/catch.
+                if (chapterLoadJob?.isActive == true) {
+                    closeVolumeWhenUnused(candidate)
+                    return@launch
+                }
+                coroutineScope {
+                    val commitJob =
+                        async(start = CoroutineStart.LAZY) {
+                            prepareAndCommitChapter(
+                                chapter = refreshedChapter,
+                                index = chapterIndex,
+                                direction = ChapterSwitchDirection.REFRESH,
+                                prebuilt =
+                                    PreloadedChapter(
+                                        candidate,
+                                        chapterIndex,
+                                        refreshedChapter,
+                                        candidateRevision,
+                                    ),
+                                settledPage = targetPage,
+                            )
+                        }
+                    chapterLoadJob = commitJob
+                    commitJob.start()
+                    commitJob.await()
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                // Stale descriptors and already cached pages remain readable after refresh failure.
+            } finally {
+                if (
+                    coroutineContext[Job]?.isActive == true &&
                         volume === opened &&
                         activeChapterId == chapter.chapterId &&
                         currentRevision == opened.sourceRevision
-                    ) {
-                        descriptorRefreshJob = null
-                        scheduleDescriptorRevalidation(chapter, opened)
-                    }
+                ) {
+                    descriptorRefreshJob = null
+                    scheduleDescriptorRevalidation(chapter, opened)
                 }
             }
+        }
     }
 
-    private fun adjacentChapter(
-        direction: ReaderTransitionDirection
-    ): Pair<ChapterSummary, Int>? =
+    private fun adjacentChapter(direction: ReaderTransitionDirection): Pair<ChapterSummary, Int>? =
         when (direction) {
             ReaderTransitionDirection.NEXT ->
                 nextReadableOnlineChapter(chapterSummaries, currentChapterIndex)
@@ -1143,9 +1139,7 @@ internal class OnlineReaderViewModel(
                     status = status,
                 ),
             preparedChapter =
-                cached
-                    ?.takeIf { direction in revealedAdjacentChapters }
-                    ?.toReaderWindowChapter(),
+                cached?.takeIf { direction in revealedAdjacentChapters }?.toReaderWindowChapter(),
         )
     }
 
@@ -1203,8 +1197,7 @@ internal class OnlineReaderViewModel(
                 }
             }
             ChapterSwitchDirection.MANUAL,
-            ChapterSwitchDirection.REFRESH ->
-                error("Only adjacent chapter changes retain a window")
+            ChapterSwitchDirection.REFRESH -> error("Only adjacent chapter changes retain a window")
         }
         transitionStatuses.clear()
     }
@@ -1220,8 +1213,7 @@ internal class OnlineReaderViewModel(
         if (
             next != null &&
                 next.volume !== except &&
-                (!deferRevealed ||
-                    ReaderTransitionDirection.NEXT !in revealedAdjacentChapters)
+                (!deferRevealed || ReaderTransitionDirection.NEXT !in revealedAdjacentChapters)
         ) {
             closeVolumeWhenUnused(next.volume)
         }
@@ -1229,8 +1221,7 @@ internal class OnlineReaderViewModel(
         if (
             prev != null &&
                 prev.volume !== except &&
-                (!deferRevealed ||
-                    ReaderTransitionDirection.PREVIOUS !in revealedAdjacentChapters)
+                (!deferRevealed || ReaderTransitionDirection.PREVIOUS !in revealedAdjacentChapters)
         ) {
             closeVolumeWhenUnused(prev.volume)
         }
@@ -1301,16 +1292,15 @@ internal class OnlineReaderViewModel(
         }
         val explicitPage =
             if (sessionId == null && activeChapterId == initialChapterId) {
-                initialPageId
-                    ?.let { pageId ->
-                        val exact = opened.pages.indexOfFirst { it.pageId == pageId }
-                        if (exact >= 0) RestoredOnlinePage(exact, stale = false)
-                        else {
-                            initialPageIndex
-                                ?.takeIf { it in opened.pages.indices }
-                                ?.let { RestoredOnlinePage(it, stale = true) }
-                        }
+                initialPageId?.let { pageId ->
+                    val exact = opened.pages.indexOfFirst { it.pageId == pageId }
+                    if (exact >= 0) RestoredOnlinePage(exact, stale = false)
+                    else {
+                        initialPageIndex
+                            ?.takeIf { it in opened.pages.indices }
+                            ?.let { RestoredOnlinePage(it, stale = true) }
                     }
+                }
                     ?: initialPageIndex
                         ?.takeIf { it in opened.pages.indices }
                         ?.let {
@@ -1358,7 +1348,9 @@ internal class OnlineReaderViewModel(
     ): Int {
         lastPageByChapterId[chapterId]
             ?.takeIf { it in opened.pages.indices }
-            ?.let { return it }
+            ?.let {
+                return it
+            }
         if (saved?.chapterId != chapterId) return 0
         return resolveOnlinePageReference(
             pageId = saved.pageId,
@@ -1662,10 +1654,11 @@ internal class OnlineReaderViewModel(
 
     private fun OnlineChapterVolume.readerPageStateKey(page: Int): ReaderPageStateKey =
         ReaderChapterPageKey(
-            chapterId = activeChapterId,
-            chapterRevision = sourceRevision,
-            pageIdentity = pageIdentity(page),
-        ).toReaderPageStateKey()
+                chapterId = activeChapterId,
+                chapterRevision = sourceRevision,
+                pageIdentity = pageIdentity(page),
+            )
+            .toReaderPageStateKey()
 
     private fun bookmarkKey(identity: OnlinePageIdentity): String =
         "online:${PluginContentCodec.json.encodeToString(identity)}"
@@ -1690,7 +1683,12 @@ internal class OnlineReaderViewModel(
         val fetchedAtMs: Long,
     )
 
-    private enum class ChapterSwitchDirection { MANUAL, NEXT, PREVIOUS, REFRESH }
+    private enum class ChapterSwitchDirection {
+        MANUAL,
+        NEXT,
+        PREVIOUS,
+        REFRESH,
+    }
 
     private class PreloadedChapter(
         val volume: OnlineChapterVolume,
@@ -1758,8 +1756,9 @@ internal fun nextReadableOnlineChapter(
     currentChapterIndex: Int,
 ): Pair<ChapterSummary, Int>? {
     if (currentChapterIndex !in chapters.indices) return null
-    val index = (currentChapterIndex + 1 until chapters.size).firstOrNull { chapters[it].available }
-        ?: return null
+    val index =
+        (currentChapterIndex + 1 until chapters.size).firstOrNull { chapters[it].available }
+            ?: return null
     return chapters[index] to index
 }
 
@@ -1768,7 +1767,7 @@ internal fun previousReadableOnlineChapter(
     currentChapterIndex: Int,
 ): Pair<ChapterSummary, Int>? {
     if (currentChapterIndex !in chapters.indices) return null
-    val index = (currentChapterIndex - 1 downTo 0).firstOrNull { chapters[it].available }
-        ?: return null
+    val index =
+        (currentChapterIndex - 1 downTo 0).firstOrNull { chapters[it].available } ?: return null
     return chapters[index] to index
 }

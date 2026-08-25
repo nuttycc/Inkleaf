@@ -143,6 +143,7 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.material.kolor)
     implementation(libs.okhttp)
+    implementation(libs.okhttp.dnsoverhttps)
     implementation(libs.debugoverlay)
     implementation(libs.debugoverlay.okhttp)
     implementation(libs.debugoverlay.timber)

@@ -44,6 +44,8 @@ internal class OnlineChapterVolume(
     private val cache: OnlinePageCache,
     initialCacheIdentity: OnlinePageCacheIdentity,
     private val refreshChapter: (suspend () -> OnlineChapterRefresh?)? = null,
+    private val networkRetryDelaysMillis: List<Long> = DEFAULT_NETWORK_RETRY_DELAYS_MILLIS,
+    private val retryDelay: suspend (Long) -> Unit = { delay(it) },
 ) : ComicVolume {
     private val closed = AtomicBoolean(false)
     private val calls = ConcurrentHashMap.newKeySet<Call>()
@@ -113,7 +115,11 @@ internal class OnlineChapterVolume(
     }
 
     override suspend fun loadPageBytes(globalPage: Int): ByteArray {
-        return loadPage(globalPage, OnlinePageLoadPriority.FOREGROUND, allowDescriptorRefresh = true)
+        return loadPage(
+            globalPage,
+            OnlinePageLoadPriority.FOREGROUND,
+            allowDescriptorRefresh = true,
+        )
     }
 
     override suspend fun loadThumbnailPageBytes(globalPage: Int): ByteArray =
@@ -223,29 +229,40 @@ internal class OnlineChapterVolume(
                 }
                 .build()
         var retry = false
+        var networkAttempt = 0
         while (true) {
             try {
                 return execute(request)
             } catch (error: CancellationException) {
                 throw error
             } catch (error: IOException) {
-                if (priority == OnlinePageLoadPriority.FOREGROUND && !retry) {
-                    retry = true
+                if (
+                    priority == OnlinePageLoadPriority.FOREGROUND &&
+                        networkAttempt < networkRetryDelaysMillis.size
+                ) {
+                    // DNS/连接类失败立即重试几乎必然复现，退避后才有恢复机会
+                    retryDelay(networkRetryDelaysMillis[networkAttempt])
+                    networkAttempt += 1
                     continue
                 }
                 throw ComicOpenException(error.message ?: "页面下载失败", error)
             } catch (error: PageResponseException) {
                 val retryable = error.code == 429 || error.code in 500..599
-                if (
-                    priority == OnlinePageLoadPriority.FOREGROUND &&
-                        retryable &&
-                        !retry
-                ) {
+                if (priority == OnlinePageLoadPriority.FOREGROUND && retryable && !retry) {
                     val waitMillis = error.retryAfterMillis
                     when {
                         waitMillis != null -> {
                             if (waitMillis > MAX_RETRY_AFTER_MS) {
-                                throw ComicOpenException("请求过于频繁，请稍后重试")
+                                // Retry-After 同样出现在 5xx 上：保留真实状态码，避免 503 被误分类为限流
+                                throw ComicOpenException(
+                                    message =
+                                        if (error.code == 429) {
+                                            "请求过于频繁，请稍后重试"
+                                        } else {
+                                            "页面请求失败（HTTP ${error.code}）"
+                                        },
+                                    httpCode = error.code,
+                                )
                             }
                             delay(waitMillis.milliseconds)
                         }
@@ -298,7 +315,8 @@ internal class OnlineChapterVolume(
                                 if (!it.isSuccessful) {
                                     throw PageResponseException(
                                         code = it.code,
-                                        retryAfterMillis = retryAfterMillis(it.header("Retry-After")),
+                                        retryAfterMillis =
+                                            retryAfterMillis(it.header("Retry-After")),
                                     )
                                 }
                                 it.body.readPageBytes(PluginRuntimePolicy.MAX_IMAGE_BYTES)
@@ -324,7 +342,8 @@ internal class OnlineChapterVolume(
             return seconds.coerceAtMost(Long.MAX_VALUE / 1_000L) * 1_000L
         }
         return runCatching {
-                val target = ZonedDateTime.parse(value, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant()
+                val target =
+                    ZonedDateTime.parse(value, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant()
                 Duration.between(Instant.now(), target).toMillis().coerceAtLeast(0L)
             }
             .getOrNull()
@@ -345,24 +364,26 @@ internal class OnlineChapterVolume(
         val retryAfterMillis: Long?,
     ) : Exception() {
         fun toComicOpenException(): ComicOpenException =
-            ComicOpenException("页面请求失败（HTTP $code）")
+            ComicOpenException("页面请求失败（HTTP $code）", httpCode = code)
     }
 
     private companion object {
         val DESCRIPTOR_REFRESH_CODES = setOf(401, 403, 404)
         const val MAX_RETRY_AFTER_MS = 30_000L
         const val DEFAULT_RETRY_BACKOFF_MS = 1_000L
+
+        /** 前台网络类失败的退避序列：共 1 次原始尝试 + 2 次退避重试。 */
+        val DEFAULT_NETWORK_RETRY_DELAYS_MILLIS = listOf(500L, 2_000L)
     }
 }
 
 internal fun onlinePageIdentities(
     sourceRevision: String,
     pages: List<PageDescriptor>,
-): List<String> =
-    pages.mapIndexed { index, page ->
-        page.pageId?.let { pageId -> "id:${pageId.length}:$pageId" }
-            ?: "revision-index:${sourceRevision.length}:$sourceRevision:$index"
-    }
+): List<String> = pages.mapIndexed { index, page ->
+    page.pageId?.let { pageId -> "id:${pageId.length}:$pageId" }
+        ?: "revision-index:${sourceRevision.length}:$sourceRevision:$index"
+}
 
 internal fun ResponseBody.readPageBytes(maxBytes: Long): ByteArray {
     require(maxBytes >= 0L) { "maxBytes must not be negative" }

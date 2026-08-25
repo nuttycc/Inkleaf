@@ -14,8 +14,12 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
-/** 打开漫画失败时抛出，message 直接用于界面展示 */
-class ComicOpenException(message: String, cause: Throwable? = null) : Exception(message, cause)
+/** 打开漫画失败时抛出，message 直接用于界面展示；httpCode 携带结构化的 HTTP 状态码（非 HTTP 失败为 null）供错误分类使用，避免文案被改后分类失效。 */
+class ComicOpenException(
+    message: String,
+    cause: Throwable? = null,
+    val httpCode: Int? = null,
+) : Exception(message, cause)
 
 /**
  * 一本已打开的漫画。UI 层只通过 pageCount / loadPageBytes 访问， 完全不需要知道背后是 zip。
