@@ -241,6 +241,30 @@ fun SourcesScreen(
             }
 
             item {
+                PluginRepoSection(
+                    installed = plugins,
+                    busy = busy,
+                    launchOperation = { operation -> launchOperation(operation) },
+                    onFeedback = { message, isError ->
+                        scope.launch {
+                            snackbarHostState.showSnackbar(
+                                SourcesSnackbarVisuals(
+                                    message,
+                                    if (isError) SourcesFeedbackKind.ERROR
+                                    else SourcesFeedbackKind.INFO,
+                                )
+                            )
+                        }
+                    },
+                    onInstallResult = { result -> handleInstallResult(result) },
+                )
+            }
+
+            item {
+                HorizontalDivider()
+            }
+
+            item {
                 Text(
                     text = "已安装来源 (${plugins.size})",
                     style = MaterialTheme.typography.titleMedium,
