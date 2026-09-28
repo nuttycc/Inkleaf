@@ -15,6 +15,7 @@ import com.exio.inkleaf.plugin.PluginCatalog
 import com.exio.inkleaf.plugin.PluginManager
 import com.exio.inkleaf.plugin.PluginNetworkPolicy
 import com.exio.inkleaf.plugin.PluginPackageStore
+import com.exio.inkleaf.plugin.PluginRepoRepository
 import com.exio.inkleaf.plugin.PluginRuntimeManager
 import com.exio.inkleaf.plugin.PluginSettingsRepository
 import java.io.File
@@ -67,6 +68,14 @@ class InkleafApplication : Application(), ImageLoaderFactory {
             onlineContentRepository,
             pluginSettingsRepository,
         )
+    }
+    val pluginRepoRepository: PluginRepoRepository by lazy {
+        val client =
+            OkHttpClient.Builder()
+                .connectTimeout(10, TimeUnit.SECONDS)
+                .readTimeout(30, TimeUnit.SECONDS)
+                .build()
+        PluginRepoRepository(PluginNetworkPolicy.createCallFactory(this, client, followSslRedirects = true))
     }
     val onlineContentRepository: OnlineContentRepository by lazy {
         OnlineContentRepository(File(filesDir, "online-content/state.json"))
