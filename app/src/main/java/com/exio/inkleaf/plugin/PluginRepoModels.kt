@@ -35,6 +35,9 @@ object PluginRepoContract {
     /** Repository index bundled with the app; a static file published via GitHub raw. */
     const val DEFAULT_REPO_URL =
         "https://raw.githubusercontent.com/nuttycc/inkleaf-plugins/main/index.json"
+
+    /** A persisted index is re-fetched automatically after this lifetime elapses. */
+    const val CACHE_TTL_MS = 4L * 60L * 60L * 1000L
 }
 
 /** Parses a repository index document, rejecting schemas this build cannot trust. */
