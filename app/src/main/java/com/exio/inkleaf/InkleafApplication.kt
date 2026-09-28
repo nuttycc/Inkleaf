@@ -75,7 +75,10 @@ class InkleafApplication : Application(), ImageLoaderFactory {
                 .connectTimeout(10, TimeUnit.SECONDS)
                 .readTimeout(30, TimeUnit.SECONDS)
                 .build()
-        PluginRepoRepository(PluginNetworkPolicy.createCallFactory(this, client, followSslRedirects = true))
+        PluginRepoRepository(
+            PluginNetworkPolicy.createCallFactory(this, client, followSslRedirects = true),
+            cacheFile = File(filesDir, "plugin-repo/index-cache.json"),
+        )
     }
     val onlineContentRepository: OnlineContentRepository by lazy {
         OnlineContentRepository(File(filesDir, "online-content/state.json"))

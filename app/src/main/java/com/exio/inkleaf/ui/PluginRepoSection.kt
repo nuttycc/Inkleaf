@@ -23,6 +23,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -64,6 +65,19 @@ internal fun PluginRepoSection(
             val fetched = application.pluginRepoRepository.fetchIndex(PluginRepoContract.DEFAULT_REPO_URL)
             repoIndex = fetched
             onFeedback("已从插件仓库读取 ${fetched.plugins.size} 个插件", false)
+        }
+    }
+
+    // Restore the persisted index immediately; a stale cache (>4h) silently refreshes in place,
+    // keeping the cached list visible if the refresh fails.
+    LaunchedEffect(Unit) {
+        val cached = application.pluginRepoRepository.cachedIndex() ?: return@LaunchedEffect
+        repoIndex = cached.index
+        if (application.pluginRepoRepository.isCacheExpired(cached)) {
+            runCatching {
+                application.pluginRepoRepository.fetchIndex(PluginRepoContract.DEFAULT_REPO_URL)
+            }
+                .onSuccess { refreshed -> repoIndex = refreshed }
         }
     }
 
