@@ -240,7 +240,7 @@ fun SourcesScreen(
                 }
             }
 
-            item {
+            item(key = "plugin-repo-section") {
                 PluginRepoSection(
                     installed = plugins,
                     busy = busy,
