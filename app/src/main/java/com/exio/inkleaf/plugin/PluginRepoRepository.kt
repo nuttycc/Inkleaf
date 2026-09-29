@@ -13,11 +13,12 @@ import okhttp3.Call
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Request
 
-/** A repository index together with the wall-clock time it was fetched. */
+/** A repository index together with the wall-clock time and URL it was fetched from. */
 @Serializable
 data class PluginRepoCacheEntry(
     val index: PluginRepoIndex,
     val fetchedAtMs: Long,
+    val sourceUrl: String? = null,
 )
 
 /** Fetches remote plugin repository indexes over HTTPS, persisting the last good result. */
@@ -30,7 +31,7 @@ class PluginRepoRepository(
     suspend fun fetchIndex(url: String): PluginRepoIndex {
         val index = fetchAndParse(url)
         cacheFile?.let { file ->
-            withContext(Dispatchers.IO) { writeCache(file, index) }
+            withContext(Dispatchers.IO) { writeCache(file, index, url.trim()) }
         }
         return index
     }
@@ -80,10 +81,10 @@ class PluginRepoRepository(
             }
         }
 
-    private fun writeCache(file: File, index: PluginRepoIndex) {
+    private fun writeCache(file: File, index: PluginRepoIndex, sourceUrl: String) {
         try {
             file.parentFile?.mkdirs()
-            val payload = cacheJson.encodeToString(PluginRepoCacheEntry(index, clock()))
+            val payload = cacheJson.encodeToString(PluginRepoCacheEntry(index, clock(), sourceUrl))
             val temp = File(file.parentFile, file.name + ".tmp")
             temp.writeText(payload)
             replaceFileAtomically(temp.toPath(), file.toPath()) { from, to, options ->

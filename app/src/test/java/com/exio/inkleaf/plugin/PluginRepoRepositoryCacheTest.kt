@@ -66,6 +66,7 @@ class PluginRepoRepositoryCacheTest {
 
             assertEquals(fetched.plugins.single().id, cached?.index?.plugins?.single()?.id)
             assertEquals(1_000L, cached?.fetchedAtMs)
+            assertEquals(PluginRepoContract.DEFAULT_REPO_URL, cached?.sourceUrl)
             assertFalse(repository.isCacheExpired(cached!!))
         } finally {
             directory.deleteRecursively()
