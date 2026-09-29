@@ -77,7 +77,7 @@ class InkleafApplication : Application(), ImageLoaderFactory {
                 .build()
         PluginRepoRepository(
             PluginNetworkPolicy.createCallFactory(this, client, followSslRedirects = true),
-            cacheFile = File(filesDir, "plugin-repo/index-cache.json"),
+            cacheFile = File(cacheDir, "plugin-repo/index-cache.json"),
         )
     }
     val onlineContentRepository: OnlineContentRepository by lazy {
