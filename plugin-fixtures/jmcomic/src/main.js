@@ -812,9 +812,10 @@ async function describe() {
 
 // --------------------------------------------------------------------------- handlers
 
-async function search(request, signal) {
+async function search(request, context) {
+  const signal = context && context.signal;
   const query = text(request.query);
-  if (!query) return browse({ feedId: "latest", cursor: request.cursor }, signal);
+  if (!query) return browse({ feedId: "latest", cursor: request.cursor }, { signal: signal });
 
   const page = pageFromCursor(request.cursor);
   const hosts = lineHosts(await endpoints(signal));
@@ -853,7 +854,8 @@ async function search(request, signal) {
   };
 }
 
-async function browse(request, signal) {
+async function browse(request, context) {
+  const signal = context && context.signal;
   const hosts = lineHosts(await endpoints(signal));
   const page = pageFromCursor(request.cursor);
   const filters = request.filters || {};
@@ -880,7 +882,8 @@ async function browse(request, signal) {
   };
 }
 
-async function detail(request, signal) {
+async function detail(request, context) {
+  const signal = context && context.signal;
   const sourceId = text(request.sourceId);
   const hosts = lineHosts(await endpoints(signal));
   const album = await apiRequest("/album", { id: sourceId }, null, signal);
@@ -896,7 +899,8 @@ async function detail(request, signal) {
   return result;
 }
 
-async function chapters(request, signal) {
+async function chapters(request, context) {
+  const signal = context && context.signal;
   const sourceId = text(request.sourceId);
   const album = await apiRequest("/album", { id: sourceId }, null, signal);
   return {
@@ -914,7 +918,8 @@ async function chapters(request, signal) {
   };
 }
 
-async function pages(request, signal) {
+async function pages(request, context) {
+  const signal = context && context.signal;
   const sourceId = text(request.sourceId);
   const chapterId = text(request.chapterId);
   const hosts = lineHosts(await endpoints(signal));
@@ -953,7 +958,8 @@ async function pages(request, signal) {
   };
 }
 
-async function invokeAction(request, signal) {
+async function invokeAction(request, context) {
+  const signal = context && context.signal;
   const actionId = text(request.actionId);
   const input = asObject(request.input);
 
