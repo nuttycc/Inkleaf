@@ -7,6 +7,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -151,6 +152,19 @@ data class PluginPagesResponse(
     val accessScope: String? = null,
 )
 
+/** A source-declared transform the host applies to downloaded image bytes before caching them. */
+@Serializable
+data class PageImageTransform(
+    val type: PageImageTransformType,
+    val scrambleId: Int,
+)
+
+@Serializable
+enum class PageImageTransformType {
+    @SerialName("jmSegmentation")
+    JM_SEGMENTATION,
+}
+
 @Serializable
 data class PageDescriptor(
     val pageId: String? = null,
@@ -161,6 +175,7 @@ data class PageDescriptor(
     val width: Int? = null,
     val height: Int? = null,
     val opaqueContext: JsonElement? = null,
+    val imageTransform: PageImageTransform? = null,
 )
 
 @Serializable
@@ -266,6 +281,18 @@ object PluginContentCodec {
                 validateHeaders(page.headers, "page.headers")
                 page.referer?.let { validateUrl(it, "page.referer") }
                 validateOpaque(page.opaqueContext)
+                page.imageTransform?.let { transform ->
+                    if (response.chapterId.toLongOrNull()?.let { it >= 0 } != true) {
+                        throw PluginContentValidationException(
+                            "Transformed page chapter ids must be non-negative numbers"
+                        )
+                    }
+                    if (transform.scrambleId < 0) {
+                        throw PluginContentValidationException(
+                            "Image transform scramble ids must be non-negative"
+                        )
+                    }
+                }
             }
         }
 

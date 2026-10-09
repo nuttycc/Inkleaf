@@ -173,7 +173,7 @@ internal class OnlineChapterVolume(
         val target = targetFor(page)
         return try {
             cache.getOrLoad(target.key, priority) {
-                download(target.descriptor, priority)
+                applyImageTransform(download(target.descriptor, priority), target.descriptor)
             }
         } catch (error: PageResponseException) {
             if (
@@ -212,6 +212,22 @@ internal class OnlineChapterVolume(
         synchronized(protectionLock) {
             if (closed.get()) return
             if (protectedIdentities.add(identity)) cache.protectChapter(identity)
+        }
+    }
+
+    /** Restores source-declared image obfuscation before the bytes reach the page cache. */
+    private fun applyImageTransform(bytes: ByteArray, page: PageDescriptor): ByteArray {
+        val transform = page.imageTransform ?: return bytes
+        // The codec already rejects transformed chapters whose id is not a number.
+        val chapterIdentity = chapterId.toLongOrNull() ?: return bytes
+        return when (transform.type) {
+            PageImageTransformType.JM_SEGMENTATION ->
+                JmSegmentationImage.apply(
+                    bytes = bytes,
+                    chapterId = chapterIdentity,
+                    scrambleId = transform.scrambleId.toLong(),
+                    url = page.url,
+                )
         }
     }
 
@@ -381,8 +397,17 @@ internal fun onlinePageIdentities(
     sourceRevision: String,
     pages: List<PageDescriptor>,
 ): List<String> = pages.mapIndexed { index, page ->
-    page.pageId?.let { pageId -> "id:${pageId.length}:$pageId" }
-        ?: "revision-index:${sourceRevision.length}:$sourceRevision:$index"
+    val identity =
+        page.pageId?.let { pageId -> "id:${pageId.length}:$pageId" }
+            ?: "revision-index:${sourceRevision.length}:$sourceRevision:$index"
+    // Cached bytes are only reusable when the transform that produced them is unchanged, so the
+    // declaration is part of the identity rather than only of the download step.
+    val transform = page.imageTransform
+    if (transform == null) {
+        identity
+    } else {
+        "$identity:transform=${transform.type.name},${transform.scrambleId}"
+    }
 }
 
 internal fun ResponseBody.readPageBytes(maxBytes: Long): ByteArray {
