@@ -26,6 +26,27 @@ const CONFIG_URL = "https://rup4a04-c01.tos-ap-southeast-1.bytepluses.com/newsvr
 
 const md5Hex = (value) => crypto.createHash("md5").update(value, "utf8").digest("hex");
 
+/**
+ * The host hands handlers a `{ signal }` context, and its own bridge refuses anything else, so the
+ * mocks below enforce the same shape: passing the context straight through as a signal fails here.
+ */
+function guardSignal(signal) {
+  if (signal === undefined || signal === null) return;
+  if (typeof signal.addEventListener !== "function" || typeof signal.removeEventListener !== "function") {
+    throw new TypeError("signal.addEventListener is not a function");
+  }
+}
+
+function ctx() {
+  return {
+    signal: {
+      aborted: false,
+      addEventListener: function () {},
+      removeEventListener: function () {},
+    },
+  };
+}
+
 function aesEcbEncrypt(plain, keyString) {
   const cipher = crypto.createCipheriv("aes-256-ecb", Buffer.from(keyString, "utf8"), null);
   return Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]).toString("base64");
@@ -72,7 +93,8 @@ function createPlugin(options) {
       },
       host: {
         http: {
-          request: async function (request) {
+          request: async function (request, signal) {
+            guardSignal(signal);
             requests.push(request);
             const reply = respond(request);
             if (reply.statusCode && reply.statusCode >= 400) {
@@ -104,15 +126,18 @@ function createPlugin(options) {
           },
         },
         settings: {
-          get: async function (id) {
+          get: async function (id, signal) {
+            guardSignal(signal);
             return settings[id] === "" ? null : settings[id] ?? null;
           },
         },
         kv: {
-          get: async function (request) {
+          get: async function (request, signal) {
+            guardSignal(signal);
             return store.has(request.key) ? store.get(request.key) : null;
           },
-          set: async function (request) {
+          set: async function (request, signal) {
+            guardSignal(signal);
             store.set(request.key, request.value);
             return true;
           },
@@ -260,7 +285,7 @@ async function run() {
   // 3. search maps rows, honours the signing headers and derives the cursor from the page size.
   {
     const { plugin, requests } = createPlugin();
-    const page = await plugin.search({ query: "火影", limit: 40 }, {});
+    const page = await plugin.search({ query: "火影", limit: 40 }, ctx());
     assert.equal(page.items.length, 3);
     assert.equal(page.items[0].sourceId, "500000");
     assert.ok(page.items[0].cover.url.startsWith("https://cdn-msp.setting.example/media/albums/"));
@@ -294,7 +319,7 @@ async function run() {
     });
     const page = await plugin.search(
       { query: "火影", limit: 40, filters: { o: "mv_w" } },
-      {}
+      ctx()
     );
     assert.equal(page.nextCursor, "2");
     assert.equal(page.items.length, 80);
@@ -303,7 +328,7 @@ async function run() {
   // 5. A plate number resolves as an album instead of a keyword search.
   {
     const { plugin, requests } = createPlugin();
-    const page = await plugin.search({ query: "JM501234" }, {});
+    const page = await plugin.search({ query: "JM501234" }, ctx());
     assert.equal(page.items.length, 1);
     assert.equal(page.items[0].sourceId, "501234");
     assert.ok(requests.some(function (request) {
@@ -314,29 +339,29 @@ async function run() {
   // 6. browse /latest counts pages from zero, matching the site's own offset.
   {
     const { plugin, requests } = createPlugin();
-    const first = await plugin.browse({ feedId: "latest", limit: 40 }, {});
+    const first = await plugin.browse({ feedId: "latest", limit: 40 }, ctx());
     assert.equal(first.items.length, 80);
     assert.equal(first.nextCursor, "2");
     assert.equal(pathOf(requests[requests.length - 1]), "/latest?page=0");
 
-    await plugin.browse({ feedId: "latest", cursor: "3" }, {});
+    await plugin.browse({ feedId: "latest", cursor: "3" }, ctx());
     assert.equal(pathOf(requests[requests.length - 1]), "/latest?page=2");
   }
 
   // 7. browse /ranking defaults then overrides its select filters.
   {
     const { plugin, requests } = createPlugin();
-    await plugin.browse({ feedId: "ranking", cursor: "2" }, {});
+    await plugin.browse({ feedId: "ranking", cursor: "2" }, ctx());
     assert.equal(pathOf(requests[requests.length - 1]), "/categories/filter?page=2&c=0&o=mv_m");
 
-    await plugin.browse({ feedId: "ranking", filters: { c: "hanman", o: "mv_t" } }, {});
+    await plugin.browse({ feedId: "ranking", filters: { c: "hanman", o: "mv_t" } }, ctx());
     assert.equal(pathOf(requests[requests.length - 1]), "/categories/filter?page=1&c=hanman&o=mv_t");
   }
 
   // 8. /recommend flattens the section list without a cursor.
   {
     const { plugin } = createPlugin();
-    const page = await plugin.browse({ feedId: "recommend" }, {});
+    const page = await plugin.browse({ feedId: "recommend" }, ctx());
     assert.equal(page.items.length, 5);
     assert.equal(page.nextCursor, null);
   }
@@ -345,7 +370,7 @@ async function run() {
   {
     const { plugin, internals } = createPlugin();
     assert.equal(internals.stripTags(ALBUM.description), "敘述：\n第一段\n\n第二段");
-    const detail = await plugin.detail({ sourceId: "501234" }, {});
+    const detail = await plugin.detail({ sourceId: "501234" }, ctx());
     assert.equal(detail.sourceId, "501234");
     assert.equal(detail.title, "測試本");
     assert.equal(detail.description, "敘述：\n第一段\n\n第二段");
@@ -356,7 +381,7 @@ async function run() {
   // 10. chapters drops the sort=0 cross-links; a lone album becomes one chapter.
   {
     const { plugin } = createPlugin();
-    const listing = await plugin.chapters({ sourceId: "501234" }, {});
+    const listing = await plugin.chapters({ sourceId: "501234" }, ctx());
     assert.deepEqual(
       plain(listing.chapters.map(function (chapter) {
         return [chapter.chapterId, chapter.title, chapter.number];
@@ -376,7 +401,7 @@ async function run() {
         return defaultRespond(request);
       },
     });
-    const fallback = await lone.plugin.chapters({ sourceId: "501234" }, {});
+    const fallback = await lone.plugin.chapters({ sourceId: "501234" }, ctx());
     assert.deepEqual(
       plain(fallback.chapters.map(function (chapter) {
         return chapter.chapterId;
@@ -388,7 +413,7 @@ async function run() {
   // 11. pages build host-qualified urls, carry the site's scramble id and index contiguously.
   {
     const { plugin, requests } = createPlugin();
-    const result = await plugin.pages({ sourceId: "501234", chapterId: "501235" }, {});
+    const result = await plugin.pages({ sourceId: "501234", chapterId: "501235" }, ctx());
     assert.equal(result.sourceId, "501234");
     assert.equal(result.chapterId, "501235");
     assert.deepEqual(
@@ -418,7 +443,7 @@ async function run() {
   // 12. A user-pinned image host wins over the site's suggestion.
   {
     const { plugin } = createPlugin({ settings: { imageHost: "cdn-msp.pinned.example" } });
-    const result = await plugin.pages({ sourceId: "501234", chapterId: "501235" }, {});
+    const result = await plugin.pages({ sourceId: "501234", chapterId: "501235" }, ctx());
     assert.ok(result.pages[0].url.startsWith("https://cdn-msp.pinned.example/"));
   }
 
@@ -434,14 +459,14 @@ async function run() {
         return defaultRespond(request);
       },
     });
-    const result = await plugin.pages({ sourceId: "501234", chapterId: "501235" }, {});
+    const result = await plugin.pages({ sourceId: "501234", chapterId: "501235" }, ctx());
     assert.equal(result.pages[0].imageTransform.scrambleId, 220980);
   }
 
   // 14. The bootstrap config file replaces the built-in hosts.
   {
     const { plugin, requests } = createPlugin();
-    await plugin.search({ query: "x" }, {});
+    await plugin.search({ query: "x" }, ctx());
     assert.ok(requests[0].url.indexOf("bytepluses") >= 0, "line config is fetched first");
     assert.ok(
       requests.some(function (request) {
@@ -460,7 +485,7 @@ async function run() {
         return defaultRespond(request);
       },
     });
-    await plugin.search({ query: "x" }, {});
+    await plugin.search({ query: "x" }, ctx());
     const last = requests[requests.length - 1];
     assert.equal(last.headers.tokenparam.split(",")[1], "9.9.9");
   }
@@ -470,7 +495,7 @@ async function run() {
     const { plugin, requests, store } = createPlugin({
       settings: { account: "tester", password: "pw" },
     });
-    const result = await plugin.invokeAction({ actionId: "login" }, {});
+    const result = await plugin.invokeAction({ actionId: "login" }, ctx());
     assert.equal(result.ok, true);
     assert.equal(store.get("auth.jwt"), "jwt-abc");
     const login = requests.find(function (request) {
@@ -483,20 +508,20 @@ async function run() {
       "username=tester&password=pw"
     );
 
-    await plugin.search({ query: "x" }, {});
+    await plugin.search({ query: "x" }, ctx());
     const search = requests[requests.length - 1];
     assert.equal(search.headers.authorization, "Bearer jwt-abc");
 
-    await plugin.invokeAction({ actionId: "logout" }, {});
+    await plugin.invokeAction({ actionId: "logout" }, ctx());
     assert.equal(store.get("auth.jwt"), "");
-    await plugin.search({ query: "x" }, {});
+    await plugin.search({ query: "x" }, ctx());
     assert.equal(requests[requests.length - 1].headers.authorization, undefined);
   }
 
   // 17. Credentials come from the action input when the user typed them there.
   {
     const { plugin, requests, store } = createPlugin();
-    await plugin.invokeAction({ actionId: "login", input: { account: "a", password: "b" } }, {});
+    await plugin.invokeAction({ actionId: "login", input: { account: "a", password: "b" } }, ctx());
     assert.equal(store.get("auth.jwt"), "jwt-abc");
     const login = requests.find(function (request) {
       return pathOf(request).indexOf("/login") === 0;
@@ -509,7 +534,7 @@ async function run() {
     const { plugin } = createPlugin();
     await assert.rejects(
       function () {
-        return plugin.invokeAction({ actionId: "login" }, {});
+        return plugin.invokeAction({ actionId: "login" }, ctx());
       },
       function (error) {
         return error.code === "INVALID_ARGUMENT";
@@ -520,9 +545,9 @@ async function run() {
   // 19. refreshEndpoints forgets the cached line state and re-reads the config.
   {
     const { plugin, requests } = createPlugin();
-    await plugin.search({ query: "x" }, {});
+    await plugin.search({ query: "x" }, ctx());
     const before = requests.length;
-    const result = await plugin.invokeAction({ actionId: "refreshEndpoints" }, {});
+    const result = await plugin.invokeAction({ actionId: "refreshEndpoints" }, ctx());
     assert.equal(result.appVersion, "2.1.7");
     assert.ok(result.apiHosts[0] === "www.configured.net");
     assert.ok(requests.length > before);
@@ -540,7 +565,7 @@ async function run() {
     });
     await assert.rejects(
       function () {
-        return plugin.pages({ sourceId: "501234", chapterId: "501235" }, {});
+        return plugin.pages({ sourceId: "501234", chapterId: "501235" }, ctx());
       },
       function (error) {
         return error.code === "HTTP" && /Restricted/.test(error.message);
@@ -560,7 +585,7 @@ async function run() {
     });
     await assert.rejects(
       function () {
-        return plugin.pages({ sourceId: "501234", chapterId: "501235" }, {});
+        return plugin.pages({ sourceId: "501234", chapterId: "501235" }, ctx());
       },
       function (error) {
         return error.code === "NOT_FOUND";
@@ -578,7 +603,7 @@ async function run() {
         return defaultRespond(request);
       },
     });
-    const page = await plugin.search({ query: "x" }, {});
+    const page = await plugin.search({ query: "x" }, ctx());
     assert.equal(page.items.length, 3);
     assert.ok(
       requests.some(function (request) {
