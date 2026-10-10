@@ -348,13 +348,20 @@ async function describeContract() {
   );
   const category = described.feeds[1].filters[0];
   assert.equal(category.type, "select");
-  assert.equal(category.options[0].id, "");
   assert.ok(
     category.options.some(function (option) {
       return option.id === "38" && option.title === "合集";
     }),
     "the 合集 category has to be selectable, it is the only way into a series"
   );
+  // The host rejects a blank filter option id, so 全部 needs a sentinel rather than "".
+  described.feeds.forEach(function (feed) {
+    (feed.filters || []).forEach(function (filter) {
+      filter.options.forEach(function (option) {
+        assert.ok(option.id && option.id.trim() === option.id, feed.id + " has a blank option id");
+      });
+    });
+  });
   assert.deepEqual(
     described.settings.map(function (setting) {
       return setting.id;
@@ -422,6 +429,16 @@ async function rankingAndCategoryRequests() {
 
   await fresh.api.browse({ feedId: "category", cursor: null, limit: 40, filters: { cate: "38" } }, ctx());
   assert.equal(fresh.urls()[1], "https://" + SITE_HOST + "/albums-index-page-1-cate-38.html");
+
+  await fresh.api.browse({ feedId: "category", cursor: null, limit: 40, filters: { cate: "all" } }, ctx());
+  assert.equal(
+    fresh.urls()[2],
+    "https://" + SITE_HOST + "/albums-index.html",
+    "the 全部 sentinel must fall back to the unfiltered list"
+  );
+
+  await fresh.api.browse({ feedId: "ranking", cursor: null, limit: 40, filters: { cate: "all" } }, ctx());
+  assert.equal(fresh.urls()[3], "https://" + SITE_HOST + "/albums-favorite_ranking-page-1-type-week.html");
 }
 
 async function searches() {
