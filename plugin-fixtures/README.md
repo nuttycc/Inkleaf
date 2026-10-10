@@ -37,12 +37,14 @@ python .scripts/plugin.py package --all --output-dir plugin-fixtures/dist/releas
 python .scripts/plugin.py deploy copycomic
 python .scripts/plugin.py deploy zaimanhua --serial emulator-5554 `
   --package-id com.exio.inkleaf.debug
+python .scripts/plugin.py publish zaimanhua
+python .scripts/plugin.py publish zaimanhua copycomic --push
 ```
 
 Non-interactive commands never prompt. When several ADB devices are ready,
-`deploy` requires `--serial`. Use `--help`, `package --help`, or `deploy --help`
-for the complete command reference. `--output` is available for one plugin;
-`--output-dir` is available when packaging multiple plugins.
+`deploy` requires `--serial`. Use `--help`, `package --help`, `deploy --help`, or
+`publish --help` for the complete command reference. `--output` is available for
+one plugin; `--output-dir` is available when packaging multiple plugins.
 
 ## Source and package layout
 
@@ -70,7 +72,29 @@ assets/                     # optional
 
 Packages are written below `plugin-fixtures/dist/` as
 `<plugin>-plugin-v<manifest.version>.zip`. The tool rebuilds each staging
-directory from scratch so removed assets cannot remain in a later ZIP.
+directory from scratch so removed assets cannot remain in a later ZIP. ZIP
+entries carry a fixed 1980 timestamp, so rebuilding unchanged source produces
+byte-identical packages and a published `sha256` stays checkable.
+
+## Publishing a release
+
+`publish` releases a plugin to the separate `nuttycc/inkleaf-plugins` repository,
+which the app reads through its built-in index URL. Clone that repository once,
+beside this one, or point `--repo-dir` (or `$INKLEAF_PLUGIN_REPO`) at an existing
+clone:
+
+```powershell
+git clone https://github.com/nuttycc/inkleaf-plugins.git
+```
+
+Without `--push`, `publish` builds the package, merges the index entry, and
+prints the resulting diff while changing nothing. It refuses to continue when the
+plugin source has uncommitted changes, when the manifest version is not newer than
+the version already advertised, when that version exists with different bytes, or
+when the repository clone is dirty or behind `origin/main`. With `--push` it writes
+the package and index, commits (recording the Inkleaf commit the package was built
+from), pushes, then re-downloads each published package and compares its hash.
+`--force` overrides the version checks when a re-release is genuinely intended.
 
 ## Deterministic fixture
 
