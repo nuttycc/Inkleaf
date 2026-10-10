@@ -58,6 +58,29 @@ const LIST_HTML = [
 const LIST_LAST_PAGE_HTML = LIST_HTML.replace('<span class="thispage">2</span>', '<span class="thispage">15094</span>')
   .replace('<a href="/albums-index-page-3.html">3</a> <a href="/albums-index-page-15094.html">15094</a>', "");
 
+// The ranking page wraps each cover in two absolutely-positioned badge divs, and keeps an uploader
+// avatar in the row. Both are traps for a cover extractor that walks <img> tags naively.
+const RANKING_HTML = [
+  '<div class="grid"><div class="gallary_wrap"><ul class="cc">',
+  '<li class="li gallary_item"><div class="pic_box" style="position: relative;">',
+  '<!-- 排名標識 --><div style="position: absolute; top: 8px;">👑</div>',
+  '<!-- 收藏數標識 --><div style="position: absolute; top: 8px; right: 25px;">1.2k</div>',
+  '<a href="/photos-index-aid-392520.html"><img alt="x" src="//t4.wnimg2.cfd/data/t/3925/20/17911274296047289.webp"></a>',
+  "</div>",
+  '<div class="info"><div class="title"><a href="/photos-index-aid-392520.html">今日から雌猫を飼うことになりました件</a></div>',
+  '<div class="info_col">42張圖片， 創建於2026-10-04</div>',
+  '<img src="userpic/20f425113f20788d7b5b7f25dcb422e5.jpeg" class="img_108x108"></div></li>',
+  '<li class="li gallary_item"><div class="pic_box" style="position: relative;">',
+  '<div style="position: absolute">2</div>',
+  '<a href="/photos-index-aid-392516.html"><img alt="y" data-original="//t4.wnimg2.cfd/data/t/3925/16/17911274095129799.webp" src="loading.jpg"></a>',
+  "</div>",
+  '<div class="info"><div class="title"><a href="/photos-index-aid-392516.html">ドパギャル。</a></div>',
+  '<div class="info_col">51張圖片， 創建於2026-10-04</div></li>',
+  "</ul></div>",
+  '<div class="f_left paginator"><span class="thispage">1</span>',
+  '<a href="/albums-favorite_ranking-page-2-type-week.html">2</a></div>',
+].join("\n");
+
 const SEARCH_HTML = [
   '<p class="result">為了紳士漫畫更好的運營生存下去，請將我們加入廣告屏蔽插件白名單</p>',
   '<div class="grid"><div class="gallary_wrap"><ul class="cc">',
@@ -288,7 +311,7 @@ function createPlugin(options) {
 function siteResponse(request) {
   const url = request.url;
   if (url.indexOf("/albums-index-page-15094") >= 0) return { body: LIST_LAST_PAGE_HTML };
-  if (url.indexOf("/albums-favorite_ranking") >= 0) return { body: LIST_HTML };
+  if (url.indexOf("/albums-favorite_ranking") >= 0) return { body: RANKING_HTML };
   if (url.indexOf("/albums-index") >= 0) return { body: LIST_HTML };
   if (url.indexOf("/search/") >= 0) {
     return { body: url.indexOf("q=%E9%9F%93%E6%BC%A2") >= 0 ? SEARCH_EMPTY_HTML : SEARCH_HTML };
@@ -437,8 +460,19 @@ async function rankingAndCategoryRequests() {
     "the 全部 sentinel must fall back to the unfiltered list"
   );
 
-  await fresh.api.browse({ feedId: "ranking", cursor: null, limit: 40, filters: { cate: "all" } }, ctx());
+  const ranked = plain(
+    await fresh.api.browse({ feedId: "ranking", cursor: null, limit: 40, filters: { cate: "all" } }, ctx())
+  );
   assert.equal(fresh.urls()[3], "https://" + SITE_HOST + "/albums-favorite_ranking-page-1-type-week.html");
+  // Ranking rows carry two badge divs ahead of the cover, which used to truncate the search region
+  // and leave every thumbnail blank on this feed only.
+  assert.equal(ranked.items.length, 2);
+  assert.equal(
+    ranked.items[0].cover.url,
+    "https://t4.wnimg2.cfd/data/t/3925/20/17911274296047289.webp"
+  );
+  assert.ok(ranked.items[1].cover.url.indexOf("/data/t/") > 0);
+  assert.equal(ranked.nextCursor, "2");
 }
 
 async function searches() {

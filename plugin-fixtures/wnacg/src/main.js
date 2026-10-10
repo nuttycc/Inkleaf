@@ -192,6 +192,18 @@ function albumIdFromHref(href) {
   return match ? match[1] : "";
 }
 
+// Every list row, thumbnail and uploader block on the site carries <img> tags, and only the cover
+// points at album art: the rest are lazy-load placeholders, avatars and static chrome.
+const NON_COVER_HINTS = ["loading.jpg", "data:", "userpic/", "statics/", "/themes/"];
+
+function looksLikeCover(value) {
+  if (!value) return false;
+  for (let index = 0; index < NON_COVER_HINTS.length; index += 1) {
+    if (value.indexOf(NON_COVER_HINTS[index]) >= 0) return false;
+  }
+  return true;
+}
+
 function imageSourceFromBlock(block) {
   const tags = String(block).match(/<img[^>]*>/g) || [];
   for (let index = 0; index < tags.length; index += 1) {
@@ -204,8 +216,7 @@ function imageSourceFromBlock(block) {
     ];
     for (let inner = 0; inner < candidates.length; inner += 1) {
       const value = String(candidates[inner] || "").trim();
-      // Lazy-load placeholders are shipped as a bare file name or a data: URI.
-      if (value && (value.indexOf("//") >= 0 || value.indexOf("data:") !== 0)) return value;
+      if (looksLikeCover(value)) return value;
     }
   }
   return "";
@@ -223,15 +234,15 @@ function parseListItems(html, base) {
     const sourceId = albumIdFromHref(href);
     if (!sourceId) continue;
     const title = oneLine(titleBlock) || oneLine(firstMatch(block, /title="([^"]*)"/i));
-    // The class carries the category id as well, so the region is matched on its prefix.
-    const coverSource = imageSourceFromBlock(firstRegion(block, /class="pic_box[\s\S]*?<\/div>/i));
+    // The whole row is searched rather than just pic_box: on the ranking page a rank-badge div
+    // closes before the cover <img> ever appears, which truncated the region to nothing useful.
+    const coverSource = imageSourceFromBlock(block);
     const info = oneLine(firstMatch(block, /class="info_col">([\s\S]*?)<\/div>/i));
     rows.push({
       sourceId: sourceId,
       title: title || "绅士漫画 #" + sourceId,
       subtitle: info,
       coverUrl: coverSource ? toAbsolute(coverSource, base) : "",
-      category: firstMatch(block, /class="pic_box cate-(\d+)"/i),
     });
   }
   return rows;
