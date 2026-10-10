@@ -41,8 +41,9 @@ const CHAPTER_PAGE_SIZE = 12;
 const MAX_CHAPTER_PAGES = 20;
 
 // Labels below are ours; the strings the parser matches against the site stay Traditional.
+// "all" stands for no category: the host rejects a blank filter option id.
 const CATEGORY_OPTIONS = [
-  ["", "全部"],
+  ["all", "全部"],
   ["5", "同人志"],
   ["1", "同人志-汉化"],
   ["12", "同人志-日语"],
@@ -646,6 +647,12 @@ function pageFromCursor(cursor) {
   return parsed < 1 ? 1 : Math.floor(parsed);
 }
 
+/** The 全部 option is a sentinel, not a category id the site understands. */
+function categoryOf(value) {
+  const cate = text(value);
+  return !cate || cate === "all" ? "" : cate;
+}
+
 function listPath(page, cate) {
   if (cate) return "/albums-index-page-" + page + "-cate-" + cate + ".html";
   return page > 1 ? "/albums-index-page-" + page + ".html" : "/albums-index.html";
@@ -737,7 +744,7 @@ async function browse(request, context) {
   const signal = context && context.signal;
   const page = pageFromCursor(request.cursor);
   const filters = request.filters || {};
-  const cate = text(filters.cate);
+  const cate = categoryOf(filters.cate);
 
   let path;
   if (request.feedId === "ranking") {
