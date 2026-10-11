@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import argparse
 import base64
+import difflib
+import hashlib
 import json
 import os
 import re
@@ -18,6 +20,8 @@ import stat
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 import uuid
 import zipfile
 from collections.abc import Callable, Sequence
@@ -40,6 +44,34 @@ REPOSITORY_ROOT = SCRIPT_DIRECTORY.parent
 FIXTURES_ROOT = REPOSITORY_ROOT / "plugin-fixtures"
 DIST_ROOT = FIXTURES_ROOT / "dist"
 INTERACTIVE_REQUIREMENTS = SCRIPT_DIRECTORY / "requirements.txt"
+# ZIP cannot store a date before 1980; pinning it keeps builds reproducible.
+PACKAGE_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
+
+# Releases live in a separate repository, and the app reads only its main branch
+# through raw.githubusercontent.com, so publishing must land on origin/main.
+PLUGIN_REPOSITORY_SLUG = "nuttycc/inkleaf-plugins"
+PLUGIN_REPOSITORY_BRANCH = "main"
+PLUGIN_REPOSITORY_RAW_BASE = f"https://raw.githubusercontent.com/{PLUGIN_REPOSITORY_SLUG}"
+PLUGIN_REPOSITORY_INDEX = "index.json"
+PLUGIN_REPOSITORY_PACKAGES = "plugins"
+SOURCE_PLUGIN_PREFIX = "io.inkleaf.source."
+PACKAGE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9._+-]+\.zip$")
+# Mirrors PluginRepoContract.SUPPORTED_SCHEMA_VERSION in PluginRepoModels.kt.
+PLUGIN_REPOSITORY_SCHEMA_VERSION = 1
+INDEX_ROOT_FIELDS = ("schemaVersion", "repoName", "apiVersion")
+INDEX_ENTRY_FIELDS = (
+    "id",
+    "name",
+    "version",
+    "apiVersion",
+    "capabilities",
+    "description",
+    "author",
+    "iconUrl",
+    "pkgUrl",
+    "sha256",
+    "sizeBytes",
+)
 
 
 class PluginToolError(RuntimeError):
@@ -331,7 +363,14 @@ def package_plugin(plugin: Plugin, output_value: str | None = None) -> Path:
             if assets.is_dir():
                 entries.extend(path for path in assets.rglob("*") if path.is_file())
             for path in sorted(entries, key=lambda item: item.as_posix()):
-                archive.write(path, path.relative_to(staging).as_posix())
+                # Fixed timestamps keep a rebuild of the same source byte-identical, which is
+                # what lets an index sha256 assert something about plugin content at all.
+                entry = zipfile.ZipInfo(
+                    path.relative_to(staging).as_posix(), PACKAGE_TIMESTAMP
+                )
+                entry.compress_type = zipfile.ZIP_DEFLATED
+                entry.external_attr = 0o644 << 16
+                archive.writestr(entry, path.read_bytes())
         temporary.replace(output)
     finally:
         temporary.unlink(missing_ok=True)
@@ -371,6 +410,369 @@ def package_plugins(
             f"Some plugins failed to package (succeeded: {succeeded}):\n  - {summary}"
         )
     return packages
+
+
+def select_plugins(names: Sequence[str], available: list[Plugin]) -> list[Plugin]:
+    selected: list[Plugin] = []
+    seen: set[str] = set()
+    for name in names:
+        if name not in seen:
+            selected.append(find_plugin(name, available))
+            seen.add(name)
+    return selected
+
+
+def run_git(
+    repository: Path, arguments: list[str], *, check: bool = True
+) -> subprocess.CompletedProcess[str]:
+    result = subprocess.run(
+        ["git", *arguments],
+        cwd=str(repository),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if check and result.returncode != 0:
+        summary = result.stdout.strip() or "\n".join(arguments)
+        raise PluginToolError(f"Git command failed ({result.returncode}): {summary}")
+    return result
+
+
+def repository_slug(remote_url: str) -> str:
+    match = re.search(
+        r"[/:](?P<owner>[^/]+)[/:](?P<repo>[^/]+?)(?:\.git)?/?$", remote_url
+    )
+    if not match:
+        raise PluginToolError(f"Cannot read a GitHub slug from remote: {remote_url}")
+    return f"{match.group('owner')}/{match.group('repo')}"
+
+
+def resolve_plugin_repository(value: str | None) -> Path:
+    configured = value or os.environ.get("INKLEAF_PLUGIN_REPO")
+    candidate = (
+        Path(configured)
+        if configured
+        else REPOSITORY_ROOT.parent / PLUGIN_REPOSITORY_SLUG.rsplit("/", 1)[1]
+    )
+    candidate = Path(os.path.abspath(candidate))
+    if not candidate.is_dir():
+        raise PluginToolError(
+            f"Plugin repository clone not found: {candidate}\n"
+            "Clone it once, or point --repo-dir at an existing clone:\n"
+            f'  git clone https://github.com/{PLUGIN_REPOSITORY_SLUG}.git "{candidate}"'
+        )
+    require_plain_directory(candidate)
+    remote = run_git(candidate, ["remote", "get-url", "origin"], check=False).stdout.strip()
+    if not remote or repository_slug(remote) != PLUGIN_REPOSITORY_SLUG:
+        raise PluginToolError(
+            f"{candidate} is not a clone of {PLUGIN_REPOSITORY_SLUG}"
+            f" (origin: {remote or 'none'})"
+        )
+    if not (candidate / PLUGIN_REPOSITORY_INDEX).is_file():
+        raise PluginToolError(
+            f"Plugin repository has no {PLUGIN_REPOSITORY_INDEX}: {candidate}"
+        )
+    return candidate
+
+
+def prepare_plugin_repository(repository: Path) -> None:
+    """A package published off a side branch would never be served by its raw URL."""
+    branch = run_git(repository, ["rev-parse", "--abbrev-ref", "HEAD"]).stdout.strip()
+    if branch != PLUGIN_REPOSITORY_BRANCH:
+        raise PluginToolError(
+            f"Plugin repository must be on {PLUGIN_REPOSITORY_BRANCH}, found {branch}: {repository}"
+        )
+    if run_git(repository, ["status", "--porcelain"], check=False).stdout.strip():
+        raise PluginToolError(f"Plugin repository has uncommitted changes: {repository}")
+    run_git(repository, ["fetch", "origin", branch])
+    local = run_git(repository, ["rev-parse", "HEAD"]).stdout.strip()
+    remote = run_git(repository, ["rev-parse", f"origin/{branch}"]).stdout.strip()
+    if local != remote:
+        raise PluginToolError(
+            f"Plugin repository does not match origin/{branch}; sync it first: {repository}"
+        )
+
+
+def require_committed_source(plugin: Plugin) -> str:
+    """Recorded per release: copycomic 0.4.3 shipped from a dirty tree and matched no commit."""
+    relative = plugin.root.relative_to(REPOSITORY_ROOT).as_posix()
+    status = run_git(
+        REPOSITORY_ROOT, ["status", "--porcelain", "--", relative], check=False
+    ).stdout.strip()
+    if status:
+        raise PluginToolError(
+            f"{relative} has uncommitted changes; commit them before publishing {plugin.name}"
+        )
+    return run_git(REPOSITORY_ROOT, ["rev-parse", "HEAD"]).stdout.strip()
+
+
+def version_key(value: str) -> tuple[int, ...]:
+    parts = value.split(".")
+    if not parts or not all(part.isdigit() for part in parts):
+        raise PluginToolError(f"Cannot compare plugin version '{value}' (expected dotted numbers)")
+    return tuple(int(part) for part in parts)
+
+
+def build_index_entry(
+    plugin: Plugin, package_name: str, package: bytes
+) -> dict[str, object]:
+    manifest = plugin.manifest
+    entry: dict[str, object] = {
+        "id": plugin.plugin_id,
+        "name": str(manifest.get("name") or plugin.name),
+        "version": plugin.version,
+    }
+    for field in ("apiVersion", "capabilities", "description"):
+        if manifest.get(field) is not None:
+            entry[field] = manifest[field]
+    author = manifest.get("author")
+    if isinstance(author, dict):
+        author = author.get("name")
+    if isinstance(author, str) and author.strip():
+        entry["author"] = author
+    entry["pkgUrl"] = (
+        f"{PLUGIN_REPOSITORY_RAW_BASE}/{PLUGIN_REPOSITORY_BRANCH}"
+        f"/{PLUGIN_REPOSITORY_PACKAGES}/{package_name}"
+    )
+    entry["sha256"] = hashlib.sha256(package).hexdigest()
+    entry["sizeBytes"] = len(package)
+    return entry
+
+
+def load_plugin_index(repository: Path) -> tuple[str, dict[str, object]]:
+    path = repository / PLUGIN_REPOSITORY_INDEX
+    try:
+        raw = path.read_text(encoding="utf-8")
+        index = json.loads(raw)
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise PluginToolError(f"Invalid plugin repository index at {path}: {error}") from error
+    if not isinstance(index, dict):
+        raise PluginToolError(f"Plugin repository index must be a JSON object: {path}")
+    if index.get("schemaVersion") != PLUGIN_REPOSITORY_SCHEMA_VERSION:
+        raise PluginToolError(
+            f"Unsupported plugin index schemaVersion: {index.get('schemaVersion')}"
+        )
+    if not isinstance(index.get("plugins"), list) or not index["plugins"]:
+        raise PluginToolError(f"Plugin repository index lists no plugins: {path}")
+    return raw, index
+
+
+def index_entries(index: dict[str, object]) -> list[dict[str, object]]:
+    entries = [entry for entry in index["plugins"] if isinstance(entry, dict)]
+    if len(entries) != len(index["plugins"]):
+        raise PluginToolError("Every plugin index entry must be a JSON object")
+    return entries
+
+
+def verify_index_packages(
+    repository: Path, entries: Sequence[dict[str, object]], pending: dict[str, bytes]
+) -> None:
+    seen: set[str] = set()
+    for entry in entries:
+        plugin_id = str(entry.get("id", ""))
+        package_url = str(entry.get("pkgUrl", ""))
+        required = (plugin_id, str(entry.get("name", "")), str(entry.get("version", "")))
+        if not all(value.strip() for value in required) or not package_url.startswith(
+            "https://"
+        ):
+            raise PluginToolError(
+                f"Plugin index entry is missing a required field: {plugin_id or '<unnamed>'}"
+            )
+        if plugin_id in seen:
+            raise PluginToolError(f"Duplicate plugin index entry: {plugin_id}")
+        seen.add(plugin_id)
+        package_name = package_url.rsplit("/", 1)[-1]
+        if not PACKAGE_NAME_PATTERN.fullmatch(package_name):
+            raise PluginToolError(f"Plugin index entry has an unusable package name: {package_url}")
+        if package_name in pending:
+            data = pending[package_name]
+        else:
+            path = repository / PLUGIN_REPOSITORY_PACKAGES / package_name
+            if not path.is_file():
+                raise PluginToolError(f"Plugin index entry has no package file: {path}")
+            data = path.read_bytes()
+        if str(entry.get("sha256", "")) != hashlib.sha256(data).hexdigest():
+            raise PluginToolError(f"Plugin index sha256 does not match {package_name}")
+        if entry.get("sizeBytes") != len(data):
+            raise PluginToolError(f"Plugin index sizeBytes does not match {package_name}")
+
+
+def merge_index_entry(entries: list[dict[str, object]], entry: dict[str, object]) -> str:
+    for position, existing in enumerate(entries):
+        if existing.get("id") == entry["id"]:
+            entries[position] = entry
+            return "updated"
+    # The fixture source is a development tool, so it stays below the real sources.
+    insert_at = next(
+        (
+            position
+            for position, existing in enumerate(entries)
+            if not str(existing.get("id", "")).startswith(SOURCE_PLUGIN_PREFIX)
+        ),
+        len(entries),
+    )
+    entries.insert(insert_at, entry)
+    return "added"
+
+
+def render_index_entry(entry: dict[str, object]) -> str:
+    fields = [field for field in INDEX_ENTRY_FIELDS if field in entry]
+    fields += [field for field in entry if field not in fields]
+    lines: list[str] = []
+    for field in fields:
+        value = entry[field]
+        if isinstance(value, list) and all(isinstance(item, str) for item in value):
+            rendered = "[" + ", ".join(json.dumps(item, ensure_ascii=False) for item in value) + "]"
+        else:
+            rendered = json.dumps(value, ensure_ascii=False)
+        lines.append(f"      {json.dumps(field)}: {rendered}")
+    return "    {\n" + ",\n".join(lines) + "\n    }"
+
+
+def render_index(index: dict[str, object], entries: Sequence[dict[str, object]]) -> str:
+    if not entries:
+        raise PluginToolError("The plugin index must list at least one plugin")
+    fields = [field for field in INDEX_ROOT_FIELDS if field in index]
+    fields += [field for field in index if field not in fields and field != "plugins"]
+    chunks = [
+        f"  {json.dumps(field)}: {json.dumps(index[field], ensure_ascii=False)}"
+        for field in fields
+    ]
+    rendered_entries = ",\n".join(render_index_entry(entry) for entry in entries)
+    chunks.append(f"  \"plugins\": [\n{rendered_entries}\n  ]")
+    return "{\n" + ",\n".join(chunks) + "\n}\n"
+
+
+def fetch_https(url: str) -> bytes:
+    request = urllib.request.Request(url, headers={"User-Agent": "inkleaf-plugin-tool"})
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return response.read()
+    except (urllib.error.URLError, OSError) as error:
+        raise PluginToolError(f"Download failed: {url} ({error})") from error
+
+
+def verify_published(entries: Sequence[dict[str, object]]) -> None:
+    """raw.githubusercontent.com and the app both cache, so a stale read is a note, not a failure."""
+    for entry in entries:
+        url = str(entry["pkgUrl"])
+        try:
+            served = fetch_https(url)
+        except PluginToolError as error:
+            print(f"[warn] {error}")
+            continue
+        if hashlib.sha256(served).hexdigest() == str(entry["sha256"]):
+            print(f"[ok] {entry['id']}@{entry['version']} is live ({len(served)} bytes)")
+        else:
+            print(f"[warn] {url} is not yet served with the published bytes.")
+    try:
+        index = json.loads(
+            fetch_https(f"{PLUGIN_REPOSITORY_RAW_BASE}/{PLUGIN_REPOSITORY_BRANCH}/index.json").decode(
+                "utf-8"
+            )
+        )
+        served_ids = {str(item.get("id")) for item in index.get("plugins", [])}
+    except (PluginToolError, UnicodeError, json.JSONDecodeError):
+        served_ids = set()
+    missing = [str(entry["id"]) for entry in entries if str(entry["id"]) not in served_ids]
+    if missing:
+        print(
+            "[info] The index still reads the previous copy (GitHub CDN ~5 minutes,"
+            f" app cache 4 hours): {', '.join(missing)}"
+        )
+
+
+def publish_plugins(
+    plugins: Sequence[Plugin],
+    *,
+    repository_value: str | None,
+    message: str | None,
+    push: bool,
+    force: bool,
+) -> list[str]:
+    if not plugins:
+        raise PluginToolError("Select at least one plugin to publish")
+    repository = resolve_plugin_repository(repository_value)
+    prepare_plugin_repository(repository)
+    original, index = load_plugin_index(repository)
+    entries = index_entries(index)
+    verify_index_packages(repository, entries, {})
+
+    pending: dict[str, bytes] = {}
+    published: list[dict[str, object]] = []
+    source_commit = ""
+    for plugin in plugins:
+        source_commit = require_committed_source(plugin)
+        package_path = package_plugin(plugin)
+        data = package_path.read_bytes()
+        entry = build_index_entry(plugin, package_path.name, data)
+        previous = next(
+            (item for item in entries if item.get("id") == entry["id"]), None
+        )
+        if previous is not None and not force:
+            published_version = str(previous["version"])
+            if version_key(published_version) > version_key(plugin.version):
+                raise PluginToolError(
+                    f"{plugin.name}: the index already advertises the newer {published_version}"
+                )
+            if published_version == plugin.version:
+                if previous.get("sha256") != entry["sha256"]:
+                    raise PluginToolError(
+                        f"{plugin.name} {plugin.version} is already published with different"
+                        " content; bump the version so installs can tell them apart"
+                    )
+                raise PluginToolError(
+                    f"{plugin.name} {plugin.version} is already published and unchanged"
+                )
+        staged = repository / PLUGIN_REPOSITORY_PACKAGES / package_path.name
+        if (
+            staged.is_file()
+            and not force
+            and hashlib.sha256(staged.read_bytes()).hexdigest()
+            != hashlib.sha256(data).hexdigest()
+        ):
+            raise PluginToolError(f"{staged} already holds different bytes; pass --force to replace it")
+
+        action = merge_index_entry(entries, entry)
+        pending[package_path.name] = data
+        published.append(entry)
+        print(f"[info] {plugin.plugin_id}@{plugin.version} {action} ({len(data)} bytes)")
+
+    verify_index_packages(repository, entries, pending)
+    rendered = render_index(index, entries)
+    diff = "".join(
+        difflib.unified_diff(
+            original.splitlines(keepends=True),
+            rendered.splitlines(keepends=True),
+            fromfile=f"a/{PLUGIN_REPOSITORY_INDEX}",
+            tofile=f"b/{PLUGIN_REPOSITORY_INDEX}",
+        )
+    )
+    print(diff.rstrip("\n") or f"[info] {PLUGIN_REPOSITORY_INDEX} is already up to date")
+    if not push:
+        print("[info] Prepared only. Re-run with --push to commit and publish.")
+        return []
+
+    (repository / PLUGIN_REPOSITORY_INDEX).write_text(rendered, encoding="utf-8", newline="\n")
+    for package_name, package in pending.items():
+        (repository / PLUGIN_REPOSITORY_PACKAGES / package_name).write_bytes(package)
+    paths = [PLUGIN_REPOSITORY_INDEX] + [
+        f"{PLUGIN_REPOSITORY_PACKAGES}/{name}" for name in pending
+    ]
+    run_git(repository, ["add", "--", *paths])
+    subject = message or "feat: publish " + ", ".join(
+        f"{entry['name']} {entry['version']}" for entry in published
+    )
+    run_git(
+        repository,
+        ["commit", "-m", subject, "-m", f"Built from Inkleaf {source_commit}."],
+    )
+    print(run_git(repository, ["push", "origin", PLUGIN_REPOSITORY_BRANCH]).stdout.strip())
+    verify_published(published)
+    return [str(entry["id"]) for entry in published]
 
 
 def resolve_adb_path() -> Path:
@@ -777,7 +1179,7 @@ def run_interactive() -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Package and deploy Inkleaf plugins.",
+        description="Package, deploy, and publish Inkleaf plugins.",
         epilog="Run without arguments for the interactive menu.",
     )
     subparsers = parser.add_subparsers(dest="action", required=True)
@@ -812,6 +1214,32 @@ def build_parser() -> argparse.ArgumentParser:
     deploy_parser.add_argument("--device-directory", default=DEFAULT_DEVICE_DIRECTORY)
     deploy_parser.add_argument("--output", help="ZIP path below plugin-fixtures/dist.")
     deploy_parser.add_argument("--package-id", default=DEFAULT_PACKAGE_ID)
+
+    publish_parser = subparsers.add_parser(
+        "publish",
+        help="Build plugins, update the repository index, and optionally push the release.",
+    )
+    publish_parser.add_argument(
+        "plugins", nargs="+", metavar="plugin", help="Directory names below plugin-fixtures."
+    )
+    publish_parser.add_argument(
+        "--repo-dir",
+        help=(
+            "Clone of "
+            f"{PLUGIN_REPOSITORY_SLUG}; defaults to $INKLEAF_PLUGIN_REPO or the sibling of this repository."
+        ),
+    )
+    publish_parser.add_argument("--message", help="Commit subject for the release.")
+    publish_parser.add_argument(
+        "--push",
+        action="store_true",
+        help="Write, commit, and push the release; without this the plan is only printed.",
+    )
+    publish_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Replace an already published version instead of refusing it.",
+    )
     return parser
 
 
@@ -829,17 +1257,18 @@ def main(arguments: list[str]) -> int:
             raise PluginToolError("Plugin names and --all cannot be used together")
         if not options.all and not options.plugins:
             raise PluginToolError("Specify one or more plugins, or use --all")
-        if options.all:
-            selected = available
-        else:
-            selected = []
-            seen: set[str] = set()
-            for name in options.plugins:
-                if name not in seen:
-                    selected.append(find_plugin(name, available))
-                    seen.add(name)
+        selected = available if options.all else select_plugins(options.plugins, available)
         package_plugins(
             selected, output=options.output, output_directory=options.output_dir
+        )
+    elif options.action == "publish":
+        available = discover_plugins()
+        publish_plugins(
+            select_plugins(options.plugins, available),
+            repository_value=options.repo_dir,
+            message=options.message,
+            push=options.push,
+            force=options.force,
         )
     else:
         plugin = find_plugin(options.plugin)
