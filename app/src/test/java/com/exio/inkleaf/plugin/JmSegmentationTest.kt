@@ -1,6 +1,7 @@
 package com.exio.inkleaf.plugin
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -75,6 +76,22 @@ class JmSegmentationTest {
         assertTrue(JmSegmentation.restoreMoves(100, 1).isEmpty())
         assertTrue(JmSegmentation.restoreMoves(100, 0).isEmpty())
         assertTrue(JmSegmentation.restoreMoves(0, 10).isEmpty())
+    }
+
+    @Test
+    fun `pages past the pixel budget are refused instead of restacked`() {
+        // The download cap measures compressed bytes, so a page can pass it and still decode to
+        // millions of pixels; the restack budget is what protects the heap.
+        assertTrue(JmSegmentation.isRestackable(1_200, 1_700))
+        assertTrue(JmSegmentation.isRestackable(2_000, 4_000)) // exactly the budget
+        assertTrue(JmSegmentation.isRestackable(8_192, 976))
+
+        assertFalse(JmSegmentation.isRestackable(8_192, 977)) // one row past the budget
+        assertFalse(JmSegmentation.isRestackable(1_200, 6_700)) // tall page past the budget
+        assertFalse(JmSegmentation.isRestackable(9_000, 100)) // past the dimension guard
+        assertFalse(JmSegmentation.isRestackable(8_192, 8_192))
+        assertFalse(JmSegmentation.isRestackable(0, 100))
+        assertFalse(JmSegmentation.isRestackable(-1, -1))
     }
 
     @Test

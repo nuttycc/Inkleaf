@@ -16,6 +16,18 @@ internal object JmSegmentation {
     /** 2023-02-08: the site dropped the ten-way variant in favour of an eight-way one. */
     const val WIDE_HASH_CUTOFF = 421_926L
 
+    /**
+     * Restack cost scales with decoded pixels, while the download cap only measures compressed
+     * bytes, so a tall page can pass the byte limit and still exhaust the heap here. The reader
+     * already refuses to rasterize past this budget for PDF pages.
+     */
+    const val MAX_RESTACK_PIXELS = 8_000_000L
+
+    /** Guards the degenerate wide-or-tall shapes the pixel budget above would still admit. */
+    const val MAX_RESTACK_DIMENSION = 8_192
+
+    // MD5 is not a security primitive here: the site's own JavaScript derives the layout from this
+    // exact digest, so any other algorithm produces a different strip count and mis-restacks.
     private val md5 = ThreadLocal.withInitial { MessageDigest.getInstance("MD5") }
 
     /**
@@ -36,6 +48,12 @@ internal object JmSegmentation {
         val lastSegment = url.substringBefore('#').substringBefore('?').substringAfterLast('/')
         return lastSegment.substringBeforeLast('.', lastSegment)
     }
+
+    /** Whether a decoded page this size can be restored without risking the whole process heap. */
+    fun isRestackable(width: Int, height: Int): Boolean =
+        width in 1..MAX_RESTACK_DIMENSION &&
+            height in 1..MAX_RESTACK_DIMENSION &&
+            width.toLong() * height.toLong() <= MAX_RESTACK_PIXELS
 
     /** Strips to copy, in destination order: the bottom source strip becomes the top row band. */
     fun restoreMoves(imageHeight: Int, stripCount: Int): List<JmSegmentMove> {
