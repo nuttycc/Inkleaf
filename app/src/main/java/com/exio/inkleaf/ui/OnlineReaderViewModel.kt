@@ -35,7 +35,6 @@ import com.exio.inkleaf.plugin.OnlineChapterRevalidation
 import com.exio.inkleaf.plugin.OnlineChapterSource
 import com.exio.inkleaf.plugin.OnlineChapterVolume
 import com.exio.inkleaf.plugin.OnlinePageBookmark
-import com.exio.inkleaf.plugin.OnlineReadingSessionRecord
 import com.exio.inkleaf.plugin.PluginContentCodec
 import com.exio.inkleaf.plugin.VersionedChapterPages
 import java.io.File
@@ -1532,28 +1531,20 @@ internal class OnlineReaderViewModel(
             if (end != null) {
                 runCatching { persistPositionOnIo(end) }
             }
-            if (
-                id != null &&
-                    start != null &&
-                    end != null &&
-                    (activeReadingMillis >= ReadingSessionRules.MIN_ACTIVE_READING_MS ||
-                        start != end)
-            ) {
-                runCatching {
-                    repository.recordReadingSession(
-                        OnlineReadingSessionRecord(
-                            sessionId = id,
-                            content = contentIdentity,
-                            titleSnapshot = currentTitle,
-                            startedAtMs = sessionStartedAtMs,
-                            endedAtMs = endedAtMs,
-                            activeReadingMillis = activeReadingMillis,
-                            timeZoneId = TimeZone.getDefault().id,
-                            start = start,
-                            end = end,
-                        )
-                    )
-                }
+            val record =
+                OnlineReadingSessions.record(
+                    sessionId = id,
+                    content = contentIdentity,
+                    titleSnapshot = currentTitle,
+                    startedAtMs = sessionStartedAtMs,
+                    endedAtMs = endedAtMs,
+                    activeReadingMillis = activeReadingMillis,
+                    timeZoneId = TimeZone.getDefault().id,
+                    start = start,
+                    end = end,
+                )
+            if (record != null) {
+                runCatching { repository.recordReadingSession(record) }
             }
         }
     }
