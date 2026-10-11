@@ -264,20 +264,13 @@ private fun ImportTopBar(title: String, onBack: () -> Unit) {
 /** The result stays on screen so the user can read it, act on it, or try another package. */
 @Composable
 private fun InstallOutcomeCard(outcome: PluginInstallResult, onOpen: () -> Unit) {
-    val name = outcome.pluginId ?: "未知插件"
-    val version = outcome.version?.let { " v$it" } ?: ""
     OutlinedCard(modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                text =
-                    if (outcome.activatable) {
-                        "已安装 $name$version"
-                    } else {
-                        "已安装 $name$version，但未激活：与当前版本不兼容"
-                    },
+                text = installCardMessage(outcome, "未知插件"),
                 style = MaterialTheme.typography.bodyMedium,
                 color =
                     if (outcome.activatable) MaterialTheme.colorScheme.onSurface

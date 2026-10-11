@@ -47,16 +47,9 @@ import com.exio.inkleaf.InkleafApplication
 import com.exio.inkleaf.R
 import com.exio.inkleaf.plugin.InstalledPlugin
 import com.exio.inkleaf.plugin.PluginHealth
-import com.exio.inkleaf.plugin.PluginInstallResult
-import com.exio.inkleaf.plugin.PluginInstallStatus
-import com.exio.inkleaf.plugin.PluginRepoEntry
 import com.exio.inkleaf.plugin.PluginState
 import com.exio.inkleaf.plugin.PluginUpdatePlanner
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -79,7 +72,6 @@ fun SourcesScreen(
     val scope = rememberCoroutineScope()
 
     var plugins by remember { mutableStateOf<List<InstalledPlugin>>(emptyList()) }
-    var busy by remember { mutableStateOf(false) }
     var showAddMenu by rememberSaveable { mutableStateOf(false) }
 
     val rows =
@@ -93,79 +85,19 @@ fun SourcesScreen(
         plugins = withContext(Dispatchers.IO) { application.pluginManager.installed() }
     }
 
-    fun runOperation(operation: suspend () -> Unit) {
-        if (busy) return
-        scope.launch {
-            busy = true
-            try {
-                operation()
-                refresh()
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Throwable) {
-                feedback.show("操作失败: ${error.message ?: "未知错误"}", SourceFeedbackKind.ERROR)
-                runCatching { refresh() }
-            } finally {
-                if (currentCoroutineContext().isActive) busy = false
-            }
-        }
-    }
-
-    fun report(outcome: PluginInstallResult, sourceName: String) {
-        val name = outcome.pluginId ?: sourceName
-        val version = outcome.version?.let { " v$it" } ?: ""
-        when (outcome.status) {
-            PluginInstallStatus.INSTALLED,
-            PluginInstallStatus.ALREADY_INSTALLED ->
-                feedback.show(
-                    if (outcome.activatable) "已更新 $name$version"
-                    else "已安装 $name$version，但未激活：与当前版本不兼容",
-                    if (outcome.activatable) SourceFeedbackKind.INFO else SourceFeedbackKind.ERROR,
-                    actionLabel = outcome.pluginId?.let { "打开" },
-                ) {
-                    outcome.pluginId?.let(onOpenSource)
-                }
-            PluginInstallStatus.REJECTED ->
-                feedback.show(
-                    "更新失败: ${outcome.errorMessage ?: outcome.errorCode?.name ?: "安装被拒绝"}",
-                    SourceFeedbackKind.ERROR,
-                )
-        }
-    }
-
-    fun update(entry: PluginRepoEntry, sourceName: String) {
-        runOperation {
-            report(
-                application.pluginManager.installUrl(entry.downloadSource(), activate = true),
-                sourceName,
+    val coordinator =
+        remember(application.pluginManager, feedback, scope) {
+            SourceInstallCoordinator(
+                pluginManager = application.pluginManager,
+                feedback = feedback,
+                scope = scope,
+                refresh = { refresh() },
+                onOpenSource = onOpenSource,
             )
         }
-    }
+    val busy = coordinator.busy
 
-    // Updates run one at a time: each install activates (and, on failure, rolls back) a plugin
-    // runtime, so overlapping them would only add contention.
-    fun updateAll() {
-        val candidates = updates
-        runOperation {
-            var updated = 0
-            var failed = 0
-            for (candidate in candidates) {
-                val outcome =
-                    application.pluginManager.installUrl(
-                        candidate.entry.downloadSource(),
-                        activate = true,
-                    )
-                if (outcome.status == PluginInstallStatus.REJECTED) failed++ else updated++
-            }
-            feedback.show(
-                if (failed == 0) "已更新 $updated 个漫画源"
-                else "已更新 $updated 个漫画源，$failed 个失败",
-                if (failed == 0) SourceFeedbackKind.INFO else SourceFeedbackKind.ERROR,
-            )
-        }
-    }
-
-    LaunchedEffect(Unit) { runOperation {} }
+    LaunchedEffect(Unit) { coordinator.runOperation {} }
 
     Scaffold(
         modifier = modifier,
@@ -222,7 +154,11 @@ fun SourcesScreen(
 
             if (updates.isNotEmpty()) {
                 item(key = "batch-update") {
-                    UpdateBanner(count = updates.size, busy = busy, onUpdateAll = { updateAll() })
+                    UpdateBanner(
+                        count = updates.size,
+                        busy = busy,
+                        onUpdateAll = { coordinator.updateAll(updates) },
+                    )
                 }
             }
 
@@ -263,7 +199,7 @@ fun SourcesScreen(
                             repo.index
                                 ?.plugins
                                 ?.firstOrNull { it.id == row.pluginId }
-                                ?.let { update(it, row.name) }
+                                ?.let { coordinator.update(it, row.name) }
                         },
                         onOpen = { onOpenSource(row.pluginId) },
                     )

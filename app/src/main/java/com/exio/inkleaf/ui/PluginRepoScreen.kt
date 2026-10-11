@@ -35,16 +35,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.exio.inkleaf.InkleafApplication
 import com.exio.inkleaf.plugin.InstalledPlugin
-import com.exio.inkleaf.plugin.PluginInstallResult
-import com.exio.inkleaf.plugin.PluginInstallStatus
 import com.exio.inkleaf.plugin.PluginRepoContract
 import com.exio.inkleaf.plugin.PluginRepoEntry
 import com.exio.inkleaf.plugin.PluginUpdatePlanner
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.withContext
 
 /**
@@ -65,7 +60,6 @@ fun PluginRepoScreen(
     val scope = rememberCoroutineScope()
 
     var installed by remember { mutableStateOf<List<InstalledPlugin>>(emptyList()) }
-    var busy by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var settingsDraft by rememberSaveable { mutableStateOf("") }
@@ -85,82 +79,20 @@ fun PluginRepoScreen(
     fun entryOf(pluginId: String): PluginRepoEntry? =
         repo.index?.plugins?.firstOrNull { it.id == pluginId }
 
-    fun runOperation(operation: suspend () -> Unit) {
-        if (busy) return
-        scope.launch {
-            busy = true
-            try {
-                operation()
-                refreshInstalled()
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Throwable) {
-                feedback.show(
-                    "操作失败: ${error.message ?: "未知错误"}",
-                    SourceFeedbackKind.ERROR,
-                )
-                runCatching { refreshInstalled() }
-            } finally {
-                if (currentCoroutineContext().isActive) busy = false
-            }
-        }
-    }
-
-    fun report(outcome: PluginInstallResult) {
-        val name = outcome.pluginId ?: "未知插件"
-        val version = outcome.version?.let { " v$it" } ?: ""
-        when (outcome.status) {
-            PluginInstallStatus.INSTALLED,
-            PluginInstallStatus.ALREADY_INSTALLED ->
-                feedback.show(
-                    if (outcome.activatable) "已安装 $name$version"
-                    else "已安装 $name$version，但未激活：与当前版本不兼容",
-                    if (outcome.activatable) SourceFeedbackKind.INFO else SourceFeedbackKind.ERROR,
-                    actionLabel = outcome.pluginId?.let { "打开" },
-                ) {
-                    outcome.pluginId?.let(onOpenSource)
-                }
-            PluginInstallStatus.REJECTED ->
-                feedback.show(
-                    "安装失败: ${outcome.errorMessage ?: outcome.errorCode?.name ?: "安装被拒绝"}",
-                    SourceFeedbackKind.ERROR,
-                )
-        }
-    }
-
-    // Updates run one at a time: each install activates (and, on failure, rolls back) a plugin
-    // runtime, so overlapping them would only add contention.
-    fun install(entry: PluginRepoEntry) {
-        runOperation {
-            report(application.pluginManager.installUrl(entry.downloadSource(), activate = true))
-        }
-    }
-
-    fun updateAll() {
-        val candidates = updates
-        runOperation {
-            var updated = 0
-            var failed = 0
-            for (candidate in candidates) {
-                val outcome =
-                    application.pluginManager.installUrl(
-                        candidate.entry.downloadSource(),
-                        activate = true,
-                    )
-                if (outcome.status == PluginInstallStatus.REJECTED) failed++ else updated++
-            }
-            feedback.show(
-                if (failed == 0) "已更新 $updated 个漫画源"
-                else "已更新 $updated 个漫画源，$failed 个失败",
-                if (failed == 0) SourceFeedbackKind.INFO else SourceFeedbackKind.ERROR,
+    val coordinator =
+        remember(application.pluginManager, feedback, scope) {
+            SourceInstallCoordinator(
+                pluginManager = application.pluginManager,
+                feedback = feedback,
+                scope = scope,
+                refresh = { refreshInstalled() },
+                onOpenSource = onOpenSource,
             )
         }
-    }
+    val busy = coordinator.busy
 
     fun loadRepo(url: String) {
-        if (busy) return
-        scope.launch {
-            busy = true
+        coordinator.runGuarded {
             settingsError = null
             try {
                 repo.load(url)
@@ -170,8 +102,6 @@ fun PluginRepoScreen(
                 throw error
             } catch (error: Throwable) {
                 settingsError = error.message ?: "无法读取插件仓库"
-            } finally {
-                if (currentCoroutineContext().isActive) busy = false
             }
         }
     }
@@ -227,7 +157,11 @@ fun PluginRepoScreen(
 
             if (updates.isNotEmpty()) {
                 item(key = "batch-update") {
-                    UpdateBanner(count = updates.size, busy = busy, onUpdateAll = { updateAll() })
+                    UpdateBanner(
+                        count = updates.size,
+                        busy = busy,
+                        onUpdateAll = { coordinator.updateAll(updates) },
+                    )
                 }
             }
 
@@ -245,7 +179,7 @@ fun PluginRepoScreen(
                 SourceLifecycleRowItem(
                     row = row,
                     busy = busy,
-                    onActivate = { entryOf(row.pluginId)?.let { install(it) } },
+                    onActivate = { entryOf(row.pluginId)?.let { coordinator.install(it) } },
                     onOpen = { onOpenSource(row.pluginId) },
                 )
             }

@@ -1,0 +1,165 @@
+package com.exio.inkleaf.ui
+
+import com.exio.inkleaf.plugin.PluginInstallErrorCode
+import com.exio.inkleaf.plugin.PluginInstallResult
+import com.exio.inkleaf.plugin.PluginInstallStatus
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class SourceInstallReportingTest {
+
+    @Test
+    fun `install verb reads a fresh install as installed`() {
+        val message =
+            sourceInstallMessage(
+                outcome = installed(activatable = true),
+                verb = SourceInstallVerb.Install,
+                fallbackName = "未知插件",
+            )
+
+        assertEquals("已安装 demo v0.2.0", message.text)
+        assertFalse(message.isError)
+        assertEquals("demo", message.openPluginId)
+    }
+
+    @Test
+    fun `update verb reads the same outcome as updated`() {
+        val message =
+            sourceInstallMessage(
+                outcome = installed(activatable = true),
+                verb = SourceInstallVerb.Update,
+                fallbackName = "未知插件",
+            )
+
+        assertEquals("已更新 demo v0.2.0", message.text)
+        assertFalse(message.isError)
+    }
+
+    @Test
+    fun `a missing plugin id falls back to the caller's name`() {
+        val message =
+            sourceInstallMessage(
+                outcome = installed(activatable = true, pluginId = null),
+                verb = SourceInstallVerb.Update,
+                fallbackName = "绅士漫画",
+            )
+
+        assertEquals("已更新 绅士漫画 v0.2.0", message.text)
+    }
+
+    @Test
+    fun `a version-less outcome omits the version suffix`() {
+        val message =
+            sourceInstallMessage(
+                outcome = installed(activatable = true, version = null),
+                verb = SourceInstallVerb.Install,
+                fallbackName = "未知插件",
+            )
+
+        assertEquals("已安装 demo", message.text)
+    }
+
+    @Test
+    fun `an unactivatable install still reads as installed but flags the error`() {
+        val message =
+            sourceInstallMessage(
+                outcome = installed(activatable = false),
+                verb = SourceInstallVerb.Update,
+                fallbackName = "未知插件",
+            )
+
+        assertEquals("已安装 demo v0.2.0，但未激活：与当前版本不兼容", message.text)
+        assertTrue(message.isError)
+        assertEquals("demo", message.openPluginId)
+    }
+
+    @Test
+    fun `a rejection reads with the verb's failure text and offers nothing to open`() {
+        val message =
+            sourceInstallMessage(
+                outcome =
+                    PluginInstallResult(
+                        status = PluginInstallStatus.REJECTED,
+                        pluginId = "demo",
+                        errorMessage = "版本不兼容",
+                    ),
+                verb = SourceInstallVerb.Update,
+                fallbackName = "未知插件",
+            )
+
+        assertEquals("更新失败: 版本不兼容", message.text)
+        assertTrue(message.isError)
+        assertNull(message.openPluginId)
+    }
+
+    @Test
+    fun `a rejection without a message falls back to the error code name`() {
+        val message =
+            sourceInstallMessage(
+                outcome =
+                    PluginInstallResult(
+                        status = PluginInstallStatus.REJECTED,
+                        errorCode = PluginInstallErrorCode.VERSION_CONFLICT,
+                    ),
+                verb = SourceInstallVerb.Install,
+                fallbackName = "未知插件",
+            )
+
+        assertEquals("安装失败: VERSION_CONFLICT", message.text)
+    }
+
+    @Test
+    fun `the in-page card reads a successful install without a verb`() {
+        assertEquals(
+            "已安装 demo v0.2.0",
+            installCardMessage(installed(activatable = true), fallbackName = "未知插件"),
+        )
+    }
+
+    @Test
+    fun `the in-page card explains an unactivatable install`() {
+        assertEquals(
+            "已安装 demo v0.2.0，但未激活：与当前版本不兼容",
+            installCardMessage(installed(activatable = false), fallbackName = "未知插件"),
+        )
+    }
+
+    @Test
+    fun `an update sweep counts only rejections as failures`() {
+        val summary =
+            summarizeUpdateAll(
+                listOf(
+                    installed(activatable = true),
+                    PluginInstallResult(status = PluginInstallStatus.ALREADY_INSTALLED),
+                    PluginInstallResult(status = PluginInstallStatus.REJECTED),
+                )
+            )
+
+        assertEquals(2, summary.updated)
+        assertEquals(1, summary.failed)
+        assertEquals("已更新 2 个漫画源，1 个失败", summary.text)
+        assertTrue(summary.isError)
+    }
+
+    @Test
+    fun `a clean update sweep reports no failures`() {
+        val summary = summarizeUpdateAll(listOf(installed(activatable = true)))
+
+        assertEquals("已更新 1 个漫画源", summary.text)
+        assertFalse(summary.isError)
+    }
+
+    private fun installed(
+        activatable: Boolean,
+        pluginId: String? = "demo",
+        version: String? = "0.2.0",
+    ) = PluginInstallResult(
+        status = PluginInstallStatus.INSTALLED,
+        pluginId = pluginId,
+        version = version,
+        activatable = activatable,
+    )
+}
