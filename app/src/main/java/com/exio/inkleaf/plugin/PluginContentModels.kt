@@ -281,18 +281,7 @@ object PluginContentCodec {
                 validateHeaders(page.headers, "page.headers")
                 page.referer?.let { validateUrl(it, "page.referer") }
                 validateOpaque(page.opaqueContext)
-                page.imageTransform?.let { transform ->
-                    if (response.chapterId.toLongOrNull()?.let { it >= 0 } != true) {
-                        throw PluginContentValidationException(
-                            "Transformed page chapter ids must be non-negative numbers"
-                        )
-                    }
-                    if (transform.scrambleId < 0) {
-                        throw PluginContentValidationException(
-                            "Image transform scramble ids must be non-negative"
-                        )
-                    }
-                }
+                page.imageTransform?.let { PageImageTransforms.validate(it, response.chapterId) }
             }
         }
 
