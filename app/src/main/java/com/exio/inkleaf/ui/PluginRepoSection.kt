@@ -29,10 +29,14 @@ import androidx.compose.ui.unit.dp
 import com.exio.inkleaf.InkleafApplication
 import com.exio.inkleaf.plugin.InstalledPlugin
 import com.exio.inkleaf.plugin.PluginDownloadSource
+import com.exio.inkleaf.plugin.PluginEntryState
 import com.exio.inkleaf.plugin.PluginInstallResult
+import com.exio.inkleaf.plugin.PluginInstallStatus
 import com.exio.inkleaf.plugin.PluginRepoContract
 import com.exio.inkleaf.plugin.PluginRepoEntry
 import com.exio.inkleaf.plugin.PluginRepoIndex
+import com.exio.inkleaf.plugin.PluginUpdateCandidate
+import com.exio.inkleaf.plugin.PluginUpdatePlanner
 import java.time.Duration
 
 /**
@@ -63,6 +67,28 @@ internal fun PluginRepoSection(
             val fetched = application.pluginRepoRepository.fetchIndex(repoUrl.trim())
             persistAndShow(fetched)
             onFeedback("已从插件仓库读取 ${fetched.plugins.size} 个插件", false)
+        }
+    }
+
+    // Updates run one at a time: each install activates (and, on failure, rolls back) a plugin
+    // runtime, so overlapping them would only add contention.
+    fun updateAll(candidates: List<PluginUpdateCandidate>) {
+        launchOperation {
+            var updated = 0
+            var failed = 0
+            for (candidate in candidates) {
+                val result =
+                    application.pluginManager.installUrl(
+                        candidate.entry.downloadSource(),
+                        activate = true,
+                    )
+                if (result.status == PluginInstallStatus.REJECTED) failed++ else updated++
+            }
+            onFeedback(
+                if (failed == 0) "已更新 $updated 个插件"
+                else "已更新 $updated 个插件，$failed 个失败",
+                failed > 0,
+            )
         }
     }
 
@@ -114,6 +140,33 @@ internal fun PluginRepoSection(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
+        val updates = index?.let { PluginUpdatePlanner.updates(it.plugins, installed) }.orEmpty()
+        if (updates.isNotEmpty()) {
+            OutlinedCard(
+                modifier = Modifier.fillMaxWidth(),
+                colors =
+                    CardDefaults.outlinedCardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    ),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(
+                        text = "发现 ${updates.size} 个可更新插件",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Button(onClick = { updateAll(updates) }, enabled = !busy) {
+                        Text("全部更新")
+                    }
+                }
+            }
+        }
+
         if (index != null) {
             OutlinedCard(
                 modifier = Modifier.fillMaxWidth(),
@@ -124,19 +177,17 @@ internal fun PluginRepoSection(
             ) {
                 index.plugins.forEachIndexed { position, entry ->
                     if (position > 0) HorizontalDivider()
+                    val plugin = installed.firstOrNull { it.state.pluginId == entry.id }
                     RepoEntryRow(
                         entry = entry,
-                        installed = installed.firstOrNull { it.state.pluginId == entry.id },
+                        installed = plugin,
+                        state = PluginUpdatePlanner.state(entry, plugin),
                         busy = busy,
                         onInstall = {
                             launchOperation {
                                 val result =
                                     application.pluginManager.installUrl(
-                                        PluginDownloadSource(
-                                            url = entry.packageUrl,
-                                            expectedSha256 = entry.sha256,
-                                            expectedSizeBytes = entry.sizeBytes,
-                                        ),
+                                        entry.downloadSource(),
                                         activate = true,
                                     )
                                 onInstallResult(result)
@@ -158,11 +209,12 @@ internal fun PluginRepoSection(
     }
 }
 
-/** One dense plugin row: identity and status left, the single install action right. */
+/** One dense plugin row: identity and status left, the primary action (安装/更新) and 卸载 right. */
 @Composable
 private fun RepoEntryRow(
     entry: PluginRepoEntry,
     installed: InstalledPlugin?,
+    state: PluginEntryState,
     busy: Boolean,
     onInstall: () -> Unit,
     onUninstall: () -> Unit,
@@ -171,6 +223,7 @@ private fun RepoEntryRow(
     val statusText =
         when {
             installed == null -> "未安装"
+            state is PluginEntryState.UpdateAvailable -> "有更新，当前 v${state.installedVersion}"
             installedVersion == null -> "已安装（未激活）"
             installedVersion == entry.version -> "已安装"
             else -> "已安装 v$installedVersion"
@@ -208,6 +261,15 @@ private fun RepoEntryRow(
                     Text("安装")
                 }
             } else {
+                if (state is PluginEntryState.UpdateAvailable) {
+                    Button(
+                        onClick = onInstall,
+                        enabled = !busy,
+                        contentPadding = ButtonDefaults.ContentPadding,
+                    ) {
+                        Text("更新")
+                    }
+                }
                 OutlinedButton(
                     onClick = onUninstall,
                     enabled = !busy,
@@ -229,6 +291,13 @@ private fun RepoEntryRow(
         }
     }
 }
+
+private fun PluginRepoEntry.downloadSource(): PluginDownloadSource =
+    PluginDownloadSource(
+        url = packageUrl,
+        expectedSha256 = sha256,
+        expectedSizeBytes = sizeBytes,
+    )
 
 private fun relativeAge(thenMs: Long): String {
     val minutes = Duration.ofMillis(System.currentTimeMillis() - thenMs).toMinutes()

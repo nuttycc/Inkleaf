@@ -30,7 +30,12 @@ class PluginManager(
     suspend fun installFile(packageFile: File, activate: Boolean = false): PluginInstallResult =
         runtimeManager.install(packageFile, activate).also { result ->
             if (activate && result.status != PluginInstallStatus.REJECTED && result.activatable) {
-                result.pluginId?.let { markAvailable(it) }
+                result.pluginId?.let { pluginId ->
+                    markAvailable(pluginId)
+                    // A new active version can parse detail payloads differently, so snapshots this
+                    // source already produced must refresh on the next detail visit.
+                    invalidateMetadata(pluginId)
+                }
             }
         }
 
@@ -98,6 +103,12 @@ class PluginManager(
     private suspend fun markAvailable(pluginId: String) {
         withContext(Dispatchers.IO) {
             onlineContentRepository?.setPluginAvailability(pluginId, OnlineAvailability.AVAILABLE)
+        }
+    }
+
+    private suspend fun invalidateMetadata(pluginId: String) {
+        withContext(Dispatchers.IO) {
+            onlineContentRepository?.invalidateMetadata(pluginId)
         }
     }
 
