@@ -2,6 +2,9 @@ package com.exio.inkleaf.ui
 
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -56,6 +59,16 @@ internal fun InkleafInfoListItem(
     ) {
         Text(headline)
     }
+}
+
+/** Trailing cue that a list item opens another screen. */
+@Composable
+internal fun ForwardIcon(modifier: Modifier = Modifier) {
+    Icon(
+        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+        contentDescription = null,
+        modifier = modifier,
+    )
 }
 
 /** Shared single-choice row backed by Material 3's selected list-item semantics. */
