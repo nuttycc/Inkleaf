@@ -7,9 +7,9 @@ import com.exio.inkleaf.plugin.PluginRepoEntry
 import com.exio.inkleaf.plugin.PluginRepoIndex
 import com.exio.inkleaf.plugin.PluginUpdatePlanner
 
-/** The single action one merged source row offers. */
+/** The single action one source row offers. */
 enum class SourceRowAction {
-    /** Nothing installed for this id: the row itself performs the install. */
+    /** Nothing installed for this id: the row installs it from the repository. */
     Install,
 
     /** Installed, and the repository advertises a strictly newer version. */
@@ -19,7 +19,7 @@ enum class SourceRowAction {
     Manage,
 }
 
-/** One row of the source lifecycle list: a plugin id, its identity, and its one action. */
+/** One row of a source list: a plugin id, its identity, its state in words, and its one action. */
 data class SourceLifecycleRow(
     val pluginId: String,
     val name: String,
@@ -29,45 +29,37 @@ data class SourceLifecycleRow(
 )
 
 /**
- * The repository index and the installed set are two views of the same entity, so the list shows
- * one row per plugin id instead of one section per view. Repository order is kept because the
- * index author's ordering is the only ordering signal the catalog has; plugins installed from a
- * file or an arbitrary URL have no catalog position and are appended as 本地导入.
+ * Turns a repository index and the installed set into rows. Which of the two the list shows is a
+ * decision per screen — the source list is about the device, the repository screen is about the
+ * index — but a plugin id means the same thing in both, so the join and the wording live here.
  */
 object SourceLifecycleRows {
 
-    fun build(index: PluginRepoIndex?, installed: List<InstalledPlugin>): List<SourceLifecycleRow> {
-        val byId = installed.associateBy { it.state.pluginId }
+    /** Sources on the device, annotated with what the cached index says about them. */
+    fun installedRows(
+        index: PluginRepoIndex?,
+        installed: List<InstalledPlugin>,
+    ): List<SourceLifecycleRow> {
         val entries = index?.plugins.orEmpty()
-        val catalogRows =
-            entries.map { entry ->
-                val plugin = byId[entry.id]
-                val entryState = PluginUpdatePlanner.state(entry, plugin)
-                SourceLifecycleRow(
-                    pluginId = entry.id,
-                    name = displayName(plugin, entry.name),
-                    action =
-                        when (entryState) {
-                            PluginEntryState.NotInstalled -> SourceRowAction.Install
-                            is PluginEntryState.UpdateAvailable -> SourceRowAction.Update
-                            else -> SourceRowAction.Manage
-                        },
-                    statusText = statusText(plugin, entryState, entry),
-                    description = plugin?.manifest?.description ?: entry.description,
-                )
-            }
         val advertisedIds = entries.mapTo(hashSetOf()) { it.id }
-        val localRows =
-            installed.filterNot { it.state.pluginId in advertisedIds }.map { plugin ->
-                SourceLifecycleRow(
-                    pluginId = plugin.state.pluginId,
-                    name = displayName(plugin, plugin.state.pluginId),
-                    action = SourceRowAction.Manage,
-                    statusText = statusText(plugin, entryState = null, entry = null),
-                    description = plugin.manifest?.description,
-                )
+        val localOnly = installed.filterNot { it.state.pluginId in advertisedIds }
+        val fromIndex =
+            entries.filter { entry -> installed.any { it.state.pluginId == entry.id } }.map { entry ->
+                val plugin = installed.first { it.state.pluginId == entry.id }
+                row(plugin, entry)
             }
-        return catalogRows + localRows
+        // Locally imported sources have no catalog position; they lead because they are what the
+        // user already committed to.
+        return localOnly.map { row(it, entry = null) } + fromIndex
+    }
+
+    /** Everything the index advertises, marked with local state. */
+    fun catalogRows(
+        index: PluginRepoIndex?,
+        installed: List<InstalledPlugin>,
+    ): List<SourceLifecycleRow> {
+        val byId = installed.associateBy { it.state.pluginId }
+        return index?.plugins.orEmpty().map { entry -> row(byId[entry.id], entry) }
     }
 
     /** Counts the sources browsing can actually offer, matching the discover screen's filter. */
@@ -78,8 +70,21 @@ object SourceLifecycleRows {
                 it.state.health == PluginHealth.HEALTHY
         }
 
-    private fun displayName(plugin: InstalledPlugin?, fallback: String): String =
-        plugin?.manifest?.name ?: fallback
+    private fun row(plugin: InstalledPlugin?, entry: PluginRepoEntry?): SourceLifecycleRow {
+        val entryState = if (plugin != null && entry != null) PluginUpdatePlanner.state(entry, plugin) else null
+        return SourceLifecycleRow(
+            pluginId = plugin?.state?.pluginId ?: entry!!.id,
+            name = plugin?.manifest?.name ?: entry?.name ?: plugin?.state?.pluginId.orEmpty(),
+            action =
+                when {
+                    plugin == null -> SourceRowAction.Install
+                    entryState is PluginEntryState.UpdateAvailable -> SourceRowAction.Update
+                    else -> SourceRowAction.Manage
+                },
+            statusText = statusText(plugin, entryState, entry),
+            description = plugin?.manifest?.description ?: entry?.description,
+        )
+    }
 
     private fun statusText(
         plugin: InstalledPlugin?,

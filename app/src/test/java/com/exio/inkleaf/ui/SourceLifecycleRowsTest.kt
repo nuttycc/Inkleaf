@@ -13,43 +13,56 @@ import org.junit.Test
 class SourceLifecycleRowsTest {
 
     @Test
-    fun `rows follow repository order and append local-only imports`() {
+    fun `the installed list keeps device-only sources and drops uninstalled catalog entries`() {
         val rows =
-            SourceLifecycleRows.build(
-                index = indexOf(entry("b_source", "B 源", "1.0.0")),
+            SourceLifecycleRows.installedRows(
+                index = indexOf(entry("b_repo", "B 源", "1.0.0")),
                 installed = listOf(installed("a_local", activeVersion = "2.0.0")),
             )
 
-        assertEquals(listOf("b_source", "a_local"), rows.map { it.pluginId })
-        assertEquals(SourceRowAction.Manage, rows[1].action)
-        assertEquals("本地导入 · v2.0.0", rows[1].statusText)
+        assertEquals(listOf("a_local"), rows.map { it.pluginId })
+        assertEquals("本地导入 · v2.0.0", rows.single().statusText)
+        assertEquals(SourceRowAction.Manage, rows.single().action)
     }
 
     @Test
-    fun `an uninstalled entry offers install and names the repository version`() {
-        val rows = SourceLifecycleRows.build(indexOf(entry("jm", "禁漫天堂", "0.1.3")), emptyList())
+    fun `the catalog list follows repository order and marks what is already installed`() {
+        val rows =
+            SourceLifecycleRows.catalogRows(
+                indexOf(entry("first", "第一源", "1.0.0"), entry("second", "第二源", "1.0.0")),
+                installed = listOf(installed("second", activeVersion = "1.0.0", versions = "1.0.0")),
+            )
 
-        assertEquals(SourceRowAction.Install, rows.single().action)
-        assertEquals("未安装 · v0.1.3", rows.single().statusText)
-        assertEquals("广告描述", rows.single().description)
+        assertEquals(listOf("first", "second"), rows.map { it.pluginId })
+        assertEquals(SourceRowAction.Install, rows[0].action)
+        assertEquals("未安装 · v1.0.0", rows[0].statusText)
+        assertEquals("广告描述", rows[0].description)
+        assertEquals(SourceRowAction.Manage, rows[1].action)
+        assertEquals("已安装 · v1.0.0", rows[1].statusText)
     }
 
     @Test
     fun `a strictly newer repository version offers update and states both versions`() {
-        val rows =
-            SourceLifecycleRows.build(
+        val installedOnly =
+            SourceLifecycleRows.installedRows(
+                indexOf(entry("jm", "禁漫天堂", "0.1.3")),
+                listOf(installed("jm", activeVersion = "0.1.1", versions = "0.1.1")),
+            )
+        val catalog =
+            SourceLifecycleRows.catalogRows(
                 indexOf(entry("jm", "禁漫天堂", "0.1.3")),
                 listOf(installed("jm", activeVersion = "0.1.1", versions = "0.1.1")),
             )
 
-        assertEquals(SourceRowAction.Update, rows.single().action)
-        assertEquals("有更新 · 当前 v0.1.1，仓库 v0.1.3", rows.single().statusText)
+        assertEquals(SourceRowAction.Update, installedOnly.single().action)
+        assertEquals(SourceRowAction.Update, catalog.single().action)
+        assertEquals("有更新 · 当前 v0.1.1，仓库 v0.1.3", catalog.single().statusText)
     }
 
     @Test
     fun `a plugin already at the repository version is managed, never offered an update`() {
         val rows =
-            SourceLifecycleRows.build(
+            SourceLifecycleRows.installedRows(
                 indexOf(entry("jm", "禁漫天堂", "0.1.3")),
                 listOf(installed("jm", activeVersion = "0.1.3", versions = "0.1.3")),
             )
@@ -61,7 +74,7 @@ class SourceLifecycleRowsTest {
     @Test
     fun `an installed but unactivatable version states both facts instead of hiding one`() {
         val rows =
-            SourceLifecycleRows.build(
+            SourceLifecycleRows.installedRows(
                 indexOf(entry("jm", "禁漫天堂", "0.1.3")),
                 listOf(installed("jm", activeVersion = null, versions = "0.1.3")),
             )
@@ -73,21 +86,26 @@ class SourceLifecycleRowsTest {
     @Test
     fun `health outranks a disabled flag left by the same failure`() {
         val broken =
-            installed("jm", activeVersion = "0.1.3", versions = "0.1.3")
-                .let {
-                    it.copy(
-                        state =
-                            it.state.copy(
-                                disabled = true,
-                                health = PluginHealth.RUNTIME_UNHEALTHY,
-                            )
-                    )
-                }
+            installed("jm", activeVersion = "0.1.3", versions = "0.1.3").let {
+                it.copy(state = it.state.copy(disabled = true, health = PluginHealth.RUNTIME_UNHEALTHY))
+            }
 
-        val rows = SourceLifecycleRows.build(indexOf(entry("jm", "禁漫天堂", "0.1.3")), listOf(broken))
+        val rows = SourceLifecycleRows.installedRows(indexOf(entry("jm", "禁漫天堂", "0.1.3")), listOf(broken))
 
         assertEquals("已安装 · v0.1.3 · 运行异常", rows.single().statusText)
         assertEquals(0, SourceLifecycleRows.usableCount(listOf(broken)))
+    }
+
+    @Test
+    fun `a disabled source states the user's own choice`() {
+        val stopped =
+            installed("jm", activeVersion = "0.1.3", versions = "0.1.3").let {
+                it.copy(state = it.state.copy(disabled = true))
+            }
+
+        val rows = SourceLifecycleRows.installedRows(indexOf(entry("jm", "禁漫天堂", "0.1.3")), listOf(stopped))
+
+        assertEquals("已安装 · v0.1.3 · 已停用", rows.single().statusText)
     }
 
     @Test
@@ -100,12 +118,13 @@ class SourceLifecycleRowsTest {
     }
 
     @Test
-    fun `an empty index leaves only the installed set`() {
+    fun `an unloaded index still lists what is on the device`() {
         val rows =
-            SourceLifecycleRows.build(null, listOf(installed("a_local", activeVersion = "1.0.0")))
+            SourceLifecycleRows.installedRows(null, listOf(installed("a_local", activeVersion = "1.0.0")))
 
         assertEquals(listOf("a_local"), rows.map { it.pluginId })
         assertEquals("本地导入 · v1.0.0", rows.single().statusText)
+        assertEquals(emptyList<SourceLifecycleRow>(), SourceLifecycleRows.catalogRows(null, emptyList()))
     }
 
     private fun indexOf(vararg entries: PluginRepoEntry) =
@@ -131,7 +150,8 @@ class SourceLifecycleRowsTest {
                     pluginId = pluginId,
                     activeVersion = activeVersion,
                     versions =
-                        versions?.let { listOf(PluginVersionRecord(it, "sha", compatible = true, 0L)) }
+                        versions
+                            ?.let { listOf(PluginVersionRecord(it, "sha", compatible = true, 0L)) }
                             ?: emptyList(),
                 ),
             directory = File(pluginId),

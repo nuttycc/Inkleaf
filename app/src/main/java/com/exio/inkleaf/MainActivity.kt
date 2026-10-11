@@ -64,10 +64,13 @@ import com.exio.inkleaf.plugin.PluginContentCodec
 import com.exio.inkleaf.ui.AlbumEditorScreen
 import com.exio.inkleaf.ui.FavoriteViewerScreen
 import com.exio.inkleaf.ui.HistoryScreen
+import com.exio.inkleaf.ui.ImportFromFileScreen
+import com.exio.inkleaf.ui.ImportFromUrlScreen
 import com.exio.inkleaf.ui.OnlineComicScreen
 import com.exio.inkleaf.ui.OnlineReaderScreen
 import com.exio.inkleaf.ui.OnlineReaderTarget
 import com.exio.inkleaf.ui.PluginDiscoverScreen
+import com.exio.inkleaf.ui.PluginRepoScreen
 import com.exio.inkleaf.ui.ReaderScreen
 import com.exio.inkleaf.ui.SavedScreen
 import com.exio.inkleaf.ui.SettingsScreen
@@ -111,6 +114,12 @@ import timber.log.Timber
 @Serializable data object SourcesRoute
 
 @Serializable data class SourceDetailRoute(val pluginId: String)
+
+@Serializable data object PluginRepoRoute
+
+@Serializable data object ImportFromUrlRoute
+
+@Serializable data object ImportFromFileRoute
 
 @Serializable
 data class OnlineComicRoute(
@@ -665,6 +674,35 @@ class MainActivity : AppCompatActivity() {
                         }
                         composable<SourcesRoute> {
                             SourcesScreen(
+                                onBack = { outerNavController.popBackStack() },
+                                onOpenSource = { pluginId ->
+                                    outerNavController.navigate(SourceDetailRoute(pluginId))
+                                },
+                                onImportFromFile = {
+                                    outerNavController.navigate(ImportFromFileRoute)
+                                },
+                                onImportFromUrl = { outerNavController.navigate(ImportFromUrlRoute) },
+                                onOpenRepository = { outerNavController.navigate(PluginRepoRoute) },
+                            )
+                        }
+                        composable<ImportFromFileRoute> {
+                            ImportFromFileScreen(
+                                onBack = { outerNavController.popBackStack() },
+                                onOpenSource = { pluginId ->
+                                    outerNavController.navigate(SourceDetailRoute(pluginId))
+                                },
+                            )
+                        }
+                        composable<ImportFromUrlRoute> {
+                            ImportFromUrlScreen(
+                                onBack = { outerNavController.popBackStack() },
+                                onOpenSource = { pluginId ->
+                                    outerNavController.navigate(SourceDetailRoute(pluginId))
+                                },
+                            )
+                        }
+                        composable<PluginRepoRoute> {
+                            PluginRepoScreen(
                                 onBack = { outerNavController.popBackStack() },
                                 onOpenSource = { pluginId ->
                                     outerNavController.navigate(SourceDetailRoute(pluginId))
