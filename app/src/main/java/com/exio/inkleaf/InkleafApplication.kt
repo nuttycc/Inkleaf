@@ -66,6 +66,7 @@ class InkleafApplication : Application(), ImageLoaderFactory {
             pluginPackageStore,
             pluginRuntimeManager,
             onlineContentRepository,
+            pluginBrowseRepository,
             pluginSettingsRepository,
         )
     }

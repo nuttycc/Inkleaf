@@ -6,6 +6,7 @@ import com.exio.inkleaf.plugin.PluginHealth
 import com.exio.inkleaf.plugin.PluginRepoEntry
 import com.exio.inkleaf.plugin.PluginRepoIndex
 import com.exio.inkleaf.plugin.PluginUpdatePlanner
+import com.exio.inkleaf.plugin.isUsable
 
 /** The single action one source row offers. */
 enum class SourceRowAction {
@@ -63,12 +64,7 @@ object SourceLifecycleRows {
     }
 
     /** Counts the sources browsing can actually offer, matching the discover screen's filter. */
-    fun usableCount(installed: List<InstalledPlugin>): Int =
-        installed.count {
-            it.state.activeVersion != null &&
-                !it.state.disabled &&
-                it.state.health == PluginHealth.HEALTHY
-        }
+    fun usableCount(installed: List<InstalledPlugin>): Int = installed.count { it.isUsable }
 
     private fun row(plugin: InstalledPlugin?, entry: PluginRepoEntry?): SourceLifecycleRow {
         val entryState = if (plugin != null && entry != null) PluginUpdatePlanner.state(entry, plugin) else null

@@ -502,11 +502,7 @@ class PluginCatalog(private val runtimeManager: PluginRuntimeManager) {
                 ?: withContext(Dispatchers.IO) {
                     runtimeManager
                         .installedPlugins()
-                        .filter {
-                            !it.state.disabled &&
-                                it.state.health == PluginHealth.HEALTHY &&
-                                it.state.activeVersion != null
-                        }
+                        .filter { it.isUsable }
                         .map { it.state.pluginId }
                 }
         coroutineScope {

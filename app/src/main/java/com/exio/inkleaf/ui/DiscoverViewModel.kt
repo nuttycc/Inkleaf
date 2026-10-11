@@ -16,10 +16,10 @@ import com.exio.inkleaf.plugin.PluginBrowseRequest
 import com.exio.inkleaf.plugin.PluginCapabilities
 import com.exio.inkleaf.plugin.PluginCatalog
 import com.exio.inkleaf.plugin.PluginFeedDescriptor
-import com.exio.inkleaf.plugin.PluginHealth
 import com.exio.inkleaf.plugin.PluginManager
 import com.exio.inkleaf.plugin.PluginSearchRequest
 import com.exio.inkleaf.plugin.PluginSearchResult
+import com.exio.inkleaf.plugin.isUsable
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -469,11 +469,7 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
 
         val activeHealthyIds =
             availablePlugins
-                .filter {
-                    !it.state.disabled &&
-                        it.state.health == PluginHealth.HEALTHY &&
-                        it.state.activeVersion != null
-                }
+                .filter { it.isUsable }
                 .map { it.state.pluginId }
         if (activeHealthyIds.isEmpty()) {
             finishSearchWithoutRequest()

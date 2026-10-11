@@ -104,8 +104,8 @@ import com.exio.inkleaf.plugin.ComicSummary
 import com.exio.inkleaf.plugin.InstalledPlugin
 import com.exio.inkleaf.plugin.PageImage
 import com.exio.inkleaf.plugin.PluginFilterDescriptor
-import com.exio.inkleaf.plugin.PluginHealth
 import com.exio.inkleaf.plugin.PluginSearchResult
+import com.exio.inkleaf.plugin.isUsable
 import kotlinx.coroutines.flow.first
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
@@ -154,11 +154,7 @@ fun PluginDiscoverScreen(
 
     val activeHealthyPlugins =
         remember(installedPlugins) {
-            installedPlugins.filter {
-                !it.state.disabled &&
-                    it.state.health == PluginHealth.HEALTHY &&
-                    it.state.activeVersion != null
-            }
+            installedPlugins.filter { it.isUsable }
         }
     val activePluginSignature =
         remember(activeHealthyPlugins) {
