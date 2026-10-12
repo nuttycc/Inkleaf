@@ -2,34 +2,6 @@ package com.exio.inkleaf.ui
 
 internal sealed interface ReaderChapterWindowKey
 
-internal data class ReaderChapterPageKey(
-    val chapterId: String,
-    val chapterRevision: String,
-    val pageIdentity: String,
-) : ReaderChapterWindowKey {
-    init {
-        require(chapterId.isNotBlank())
-        require(chapterRevision.isNotBlank())
-        require(pageIdentity.isNotBlank())
-    }
-}
-
-internal data class ReaderPageStateKey(
-    val namespace: String,
-    val pageIdentity: String,
-) {
-    init {
-        require(namespace.isNotBlank())
-        require(pageIdentity.isNotBlank())
-    }
-}
-
-internal fun ReaderChapterPageKey.toReaderPageStateKey(): ReaderPageStateKey =
-    ReaderPageStateKey(
-        namespace = "$chapterId\u0000$chapterRevision",
-        pageIdentity = pageIdentity,
-    )
-
 internal data class ReaderChapterBoundaryKey(
     val previousChapterId: String?,
     val nextChapterId: String?,

@@ -85,6 +85,10 @@ data class PluginHttpChunk(
 
 @Serializable data class PluginKvDelete(val key: String)
 
+@Serializable data class PluginHttpClose(val handle: String)
+
+@Serializable data class PluginClockSleep(val durationMs: Long)
+
 /** Input for settings.get; id matches PluginSettingDescriptor.id from describe(). */
 @Serializable data class PluginSettingGet(val id: String)
 
@@ -151,68 +155,94 @@ class PluginHostSession(
     private val httpClient: OkHttpClient
         get() = httpClientDelegate.value
 
-    override suspend fun handle(method: String, params: JsonElement): JsonElement {
-        if (closed.get()) throw hostError("Plugin host session is closed")
-        return when (method) {
-            "http.request" ->
-                json.encodeToJsonElement(httpRequest(json.decodeFromJsonElement(params)))
-            "http.read" -> json.encodeToJsonElement(readBody(json.decodeFromJsonElement(params)))
-            "http.close" -> {
-                val handle =
-                    params.jsonObject["handle"]?.jsonPrimitive?.contentOrNull
-                        ?: throw hostError("http.close requires handle")
-                bodyHandles.remove(handle)
+    /**
+     * The single catalogue of host capabilities.
+     *
+     * The same list drives the Kotlin dispatch in [handle] and, through
+     * [PluginBootstrap.script], the JS `host` object the plugin is handed, so a capability exists on
+     * both sides of the seam or on neither.
+     */
+    internal val hostMethods: List<PluginHostMethod> =
+        listOf(
+            PluginHostMethod("http.request", PluginHostJsArgs.Request) { _, params ->
+                json.encodeToJsonElement(httpRequest(json.decodeFromJsonElement<PluginHttpRequest>(params)))
+            },
+            PluginHostMethod("http.read", PluginHostJsArgs.Request) { _, params ->
+                json.encodeToJsonElement(readBody(json.decodeFromJsonElement<PluginHttpRead>(params)))
+            },
+            PluginHostMethod("http.close", PluginHostJsArgs.Request) { _, params ->
+                val request = json.decodeFromJsonElement<PluginHttpClose>(params)
+                bodyHandles.remove(request.handle)
                 buildJsonObject { put("closed", true) }
-            }
-            "kv.get" -> {
+            },
+            PluginHostMethod("kv.get", PluginHostJsArgs.Request) { _, params ->
                 val request = json.decodeFromJsonElement<PluginKvGet>(params)
                 kv.get(request.key) ?: JsonNull
-            }
-            "kv.set" -> {
+            },
+            PluginHostMethod("kv.set", PluginHostJsArgs.Request) { _, params ->
                 val request = json.decodeFromJsonElement<PluginKvSet>(params)
                 kv.set(request.key, request.value)
                 buildJsonObject { put("stored", true) }
-            }
-            "kv.delete" -> {
+            },
+            PluginHostMethod("kv.delete", PluginHostJsArgs.Request) { _, params ->
                 val request = json.decodeFromJsonElement<PluginKvDelete>(params)
                 buildJsonObject { put("deleted", kv.delete(request.key)) }
-            }
-            "kv.keys" -> json.encodeToJsonElement(kv.keys())
-            "settings.get" -> {
+            },
+            PluginHostMethod("kv.keys", PluginHostJsArgs.Signal) { _, _ ->
+                json.encodeToJsonElement(kv.keys())
+            },
+            // User-selected source settings are read-only to plugins. Plugin-owned kv storage
+            // remains a separate read-write channel. Missing values resolve to null.
+            PluginHostMethod("settings.get", PluginHostJsArgs.Field("id")) { _, params ->
                 val request = json.decodeFromJsonElement<PluginSettingGet>(params)
                 settingsReader.read(pluginId, request.id)?.let(::JsonPrimitive) ?: JsonNull
-            }
-            "cookie.list" -> json.encodeToJsonElement(cookieJar.snapshot())
-            "cookie.set" -> {
+            },
+            PluginHostMethod("cookie.list", PluginHostJsArgs.Signal) { _, _ ->
+                json.encodeToJsonElement(cookieJar.snapshot())
+            },
+            PluginHostMethod("cookie.set", PluginHostJsArgs.Request) { _, params ->
                 val request = json.decodeFromJsonElement<PluginCookieSet>(params)
                 cookieJar.set(request)
                 buildJsonObject { put("stored", true) }
-            }
-            "cookie.clear" -> {
+            },
+            PluginHostMethod("cookie.clear", PluginHostJsArgs.Signal) { _, _ ->
                 cookieJar.clear()
                 buildJsonObject { put("cleared", true) }
-            }
-            "clock.now" -> buildJsonObject { put("epochMs", clockMs()) }
-            "clock.sleep" -> {
-                val duration =
-                    params.jsonObject["durationMs"]?.jsonPrimitive?.longOrNull
-                        ?: throw hostError("clock.sleep requires durationMs")
-                if (duration < 0L || duration > PluginRuntimePolicy.HARD_DEADLINE_MS) {
+            },
+            PluginHostMethod("clock.now", PluginHostJsArgs.Signal) { _, _ ->
+                buildJsonObject { put("epochMs", clockMs()) }
+            },
+            PluginHostMethod("clock.sleep", PluginHostJsArgs.Field("durationMs")) { _, params ->
+                val request = json.decodeFromJsonElement<PluginClockSleep>(params)
+                if (request.durationMs < 0L || request.durationMs > PluginRuntimePolicy.HARD_DEADLINE_MS) {
                     throw quotaError("clock.sleep duration is outside the host limit")
                 }
-                delay(duration)
-                buildJsonObject { put("slept", duration) }
-            }
-            "log" -> {
-                val entry = json.decodeFromJsonElement<PluginLogEntry>(params)
-                logger.append(entry)
+                delay(request.durationMs)
+                buildJsonObject { put("slept", request.durationMs) }
+            },
+            PluginHostMethod("log", PluginHostJsArgs.Log) { _, params ->
+                val request = json.decodeFromJsonElement<PluginLogEntry>(params)
+                logger.append(request)
                 buildJsonObject { put("logged", true) }
-            }
-            else ->
-                throw PluginRpcException(
+            },
+        )
+
+    private val hostMethodsByName: Map<String, PluginHostMethod> = hostMethods.associateBy { it.name }
+
+    init {
+        require(hostMethodsByName.size == hostMethods.size) {
+            "Host method names must be unique: ${hostMethods.map { it.name }}"
+        }
+    }
+
+    override suspend fun handle(method: String, params: JsonElement): JsonElement {
+        if (closed.get()) throw hostError("Plugin host session is closed")
+        val entry =
+            hostMethodsByName[method]
+                ?: throw PluginRpcException(
                     PluginRpcError(PluginErrorCode.PLUGIN_PROTOCOL, "Unknown host method: $method")
                 )
-        }
+        return entry.invoke(this, params)
     }
 
     override fun close() {

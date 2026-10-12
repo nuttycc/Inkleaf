@@ -124,21 +124,19 @@ class SourceInstallReportingTest {
         assertEquals("安装失败: VERSION_CONFLICT", message.text)
     }
 
-    /** Checks that the inline success card names the source and version without an operation verb. */
+    /** Checks that the placed card reads exactly what the announced message says. */
     @Test
-    fun `the in-page card reads a successful install without a verb`() {
+    fun `the placed card reuses the announced wording`() {
+        val installed = installed(activatable = true)
+        val unactivatable = installed(activatable = false)
+
         assertEquals(
             "已安装 demo v0.2.0",
-            installCardMessage(installed(activatable = true), fallbackName = "未知插件"),
+            sourceInstallMessage(installed, SourceInstallVerb.Install, "未知插件").text,
         )
-    }
-
-    /** Explains activation incompatibility in the inline card while preserving installed status. */
-    @Test
-    fun `the in-page card explains an unactivatable install`() {
         assertEquals(
             "已安装 demo v0.2.0，但未激活：与当前版本不兼容",
-            installCardMessage(installed(activatable = false), fallbackName = "未知插件"),
+            sourceInstallMessage(unactivatable, SourceInstallVerb.Install, "未知插件").text,
         )
     }
 

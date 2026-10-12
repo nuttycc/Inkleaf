@@ -153,34 +153,20 @@ class ReadingSessionStateMachine(
             lastVisiblePosition = event.initialPosition
         }
 
+        val comic = pendingComic
         val existing = resumable
-        if (existing != null && pendingComic?.fileKey == existing.comic.fileKey) {
-            val now = clock.nowMillis()
-            val sameSource =
-                existing.checkpointPosition.sourceRevision == event.initialPosition.sourceRevision
-            val withinWindow =
-                ReadingSessionRules.isWithinInterruptionWindow(existing.lastCheckpointAt, now)
-            if (!sameSource || !withinWindow) {
-                val reason =
-                    when {
-                        !sameSource -> ReadingSessionEndReason.SOURCE_CHANGED
-                        else -> ReadingSessionEndReason.INTERRUPTION_TIMEOUT
-                    }
-                val activelyTiming =
-                    existing.status == ReadingSessionStatus.ACTIVE &&
-                        interactiveSegmentStartedAt != null
-                val settled =
-                    settle(
-                        current = existing,
-                        reason = reason,
-                        settlementInstant =
-                            settlementInstantFor(
-                                existing,
-                                now,
-                                wasActivelyTiming = activelyTiming,
-                            ),
-                    )
-                return settled + tryStart()
+        if (existing != null && comic != null && comic.fileKey == existing.comic.fileKey) {
+            val decision =
+                ReadingSessionRules.decideResume(
+                    existing = existing,
+                    incomingFileKey = comic.fileKey,
+                    incomingSourceRevision = event.initialPosition.sourceRevision,
+                    nowMillis = clock.nowMillis(),
+                )
+            if (decision is ResumeDecision.SettleThenStart) {
+                // Settle before callers clear visible-page state so ACTIVE ends keep
+                // the last actually-visible page and open foreground segment.
+                return settleForeignOrActive(existing, decision.reason) + tryStart()
             }
         }
         return tryStart()
@@ -328,39 +314,30 @@ class ReadingSessionStateMachine(
         val existing = resumable
 
         if (existing != null) {
-            if (existing.comic.fileKey != comic.fileKey) {
-                // Should have been settled on OpenComic; belt-and-suspenders.
+            // The same decision the offline reader and the recovery path use, so one tested rule
+            // governs every resume/settle question the machine asks.
+            val decision =
+                ReadingSessionRules.decideResume(
+                    existing = existing,
+                    incomingFileKey = comic.fileKey,
+                    incomingSourceRevision = position.sourceRevision,
+                    nowMillis = now,
+                )
+            if (decision is ResumeDecision.SettleThenStart) {
+                // An actively timing session folds its open segment into the settlement; a paused
+                // one ends at its stored checkpoint. Both settle paths in this machine used to
+                // disagree here, which silently dropped real reading time on the switch path.
                 val activelyTiming =
                     existing.status == ReadingSessionStatus.ACTIVE &&
                         interactiveSegmentStartedAt != null
                 return settle(
                     current = existing,
-                    reason = ReadingSessionEndReason.SWITCHED_COMIC,
+                    reason = decision.reason,
                     settlementInstant =
                         settlementInstantFor(
                             existing,
                             now,
                             wasActivelyTiming = activelyTiming,
-                        ),
-                ) + startNew(comic, position, now)
-            }
-            val sameSource = existing.checkpointPosition.sourceRevision == position.sourceRevision
-            val withinWindow =
-                ReadingSessionRules.isWithinInterruptionWindow(existing.lastCheckpointAt, now)
-            if (!sameSource || !withinWindow) {
-                val reason =
-                    when {
-                        !sameSource -> ReadingSessionEndReason.SOURCE_CHANGED
-                        else -> ReadingSessionEndReason.INTERRUPTION_TIMEOUT
-                    }
-                return settle(
-                    current = existing,
-                    reason = reason,
-                    settlementInstant =
-                        settlementInstantFor(
-                            existing,
-                            now,
-                            wasActivelyTiming = false,
                         ),
                 ) + startNew(comic, position, now)
             }

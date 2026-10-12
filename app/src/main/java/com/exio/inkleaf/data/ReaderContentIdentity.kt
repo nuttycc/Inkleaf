@@ -97,7 +97,7 @@ data class OnlinePageLocation(
     val identity: OnlinePageIdentity,
     val pageIndex: Int,
     val chapterRevision: String? = null,
-) {
+) : ReadingPosition<OnlinePageLocation> {
     init {
         require(pageIndex >= 0) { "pageIndex must be non-negative" }
         identity.fallback?.let { fallback ->
@@ -107,6 +107,12 @@ data class OnlinePageLocation(
             }
         }
     }
+
+    /**
+     * A different page, chapter revision, or page identity is reading progress. Structural equality
+     * expresses exactly what the offline snapshot's own [ReadingPosition.differsFrom] expresses.
+     */
+    override fun differsFrom(other: OnlinePageLocation): Boolean = this != other
 
     companion object {
         fun create(

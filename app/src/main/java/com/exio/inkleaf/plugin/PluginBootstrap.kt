@@ -5,13 +5,24 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 /** Builds the single bootstrap evaluation used before all business RPC calls. */
-object PluginBootstrap {
+internal object PluginBootstrap {
     private val json = Json { explicitNulls = false }
 
-    fun script(mainScript: String, portName: String, requiredMethods: Set<String>): String {
+    /** Keeps the generated host object flush with the rest of the bootstrap template. */
+    private const val HOST_OBJECT_INDENT = "              "
+
+    fun script(
+        mainScript: String,
+        portName: String,
+        requiredMethods: Set<String>,
+        hostMethods: List<PluginHostMethod>,
+    ): String {
         val encodedMainScript = json.encodeToString(String.serializer(), mainScript)
         val encodedPortName = json.encodeToString(String.serializer(), portName)
         val encodedRequiredMethods = json.encodeToString(requiredMethods.sorted())
+        // Generated from the host's own capability catalogue rather than written out here, so the
+        // JS surface and the Kotlin dispatch cannot drift apart.
+        val hostObject = renderPluginHostObject(hostMethods, indent = HOST_OBJECT_INDENT)
         return """
             (async function() {
               const port = await android.getNamedPort($encodedPortName);
@@ -96,39 +107,7 @@ object PluginBootstrap {
                 });
               }
 
-              const host = Object.freeze({
-                call: hostCall,
-                http: Object.freeze({
-                  request: function(request, signal) { return hostCall("http.request", request, signal); },
-                  read: function(request, signal) { return hostCall("http.read", request, signal); },
-                  close: function(request, signal) { return hostCall("http.close", request, signal); }
-                }),
-                kv: Object.freeze({
-                  get: function(request, signal) { return hostCall("kv.get", request, signal); },
-                  set: function(request, signal) { return hostCall("kv.set", request, signal); },
-                  delete: function(request, signal) { return hostCall("kv.delete", request, signal); },
-                  keys: function(signal) { return hostCall("kv.keys", {}, signal); }
-                }),
-                // User-selected source settings are read-only to plugins. Plugin-owned kv storage
-                // remains a separate read-write channel. Missing values resolve to null.
-                settings: Object.freeze({
-                  get: function(id, signal) { return hostCall("settings.get", { id: id }, signal); }
-                }),
-                cookie: Object.freeze({
-                  list: function(signal) { return hostCall("cookie.list", {}, signal); },
-                  set: function(request, signal) { return hostCall("cookie.set", request, signal); },
-                  clear: function(signal) { return hostCall("cookie.clear", {}, signal); }
-                }),
-                clock: Object.freeze({
-                  now: function(signal) { return hostCall("clock.now", {}, signal); },
-                  sleep: function(durationMs, signal) {
-                    return hostCall("clock.sleep", { durationMs: durationMs }, signal);
-                  }
-                }),
-                log: function(level, message, fields, signal) {
-                  return hostCall("log", { level: level, message: message, fields: fields || {} }, signal);
-                }
-              });
+              $hostObject
 
               const api = {
                 host: host,

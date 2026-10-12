@@ -163,13 +163,6 @@ fun PluginDiscoverScreen(
         remember(results, currentSelectedIds) {
             results.filter { it.pluginId in currentSelectedIds }
         }
-    val hasNoResults =
-        remember(visibleResults) {
-            visibleResults.isEmpty() ||
-                visibleResults.all { result ->
-                    result.error == null && result.page?.items.orEmpty().isEmpty()
-                }
-        }
 
     val selectedFeed = feeds.firstOrNull { it.key == selectedFeedKey }
     // 源与分类分两级：源占标题位，chips 只列当前源的分类。拉平成一行时
@@ -216,10 +209,8 @@ fun PluginDiscoverScreen(
                             },
                 )
         }
-    val gridComicItems =
+    val browseLayout =
         remember(
-            activeHealthyPlugins.isEmpty(),
-            mode,
             feeds,
             selectedFeed,
             isLoadingFeeds,
@@ -228,33 +219,33 @@ fun PluginDiscoverScreen(
             browseError,
             isBrowsing,
             browseNextCursor,
-            visibleResults,
-            query,
-            isSearching,
-            errorMessage,
-            hasNoResults,
         ) {
-            if (activeHealthyPlugins.isEmpty()) {
-                emptyList()
-            } else if (mode == DiscoverViewModel.Mode.BROWSE) {
-                buildBrowseGridComicItems(
-                    feeds = feeds,
-                    selectedFeed = selectedFeed,
-                    isLoadingFeeds = isLoadingFeeds,
-                    feedLoadError = feedLoadError,
-                    browseItems = browseItems,
-                    browseError = browseError,
-                    isBrowsing = isBrowsing,
-                    hasMore = browseNextCursor != null,
-                )
-            } else {
-                buildSearchGridComicItems(
-                    visibleResults = visibleResults,
-                    query = query,
-                    isSearching = isSearching,
-                    errorMessage = errorMessage,
-                    hasNoResults = hasNoResults,
-                )
+            browseGridLayout(
+                feeds = feeds,
+                selectedFeed = selectedFeed,
+                isLoadingFeeds = isLoadingFeeds,
+                feedLoadError = feedLoadError,
+                browseItems = browseItems,
+                browseError = browseError,
+                isBrowsing = isBrowsing,
+                hasMore = browseNextCursor != null,
+            )
+        }
+    val searchLayout =
+        remember(visibleResults, query, isSearching, errorMessage) {
+            searchGridLayout(
+                visibleResults = visibleResults,
+                query = query,
+                isSearching = isSearching,
+                errorMessage = errorMessage,
+            )
+        }
+    val gridComicItems =
+        remember(activeHealthyPlugins.isEmpty(), mode, browseLayout, searchLayout) {
+            when {
+                activeHealthyPlugins.isEmpty() -> emptyList()
+                mode == DiscoverViewModel.Mode.BROWSE -> browseLayout.comicItems
+                else -> searchLayout.comicItems
             }
         }
     val latestGridComicItems by rememberUpdatedState(gridComicItems)
@@ -503,14 +494,11 @@ fun PluginDiscoverScreen(
                     item(span = { GridItemSpan(maxLineSpan) }) { NoSources(onOpenSources) }
                 } else if (mode == DiscoverViewModel.Mode.BROWSE) {
                     browseContent(
-                        feeds = feeds,
+                        layout = browseLayout,
                         selectedFeed = selectedFeed,
-                        isLoadingFeeds = isLoadingFeeds,
                         feedLoadError = feedLoadError,
-                        browseItems = browseItems,
                         browseError = browseError,
-                        isBrowsing = isBrowsing,
-                        hasMore = browseNextCursor != null,
+                        browseItems = browseItems,
                         isListLayout = isListLayout,
                         onOpenComic = onOpenComic,
                         onReloadFeeds = { viewModel.reloadFeeds() },
@@ -518,12 +506,10 @@ fun PluginDiscoverScreen(
                     )
                 } else {
                     searchContent(
+                        layout = searchLayout,
                         visibleResults = visibleResults,
                         installedPlugins = installedPlugins,
-                        query = query,
-                        isSearching = isSearching,
                         errorMessage = errorMessage,
-                        hasNoResults = hasNoResults,
                         isListLayout = isListLayout,
                         onOpenComic = onOpenComic,
                         onRetry = { viewModel.retrySearch() },
@@ -873,7 +859,8 @@ private data class DiscoverGridComicLookup(
     val orderedKeys: List<DiscoverComicKey>,
 )
 
-private fun buildBrowseGridComicItems(
+/** The browse grid's structure, derived once and read by both the anchor mapper and the renderer. */
+private fun browseGridLayout(
     feeds: List<DiscoverViewModel.Feed>,
     selectedFeed: DiscoverViewModel.Feed?,
     isLoadingFeeds: Boolean,
@@ -882,85 +869,97 @@ private fun buildBrowseGridComicItems(
     browseError: String?,
     isBrowsing: Boolean,
     hasMore: Boolean,
-): List<DiscoverGridComicItem> {
-    if (isLoadingFeeds && feeds.isEmpty()) return emptyList()
-    if (feeds.isEmpty()) return emptyList()
-
-    val feed = selectedFeed ?: return emptyList()
-    var leadingStructuralItemCount = 0
-    if (feedLoadError != null) leadingStructuralItemCount += 1
-    if (browseError != null) leadingStructuralItemCount += 1
-    if (isBrowsing && browseItems.isEmpty()) {
-        leadingStructuralItemCount += 1
-    } else if (!isBrowsing && browseError == null && browseItems.isEmpty()) {
-        leadingStructuralItemCount += 1
-    }
-
-    val trailingStructuralItemCount =
-        if (isBrowsing && browseItems.isNotEmpty()) {
-            1
-        } else if (hasMore && browseError != null) {
-            1
-        } else {
-            0
-        }
-
-    return mapDiscoverGridComicItems(
-        leadingStructuralItemCount = leadingStructuralItemCount,
-        sections =
-            listOf(
-                DiscoverGridComicSection(
-                    structuralItemCount = 0,
-                    comicKeys =
-                        browseItems.map { comic ->
-                            DiscoverComicKey(feed.pluginId, comic.sourceId)
-                        },
-                )
+): DiscoverGridLayout =
+    discoverBrowseGridLayout(
+        input =
+            DiscoverBrowseGridInput(
+                feedCount = feeds.size,
+                hasSelectedFeed = selectedFeed != null,
+                isLoadingFeeds = isLoadingFeeds,
+                hasFeedLoadError = feedLoadError != null,
+                hasBrowseError = browseError != null,
+                isBrowsing = isBrowsing,
+                hasMore = hasMore,
             ),
-        trailingStructuralItemCount = trailingStructuralItemCount,
+        comicKeys = selectedFeed?.let { feed ->
+            browseItems.map { comic -> DiscoverComicKey(feed.pluginId, comic.sourceId) }
+        } ?: emptyList(),
     )
-}
 
-private fun buildSearchGridComicItems(
+/** The search grid's structure, derived once and read by both the anchor mapper and the renderer. */
+private fun searchGridLayout(
     visibleResults: List<PluginSearchResult>,
     query: String,
     isSearching: Boolean,
     errorMessage: String?,
-    hasNoResults: Boolean,
-): List<DiscoverGridComicItem> {
-    var leadingStructuralItemCount = 0
-    if (isSearching) leadingStructuralItemCount += 1
-    if (errorMessage != null) leadingStructuralItemCount += 1
-
-    if (!isSearching && errorMessage == null && query.isNotBlank() && hasNoResults) {
-        return emptyList()
-    }
-
-    val sections =
-        visibleResults.map { result ->
-            val comics = result.page?.items.orEmpty()
-            val structuralItemCount =
-                1 +
-                    when {
-                        result.error != null -> 1
-                        comics.isEmpty() -> 1
-                        else -> 0
-                    }
-            DiscoverGridComicSection(
-                structuralItemCount = structuralItemCount,
-                comicKeys =
-                    if (result.error == null) {
-                        comics.map { comic -> DiscoverComicKey(result.pluginId, comic.sourceId) }
-                    } else {
-                        emptyList()
+): DiscoverGridLayout =
+    discoverSearchGridLayout(
+        input =
+            DiscoverSearchGridInput(
+                query = query,
+                isSearching = isSearching,
+                hasError = errorMessage != null,
+                groups =
+                    visibleResults.map { result ->
+                        DiscoverSearchGroupInput(
+                            comicKeys =
+                                result.page?.items.orEmpty().map { comic ->
+                                    DiscoverComicKey(result.pluginId, comic.sourceId)
+                                },
+                            hasError = result.error != null,
+                        )
                     },
             )
-        }
-
-    return mapDiscoverGridComicItems(
-        leadingStructuralItemCount = leadingStructuralItemCount,
-        sections = sections,
     )
+
+/**
+ * Renders one structural entry in the order the layout lists it. The leading, section and trailing
+ * sequences come from [DiscoverGridLayout], so this loop and the scroll-anchor mapper cannot disagree
+ * about where a comic sits.
+ */
+private fun LazyGridScope.discoverStructuralItem(
+    item: DiscoverStructuralItem,
+    message: String,
+    onRetry: () -> Unit,
+    retryLabel: String = "加载更多",
+) {
+    item(span = { GridItemSpan(maxLineSpan) }) {
+        when (item) {
+            DiscoverStructuralItem.FEED_LOADING,
+            DiscoverStructuralItem.BROWSE_PROGRESS,
+            DiscoverStructuralItem.BROWSE_PAGING,
+            DiscoverStructuralItem.SEARCH_PROGRESS -> CenteredProgress()
+            DiscoverStructuralItem.FEED_EMPTY_ERROR,
+            DiscoverStructuralItem.FEED_ERROR,
+            DiscoverStructuralItem.BROWSE_ERROR,
+            DiscoverStructuralItem.SEARCH_ERROR -> M3ErrorBanner(message = message, onRetry = onRetry)
+            DiscoverStructuralItem.FEED_EMPTY_TEXT ->
+                Text(
+                    "已启用的漫画源暂不支持推荐或分类浏览，请使用搜索。",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 24.dp),
+                )
+            DiscoverStructuralItem.BROWSE_EMPTY ->
+                Text(
+                    "暂无内容",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(vertical = 16.dp),
+                )
+            DiscoverStructuralItem.LOAD_MORE ->
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    OutlinedButton(onClick = onRetry) { Text(retryLabel) }
+                }
+            DiscoverStructuralItem.SEARCH_EMPTY -> SearchEmptyState()
+            DiscoverStructuralItem.SOURCE_HEADER,
+            DiscoverStructuralItem.SOURCE_ERROR,
+            DiscoverStructuralItem.SOURCE_EMPTY -> Unit
+        }
+    }
 }
 
 private fun discoverScrollAnchor(
@@ -991,66 +990,31 @@ private fun discoverScrollAnchor(
 }
 
 private fun LazyGridScope.browseContent(
-    feeds: List<DiscoverViewModel.Feed>,
+    layout: DiscoverGridLayout,
     selectedFeed: DiscoverViewModel.Feed?,
-    isLoadingFeeds: Boolean,
     feedLoadError: String?,
-    browseItems: List<ComicSummary>,
     browseError: String?,
-    isBrowsing: Boolean,
-    hasMore: Boolean,
+    browseItems: List<ComicSummary>,
     isListLayout: Boolean,
     onOpenComic: (String, ComicSummary) -> Unit,
     onReloadFeeds: () -> Unit,
     onRetryBrowse: () -> Unit,
 ) {
-    if (isLoadingFeeds && feeds.isEmpty()) {
-        item(span = { GridItemSpan(maxLineSpan) }) { CenteredProgress() }
-        return
-    }
-
-    if (feeds.isEmpty()) {
-        item(span = { GridItemSpan(maxLineSpan) }) {
-            if (feedLoadError != null) {
-                M3ErrorBanner(message = feedLoadError, onRetry = onReloadFeeds)
-            } else {
-                Text(
-                    "已启用的漫画源暂不支持推荐或分类浏览，请使用搜索。",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(vertical = 24.dp),
-                )
-            }
-        }
-        return
-    }
-
-    feedLoadError?.let { error ->
-        item(span = { GridItemSpan(maxLineSpan) }) {
-            M3ErrorBanner(message = error, onRetry = onReloadFeeds)
+    layout.leading.forEach { entry ->
+        when (entry) {
+            DiscoverStructuralItem.FEED_LOADING,
+            DiscoverStructuralItem.FEED_EMPTY_ERROR,
+            DiscoverStructuralItem.FEED_EMPTY_TEXT ->
+                discoverStructuralItem(entry, feedLoadError.orEmpty(), onReloadFeeds)
+            DiscoverStructuralItem.BROWSE_ERROR ->
+                discoverStructuralItem(entry, browseError.orEmpty(), onRetryBrowse)
+            DiscoverStructuralItem.FEED_ERROR ->
+                discoverStructuralItem(entry, feedLoadError.orEmpty(), onReloadFeeds)
+            else -> discoverStructuralItem(entry, "", onRetryBrowse)
         }
     }
 
     val feed = selectedFeed ?: return
-
-    browseError?.let { error ->
-        item(span = { GridItemSpan(maxLineSpan) }) {
-            M3ErrorBanner(message = error, onRetry = onRetryBrowse)
-        }
-    }
-
-    if (isBrowsing && browseItems.isEmpty()) {
-        item(span = { GridItemSpan(maxLineSpan) }) { CenteredProgress() }
-    } else if (!isBrowsing && browseError == null && browseItems.isEmpty()) {
-        item(span = { GridItemSpan(maxLineSpan) }) {
-            Text(
-                "暂无内容",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(vertical = 16.dp),
-            )
-        }
-    }
 
     items(browseItems, key = { "${feed.pluginId}_${it.sourceId}" }) { comic ->
         DiscoverComicItem(
@@ -1061,45 +1025,20 @@ private fun LazyGridScope.browseContent(
     }
 
     // 翻页由触底预取驱动，底部只需要一个"还在加载"的提示
-    if (isBrowsing && browseItems.isNotEmpty()) {
-        item(span = { GridItemSpan(maxLineSpan) }) { CenteredProgress() }
-    } else if (hasMore && browseError != null) {
-        // 预取失败后自动重试会立刻再撞上同一个错误，这里给一次手动机会
-        item(span = { GridItemSpan(maxLineSpan) }) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                horizontalArrangement = Arrangement.Center,
-            ) {
-                OutlinedButton(onClick = onRetryBrowse) { Text("加载更多") }
-            }
-        }
-    }
+    layout.trailing.forEach { entry -> discoverStructuralItem(entry, "", onRetryBrowse) }
 }
 
 private fun LazyGridScope.searchContent(
+    layout: DiscoverGridLayout,
     visibleResults: List<PluginSearchResult>,
     installedPlugins: List<InstalledPlugin>,
-    query: String,
-    isSearching: Boolean,
     errorMessage: String?,
-    hasNoResults: Boolean,
     isListLayout: Boolean,
     onOpenComic: (String, ComicSummary) -> Unit,
     onRetry: () -> Unit,
 ) {
-    if (isSearching) {
-        item(span = { GridItemSpan(maxLineSpan) }) { CenteredProgress() }
-    }
-
-    errorMessage?.let { error ->
-        item(span = { GridItemSpan(maxLineSpan) }) {
-            M3ErrorBanner(message = error, onRetry = onRetry)
-        }
-    }
-
-    if (!isSearching && errorMessage == null && query.isNotBlank() && hasNoResults) {
-        item(span = { GridItemSpan(maxLineSpan) }) { SearchEmptyState() }
-        return
+    layout.leading.forEach { entry ->
+        discoverStructuralItem(entry, errorMessage.orEmpty(), onRetry)
     }
 
     visibleResults.forEach { result ->

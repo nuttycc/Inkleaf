@@ -32,6 +32,17 @@ enum class ReadingSessionEndReason {
 }
 
 /**
+ * A captured reading position that knows when the reader has moved away from it.
+ *
+ * The offline snapshot and the online page location both implement this so one permanence rule in
+ * [ReadingSessionRules] serves both readers instead of being restated per reader.
+ */
+interface ReadingPosition<T : ReadingPosition<T>> {
+    /** True when the reader has moved away from [other]. */
+    fun differsFrom(other: T): Boolean
+}
+
+/**
  * Page location captured at session start, checkpoint, or end.
  *
  * Mirrors the bookmark location fields so both features share resolution.
@@ -43,7 +54,7 @@ data class ReadingPositionSnapshot(
     val pageIndex: Int,
     val chapterTitle: String,
     val sourceRevision: String,
-) {
+) : ReadingPosition<ReadingPositionSnapshot> {
     init {
         require(globalPageIndex >= 0)
         require(chapterIndex >= 0)
@@ -52,7 +63,7 @@ data class ReadingPositionSnapshot(
     }
 
     /** True when the reader has moved away from the session start page. */
-    fun differsFrom(other: ReadingPositionSnapshot): Boolean {
+    override fun differsFrom(other: ReadingPositionSnapshot): Boolean {
         if (pageIdentity != null || other.pageIdentity != null) {
             if (pageIdentity != other.pageIdentity) return true
         }

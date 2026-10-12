@@ -1572,12 +1572,11 @@ internal class OnlineReaderViewModel(
     }
 
     private fun OnlineChapterVolume.readerPageStateKey(page: Int): ReaderPageStateKey =
-        ReaderChapterPageKey(
-                chapterId = activeChapterId,
-                chapterRevision = sourceRevision,
-                pageIdentity = pageIdentity(page),
-            )
-            .toReaderPageStateKey()
+        PageIdentity.stateKey(
+            chapterId = activeChapterId,
+            chapterRevision = sourceRevision,
+            pageIdentity = pageIdentity(page),
+        )
 
     private fun bookmarkKey(identity: OnlinePageIdentity): String =
         "online:${PluginContentCodec.json.encodeToString(identity)}"

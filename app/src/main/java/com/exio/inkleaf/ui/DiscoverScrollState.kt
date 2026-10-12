@@ -41,9 +41,17 @@ data class DiscoverGridComicItem(
 data class DiscoverGridComicSection(
     val structuralItemCount: Int,
     val comicKeys: List<DiscoverComicKey>,
+    /**
+     * Which structural entries the section emits, in order. Empty when only the count is known, for
+     * callers that build sections by hand.
+     */
+    val structuralItems: List<DiscoverStructuralItem> = emptyList(),
 ) {
     init {
         require(structuralItemCount >= 0) { "structuralItemCount must be non-negative" }
+        require(structuralItems.isEmpty() || structuralItems.size == structuralItemCount) {
+            "structuralItems must match structuralItemCount"
+        }
     }
 }
 

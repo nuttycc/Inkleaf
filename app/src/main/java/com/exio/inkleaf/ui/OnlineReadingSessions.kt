@@ -10,7 +10,8 @@ import com.exio.inkleaf.plugin.OnlineReadingSessionRecord
  *
  * The online reader keeps a lighter session than the offline machine in [ReadingSessionRules] — no
  * resumable slot, no interruption windows — but it must agree with that module on when a session is
- * worth keeping, so the shared threshold is read from there rather than restated here.
+ * worth keeping, so the permanence threshold and the position comparison are both taken from there
+ * rather than restated here.
  */
 internal object OnlineReadingSessions {
     /**
@@ -30,7 +31,13 @@ internal object OnlineReadingSessions {
         end: OnlinePageLocation?,
     ): OnlineReadingSessionRecord? {
         if (sessionId == null || start == null || end == null) return null
-        if (!qualifiesAsPermanent(activeReadingMillis, start, end)) return null
+        val permanent =
+            ReadingSessionRules.qualifiesAsPermanent(
+                activeReadingMillis = activeReadingMillis,
+                startPosition = start,
+                latestPosition = end,
+            )
+        if (!permanent) return null
         return OnlineReadingSessionRecord(
             sessionId = sessionId,
             content = content,
@@ -43,12 +50,4 @@ internal object OnlineReadingSessions {
             end = end,
         )
     }
-
-    /** Same threshold as the offline history: enough reading time, or a position that moved. */
-    private fun qualifiesAsPermanent(
-        activeReadingMillis: Long,
-        start: OnlinePageLocation,
-        end: OnlinePageLocation,
-    ): Boolean =
-        activeReadingMillis >= ReadingSessionRules.MIN_ACTIVE_READING_MS || start != end
 }
