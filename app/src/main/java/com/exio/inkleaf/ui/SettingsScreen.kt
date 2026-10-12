@@ -13,9 +13,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MediumFlexibleTopAppBar
 import androidx.compose.material3.ModalBottomSheet
@@ -24,8 +26,10 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -42,6 +46,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.exio.inkleaf.DeveloperMode
 import com.exio.inkleaf.data.CacheLimit
 import com.exio.inkleaf.data.ThemeSettings
+import com.exio.inkleaf.update.AppUpdateChannel
 import com.ms.square.debugoverlay.DebugOverlay
 
 /** General settings. Theme editing lives on its own route with an explicit apply boundary. */
@@ -54,6 +59,7 @@ fun SettingsScreen(
     modifier: Modifier = Modifier,
     viewModel: SettingsViewModel = viewModel(),
     foldersViewModel: FoldersViewModel = viewModel(),
+    updateViewModel: AppUpdateViewModel = viewModel(),
 ) {
     val cacheLimit by viewModel.cacheLimit.collectAsStateWithLifecycle()
     val cacheUsage by viewModel.cacheUsage.collectAsStateWithLifecycle()
@@ -62,13 +68,35 @@ fun SettingsScreen(
     val isClearingOnlineCache by viewModel.isClearingOnlineCache.collectAsStateWithLifecycle()
     val cacheMessage by viewModel.cacheMessage.collectAsStateWithLifecycle()
     val developerModeEnabled by viewModel.developerModeEnabled.collectAsStateWithLifecycle()
+    val updateState by updateViewModel.uiState.collectAsStateWithLifecycle()
+    val updateChannel by updateViewModel.channel.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var showCacheLimitSheet by remember { mutableStateOf(false) }
     var showClearOnlineCacheDialog by rememberSaveable { mutableStateOf(false) }
     var showAboutSheet by remember { mutableStateOf(false) }
     var showFoldersSheet by rememberSaveable { mutableStateOf(false) }
+    var showChannelSheet by remember { mutableStateOf(false) }
     val lastPickedFolder by foldersViewModel.lastPickedFolder.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+
+    val installPermissionLauncher =
+        rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.StartActivityForResult()
+        ) { result ->
+            if (result.resultCode == android.app.Activity.RESULT_OK) {
+                updateViewModel.onInstallPermissionGranted()
+            }
+        }
+
+    LaunchedEffect(Unit) {
+        val result = updateViewModel.checkOnStartup()
+        when (result) {
+            is com.exio.inkleaf.update.AppUpdateCheckResult.UpdateAvailable -> {
+                snackbarHostState.showSnackbar("发现新版本 ${result.entry.version}")
+            }
+            else -> {}
+        }
+    }
 
     SnackbarMessageEffect(
         message = cacheMessage,
@@ -167,6 +195,27 @@ fun SettingsScreen(
 
             SectionLabel("关于")
             InkleafActionListItem(
+                headline = "检查更新",
+                supporting = when (updateState) {
+                    is AppUpdateUiState.Checking -> "正在检查..."
+                    is AppUpdateUiState.Downloading -> "正在下载更新..."
+                    is AppUpdateUiState.UpdateAvailable -> "发现新版本"
+                    is AppUpdateUiState.Error -> "检查失败，点击重试"
+                    is AppUpdateUiState.UpToDate -> "已是最新版本"
+                    else -> "当前版本: ${appVersionName(context)}"
+                },
+                onClick = { updateViewModel.checkForUpdate() },
+            )
+            InkleafActionListItem(
+                headline = "更新通道",
+                supporting = when (updateChannel) {
+                    AppUpdateChannel.STABLE -> "稳定版"
+                    AppUpdateChannel.PREVIEW -> "预览版"
+                },
+                onClick = { showChannelSheet = true },
+                trailingContent = { ForwardIcon() },
+            )
+            InkleafActionListItem(
                 headline = "关于 Inkleaf",
                 supporting = "版本、GitHub 与项目信息",
                 onClick = { showAboutSheet = true },
@@ -230,6 +279,112 @@ fun SettingsScreen(
                 },
             )
         }
+    }
+
+    if (showChannelSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showChannelSheet = false },
+            sheetState = rememberExpandOnlySheetState(),
+        ) {
+            SheetColumn(modifier = Modifier, selectable = true) {
+                StandardSheetTitle("更新通道")
+                Text(
+                    text = "稳定版经过充分测试，预览版包含最新功能但可能不稳定",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+                InkleafChoiceListItem(
+                    headline = "稳定版",
+                    selected = updateChannel == AppUpdateChannel.STABLE,
+                    onClick = {
+                        updateViewModel.setChannel(AppUpdateChannel.STABLE)
+                        showChannelSheet = false
+                    },
+                    supportingContent = { Text("仅接收正式版本更新") },
+                )
+                InkleafChoiceListItem(
+                    headline = "预览版",
+                    selected = updateChannel == AppUpdateChannel.PREVIEW,
+                    onClick = {
+                        updateViewModel.setChannel(AppUpdateChannel.PREVIEW)
+                        showChannelSheet = false
+                    },
+                    supportingContent = { Text("接收每日构建的预览版本") },
+                )
+            }
+        }
+    }
+
+    when (val state = updateState) {
+        is AppUpdateUiState.UpdateAvailable -> {
+            AlertDialog(
+                onDismissRequest = { updateViewModel.dismissState() },
+                title = { Text("发现新版本") },
+                text = {
+                    Column {
+                        Text("版本: ${state.version}")
+                        if (state.releaseNotes != null) {
+                            Text(
+                                text = state.releaseNotes,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.padding(top = 8.dp),
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            updateViewModel.downloadAndInstall(installPermissionLauncher)
+                        }
+                    ) { Text("下载更新") }
+                },
+                dismissButton = {
+                    Column {
+                        TextButton(onClick = { updateViewModel.skipThisVersion() }) {
+                            Text("跳过此版本")
+                        }
+                        TextButton(onClick = { updateViewModel.dismissState() }) {
+                            Text("取消")
+                        }
+                    }
+                },
+            )
+        }
+        is AppUpdateUiState.Downloading -> {
+            AlertDialog(
+                onDismissRequest = { },
+                title = { Text("正在下载更新") },
+                text = {
+                    LinearProgressIndicator(
+                        progress = { state.progress },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                },
+                confirmButton = { },
+            )
+        }
+        is AppUpdateUiState.Error -> {
+            AlertDialog(
+                onDismissRequest = { updateViewModel.dismissState() },
+                title = { Text("更新失败") },
+                text = { Text(state.message) },
+                confirmButton = {
+                    TextButton(onClick = { updateViewModel.checkForUpdate() }) { Text("重试") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { updateViewModel.dismissState() }) { Text("取消") }
+                },
+            )
+        }
+        is AppUpdateUiState.UpToDate -> {
+            LaunchedEffect(Unit) {
+                snackbarHostState.showSnackbar("已是最新版本")
+                updateViewModel.consumeUpToDate()
+            }
+        }
+        else -> {}
     }
 }
 
