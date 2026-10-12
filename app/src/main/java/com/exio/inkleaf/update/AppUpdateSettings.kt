@@ -50,6 +50,6 @@ class AppUpdateSettings(context: Context) {
         private val KEY_LAST_CHECK_MS = longPreferencesKey("last_check_ms")
 
         const val MANIFEST_URL =
-            "https://raw.githubusercontent.com/nuttycc/inkleaf-plugins/main/app-update.json"
+            "https://raw.githubusercontent.com/nuttycc/inkleaf/main/app-update.json"
     }
 }

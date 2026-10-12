@@ -530,9 +530,9 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Update app-update.json manifest
-        if: steps.publish.outcome == 'success' && env.UPDATE_MANIFEST_TOKEN != ''
+        if: steps.publish.outcome == 'success'
         env:
-          GH_TOKEN: ${{ secrets.UPDATE_MANIFEST_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION_NAME: ${{ steps.meta.outputs.version_name }}
           VERSION_CODE: ${{ steps.meta.outputs.version_code }}
           PREVIEW_TAG: ${{ steps.meta.outputs.tag }}
@@ -541,7 +541,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          REPO="nuttycc/inkleaf-plugins"
+          REPO="$GITHUB_REPOSITORY"
           FILE_PATH="app-update.json"
           BRANCH="main"
 
