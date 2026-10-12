@@ -154,7 +154,12 @@ class AndroidJavaScriptPluginRuntime(
             val bootstrapResult =
                 createdIsolate
                     .evaluateJavaScriptAsync(
-                        PluginBootstrap.script(script, portName, requiredMethods)
+                        PluginBootstrap.script(
+                            script,
+                            portName,
+                            requiredMethods,
+                            hostSession.hostMethods,
+                        )
                     )
                     .awaitJavaScript()
             if (bootstrapResult != "BOOTSTRAPPED") {
