@@ -183,7 +183,7 @@ fun ReaderScreen(
                     volume = state.volume,
                     startPage = state.startPage,
                     title = state.title,
-                    cacheKeyPrefix = "comic-$comicId",
+                    cacheKeyPrefix = PageIdentity.volumeNamespace(state.volume),
                 )
         }
     val features =
@@ -442,11 +442,7 @@ private fun ComicPager(
         }
             ?: if (!isTransitionPage && currentRealPage in 0 until volume.totalPageCount) {
                 ReaderPageTarget(
-                    key =
-                        ReaderPageStateKey(
-                            cacheKeyPrefix,
-                            volume.pageIdentity(currentRealPage) ?: "index:$currentRealPage",
-                        ),
+                    key = PageIdentity.stateKey(volume, currentRealPage),
                     volume = volume,
                     page = currentRealPage,
                 )
@@ -731,11 +727,7 @@ private fun ComicPager(
                         )
                 }
             } else {
-                val pageStateKey =
-                    ReaderPageStateKey(
-                        cacheKeyPrefix,
-                        volume.pageIdentity(page) ?: "index:$page",
-                    )
+                val pageStateKey = PageIdentity.stateKey(volume, page)
                 ComicPage(
                     volume = volume,
                     page = page,
@@ -1848,7 +1840,7 @@ private fun ComicPage(
                                             ReaderPageCacheKey.forPage(
                                                 cacheKeyPrefix,
                                                 page,
-                                                volume.pageIdentity(page),
+                                                PageIdentity.pageIdentity(volume, page),
                                             )
                                         )
                                         .size(viewportSize.width, viewportSize.height)
