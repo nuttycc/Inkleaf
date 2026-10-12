@@ -33,7 +33,7 @@ import kotlinx.coroutines.withContext
 
 /**
  * Navigation-scoped state holder for the comic discovery surface. Retains browse and search state
- * across SourcesScreen and bottom-tab navigation.
+ * across the discover surface and bottom-tab navigation.
  */
 class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
     /** 浏览与搜索共用这一屏：搜索是覆盖在浏览之上的临时态，退出即回到原来的内容流。 */

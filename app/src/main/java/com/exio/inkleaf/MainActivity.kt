@@ -70,13 +70,13 @@ import com.exio.inkleaf.ui.OnlineComicScreen
 import com.exio.inkleaf.ui.OnlineReaderScreen
 import com.exio.inkleaf.ui.OnlineReaderTarget
 import com.exio.inkleaf.ui.PluginDiscoverScreen
-import com.exio.inkleaf.ui.PluginRepoScreen
 import com.exio.inkleaf.ui.ReaderScreen
 import com.exio.inkleaf.ui.SavedScreen
 import com.exio.inkleaf.ui.SettingsScreen
 import com.exio.inkleaf.ui.ShelfScreen
 import com.exio.inkleaf.ui.SourceDetailScreen
-import com.exio.inkleaf.ui.SourcesScreen
+import com.exio.inkleaf.ui.SourceListMode
+import com.exio.inkleaf.ui.SourceListScreen
 import com.exio.inkleaf.ui.ThemeSettingsScreen
 import com.exio.inkleaf.ui.theme.InkleafTheme
 import com.exio.inkleaf.ui.toRouteSeed
@@ -673,7 +673,8 @@ class MainActivity : AppCompatActivity() {
                             )
                         }
                         composable<SourcesRoute> {
-                            SourcesScreen(
+                            SourceListScreen(
+                                mode = SourceListMode.Device,
                                 onBack = { outerNavController.popBackStack() },
                                 onOpenSource = { pluginId ->
                                     outerNavController.navigate(SourceDetailRoute(pluginId))
@@ -702,7 +703,8 @@ class MainActivity : AppCompatActivity() {
                             )
                         }
                         composable<PluginRepoRoute> {
-                            PluginRepoScreen(
+                            SourceListScreen(
+                                mode = SourceListMode.Repository,
                                 onBack = { outerNavController.popBackStack() },
                                 onOpenSource = { pluginId ->
                                     outerNavController.navigate(SourceDetailRoute(pluginId))

@@ -1,9 +1,16 @@
 package com.exio.inkleaf.ui
 
+import android.net.Uri
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import com.exio.inkleaf.InkleafApplication
+import com.exio.inkleaf.plugin.PluginDownloadSource
 import com.exio.inkleaf.plugin.PluginInstallResult
 import com.exio.inkleaf.plugin.PluginManager
 import com.exio.inkleaf.plugin.PluginRepoEntry
@@ -15,9 +22,13 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
- * Runs one source install at a time for the snackbar screens. It owns the busy gate, refreshes the
- * caller's list afterwards, and turns each outcome into wording through the shared pure functions,
- * so a screen only decides which verb its list means.
+ * The one gate every source install goes through.
+ *
+ * It owns the busy gate, the list refresh afterwards, and the wording of each outcome, so the source
+ * list, the repository screen and both import screens cannot disagree about what "installing a
+ * source" means. Install outcomes are either announced (the list screens, where the user is already
+ * looking at the result land) or placed on the screen that raised them (the import screens, which the
+ * user is about to leave).
  */
 @Stable
 internal class SourceInstallCoordinator(
@@ -71,25 +82,15 @@ internal class SourceInstallCoordinator(
         }
     }
 
-    /** Updates a source the device list already holds, so a success reads as an update. */
-    fun update(entry: PluginRepoEntry, sourceName: String) =
-        runOperation {
-            report(
-                pluginManager.installUrl(entry.downloadSource(), activate = true),
-                sourceName,
-                SourceInstallVerb.Update,
-            )
-        }
+    /** Installs a repository entry, which may be a first install, so it reads as an install. */
+    fun install(entry: PluginRepoEntry) {
+        installEntry(entry, entry.name, SourceInstallVerb.Install)
+    }
 
-    /** Installs a catalog entry, which may be a first install, so a success reads as an install. */
-    fun install(entry: PluginRepoEntry) =
-        runOperation {
-            report(
-                pluginManager.installUrl(entry.downloadSource(), activate = true),
-                "未知插件",
-                SourceInstallVerb.Install,
-            )
-        }
+    /** Updates a source the device list already holds, so a success reads as an update. */
+    fun update(entry: PluginRepoEntry, sourceName: String) {
+        installEntry(entry, sourceName, SourceInstallVerb.Update)
+    }
 
     /** Installs every pending update in sequence and reports the tally. */
     fun updateAll(candidates: List<PluginUpdateCandidate>) =
@@ -104,6 +105,43 @@ internal class SourceInstallCoordinator(
         }
 
     /**
+     * Installs a package from a download URL under the shared gate. The outcome is placed on the
+     * screen that asked for it rather than announced, because that screen is about to be left.
+     */
+    fun installUrl(source: PluginDownloadSource, onOutcome: (PluginInstallResult?, String?) -> Unit) {
+        place(onOutcome) { pluginManager.installUrl(source, activate = true) }
+    }
+
+    /** Installs a package the user already has on the device, under the same gate and rules. */
+    fun installFile(uri: Uri, onOutcome: (PluginInstallResult?, String?) -> Unit) {
+        place(onOutcome) { pluginManager.installUri(uri, activate = true) }
+    }
+
+    private fun installEntry(entry: PluginRepoEntry, sourceName: String, verb: SourceInstallVerb) =
+        runOperation {
+            report(
+                pluginManager.installUrl(entry.downloadSource(), activate = true),
+                sourceName,
+                verb,
+            )
+        }
+
+    private fun place(
+        onOutcome: (PluginInstallResult?, String?) -> Unit,
+        call: suspend () -> PluginInstallResult,
+    ) = runGuarded {
+        try {
+            onOutcome(call(), null)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            onOutcome(null, error.message ?: "安装失败")
+        } finally {
+            runCatching { refresh() }
+        }
+    }
+
+    /**
      * Shows the outcome with the requested verb and offers navigation only when a plugin ID is
      * available.
      */
@@ -116,5 +154,28 @@ internal class SourceInstallCoordinator(
         ) {
             message.openPluginId?.let(onOpenSource)
         }
+    }
+}
+
+/**
+ * The shared gate for screens that place their outcome instead of announcing it. The list screens
+ * build their own instance because their refresh has to write to their own state.
+ */
+@Composable
+internal fun rememberSourceInstallCoordinator(
+    onOpenSource: (String) -> Unit = {},
+): SourceInstallCoordinator {
+    val application = LocalContext.current.applicationContext as InkleafApplication
+    val feedback = rememberSourceFeedback()
+    val scope = rememberCoroutineScope()
+    val manager = application.pluginManager
+    return remember(manager, feedback, scope, onOpenSource) {
+        SourceInstallCoordinator(
+            pluginManager = manager,
+            feedback = feedback,
+            scope = scope,
+            refresh = {},
+            onOpenSource = onOpenSource,
+        )
     }
 }

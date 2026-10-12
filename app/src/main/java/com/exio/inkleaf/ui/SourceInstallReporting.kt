@@ -55,17 +55,6 @@ internal fun sourceInstallMessage(
     }
 }
 
-/** The in-page card wording for one install outcome, which never reads as a failure. */
-internal fun installCardMessage(outcome: PluginInstallResult, fallbackName: String): String {
-    val name = outcome.pluginId ?: fallbackName
-    val version = outcome.version?.let { " v$it" } ?: ""
-    return if (outcome.activatable) {
-        "已安装 $name$version"
-    } else {
-        "已安装 $name$version，但未激活：与当前版本不兼容"
-    }
-}
-
 /** Tally of one update sweep. Only a rejection is not counted as updated. */
 internal data class UpdateAllSummary(val updated: Int, val failed: Int) {
     val text: String
