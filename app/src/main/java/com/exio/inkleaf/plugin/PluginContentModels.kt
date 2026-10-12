@@ -257,6 +257,11 @@ object PluginContentCodec {
             }
         }
 
+    /**
+     * Decodes a page response and validates host limits, contiguous indexes and image transforms.
+     * Rejects invalid content with [PluginContentValidationException] before the reader consumes
+     * it.
+     */
     fun pages(value: JsonElement, pluginId: String): PluginPagesResponse =
         json.decodeFromJsonElement<PluginPagesResponse>(value).also { response ->
             validateId(response.sourceId, "pages.sourceId")
@@ -480,6 +485,10 @@ class PluginCatalog(private val runtimeManager: PluginRuntimeManager) {
         return withContext(Dispatchers.Default) { PluginContentCodec.describe(result) }
     }
 
+    /**
+     * Searches distinct requested plugins, or all usable plugins when [pluginIds] is null.
+     * Bounds the result limit and returns per-plugin failures while propagating cancellation.
+     */
     suspend fun search(
         request: PluginSearchRequest,
         pluginIds: List<String>? = null,

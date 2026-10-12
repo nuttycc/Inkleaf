@@ -11,6 +11,10 @@ import org.junit.Test
 
 class SourceInstallReportingTest {
 
+    /**
+     * Checks successful install wording, informational severity and the available open-source
+     * action.
+     */
     @Test
     fun `install verb reads a fresh install as installed`() {
         val message =
@@ -25,6 +29,7 @@ class SourceInstallReportingTest {
         assertEquals("demo", message.openPluginId)
     }
 
+    /** Checks that the update verb changes success wording without changing severity. */
     @Test
     fun `update verb reads the same outcome as updated`() {
         val message =
@@ -38,6 +43,7 @@ class SourceInstallReportingTest {
         assertFalse(message.isError)
     }
 
+    /** Uses the caller-provided display name when an outcome lacks a plugin ID. */
     @Test
     fun `a missing plugin id falls back to the caller's name`() {
         val message =
@@ -50,6 +56,7 @@ class SourceInstallReportingTest {
         assertEquals("已更新 绅士漫画 v0.2.0", message.text)
     }
 
+    /** Omits the version label when the install outcome has no version. */
     @Test
     fun `a version-less outcome omits the version suffix`() {
         val message =
@@ -62,6 +69,10 @@ class SourceInstallReportingTest {
         assertEquals("已安装 demo", message.text)
     }
 
+    /**
+     * Keeps installed wording and navigation for an incompatible source while marking the outcome
+     * as an error.
+     */
     @Test
     fun `an unactivatable install still reads as installed but flags the error`() {
         val message =
@@ -76,6 +87,7 @@ class SourceInstallReportingTest {
         assertEquals("demo", message.openPluginId)
     }
 
+    /** Checks that rejection uses failure wording and cannot offer navigation to a source. */
     @Test
     fun `a rejection reads with the verb's failure text and offers nothing to open`() {
         val message =
@@ -95,6 +107,7 @@ class SourceInstallReportingTest {
         assertNull(message.openPluginId)
     }
 
+    /** Uses the error-code name when a rejected outcome has no human-readable explanation. */
     @Test
     fun `a rejection without a message falls back to the error code name`() {
         val message =
@@ -111,6 +124,7 @@ class SourceInstallReportingTest {
         assertEquals("安装失败: VERSION_CONFLICT", message.text)
     }
 
+    /** Checks that the inline success card names the source and version without an operation verb. */
     @Test
     fun `the in-page card reads a successful install without a verb`() {
         assertEquals(
@@ -119,6 +133,7 @@ class SourceInstallReportingTest {
         )
     }
 
+    /** Explains activation incompatibility in the inline card while preserving installed status. */
     @Test
     fun `the in-page card explains an unactivatable install`() {
         assertEquals(
@@ -127,6 +142,7 @@ class SourceInstallReportingTest {
         )
     }
 
+    /** Counts already-installed outcomes as updates and only rejected outcomes as failures. */
     @Test
     fun `an update sweep counts only rejections as failures`() {
         val summary =
@@ -144,6 +160,7 @@ class SourceInstallReportingTest {
         assertTrue(summary.isError)
     }
 
+    /** Checks that a sweep with no rejections uses success wording and informational severity. */
     @Test
     fun `a clean update sweep reports no failures`() {
         val summary = summarizeUpdateAll(listOf(installed(activatable = true)))
@@ -152,6 +169,7 @@ class SourceInstallReportingTest {
         assertFalse(summary.isError)
     }
 
+    /** Creates an installed outcome with configurable activation, identity and version metadata. */
     private fun installed(
         activatable: Boolean,
         pluginId: String? = "demo",

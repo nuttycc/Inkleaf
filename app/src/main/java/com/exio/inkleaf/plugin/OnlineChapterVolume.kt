@@ -163,6 +163,10 @@ internal class OnlineChapterVolume(
         return globalPage
     }
 
+    /**
+     * Returns cached or downloaded page bytes with transforms applied before caching.
+     * Retries once with refreshed descriptors when an eligible HTTP rejection allows it.
+     */
     private suspend fun loadPage(
         globalPage: Int,
         priority: OnlinePageLoadPriority,
@@ -377,6 +381,10 @@ internal class OnlineChapterVolume(
     }
 }
 
+/**
+ * Builds ordered cache identities from page IDs, falling back to revision and position.
+ * Includes image transforms so bytes restored with different transforms cannot share a cache entry.
+ */
 internal fun onlinePageIdentities(
     sourceRevision: String,
     pages: List<PageDescriptor>,

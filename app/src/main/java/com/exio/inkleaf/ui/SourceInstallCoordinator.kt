@@ -103,6 +103,10 @@ internal class SourceInstallCoordinator(
             )
         }
 
+    /**
+     * Shows the outcome with the requested verb and offers navigation only when a plugin ID is
+     * available.
+     */
     private fun report(outcome: PluginInstallResult, sourceName: String, verb: SourceInstallVerb) {
         val message = sourceInstallMessage(outcome, verb, sourceName)
         feedback.show(

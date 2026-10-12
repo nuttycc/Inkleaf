@@ -262,6 +262,10 @@ internal class OnlineReaderViewModel(
         }
     }
 
+    /**
+     * Prepares an adjacent chapter once per direction and publishes its transition readiness.
+     * Reuses an existing preload and schedules page prefetch without committing the chapter.
+     */
     private fun loadTransitionChapter(direction: ReaderTransitionDirection) {
         if (transitionLoadJobs[direction]?.isActive == true) return
         val target = adjacentChapter(direction) ?: return
@@ -598,6 +602,10 @@ internal class OnlineReaderViewModel(
         chapterLoadJob = viewModelScope.launch { loadActiveChapter() }
     }
 
+    /**
+     * Opens the active or persisted chapter, loads its restored page and publishes reader state.
+     * Starts session tracking and background work on success; records availability on failure.
+     */
     private suspend fun loadActiveChapter() {
         val previousOpened = volume
         state = ReaderPresentationState.Loading
@@ -694,6 +702,11 @@ internal class OnlineReaderViewModel(
         }
     }
 
+    /**
+     * Loads the destination page before committing a chapter switch, reusing [prebuilt] when
+     * possible.
+     * Abandons the candidate if the active chapter or revision changed while it was loading.
+     */
     private suspend fun prepareAndCommitChapter(
         chapter: ChapterSummary,
         index: Int,
@@ -874,6 +887,10 @@ internal class OnlineReaderViewModel(
                 }
         } ?: throw ComicOpenException("插件版本不可用")
 
+    /**
+     * Schedules recurring descriptor checks after [MANIFEST_TTL] while [opened] remains current.
+     * Adopts refresh results and preserves readable cached pages if revalidation fails.
+     */
     private fun scheduleDescriptorRevalidation(
         chapter: ChapterSummary,
         opened: OnlineChapterVolume,
@@ -1515,6 +1532,11 @@ internal class OnlineReaderViewModel(
         activeSegmentStartedElapsedMs = null
     }
 
+    /**
+     * Ends the session once and queues final position and eligible history writes in application
+     * scope.
+     * Waits for pending progress writes before persisting the final location.
+     */
     private fun finishSession() {
         if (sessionEnded) return
         sessionEnded = true

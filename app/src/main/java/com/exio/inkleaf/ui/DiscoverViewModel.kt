@@ -281,6 +281,10 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Loads feed descriptors from browsable sources and selects the first feed in user order.
+     * Reuses an unchanged source signature unless [force] is true; superseded loads cannot publish.
+     */
     fun loadFeeds(
         force: Boolean = false,
     ) {
@@ -401,6 +405,7 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Activates a feed with its remembered filters, or refreshes the current target if it is stale. */
     fun selectFeed(feedKey: String?) {
         val feed = _feeds.value.firstOrNull { it.key == feedKey }
         val filters = feed?.selectedFilters().orEmpty()
@@ -414,6 +419,10 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
         activateBrowseTarget(key, filters)
     }
 
+    /**
+     * Remembers the selected filter for this feed and activates the corresponding browse cache
+     * entry.
+     */
     fun selectBrowseFilter(filterId: String, optionId: String) {
         if (_browseFilters.value[filterId] == optionId) return
         val filters = _browseFilters.value + (filterId to optionId)
@@ -432,6 +441,7 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
         if (_browseNextCursor.value != null) loadBrowsePage()
     }
 
+    /** Retries the failed next page, or forces a first-page refresh for other browse failures. */
     fun retryBrowse() {
         if (browseFailure == BrowseFailure.NEXT_PAGE) {
             loadBrowsePage()
@@ -458,6 +468,10 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
         _selectedPluginIds.value = availablePluginIds.toSet()
     }
 
+    /**
+     * Removes unavailable IDs from an explicit search selection, preserving null as the all-sources
+     * default.
+     */
     fun retainAvailablePluginSelections(availablePluginIds: Set<String>) {
         val current = _selectedPluginIds.value ?: return
         val retained = DiscoverSources.retainSelection(current, availablePluginIds)
@@ -475,6 +489,10 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
         _isRefreshing.value = false
     }
 
+    /**
+     * Searches the trimmed query across selected usable sources and publishes only current results.
+     * Clears search state without a request when the query or eligible source set is empty.
+     */
     fun performSearch() {
         val currentQuery = _query.value.trim()
         if (currentQuery.isBlank()) {
@@ -529,11 +547,16 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Clears the displayed search error and retries the current query and source selection. */
     fun retrySearch() {
         _errorMessage.value = null
         performSearch()
     }
 
+    /**
+     * Cancels the previous browse target and restores a session from the current cache generation.
+     * Loads the first page in browse mode when the restored session is missing or stale.
+     */
     private fun activateBrowseTarget(
         key: PluginBrowseCacheKey?,
         filters: Map<String, String>,
@@ -564,6 +587,10 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Refreshes a missing, invalidated or expired browse session unless a browse request is
+     * running.
+     */
     private fun ensureCurrentBrowseFresh() {
         if (_isBrowsing.value || currentBrowseKey == null) return
         val key = currentBrowseKey ?: return
@@ -577,6 +604,11 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Publishes a valid cached first page, then refreshes it if stale or [force] is true.
+     * Guards publication against target changes and clears the manual refresh indicator on
+     * completion.
+     */
     private fun loadBrowseFirstPage(
         force: Boolean,
         manual: Boolean = false,
@@ -648,6 +680,10 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Loads the current cursor and appends comics without duplicate source IDs.
+     * Discards results if the browse target or plugin cache generation changes during the request.
+     */
     private fun loadBrowsePage() {
         val feed = selectedFeed() ?: return
         val key = currentBrowseKey ?: return

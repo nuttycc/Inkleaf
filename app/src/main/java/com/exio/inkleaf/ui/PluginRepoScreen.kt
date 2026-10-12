@@ -91,6 +91,7 @@ fun PluginRepoScreen(
         }
     val busy = coordinator.busy
 
+    /** Loads a repository index under the shared busy gate and keeps failures in the settings form. */
     fun loadRepo(url: String) {
         coordinator.runGuarded {
             settingsError = null

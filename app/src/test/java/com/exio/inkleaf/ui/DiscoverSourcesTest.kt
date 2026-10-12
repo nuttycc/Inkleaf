@@ -10,6 +10,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class DiscoverSourcesTest {
+    /** Checks that discovery excludes disabled, unhealthy and inactive sources from its usable list. */
     @Test
     fun `usable keeps only healthy active sources`() {
         val plugins =
@@ -23,6 +24,7 @@ class DiscoverSourcesTest {
         assertEquals(listOf("a"), DiscoverSources.usable(plugins).map { it.state.pluginId })
     }
 
+    /** Requires browse capability even when a source is otherwise usable. */
     @Test
     fun `browsable keeps usable sources that declare browse`() {
         val plugins =
@@ -35,6 +37,10 @@ class DiscoverSourcesTest {
         assertEquals(listOf("a"), DiscoverSources.browsable(plugins).map { it.state.pluginId })
     }
 
+    /**
+     * Checks that the browse signature is sorted, includes versions and excludes search-only
+     * sources.
+     */
     @Test
     fun `browse signature is sorted and carries the active version`() {
         val plugins =
@@ -47,11 +53,13 @@ class DiscoverSourcesTest {
         assertEquals(listOf("a:1", "z:2"), DiscoverSources.browseSignature(plugins))
     }
 
+    /** Drops removed source IDs without selecting newly available sources implicitly. */
     @Test
     fun `retain selection narrows to the available ids`() {
         assertEquals(setOf("a"), DiscoverSources.retainSelection(setOf("a", "b"), setOf("a", "c")))
     }
 
+    /** Treats a null selection as all usable sources while preserving their order. */
     @Test
     fun `search targets default to every usable id when nothing is selected`() {
         assertEquals(
@@ -60,6 +68,7 @@ class DiscoverSourcesTest {
         )
     }
 
+    /** Intersects an explicit selection with usable IDs without adding unselected sources. */
     @Test
     fun `search targets narrow an explicit selection to the usable ids`() {
         assertEquals(
@@ -68,6 +77,10 @@ class DiscoverSourcesTest {
         )
     }
 
+    /**
+     * Creates an installed source with configurable state and capabilities without writing plugin
+     * files.
+     */
     private fun plugin(
         id: String,
         version: String = "1",

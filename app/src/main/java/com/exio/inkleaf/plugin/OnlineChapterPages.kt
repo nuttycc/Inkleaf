@@ -26,6 +26,10 @@ internal class VersionedChapterPages(
     private val readPages: suspend (PluginPagesRequest) -> PluginPagesResponse,
     private val activeVersion: suspend () -> String?,
 ) : OnlineChapterPages {
+    /**
+     * Returns pages read under a stable active version, retrying once before throwing
+     * [ComicOpenException].
+     */
     override suspend fun fetch(request: PluginPagesRequest): FetchedChapterPages {
         repeat(2) {
             val before = requireActiveVersion()
@@ -38,6 +42,7 @@ internal class VersionedChapterPages(
         throw ComicOpenException("插件在读取章节时已更新，请重试")
     }
 
+    /** Requires an active plugin version so fetched pages can be assigned a cache identity. */
     private suspend fun requireActiveVersion(): String =
         activeVersion() ?: throw ComicOpenException("插件版本不可用")
 }

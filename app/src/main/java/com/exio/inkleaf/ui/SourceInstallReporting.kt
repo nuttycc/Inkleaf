@@ -76,6 +76,7 @@ internal data class UpdateAllSummary(val updated: Int, val failed: Int) {
     val isError: Boolean get() = failed != 0
 }
 
+/** Counts rejected outcomes as failures; installed and already-installed outcomes count as updated. */
 internal fun summarizeUpdateAll(outcomes: List<PluginInstallResult>): UpdateAllSummary =
     UpdateAllSummary(
         updated = outcomes.count { it.status != PluginInstallStatus.REJECTED },

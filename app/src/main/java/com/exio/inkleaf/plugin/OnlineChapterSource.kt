@@ -82,6 +82,10 @@ internal class OnlineChapterSource(
         )
     }
 
+    /**
+     * Builds a nonempty volume and writes its manifest; closes the volume if manifest writing is
+     * cancelled.
+     */
     private suspend fun build(
         chapter: ChapterSummary,
         request: PluginPagesRequest,
@@ -138,6 +142,7 @@ internal class OnlineChapterSource(
         return OnlineChapterRefresh(response.pages, identity)
     }
 
+    /** Builds a page request, preferring chapter-specific opaque context over the comic context. */
     private fun pagesRequest(
         chapter: ChapterSummary,
         opaqueContext: JsonElement?,
@@ -149,6 +154,7 @@ internal class OnlineChapterSource(
             opaqueContext = chapter.opaqueContext ?: opaqueContext,
         )
 
+    /** Scopes cached pages to the plugin version, access scope and resolved chapter revision. */
     private fun cacheIdentity(
         pluginVersion: String,
         response: PluginPagesResponse,

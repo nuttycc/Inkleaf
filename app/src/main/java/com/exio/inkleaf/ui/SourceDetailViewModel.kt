@@ -138,6 +138,10 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Saves pending settings before invoking a source action, then reports its result and
+     * invalidates derived data.
+     */
     fun invokeAction(action: PluginActionDescriptor) {
         val id = pluginId ?: return
         launchOperation("运行漫画源操作：${action.title}") {
@@ -169,6 +173,10 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Clears saved and displayed settings under the save mutex, then invalidates derived source
+     * data.
+     */
     fun resetToDefaults() {
         val id = pluginId ?: return
         launchOperation("重置漫画源设置") {
@@ -208,6 +216,10 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
             }
     }
 
+    /**
+     * Persists the supplied setting values and invalidates data derived from the previous
+     * configuration.
+     */
     private suspend fun applySettingsChange(
         app: InkleafApplication,
         pluginId: String,
