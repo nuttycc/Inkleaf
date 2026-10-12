@@ -179,7 +179,7 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
     private var installedLoadGeneration = 0L
     private var feedLoadGeneration = 0L
     private var browseGeneration = 0L
-    private var loadedSourceSignature: List<String>? = null
+    private var loadedSearchSignature: List<String>? = null
     private val searchRequestGate = DiscoverSearchRequestGate()
 
     fun scrollAnchor(contextKey: DiscoverScrollContextKey): DiscoverScrollAnchor? =
@@ -243,9 +243,9 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * Reloads the installed source set and reconciles everything derived from it: the pending search
-     * selection, the browse feeds, and — when the browsable set changed while a search is showing —
-     * the results. Safe to call on every entry; unchanged sources cost one metadata read.
+     * Reloads the installed source set and reconciles everything derived from it: the pending
+     * search selection, the browse feeds, and — when usable sources or versions change during a
+     * search — the results. Safe to call on every entry; unchanged sources cost one metadata read.
      */
     fun refreshSources() {
         val generation = ++installedLoadGeneration
@@ -266,16 +266,16 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
                 retainAvailablePluginSelections(
                     DiscoverSources.usable(plugins).mapTo(linkedSetOf()) { it.state.pluginId }
                 )
-                val signature = DiscoverSources.browseSignature(plugins)
+                val signature = DiscoverSources.searchSignature(plugins)
                 if (
-                    loadedSourceSignature != null &&
-                        loadedSourceSignature != signature &&
+                    loadedSearchSignature != null &&
+                        loadedSearchSignature != signature &&
                         _mode.value == Mode.SEARCH &&
                         _query.value.isNotBlank()
                 ) {
                     performSearch()
                 }
-                loadedSourceSignature = signature
+                loadedSearchSignature = signature
             }
             loadFeeds()
         }
@@ -289,8 +289,7 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
         force: Boolean = false,
     ) {
         val browsable = DiscoverSources.browsable(_installedPlugins.value)
-        val signature =
-            browsable.map { "${it.state.pluginId}:${it.state.activeVersion}" }.sorted()
+        val signature = DiscoverSources.browseSignature(_installedPlugins.value)
         if (!force && loadedFeedSignature == signature) {
             if (_mode.value == Mode.BROWSE) ensureCurrentBrowseFresh()
             return

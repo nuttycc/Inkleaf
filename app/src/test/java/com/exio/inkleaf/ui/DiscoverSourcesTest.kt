@@ -7,6 +7,7 @@ import com.exio.inkleaf.plugin.PluginManifest
 import com.exio.inkleaf.plugin.PluginState
 import java.io.File
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Test
 
 class DiscoverSourcesTest {
@@ -54,6 +55,69 @@ class DiscoverSourcesTest {
     }
 
     /** Drops removed source IDs without selecting newly available sources implicitly. */
+    @Test
+    fun `search signature is sorted and includes every usable active version`() {
+        val plugins =
+            listOf(
+                plugin("z", capabilities = listOf(PluginCapabilities.BROWSE)),
+                plugin("a", activeVersion = "2", capabilities = listOf(PluginCapabilities.SEARCH)),
+                plugin("c", capabilities = emptyList()),
+                plugin(
+                    "disabled",
+                    disabled = true,
+                    capabilities = listOf(PluginCapabilities.SEARCH),
+                ),
+                plugin(
+                    "unhealthy",
+                    health = PluginHealth.RUNTIME_UNHEALTHY,
+                    capabilities = listOf(PluginCapabilities.SEARCH),
+                ),
+                plugin(
+                    "inactive",
+                    activeVersion = null,
+                    capabilities = listOf(PluginCapabilities.SEARCH),
+                ),
+            )
+
+        assertEquals(listOf("a:2", "c:1", "z:1"), DiscoverSources.searchSignature(plugins))
+        assertEquals(
+            DiscoverSources.searchSignature(plugins),
+            DiscoverSources.searchSignature(plugins.reversed()),
+        )
+    }
+
+    @Test
+    fun `installing a search-only source changes only the search signature`() {
+        val before = listOf(plugin("browse", capabilities = listOf(PluginCapabilities.BROWSE)))
+        val after = before + plugin("search", capabilities = listOf(PluginCapabilities.SEARCH))
+
+        assertNotEquals(
+            DiscoverSources.searchSignature(before),
+            DiscoverSources.searchSignature(after),
+        )
+        assertEquals(
+            DiscoverSources.browseSignature(before),
+            DiscoverSources.browseSignature(after),
+        )
+    }
+
+    @Test
+    fun `updating a search-only source changes only the search signature`() {
+        val browse = plugin("browse", capabilities = listOf(PluginCapabilities.BROWSE))
+        val search = plugin("search", capabilities = listOf(PluginCapabilities.SEARCH))
+        val before = listOf(browse, search)
+        val after = listOf(browse, search.copy(state = search.state.copy(activeVersion = "2")))
+
+        assertNotEquals(
+            DiscoverSources.searchSignature(before),
+            DiscoverSources.searchSignature(after),
+        )
+        assertEquals(
+            DiscoverSources.browseSignature(before),
+            DiscoverSources.browseSignature(after),
+        )
+    }
+
     @Test
     fun `retain selection narrows to the available ids`() {
         assertEquals(setOf("a"), DiscoverSources.retainSelection(setOf("a", "b"), setOf("a", "c")))

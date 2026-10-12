@@ -22,6 +22,9 @@ internal object DiscoverSources {
     fun browseSignature(plugins: List<InstalledPlugin>): List<String> =
         browsable(plugins).map { "${it.state.pluginId}:${it.state.activeVersion}" }.sorted()
 
+    fun searchSignature(plugins: List<InstalledPlugin>): List<String> =
+        usable(plugins).map { "${it.state.pluginId}:${it.state.activeVersion}" }.sorted()
+
     /** Narrows a prior selection to the ids still available. */
     fun retainSelection(current: Set<String>, available: Set<String>): Set<String> =
         current.intersect(available)
