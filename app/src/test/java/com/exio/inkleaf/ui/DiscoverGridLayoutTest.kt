@@ -27,7 +27,7 @@ class DiscoverGridLayoutTest {
         )
 
     @Test
-    fun `browse trailing load more follows the comics while paging in`() {
+    fun `browse trailing progress follows the comics while paging in`() {
         val layout =
             browseLayout(
                 input = idleBrowse.copy(isBrowsing = true, hasMore = true),
@@ -35,7 +35,7 @@ class DiscoverGridLayoutTest {
             )
 
         assertTrue(layout.leading.isEmpty())
-        assertEquals(listOf(DiscoverStructuralItem.LOAD_MORE), layout.trailing)
+        assertEquals(listOf(DiscoverStructuralItem.BROWSE_PAGING), layout.trailing)
         assertEquals(0, layout.comicItems.single().gridIndex)
     }
 

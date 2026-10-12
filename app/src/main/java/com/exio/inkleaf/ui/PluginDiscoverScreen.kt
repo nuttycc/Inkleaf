@@ -927,6 +927,7 @@ private fun LazyGridScope.discoverStructuralItem(
         when (item) {
             DiscoverStructuralItem.FEED_LOADING,
             DiscoverStructuralItem.BROWSE_PROGRESS,
+            DiscoverStructuralItem.BROWSE_PAGING,
             DiscoverStructuralItem.SEARCH_PROGRESS -> CenteredProgress()
             DiscoverStructuralItem.FEED_EMPTY_ERROR,
             DiscoverStructuralItem.FEED_ERROR,

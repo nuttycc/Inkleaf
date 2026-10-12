@@ -26,6 +26,8 @@ enum class DiscoverStructuralItem {
     /** Centered progress while the first page of a feed is loading. */
     BROWSE_PROGRESS,
 
+    BROWSE_PAGING,
+
     /** The selected feed has no content at all. */
     BROWSE_EMPTY,
 
@@ -126,7 +128,7 @@ fun discoverBrowseGridLayout(
     }
     val trailing =
         when {
-            input.isBrowsing && comicKeys.isNotEmpty() -> listOf(DiscoverStructuralItem.LOAD_MORE)
+            input.isBrowsing && comicKeys.isNotEmpty() -> listOf(DiscoverStructuralItem.BROWSE_PAGING)
             input.hasMore && input.hasBrowseError -> listOf(DiscoverStructuralItem.LOAD_MORE)
             else -> emptyList()
         }
