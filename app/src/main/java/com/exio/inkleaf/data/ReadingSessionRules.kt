@@ -21,11 +21,14 @@ object ReadingSessionRules {
     /**
      * A session enters permanent history when either threshold is met: 30s of effective reading, or
      * the end/checkpoint position differs from start.
+     *
+     * Generic over the position type so the offline and the online readers share one rule rather
+     * than each restating it.
      */
-    fun qualifiesAsPermanent(
+    fun <T : ReadingPosition<T>> qualifiesAsPermanent(
         activeReadingMillis: Long,
-        startPosition: ReadingPositionSnapshot,
-        latestPosition: ReadingPositionSnapshot,
+        startPosition: T,
+        latestPosition: T,
     ): Boolean {
         require(activeReadingMillis >= 0)
         if (activeReadingMillis >= MIN_ACTIVE_READING_MS) return true
