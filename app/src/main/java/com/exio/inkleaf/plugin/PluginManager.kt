@@ -17,6 +17,7 @@ class PluginManager(
     private val store: PluginPackageStore,
     private val runtimeManager: PluginRuntimeManager,
     private val onlineContentRepository: OnlineContentRepository? = null,
+    private val browseRepository: PluginBrowseRepository? = null,
     private val settingsRepository: PluginSettingsRepository? = null,
     private val downloader: PluginPackageDownloader =
         PluginPackageDownloader(
@@ -82,6 +83,18 @@ class PluginManager(
         runtimeManager.recover(pluginId).also { result ->
             if (result != null) markAvailable(pluginId)
         }
+
+    /**
+     * Drops everything derived from a source's current runtime after its behavior changed — its
+     * loaded runtime, its cached browse listings, and its cached metadata. Callers that mutate a
+     * source's settings or run an action route through here instead of reaching for the individual
+     * caches, so the invalidation rules live in one place.
+     */
+    suspend fun invalidateDerivedData(pluginId: String) {
+        runtimeManager.reload(pluginId)
+        browseRepository?.clear(pluginId)
+        onlineContentRepository?.invalidateMetadata(pluginId)
+    }
 
     suspend fun uninstall(pluginId: String): Boolean {
         val removed = runtimeManager.uninstall(pluginId)

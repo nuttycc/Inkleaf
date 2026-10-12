@@ -75,6 +75,10 @@ data class InstalledPlugin(
     val manifest: PluginManifest? = null,
 )
 
+/** A source browsing can offer: an active version, not disabled, and healthy. */
+internal val InstalledPlugin.isUsable: Boolean
+    get() = state.activeVersion != null && !state.disabled && state.health == PluginHealth.HEALTHY
+
 internal object PluginStorageLimits {
     const val MAX_PACKAGE_BYTES = 64L * 1024L * 1024L
     const val MAX_ASSET_BYTES = 32L * 1024L * 1024L

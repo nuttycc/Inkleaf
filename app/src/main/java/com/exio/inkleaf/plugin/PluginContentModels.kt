@@ -257,6 +257,11 @@ object PluginContentCodec {
             }
         }
 
+    /**
+     * Decodes a page response and validates host limits, contiguous indexes and image transforms.
+     * Rejects invalid content with [PluginContentValidationException] before the reader consumes
+     * it.
+     */
     fun pages(value: JsonElement, pluginId: String): PluginPagesResponse =
         json.decodeFromJsonElement<PluginPagesResponse>(value).also { response ->
             validateId(response.sourceId, "pages.sourceId")
@@ -281,18 +286,7 @@ object PluginContentCodec {
                 validateHeaders(page.headers, "page.headers")
                 page.referer?.let { validateUrl(it, "page.referer") }
                 validateOpaque(page.opaqueContext)
-                page.imageTransform?.let { transform ->
-                    if (response.chapterId.toLongOrNull()?.let { it >= 0 } != true) {
-                        throw PluginContentValidationException(
-                            "Transformed page chapter ids must be non-negative numbers"
-                        )
-                    }
-                    if (transform.scrambleId < 0) {
-                        throw PluginContentValidationException(
-                            "Image transform scramble ids must be non-negative"
-                        )
-                    }
-                }
+                page.imageTransform?.let { PageImageTransforms.validate(it, response.chapterId) }
             }
         }
 
@@ -491,6 +485,10 @@ class PluginCatalog(private val runtimeManager: PluginRuntimeManager) {
         return withContext(Dispatchers.Default) { PluginContentCodec.describe(result) }
     }
 
+    /**
+     * Searches distinct requested plugins, or all usable plugins when [pluginIds] is null.
+     * Bounds the result limit and returns per-plugin failures while propagating cancellation.
+     */
     suspend fun search(
         request: PluginSearchRequest,
         pluginIds: List<String>? = null,
@@ -502,11 +500,7 @@ class PluginCatalog(private val runtimeManager: PluginRuntimeManager) {
                 ?: withContext(Dispatchers.IO) {
                     runtimeManager
                         .installedPlugins()
-                        .filter {
-                            !it.state.disabled &&
-                                it.state.health == PluginHealth.HEALTHY &&
-                                it.state.activeVersion != null
-                        }
+                        .filter { it.isUsable }
                         .map { it.state.pluginId }
                 }
         coroutineScope {

@@ -95,7 +95,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.composables.icons.materialsymbols.outlined.R as MaterialSymbolsOutlinedR
-import com.exio.inkleaf.InkleafApplication
 import com.exio.inkleaf.R
 import com.exio.inkleaf.data.DiscoverLayoutMode
 import com.exio.inkleaf.data.DiscoverLayoutSettings
@@ -104,7 +103,6 @@ import com.exio.inkleaf.plugin.ComicSummary
 import com.exio.inkleaf.plugin.InstalledPlugin
 import com.exio.inkleaf.plugin.PageImage
 import com.exio.inkleaf.plugin.PluginFilterDescriptor
-import com.exio.inkleaf.plugin.PluginHealth
 import com.exio.inkleaf.plugin.PluginSearchResult
 import kotlinx.coroutines.flow.first
 import sh.calvin.reorderable.ReorderableItem
@@ -123,9 +121,6 @@ fun PluginDiscoverScreen(
     modifier: Modifier = Modifier,
     viewModel: DiscoverViewModel = viewModel(),
 ) {
-    val context = LocalContext.current
-    val application = context.applicationContext as InkleafApplication
-
     val mode by viewModel.mode.collectAsStateWithLifecycle()
     val layoutSettings by viewModel.layoutSettings.collectAsStateWithLifecycle()
     val installedPlugins by viewModel.installedPlugins.collectAsStateWithLifecycle()
@@ -149,49 +144,13 @@ fun PluginDiscoverScreen(
     val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
 
     LaunchedEffect(Unit) {
-        viewModel.loadInstalledPlugins(application.pluginManager)
+        viewModel.refreshSources()
     }
 
     val activeHealthyPlugins =
         remember(installedPlugins) {
-            installedPlugins.filter {
-                !it.state.disabled &&
-                    it.state.health == PluginHealth.HEALTHY &&
-                    it.state.activeVersion != null
-            }
+            DiscoverSources.usable(installedPlugins)
         }
-    val activePluginSignature =
-        remember(activeHealthyPlugins) {
-            activeHealthyPlugins.map { "${it.state.pluginId}:${it.state.activeVersion}" }.sorted()
-        }
-    val latestMode by rememberUpdatedState(mode)
-    val latestQuery by rememberUpdatedState(query)
-    var observedPluginSignature by remember { mutableStateOf<List<String>?>(null) }
-    LaunchedEffect(activePluginSignature) {
-        val previousSignature = observedPluginSignature
-        observedPluginSignature = activePluginSignature
-
-        viewModel.retainAvailablePluginSelections(
-            activeHealthyPlugins.mapTo(linkedSetOf()) { it.state.pluginId }
-        )
-        if (
-            previousSignature != null &&
-                previousSignature != activePluginSignature &&
-                latestMode == DiscoverViewModel.Mode.SEARCH &&
-                latestQuery.isNotBlank()
-        ) {
-            viewModel.performSearch(
-                application.pluginCatalog,
-                activeHealthyPlugins,
-            )
-        }
-        viewModel.loadFeeds(
-            application.pluginCatalog,
-            application.pluginBrowseRepository,
-            activeHealthyPlugins,
-        )
-    }
-
     val defaultSelectedPluginIds =
         remember(activeHealthyPlugins) {
             activeHealthyPlugins.map { it.state.pluginId }.toSet()
@@ -397,7 +356,7 @@ fun PluginDiscoverScreen(
         if (
             mode == DiscoverViewModel.Mode.BROWSE && reachedPrefetchEdge && browseNextCursor != null
         ) {
-            viewModel.loadMore(application.pluginBrowseRepository)
+            viewModel.loadMore()
         }
     }
 
@@ -423,21 +382,14 @@ fun PluginDiscoverScreen(
                     DiscoverSearchTopBar(
                         query = query,
                         onQueryChange = viewModel::updateQuery,
-                        onSearch = {
-                            viewModel.performSearch(
-                                application.pluginCatalog,
-                                activeHealthyPlugins,
-                            )
-                        },
-                        onExit = { viewModel.exitSearch(application.pluginBrowseRepository) },
+                        onSearch = { viewModel.performSearch() },
+                        onExit = { viewModel.exitSearch() },
                     )
                 } else {
                     DiscoverBrowseTopBar(
                         sources = sources,
                         currentPluginId = selectedFeed?.pluginId,
-                        onSelectSource = { pluginId ->
-                            viewModel.selectSource(application.pluginBrowseRepository, pluginId)
-                        },
+                        onSelectSource = { pluginId -> viewModel.selectSource(pluginId) },
                         onSearch = { viewModel.enterSearch() },
                         onOpenLayout = { showLayoutSheet = true },
                         onOpenSources = onOpenSources,
@@ -454,10 +406,7 @@ fun PluginDiscoverScreen(
                                 activeHealthyPlugins.map { it.state.pluginId },
                             )
                             if (query.isNotBlank()) {
-                                viewModel.performSearch(
-                                    application.pluginCatalog,
-                                    activeHealthyPlugins,
-                                )
+                                viewModel.performSearch()
                             }
                         },
                         onSelectAll = {
@@ -465,10 +414,7 @@ fun PluginDiscoverScreen(
                                 activeHealthyPlugins.map { it.state.pluginId }
                             )
                             if (query.isNotBlank()) {
-                                viewModel.performSearch(
-                                    application.pluginCatalog,
-                                    activeHealthyPlugins,
-                                )
+                                viewModel.performSearch()
                             }
                         },
                     )
@@ -476,13 +422,9 @@ fun PluginDiscoverScreen(
                     FeedCategoryChips(
                         feeds = currentSourceFeeds,
                         selectedFeedKey = selectedFeedKey,
-                        onSelect = { feedKey ->
-                            viewModel.selectFeed(application.pluginBrowseRepository, feedKey)
-                        },
+                        onSelect = { feedKey -> viewModel.selectFeed(feedKey) },
                         onMoveFeed = viewModel::moveFeed,
-                        onDragSettled = {
-                            viewModel.onCategoryDragFinished(application.pluginBrowseRepository)
-                        },
+                        onDragSettled = { viewModel.onCategoryDragFinished() },
                     )
                     selectedFeed
                         ?.descriptor
@@ -494,7 +436,6 @@ fun PluginDiscoverScreen(
                                 selected = browseFilters,
                                 onSelected = { filterId, optionId ->
                                     viewModel.selectBrowseFilter(
-                                        application.pluginBrowseRepository,
                                         filterId,
                                         optionId,
                                     )
@@ -536,13 +477,7 @@ fun PluginDiscoverScreen(
     ) { padding ->
         PullToRefreshBox(
             isRefreshing = isRefreshing,
-            onRefresh = {
-                viewModel.refresh(
-                    application.pluginCatalog,
-                    application.pluginBrowseRepository,
-                    activeHealthyPlugins,
-                )
-            },
+            onRefresh = { viewModel.refresh() },
             modifier = Modifier.fillMaxSize().padding(padding),
         ) {
             LazyVerticalGrid(
@@ -578,17 +513,8 @@ fun PluginDiscoverScreen(
                         hasMore = browseNextCursor != null,
                         isListLayout = isListLayout,
                         onOpenComic = onOpenComic,
-                        onReloadFeeds = {
-                            viewModel.loadFeeds(
-                                application.pluginCatalog,
-                                application.pluginBrowseRepository,
-                                activeHealthyPlugins,
-                                force = true,
-                            )
-                        },
-                        onRetryBrowse = {
-                            viewModel.retryBrowse(application.pluginBrowseRepository)
-                        },
+                        onReloadFeeds = { viewModel.reloadFeeds() },
+                        onRetryBrowse = { viewModel.retryBrowse() },
                     )
                 } else {
                     searchContent(
@@ -600,12 +526,7 @@ fun PluginDiscoverScreen(
                         hasNoResults = hasNoResults,
                         isListLayout = isListLayout,
                         onOpenComic = onOpenComic,
-                        onRetry = {
-                            viewModel.retrySearch(
-                                application.pluginCatalog,
-                                activeHealthyPlugins,
-                            )
-                        },
+                        onRetry = { viewModel.retrySearch() },
                     )
                 }
             }

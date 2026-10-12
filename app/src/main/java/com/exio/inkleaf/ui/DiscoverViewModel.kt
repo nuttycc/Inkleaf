@@ -3,6 +3,7 @@ package com.exio.inkleaf.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.exio.inkleaf.InkleafApplication
 import com.exio.inkleaf.data.DiscoverLayoutMode
 import com.exio.inkleaf.data.DiscoverLayoutSettings
 import com.exio.inkleaf.data.DiscoverSettingsRepository
@@ -11,13 +12,8 @@ import com.exio.inkleaf.plugin.ComicSummary
 import com.exio.inkleaf.plugin.InstalledPlugin
 import com.exio.inkleaf.plugin.PluginBrowseCacheKey
 import com.exio.inkleaf.plugin.PluginBrowseCacheSnapshot
-import com.exio.inkleaf.plugin.PluginBrowseRepository
 import com.exio.inkleaf.plugin.PluginBrowseRequest
-import com.exio.inkleaf.plugin.PluginCapabilities
-import com.exio.inkleaf.plugin.PluginCatalog
 import com.exio.inkleaf.plugin.PluginFeedDescriptor
-import com.exio.inkleaf.plugin.PluginHealth
-import com.exio.inkleaf.plugin.PluginManager
 import com.exio.inkleaf.plugin.PluginSearchRequest
 import com.exio.inkleaf.plugin.PluginSearchResult
 import kotlinx.coroutines.CancellationException
@@ -45,7 +41,6 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
         BROWSE,
         SEARCH,
     }
-
     data class Feed(
         val pluginId: String,
         val pluginName: String,
@@ -74,6 +69,10 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private val settingsRepo = DiscoverSettingsRepository(app)
+    private val application = getApplication<InkleafApplication>()
+    private val pluginManager = application.pluginManager
+    private val catalog = application.pluginCatalog
+    private val browseRepository = application.pluginBrowseRepository
 
     private val _mode = MutableStateFlow(Mode.BROWSE)
     val mode: StateFlow<Mode> = _mode.asStateFlow()
@@ -180,6 +179,7 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
     private var installedLoadGeneration = 0L
     private var feedLoadGeneration = 0L
     private var browseGeneration = 0L
+    private var loadedSearchSignature: List<String>? = null
     private val searchRequestGate = DiscoverSearchRequestGate()
 
     fun scrollAnchor(contextKey: DiscoverScrollContextKey): DiscoverScrollAnchor? =
@@ -197,20 +197,20 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** 退出搜索一并清空查询词与结果：顶栏变回源名后，搜索态在界面上再无任何可见承载， 留着它就成了用户看不见却仍会影响下一次搜索的隐藏状态。 */
-    fun exitSearch(browseRepository: PluginBrowseRepository) {
+    fun exitSearch() {
         _mode.value = Mode.BROWSE
         updateQuery("")
-        ensureCurrentBrowseFresh(browseRepository)
+        ensureCurrentBrowseFresh()
     }
 
     /** 切换当前源：落到该源自定义排序后的第一个内容流上 */
-    fun selectSource(repository: PluginBrowseRepository, pluginId: String) {
+    fun selectSource(pluginId: String) {
         val target =
             applyUserOrderToFeeds(
                 feeds = _feeds.value.filter { it.pluginId == pluginId },
                 userOrder = _feedOrder.value,
             ).firstOrNull() ?: return
-        selectFeed(repository, target.key)
+        selectFeed(target.key)
     }
 
     fun setLayout(value: DiscoverLayoutMode) {
@@ -222,53 +222,76 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** 下拉刷新的统一入口：刷新用户此刻真正在看的东西 */
-    fun refresh(
-        catalog: PluginCatalog,
-        browseRepository: PluginBrowseRepository,
-        availablePlugins: List<InstalledPlugin>,
-    ) {
+    fun refresh() {
         when (_mode.value) {
             Mode.BROWSE -> {
                 if (currentBrowseKey == null) return
                 _isRefreshing.value = true
-                loadBrowseFirstPage(browseRepository, force = true, manual = true)
+                loadBrowseFirstPage(force = true, manual = true)
             }
             Mode.SEARCH -> {
                 if (_query.value.isBlank()) return
                 _isRefreshing.value = true
-                performSearch(catalog, availablePlugins)
+                performSearch()
             }
         }
     }
 
-    fun loadInstalledPlugins(manager: PluginManager) {
+    /** 重新发现各源的内容流（例如插件版本变化后）：忽略内容流签名缓存强制重载。 */
+    fun reloadFeeds() {
+        loadFeeds(force = true)
+    }
+
+    /**
+     * Reloads the installed source set and reconciles everything derived from it: the pending
+     * search selection, the browse feeds, and — when usable sources or versions change during a
+     * search — the results. Safe to call on every entry; unchanged sources cost one metadata read.
+     */
+    fun refreshSources() {
         val generation = ++installedLoadGeneration
         installedLoadJob?.cancel()
         installedLoadJob = viewModelScope.launch {
-            try {
-                val plugins = withContext(Dispatchers.IO) { manager.installed() }
-                if (generation == installedLoadGeneration) _installedPlugins.value = plugins
-            } catch (error: CancellationException) {
-                throw error
-            } catch (_: Throwable) {
-                // Preserve the last usable list during a transient metadata read failure.
+            val plugins =
+                try {
+                    withContext(Dispatchers.IO) { pluginManager.installed() }
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (_: Throwable) {
+                    // Preserve the last usable list during a transient metadata read failure.
+                    null
+                }
+            if (generation != installedLoadGeneration) return@launch
+            if (plugins != null) {
+                _installedPlugins.value = plugins
+                retainAvailablePluginSelections(
+                    DiscoverSources.usable(plugins).mapTo(linkedSetOf()) { it.state.pluginId }
+                )
+                val signature = DiscoverSources.searchSignature(plugins)
+                if (
+                    loadedSearchSignature != null &&
+                        loadedSearchSignature != signature &&
+                        _mode.value == Mode.SEARCH &&
+                        _query.value.isNotBlank()
+                ) {
+                    performSearch()
+                }
+                loadedSearchSignature = signature
             }
+            loadFeeds()
         }
     }
 
+    /**
+     * Loads feed descriptors from browsable sources and selects the first feed in user order.
+     * Reuses an unchanged source signature unless [force] is true; superseded loads cannot publish.
+     */
     fun loadFeeds(
-        catalog: PluginCatalog,
-        browseRepository: PluginBrowseRepository,
-        availablePlugins: List<InstalledPlugin>,
         force: Boolean = false,
     ) {
-        val signature =
-            availablePlugins
-                .filter { PluginCapabilities.BROWSE in it.manifest?.capabilities.orEmpty() }
-                .map { "${it.state.pluginId}:${it.state.activeVersion}" }
-                .sorted()
+        val browsable = DiscoverSources.browsable(_installedPlugins.value)
+        val signature = DiscoverSources.browseSignature(_installedPlugins.value)
         if (!force && loadedFeedSignature == signature) {
-            if (_mode.value == Mode.BROWSE) ensureCurrentBrowseFresh(browseRepository)
+            if (_mode.value == Mode.BROWSE) ensureCurrentBrowseFresh()
             return
         }
 
@@ -280,8 +303,7 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val previousSelected = selectedFeed()
                 val loadResults = coroutineScope {
-                    availablePlugins
-                        .filter { PluginCapabilities.BROWSE in it.manifest?.capabilities.orEmpty() }
+                    browsable
                         .map { plugin ->
                             async {
                                 try {
@@ -331,7 +353,7 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
                             selected?.pluginVersion != previousSelected?.pluginVersion ||
                             selected?.descriptor != previousSelected?.descriptor
                     ) {
-                        selectFeed(browseRepository, selected?.key)
+                        selectFeed(selected?.key)
                     }
                 }
             } finally {
@@ -367,7 +389,7 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
      * 拖拽落位后的收尾：当前源的自定义排序可能已变化，把选中同步到该源排序后的第一个，
      * 这样"重排后默认选中总是第一位"。拖动过程中不切选中，避免每拖过一个分类就重载一次内容。
      */
-    fun onCategoryDragFinished(repository: PluginBrowseRepository) {
+    fun onCategoryDragFinished() {
         val mutated = feedOrderMutatedThisGesture
         feedOrderMutatedThisGesture = false
         if (!mutated) return
@@ -378,50 +400,52 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
                 userOrder = _feedOrder.value,
             ).firstOrNull() ?: return
         if (first.key != _selectedFeedKey.value) {
-            selectFeed(repository, first.key)
+            selectFeed(first.key)
         }
     }
 
-    fun selectFeed(repository: PluginBrowseRepository, feedKey: String?) {
+    /** Activates a feed with its remembered filters, or refreshes the current target if it is stale. */
+    fun selectFeed(feedKey: String?) {
         val feed = _feeds.value.firstOrNull { it.key == feedKey }
         val filters = feed?.selectedFilters().orEmpty()
         val key = feed?.cacheKey(filters)
         if (key != null && key == currentBrowseKey) {
-            ensureCurrentBrowseFresh(repository)
+            ensureCurrentBrowseFresh()
             return
         }
 
         _selectedFeedKey.value = feedKey
-        activateBrowseTarget(repository, key, filters)
+        activateBrowseTarget(key, filters)
     }
 
-    fun selectBrowseFilter(
-        repository: PluginBrowseRepository,
-        filterId: String,
-        optionId: String,
-    ) {
+    /**
+     * Remembers the selected filter for this feed and activates the corresponding browse cache
+     * entry.
+     */
+    fun selectBrowseFilter(filterId: String, optionId: String) {
         if (_browseFilters.value[filterId] == optionId) return
         val filters = _browseFilters.value + (filterId to optionId)
         val feed = selectedFeed() ?: return
         browseFiltersByFeed[feed.sessionKey] = filters
         val key = feed.cacheKey(filters)
-        activateBrowseTarget(repository, key, filters)
+        activateBrowseTarget(key, filters)
     }
 
     /**
      * 触底预取会在滚动中被反复调用，这里必须挡住重入：loadBrowsePage 会先 cancel 掉 正在跑的
      * browseJob，不挡的话每次调用都把上一次快取到手的请求掐掉，永远加载不完。
      */
-    fun loadMore(repository: PluginBrowseRepository) {
+    fun loadMore() {
         if (_isBrowsing.value) return
-        if (_browseNextCursor.value != null) loadBrowsePage(repository)
+        if (_browseNextCursor.value != null) loadBrowsePage()
     }
 
-    fun retryBrowse(repository: PluginBrowseRepository) {
+    /** Retries the failed next page, or forces a first-page refresh for other browse failures. */
+    fun retryBrowse() {
         if (browseFailure == BrowseFailure.NEXT_PAGE) {
-            loadBrowsePage(repository)
+            loadBrowsePage()
         } else {
-            loadBrowseFirstPage(repository, force = true)
+            loadBrowseFirstPage(force = true)
         }
     }
 
@@ -443,9 +467,13 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
         _selectedPluginIds.value = availablePluginIds.toSet()
     }
 
+    /**
+     * Removes unavailable IDs from an explicit search selection, preserving null as the all-sources
+     * default.
+     */
     fun retainAvailablePluginSelections(availablePluginIds: Set<String>) {
         val current = _selectedPluginIds.value ?: return
-        val retained = current.intersect(availablePluginIds)
+        val retained = DiscoverSources.retainSelection(current, availablePluginIds)
         if (retained != current) _selectedPluginIds.value = retained
     }
 
@@ -460,28 +488,24 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
         _isRefreshing.value = false
     }
 
-    fun performSearch(catalog: PluginCatalog, availablePlugins: List<InstalledPlugin>) {
+    /**
+     * Searches the trimmed query across selected usable sources and publishes only current results.
+     * Clears search state without a request when the query or eligible source set is empty.
+     */
+    fun performSearch() {
         val currentQuery = _query.value.trim()
         if (currentQuery.isBlank()) {
             finishSearchWithoutRequest()
             return
         }
 
-        val activeHealthyIds =
-            availablePlugins
-                .filter {
-                    !it.state.disabled &&
-                        it.state.health == PluginHealth.HEALTHY &&
-                        it.state.activeVersion != null
-                }
-                .map { it.state.pluginId }
-        if (activeHealthyIds.isEmpty()) {
+        val usableIds = DiscoverSources.usable(_installedPlugins.value).map { it.state.pluginId }
+        if (usableIds.isEmpty()) {
             finishSearchWithoutRequest()
             return
         }
 
-        val targetIds =
-            (_selectedPluginIds.value ?: activeHealthyIds.toSet()).filter { it in activeHealthyIds }
+        val targetIds = DiscoverSources.searchTargets(_selectedPluginIds.value, usableIds)
         if (targetIds.isEmpty()) {
             finishSearchWithoutRequest()
             return
@@ -522,13 +546,17 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun retrySearch(catalog: PluginCatalog, availablePlugins: List<InstalledPlugin>) {
+    /** Clears the displayed search error and retries the current query and source selection. */
+    fun retrySearch() {
         _errorMessage.value = null
-        performSearch(catalog, availablePlugins)
+        performSearch()
     }
 
+    /**
+     * Cancels the previous browse target and restores a session from the current cache generation.
+     * Loads the first page in browse mode when the restored session is missing or stale.
+     */
     private fun activateBrowseTarget(
-        repository: PluginBrowseRepository,
         key: PluginBrowseCacheKey?,
         filters: Map<String, String>,
     ) {
@@ -542,7 +570,7 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
 
         val session = key?.let { resolvedKey ->
             browseSessions[resolvedKey]?.takeIf {
-                it.cacheGeneration == repository.cacheGeneration(resolvedKey.pluginId)
+                it.cacheGeneration == browseRepository.cacheGeneration(resolvedKey.pluginId)
             }
         }
         if (key != null && session == null) browseSessions.remove(key)
@@ -552,27 +580,35 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
         if (
             _mode.value == Mode.BROWSE &&
                 key != null &&
-                (session == null || !repository.isFresh(session.firstPageFetchedAtMs))
+                (session == null || !browseRepository.isFresh(session.firstPageFetchedAtMs))
         ) {
-            loadBrowseFirstPage(repository, force = false)
+            loadBrowseFirstPage(force = false)
         }
     }
 
-    private fun ensureCurrentBrowseFresh(repository: PluginBrowseRepository) {
+    /**
+     * Refreshes a missing, invalidated or expired browse session unless a browse request is
+     * running.
+     */
+    private fun ensureCurrentBrowseFresh() {
         if (_isBrowsing.value || currentBrowseKey == null) return
         val key = currentBrowseKey ?: return
         val session = browseSessions[key]
         if (
             session == null ||
-                session.cacheGeneration != repository.cacheGeneration(key.pluginId) ||
-                !repository.isFresh(session.firstPageFetchedAtMs)
+                session.cacheGeneration != browseRepository.cacheGeneration(key.pluginId) ||
+                !browseRepository.isFresh(session.firstPageFetchedAtMs)
         ) {
-            loadBrowseFirstPage(repository, force = false)
+            loadBrowseFirstPage(force = false)
         }
     }
 
+    /**
+     * Publishes a valid cached first page, then refreshes it if stale or [force] is true.
+     * Guards publication against target changes and clears the manual refresh indicator on
+     * completion.
+     */
     private fun loadBrowseFirstPage(
-        repository: PluginBrowseRepository,
         force: Boolean,
         manual: Boolean = false,
     ) {
@@ -592,8 +628,8 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
             browseFailure = null
             try {
                 val cached =
-                    repository.readFirstPage(key)?.takeIf {
-                        it.cacheGeneration == repository.cacheGeneration(key.pluginId)
+                    browseRepository.readFirstPage(key)?.takeIf {
+                        it.cacheGeneration == browseRepository.cacheGeneration(key.pluginId)
                     }
                 if (generation != browseGeneration || key != currentBrowseKey) return@launch
 
@@ -605,10 +641,10 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
                 ) {
                     publishFirstPage(key, cached)
                 }
-                if (!force && cached != null && repository.isFresh(cached)) return@launch
+                if (!force && cached != null && browseRepository.isFresh(cached)) return@launch
 
                 val refreshed =
-                    repository.refreshFirstPage(
+                    browseRepository.refreshFirstPage(
                         key = key,
                         request =
                             PluginBrowseRequest(feedId = feed.descriptor.id, filters = filters),
@@ -616,7 +652,7 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
                         force = force,
                     )
                 if (generation == browseGeneration && key == currentBrowseKey) {
-                    if (refreshed.cacheGeneration == repository.cacheGeneration(key.pluginId)) {
+                    if (refreshed.cacheGeneration == browseRepository.cacheGeneration(key.pluginId)) {
                         publishFirstPage(key, refreshed)
                     } else {
                         _browseError.value = "内容源版本已更新，请重试"
@@ -643,12 +679,16 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun loadBrowsePage(repository: PluginBrowseRepository) {
+    /**
+     * Loads the current cursor and appends comics without duplicate source IDs.
+     * Discards results if the browse target or plugin cache generation changes during the request.
+     */
+    private fun loadBrowsePage() {
         val feed = selectedFeed() ?: return
         val key = currentBrowseKey ?: return
         val cursor = _browseNextCursor.value ?: return
         val filters = _browseFilters.value
-        val cacheGeneration = repository.cacheGeneration(key.pluginId)
+        val cacheGeneration = browseRepository.cacheGeneration(key.pluginId)
         val generation = ++browseGeneration
         browseJob?.cancel()
         browseJob = viewModelScope.launch {
@@ -657,7 +697,7 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
             browseFailure = null
             try {
                 val page =
-                    repository.loadPage(
+                    browseRepository.loadPage(
                         feed.pluginId,
                         PluginBrowseRequest(
                             feedId = feed.descriptor.id,
@@ -668,7 +708,7 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
                 if (
                     generation == browseGeneration &&
                         key == currentBrowseKey &&
-                        cacheGeneration == repository.cacheGeneration(key.pluginId)
+                        cacheGeneration == browseRepository.cacheGeneration(key.pluginId)
                 ) {
                     _browseItems.value =
                         (_browseItems.value + page.items).distinctBy { it.sourceId }

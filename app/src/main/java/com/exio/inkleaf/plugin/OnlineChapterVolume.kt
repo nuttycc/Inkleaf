@@ -163,6 +163,10 @@ internal class OnlineChapterVolume(
         return globalPage
     }
 
+    /**
+     * Returns cached or downloaded page bytes with transforms applied before caching.
+     * Retries once with refreshed descriptors when an eligible HTTP rejection allows it.
+     */
     private suspend fun loadPage(
         globalPage: Int,
         priority: OnlinePageLoadPriority,
@@ -173,7 +177,7 @@ internal class OnlineChapterVolume(
         val target = targetFor(page)
         return try {
             cache.getOrLoad(target.key, priority) {
-                applyImageTransform(download(target.descriptor, priority), target.descriptor)
+                PageImageTransforms.apply(download(target.descriptor, priority), chapterId, target.descriptor)
             }
         } catch (error: PageResponseException) {
             if (
@@ -212,22 +216,6 @@ internal class OnlineChapterVolume(
         synchronized(protectionLock) {
             if (closed.get()) return
             if (protectedIdentities.add(identity)) cache.protectChapter(identity)
-        }
-    }
-
-    /** Restores source-declared image obfuscation before the bytes reach the page cache. */
-    private fun applyImageTransform(bytes: ByteArray, page: PageDescriptor): ByteArray {
-        val transform = page.imageTransform ?: return bytes
-        // The codec already rejects transformed chapters whose id is not a number.
-        val chapterIdentity = chapterId.toLongOrNull() ?: return bytes
-        return when (transform.type) {
-            PageImageTransformType.JM_SEGMENTATION ->
-                JmSegmentationImage.apply(
-                    bytes = bytes,
-                    chapterId = chapterIdentity,
-                    scrambleId = transform.scrambleId.toLong(),
-                    url = page.url,
-                )
         }
     }
 
@@ -393,6 +381,10 @@ internal class OnlineChapterVolume(
     }
 }
 
+/**
+ * Builds ordered cache identities from page IDs, falling back to revision and position.
+ * Includes image transforms so bytes restored with different transforms cannot share a cache entry.
+ */
 internal fun onlinePageIdentities(
     sourceRevision: String,
     pages: List<PageDescriptor>,
@@ -402,12 +394,7 @@ internal fun onlinePageIdentities(
             ?: "revision-index:${sourceRevision.length}:$sourceRevision:$index"
     // Cached bytes are only reusable when the transform that produced them is unchanged, so the
     // declaration is part of the identity rather than only of the download step.
-    val transform = page.imageTransform
-    if (transform == null) {
-        identity
-    } else {
-        "$identity:transform=${transform.type.name},${transform.scrambleId}"
-    }
+    identity + PageImageTransforms.identitySuffix(page.imageTransform)
 }
 
 internal fun ResponseBody.readPageBytes(maxBytes: Long): ByteArray {

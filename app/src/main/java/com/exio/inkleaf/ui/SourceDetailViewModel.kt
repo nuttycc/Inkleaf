@@ -138,6 +138,10 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Saves pending settings before invoking a source action, then reports its result and
+     * invalidates derived data.
+     */
     fun invokeAction(action: PluginActionDescriptor) {
         val id = pluginId ?: return
         launchOperation("运行漫画源操作：${action.title}") {
@@ -147,9 +151,7 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
             // Only a top-level message has a defined UI representation.
             _message.value = SourceDetailFeedback(sourceActionMessage(result, action.title))
             // An action may alter plugin-owned state, so invalidate runtime-derived data now.
-            app().pluginRuntimeManager.reload(id)
-            app().pluginBrowseRepository.clear(id)
-            app().onlineContentRepository.invalidateMetadata(id)
+            app().pluginManager.invalidateDerivedData(id)
         }
     }
 
@@ -171,6 +173,10 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Clears saved and displayed settings under the save mutex, then invalidates derived source
+     * data.
+     */
     fun resetToDefaults() {
         val id = pluginId ?: return
         launchOperation("重置漫画源设置") {
@@ -178,9 +184,7 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
                 app().pluginSettingsRepository.clear(id)
                 _values.value = emptyMap()
                 val revision = settingsRevision.incrementAndGet()
-                app().pluginRuntimeManager.reload(id)
-                app().pluginBrowseRepository.clear(id)
-                app().onlineContentRepository.invalidateMetadata(id)
+                app().pluginManager.invalidateDerivedData(id)
                 persistedSettingsRevision.set(revision)
             }
             _message.value = SourceDetailFeedback("已重置为默认设置")
@@ -212,6 +216,10 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
             }
     }
 
+    /**
+     * Persists the supplied setting values and invalidates data derived from the previous
+     * configuration.
+     */
     private suspend fun applySettingsChange(
         app: InkleafApplication,
         pluginId: String,
@@ -219,9 +227,7 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
         settingIds: Set<String>,
     ) {
         app.pluginSettingsRepository.setValues(pluginId, values, settingIds)
-        app.pluginRuntimeManager.reload(pluginId)
-        app.pluginBrowseRepository.clear(pluginId)
-        app.onlineContentRepository.invalidateMetadata(pluginId)
+        app.pluginManager.invalidateDerivedData(pluginId)
     }
 
     private fun hasPendingSettings(): Boolean =
