@@ -5,36 +5,23 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
-import com.exio.inkleaf.data.toEnumOrNull
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
 private val Context.appUpdateDataStore by preferencesDataStore(name = "app_update")
 
 /**
- * Persisted update preferences: the channel the user subscribes to, a version they opted to skip,
- * and the wall-clock time of the last successful manifest fetch.
- *
- * [channel] is null until the user picks one, meaning "follow the installed build" — a stable
- * build tracks the stable channel and a preview build tracks preview.
+ * Persisted update preferences: a version the user opted to skip and the wall-clock time of the
+ * last successful manifest fetch.
  */
 class AppUpdateSettings(context: Context) {
     private val dataStore = context.applicationContext.appUpdateDataStore
-
-    val channel: Flow<AppUpdateChannel?> =
-        dataStore.data.map { prefs ->
-            prefs[KEY_CHANNEL].toEnumOrNull()
-        }
 
     val skippedVersion: Flow<String?> =
         dataStore.data.map { prefs -> prefs[KEY_SKIPPED_VERSION] }
 
     val lastCheckMs: Flow<Long> =
         dataStore.data.map { prefs -> prefs[KEY_LAST_CHECK_MS] ?: 0L }
-
-    suspend fun setChannel(value: AppUpdateChannel) {
-        dataStore.edit { it[KEY_CHANNEL] = value.name }
-    }
 
     suspend fun setSkippedVersion(version: String?) {
         dataStore.edit {
@@ -48,7 +35,6 @@ class AppUpdateSettings(context: Context) {
     }
 
     companion object {
-        private val KEY_CHANNEL = stringPreferencesKey("update_channel")
         private val KEY_SKIPPED_VERSION = stringPreferencesKey("skipped_version")
         private val KEY_LAST_CHECK_MS = longPreferencesKey("last_check_ms")
 

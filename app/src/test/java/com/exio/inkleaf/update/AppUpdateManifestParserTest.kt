@@ -8,26 +8,19 @@ import org.junit.Test
 
 class AppUpdateManifestParserTest {
     @Test
-    fun `parses a well-formed manifest with both channels`() {
+    fun `parses a well-formed manifest`() {
         val text =
             """
             {
-              "schemaVersion": 1,
-              "stable": {
-                "version": "0.1.113",
-                "versionCode": 1000227,
-                "apkUrl": "https://github.com/nuttycc/inkleaf/releases/download/v0.1.113/Inkleaf-v0.1.113-release.apk",
+              "schemaVersion": 2,
+              "release": {
+                "version": "2026.1013.1345",
+                "versionCode": 1000725,
+                "apkUrl": "https://github.com/nuttycc/inkleaf/releases/download/v2026.1013.1345/Inkleaf-2026.1013.1345.apk",
                 "releaseNotes": "修复了已知问题",
-                "publishedAt": "2026-10-11T03:57:14Z",
+                "publishedAt": "2026-10-13T05:45:00Z",
                 "sha256": "abc123",
                 "sizeBytes": 12345678
-              },
-              "preview": {
-                "version": "0.1.113-preview.20261012.86",
-                "versionCode": 1000228,
-                "apkUrl": "https://github.com/nuttycc/inkleaf/releases/download/preview-20261012/Inkleaf-preview.apk",
-                "releaseNotes": "今日预览",
-                "publishedAt": "2026-10-11T23:42:58Z"
               },
               "unknownField": "ignored"
             }
@@ -36,68 +29,44 @@ class AppUpdateManifestParserTest {
 
         val manifest = AppUpdateManifestParser.parse(text)
 
-        assertEquals(1, manifest.schemaVersion)
-        assertNotNull(manifest.stable)
-        assertNotNull(manifest.preview)
-
-        val stable = manifest.stable!!
-        assertEquals("0.1.113", stable.version)
-        assertEquals(1000227L, stable.versionCode)
+        assertEquals(2, manifest.schemaVersion)
+        val release = manifest.release
+        assertNotNull(release)
+        assertEquals("2026.1013.1345", release!!.version)
+        assertEquals(1000725L, release.versionCode)
         assertEquals(
-            "https://github.com/nuttycc/inkleaf/releases/download/v0.1.113/Inkleaf-v0.1.113-release.apk",
-            stable.apkUrl,
+            "https://github.com/nuttycc/inkleaf/releases/download/v2026.1013.1345/Inkleaf-2026.1013.1345.apk",
+            release.apkUrl,
         )
-        assertEquals("修复了已知问题", stable.releaseNotes)
-        assertEquals("abc123", stable.sha256)
-        assertEquals(12345678L, stable.sizeBytes)
-
-        val preview = manifest.preview!!
-        assertEquals("0.1.113-preview.20261012.86", preview.version)
-        assertEquals(1000228L, preview.versionCode)
-        assertNull(preview.sha256)
+        assertEquals("修复了已知问题", release.releaseNotes)
+        assertEquals("abc123", release.sha256)
+        assertEquals(12345678L, release.sizeBytes)
     }
 
     @Test
-    fun `parses manifest with only stable channel`() {
-        val text =
-            """
-            {
-              "schemaVersion": 1,
-              "stable": {
-                "version": "1.0.0",
-                "versionCode": 100,
-                "apkUrl": "https://example.com/app.apk"
-              }
-            }
-            """
-                .trimIndent()
+    fun `allows a null release entry`() {
+        val manifest = AppUpdateManifestParser.parse("""{"schemaVersion": 2}""")
 
-        val manifest = AppUpdateManifestParser.parse(text)
-
-        assertNotNull(manifest.stable)
-        assertNull(manifest.preview)
-        assertEquals("1.0.0", manifest.stable!!.version)
+        assertNull(manifest.release)
     }
 
     @Test
     fun `rejects unsupported schema versions`() {
-        val text = """{"schemaVersion": 2, "stable": null}"""
-
         try {
-            AppUpdateManifestParser.parse(text)
+            AppUpdateManifestParser.parse("""{"schemaVersion": 1, "release": null}""")
             fail("expected AppUpdateManifestException")
         } catch (error: AppUpdateManifestException) {
-            assertEquals("更新清单版本不受支持: 2", error.message)
+            assertEquals("更新清单版本不受支持: 1", error.message)
         }
     }
 
     @Test
-    fun `rejects stable entry with blank version`() {
+    fun `rejects release entry with blank version`() {
         val text =
             """
             {
-              "schemaVersion": 1,
-              "stable": {
+              "schemaVersion": 2,
+              "release": {
                 "version": "",
                 "versionCode": 100,
                 "apkUrl": "https://example.com/app.apk"
@@ -110,18 +79,18 @@ class AppUpdateManifestParserTest {
             AppUpdateManifestParser.parse(text)
             fail("expected AppUpdateManifestException")
         } catch (error: AppUpdateManifestException) {
-            assertEquals("更新清单 stable 通道缺少必要字段", error.message)
+            assertEquals("更新清单 release 通道缺少必要字段", error.message)
         }
     }
 
     @Test
-    fun `rejects entry with non-https apk url`() {
+    fun `rejects release entry with non-https apk url`() {
         val text =
             """
             {
-              "schemaVersion": 1,
-              "stable": {
-                "version": "1.0.0",
+              "schemaVersion": 2,
+              "release": {
+                "version": "2026.1013.1345",
                 "versionCode": 100,
                 "apkUrl": "http://example.com/app.apk"
               }
@@ -133,18 +102,18 @@ class AppUpdateManifestParserTest {
             AppUpdateManifestParser.parse(text)
             fail("expected AppUpdateManifestException")
         } catch (error: AppUpdateManifestException) {
-            assertEquals("更新清单 stable 通道缺少必要字段", error.message)
+            assertEquals("更新清单 release 通道缺少必要字段", error.message)
         }
     }
 
     @Test
-    fun `rejects entry with zero version code`() {
+    fun `rejects release entry with zero version code`() {
         val text =
             """
             {
-              "schemaVersion": 1,
-              "stable": {
-                "version": "1.0.0",
+              "schemaVersion": 2,
+              "release": {
+                "version": "2026.1013.1345",
                 "versionCode": 0,
                 "apkUrl": "https://example.com/app.apk"
               }
@@ -156,7 +125,7 @@ class AppUpdateManifestParserTest {
             AppUpdateManifestParser.parse(text)
             fail("expected AppUpdateManifestException")
         } catch (error: AppUpdateManifestException) {
-            assertEquals("更新清单 stable 通道缺少必要字段", error.message)
+            assertEquals("更新清单 release 通道缺少必要字段", error.message)
         }
     }
 
@@ -168,15 +137,5 @@ class AppUpdateManifestParserTest {
         } catch (error: AppUpdateManifestException) {
             assertEquals("更新清单格式无效", error.message)
         }
-    }
-
-    @Test
-    fun `allows both channels to be null`() {
-        val text = """{"schemaVersion": 1}"""
-
-        val manifest = AppUpdateManifestParser.parse(text)
-
-        assertNull(manifest.stable)
-        assertNull(manifest.preview)
     }
 }

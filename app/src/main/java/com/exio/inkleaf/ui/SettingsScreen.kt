@@ -46,7 +46,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.exio.inkleaf.DeveloperMode
 import com.exio.inkleaf.data.CacheLimit
 import com.exio.inkleaf.data.ThemeSettings
-import com.exio.inkleaf.update.AppUpdateChannel
 import com.ms.square.debugoverlay.DebugOverlay
 
 /** General settings. Theme editing lives on its own route with an explicit apply boundary. */
@@ -69,13 +68,11 @@ fun SettingsScreen(
     val cacheMessage by viewModel.cacheMessage.collectAsStateWithLifecycle()
     val developerModeEnabled by viewModel.developerModeEnabled.collectAsStateWithLifecycle()
     val updateState by updateViewModel.uiState.collectAsStateWithLifecycle()
-    val updateChannel by updateViewModel.channel.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var showCacheLimitSheet by remember { mutableStateOf(false) }
     var showClearOnlineCacheDialog by rememberSaveable { mutableStateOf(false) }
     var showAboutSheet by remember { mutableStateOf(false) }
     var showFoldersSheet by rememberSaveable { mutableStateOf(false) }
-    var showChannelSheet by remember { mutableStateOf(false) }
     val lastPickedFolder by foldersViewModel.lastPickedFolder.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -207,15 +204,6 @@ fun SettingsScreen(
                 onClick = { updateViewModel.checkForUpdate() },
             )
             InkleafActionListItem(
-                headline = "更新通道",
-                supporting = when (updateChannel) {
-                    AppUpdateChannel.STABLE -> "稳定版"
-                    AppUpdateChannel.PREVIEW -> "预览版"
-                },
-                onClick = { showChannelSheet = true },
-                trailingContent = { ForwardIcon() },
-            )
-            InkleafActionListItem(
                 headline = "关于 Inkleaf",
                 supporting = "版本、GitHub 与项目信息",
                 onClick = { showAboutSheet = true },
@@ -278,41 +266,6 @@ fun SettingsScreen(
                     context.startActivity(Intent(Intent.ACTION_VIEW, GITHUB_URL.toUri()))
                 },
             )
-        }
-    }
-
-    if (showChannelSheet) {
-        ModalBottomSheet(
-            onDismissRequest = { showChannelSheet = false },
-            sheetState = rememberExpandOnlySheetState(),
-        ) {
-            SheetColumn(modifier = Modifier, selectable = true) {
-                StandardSheetTitle("更新通道")
-                Text(
-                    text = "稳定版经过充分测试，预览版包含最新功能但可能不稳定",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                )
-                InkleafChoiceListItem(
-                    headline = "稳定版",
-                    selected = updateChannel == AppUpdateChannel.STABLE,
-                    onClick = {
-                        updateViewModel.setChannel(AppUpdateChannel.STABLE)
-                        showChannelSheet = false
-                    },
-                    supportingContent = { Text("仅接收正式版本更新") },
-                )
-                InkleafChoiceListItem(
-                    headline = "预览版",
-                    selected = updateChannel == AppUpdateChannel.PREVIEW,
-                    onClick = {
-                        updateViewModel.setChannel(AppUpdateChannel.PREVIEW)
-                        showChannelSheet = false
-                    },
-                    supportingContent = { Text("接收每日构建的预览版本") },
-                )
-            }
         }
     }
 

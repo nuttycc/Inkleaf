@@ -13,9 +13,7 @@ import okhttp3.Request
 /**
  * Checks for app updates by comparing the running version against a remote manifest.
  *
- * The manifest lives at a fixed raw GitHub URL and carries both stable and preview channels.
- * A preview build (versionName contains a hyphen) only compares against the preview channel;
- * a stable build compares against stable. The caller may override the channel explicitly.
+ * The manifest lives at a fixed raw GitHub URL and carries a single release entry.
  */
 class AppUpdateChecker(
     private val context: Context,
@@ -23,7 +21,7 @@ class AppUpdateChecker(
     private val settings: AppUpdateSettings,
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
-    suspend fun check(channelOverride: AppUpdateChannel? = null): AppUpdateCheckResult =
+    suspend fun check(): AppUpdateCheckResult =
         withContext(Dispatchers.IO) {
             val manifest =
                 try {
@@ -34,12 +32,7 @@ class AppUpdateChecker(
                     return@withContext AppUpdateCheckResult.Error("无法连接更新服务器: ${error.message}")
                 }
 
-            val channel = channelOverride ?: detectChannel()
-            val entry =
-                when (channel) {
-                    AppUpdateChannel.STABLE -> manifest.stable
-                    AppUpdateChannel.PREVIEW -> manifest.preview ?: manifest.stable
-                } ?: return@withContext AppUpdateCheckResult.UpToDate
+            val entry = manifest.release ?: return@withContext AppUpdateCheckResult.UpToDate
 
             val currentCode = installedVersionCode(context)
             if (entry.versionCode <= currentCode) return@withContext AppUpdateCheckResult.UpToDate
@@ -50,7 +43,7 @@ class AppUpdateChecker(
             }
 
             settings.setLastCheckMs(clock())
-            AppUpdateCheckResult.UpdateAvailable(entry, channel)
+            AppUpdateCheckResult.UpdateAvailable(entry)
         }
 
     private suspend fun fetchManifest(): AppUpdateManifest {
@@ -68,18 +61,8 @@ class AppUpdateChecker(
         }
     }
 
-    private fun detectChannel(): AppUpdateChannel = detectChannel(installedVersionName(context))
-
     companion object {
         private const val MAX_MANIFEST_BYTES = 64 * 1024
-
-        /** A preview build (version name contains a hyphen) tracks the preview channel; anything else tracks stable. */
-        fun detectChannel(versionName: String?): AppUpdateChannel =
-            if (versionName != null && versionName.contains('-')) {
-                AppUpdateChannel.PREVIEW
-            } else {
-                AppUpdateChannel.STABLE
-            }
     }
 }
 
@@ -100,18 +83,4 @@ internal fun installedVersionCode(context: Context): Long {
         @Suppress("DEPRECATION")
         packageInfo.versionCode.toLong()
     }
-}
-
-internal fun installedVersionName(context: Context): String? {
-    val packageInfo =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            context.packageManager.getPackageInfo(
-                context.packageName,
-                PackageManager.PackageInfoFlags.of(0),
-            )
-        } else {
-            @Suppress("DEPRECATION")
-            context.packageManager.getPackageInfo(context.packageName, 0)
-        }
-    return packageInfo.versionName
 }

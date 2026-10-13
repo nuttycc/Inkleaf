@@ -8,20 +8,14 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.exio.inkleaf.InkleafApplication
 import com.exio.inkleaf.update.AppUpdateApkDownloader
-import com.exio.inkleaf.update.AppUpdateChannel
 import com.exio.inkleaf.update.AppUpdateCheckResult
 import com.exio.inkleaf.update.AppUpdateChecker
 import com.exio.inkleaf.update.AppUpdateInstaller
 import com.exio.inkleaf.update.AppUpdateSettings
-import com.exio.inkleaf.update.installedVersionName
 import java.io.File
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 sealed interface AppUpdateUiState {
@@ -32,7 +26,6 @@ sealed interface AppUpdateUiState {
     data class UpdateAvailable(
         val version: String,
         val releaseNotes: String?,
-        val channel: AppUpdateChannel,
     ) : AppUpdateUiState
 
     data class Downloading(val progress: Float) : AppUpdateUiState
@@ -49,19 +42,6 @@ class AppUpdateViewModel(app: Application) : AndroidViewModel(app) {
     private val _uiState = MutableStateFlow<AppUpdateUiState>(AppUpdateUiState.Idle)
     val uiState: StateFlow<AppUpdateUiState> = _uiState.asStateFlow()
 
-    /** The channel followed when the user has not chosen one: a preview build tracks previews. */
-    private val detectedChannel: AppUpdateChannel =
-        AppUpdateChecker.detectChannel(installedVersionName(application))
-
-    val channel: StateFlow<AppUpdateChannel> =
-        settings.channel
-            .map { it ?: detectedChannel }
-            .stateIn(
-                viewModelScope,
-                SharingStarted.WhileSubscribed(5_000),
-                detectedChannel,
-            )
-
     private var downloadedApk: File? = null
     private var pendingInstallLauncher: ActivityResultLauncher<Intent>? = null
 
@@ -71,7 +51,7 @@ class AppUpdateViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val checker =
                 AppUpdateChecker(getApplication(), application.onlineImageCallFactory, settings)
-            when (val result = checker.check(settings.channel.first())) {
+            when (val result = checker.check()) {
                 is AppUpdateCheckResult.UpToDate -> {
                     _uiState.value = AppUpdateUiState.UpToDate
                 }
@@ -80,7 +60,6 @@ class AppUpdateViewModel(app: Application) : AndroidViewModel(app) {
                         AppUpdateUiState.UpdateAvailable(
                             version = result.entry.version,
                             releaseNotes = result.entry.releaseNotes,
-                            channel = result.channel,
                         )
                 }
                 is AppUpdateCheckResult.Error -> {
@@ -99,7 +78,7 @@ class AppUpdateViewModel(app: Application) : AndroidViewModel(app) {
             _uiState.value = AppUpdateUiState.Downloading(0f)
             val checker =
                 AppUpdateChecker(getApplication(), application.onlineImageCallFactory, settings)
-            val result = checker.check(settings.channel.first())
+            val result = checker.check()
             if (result !is AppUpdateCheckResult.UpdateAvailable) {
                 _uiState.value = AppUpdateUiState.Error("更新信息已过期，请重新检查")
                 return@launch
@@ -147,13 +126,6 @@ class AppUpdateViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun setChannel(channel: AppUpdateChannel) {
-        viewModelScope.launch {
-            settings.setChannel(channel)
-            checkForUpdate()
-        }
-    }
-
     fun dismissState() {
         _uiState.value = AppUpdateUiState.Idle
     }
@@ -166,7 +138,7 @@ class AppUpdateViewModel(app: Application) : AndroidViewModel(app) {
 
     suspend fun checkOnStartup(): AppUpdateCheckResult {
         val checker = AppUpdateChecker(getApplication(), application.onlineImageCallFactory, settings)
-        return checker.check(settings.channel.first())
+        return checker.check()
     }
 
     private fun triggerInstall(apk: File) {

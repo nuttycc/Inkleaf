@@ -26,7 +26,7 @@ class AppUpdateApkDownloader(
     private val callFactory: Call.Factory,
 ) {
     suspend fun download(
-        entry: AppUpdateChannelEntry,
+        entry: AppUpdateEntry,
         onProgress: (ApkDownloadProgress) -> Unit = {},
     ): File =
         withContext(Dispatchers.IO) {
@@ -84,7 +84,7 @@ class AppUpdateApkDownloader(
             }
         }
 
-    private fun isExistingFileValid(file: File, entry: AppUpdateChannelEntry): Boolean {
+    private fun isExistingFileValid(file: File, entry: AppUpdateEntry): Boolean {
         if (entry.sizeBytes != null && file.length() != entry.sizeBytes) return false
         if (entry.sha256 != null) {
             val actual = sha256(file)
