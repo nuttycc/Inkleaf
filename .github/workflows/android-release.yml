@@ -1,150 +1,179 @@
 name: Android Release
 
 on:
-  workflow_dispatch:
-    inputs:
-      release_tag:
-        description: Existing release tag to rebuild and publish, for example v0.2.0
-        required: true
-        type: string
   push:
-    tags:
-      # Glob approximates semver; the job enforces strict vMAJOR.MINOR.PATCH.
-      - "v*.*.*"
+    branches:
+      - main
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: android-release-${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
+  group: android-release-main
   cancel-in-progress: false
 
 jobs:
-  build-release:
-    name: Build signed APK
+  release:
+    name: Build and publish release APK
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
     steps:
-      - name: Resolve release tag
-        id: tag
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          INPUT_TAG: ${{ inputs.release_tag }}
-          REF_TAG: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            TAG="$INPUT_TAG"
-          else
-            TAG="$REF_TAG"
-          fi
-          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Release tag must be strict vMAJOR.MINOR.PATCH (got: $TAG)" >&2
-            exit 1
-          fi
-          echo "name=$TAG" >> "$GITHUB_OUTPUT"
-
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ steps.tag.outputs.name }}
           fetch-depth: 0
 
-      - name: Validate tag, main ancestry, and version
-        id: meta
+      - name: Classify changes
+        id: changes
         env:
           EVENT_NAME: ${{ github.event_name }}
-          RELEASE_TAG: ${{ steps.tag.outputs.name }}
+          BASE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ ! "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]] || [[ "$BASE_SHA" =~ ^0+$ ]]; then
+            echo "Unable to identify a comparison base; building the release."
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
+            git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          fi
+
+          should_build=false
+          while IFS= read -r path; do
+            case "$path" in
+              *.md|docs/*|design/*|.agents/*|.claude/*|.docs/*|.entire/*|.gemini/*|.impeccable/*|.superpowers/*|.trae/*|.workbuddy/*)
+                ;;
+              *)
+                should_build=true
+                break
+                ;;
+            esac
+          done < <(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
+
+          echo "should_build=$should_build" >> "$GITHUB_OUTPUT"
+          if [ "$should_build" = "false" ]; then
+            echo "Only documentation, design, or agent metadata changed; skipping the release."
+          fi
+
+      - name: Resolve release metadata
+        if: steps.changes.outputs.should_build == 'true'
+        id: meta
+        env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          TAG="$RELEASE_TAG"
 
-          if [[ ! "$TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
-            echo "Release tag must be strict vMAJOR.MINOR.PATCH (got: $TAG)" >&2
-            exit 1
-          fi
+          # Single time-based version: YYYY.MMDD.HHMM in Asia/Shanghai, e.g. 2026.1013.1345.
+          VERSION_NAME="$(TZ=Asia/Shanghai date '+%Y.%m%d.%H%M')"
+          TAG="v${VERSION_NAME}"
 
-          MAJOR="${BASH_REMATCH[1]}"
-          MINOR="${BASH_REMATCH[2]}"
-          PATCH="${BASH_REMATCH[3]}"
-          VERSION_NAME="${MAJOR}.${MINOR}.${PATCH}"
-
-          # versionCode must strictly increase per build so a newer APK (including a rebuild of an
-          # existing tag) always outranks whatever is installed. The commit count sets a floor, the
-          # previously published codes set a ceiling; take the greater and step past it.
-          COMMIT_COUNT="$(git rev-list --count HEAD)"
+          # versionCode is a strictly increasing release counter, hidden from users. It must
+          # exceed whatever is installed, so it steps past the greatest previously published
+          # code (stable/preview hold the legacy values during the transition). A constant floor
+          # guards against a missing manifest.
           PREV_MANIFEST="$(
             gh api "repos/$GITHUB_REPOSITORY/contents/app-update.json?ref=main" \
               --jq '.content' 2>/dev/null | base64 -d 2>/dev/null || echo '{}'
           )"
-          PREV_STABLE_CODE="$(jq -r '.stable.versionCode // 0' <<< "$PREV_MANIFEST" 2>/dev/null || echo 0)"
-          PREV_PREVIEW_CODE="$(jq -r '.preview.versionCode // 0' <<< "$PREV_MANIFEST" 2>/dev/null || echo 0)"
-          PREV_MAX_CODE=$(( PREV_STABLE_CODE > PREV_PREVIEW_CODE ? PREV_STABLE_CODE : PREV_PREVIEW_CODE ))
-          STABLE_FLOOR=$((1000000 + COMMIT_COUNT * 2 + 1))
-          VERSION_CODE=$(( (STABLE_FLOOR > PREV_MAX_CODE ? STABLE_FLOOR : PREV_MAX_CODE) + 1 ))
-          if (( VERSION_CODE > 2100000000 )); then
-            echo "Calculated versionCode exceeds Android's 2,100,000,000 limit." >&2
-            exit 1
+          PREV_MAX="$(
+            jq -r '[(.release.versionCode // 0), (.stable.versionCode // 0), (.preview.versionCode // 0)] | max' \
+              <<< "$PREV_MANIFEST" 2>/dev/null || echo 0
+          )"
+          MIN_VERSION_CODE=1000000
+          VERSION_CODE=$(( (PREV_MAX > MIN_VERSION_CODE ? PREV_MAX : MIN_VERSION_CODE) + 1 ))
+
+          # The tag must be unique; a same-minute rebuild appends the run identity.
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            TAG="${TAG}-r${GITHUB_RUN_NUMBER}-a${GITHUB_RUN_ATTEMPT}"
           fi
 
-          git fetch --no-tags origin main
-          if ! git merge-base --is-ancestor HEAD origin/main; then
-            echo "Tag $TAG (commit $(git rev-parse --short HEAD)) is not an ancestor of origin/main." >&2
-            echo "Only commits on main may be released." >&2
-            exit 1
-          fi
-
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            if ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
-              echo "workflow_dispatch only rebuilds existing tags; $TAG was not found." >&2
-              exit 1
-            fi
-          fi
+          NOTES_BASE="$(
+            gh release list \
+              --repo "$GITHUB_REPOSITORY" \
+              --exclude-drafts \
+              --exclude-pre-releases \
+              --limit 1 \
+              --json tagName \
+              --jq '.[0].tagName // ""' 2>/dev/null || echo ''
+          )"
 
           {
-            echo "tag=$TAG"
             echo "version_name=$VERSION_NAME"
             echo "version_code=$VERSION_CODE"
+            echo "tag=$TAG"
+            echo "notes_base=$NOTES_BASE"
           } >> "$GITHUB_OUTPUT"
 
           echo "Release $TAG → versionName=$VERSION_NAME versionCode=$VERSION_CODE"
 
+      - name: Summarize skipped release
+        if: steps.changes.outputs.should_build == 'false'
+        run: |
+          {
+            echo "## Android Release"
+            echo
+            echo "No source change reached main; the release was skipped."
+            echo
+            echo "- Commit: \`$GITHUB_SHA\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Set up JDK
+        if: steps.changes.outputs.should_build == 'true'
         uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
           java-version: 25
 
       - name: Set up Gradle
+        if: steps.changes.outputs.should_build == 'true'
         uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
       - name: Validate signing secrets
-        run: |
-          test -n "$INKLEAF_KEYSTORE_BASE64"
-          test -n "$INKLEAF_KEYSTORE_PASSWORD"
-          test -n "$INKLEAF_KEY_ALIAS"
-          test -n "$INKLEAF_KEY_PASSWORD"
+        if: steps.changes.outputs.should_build == 'true'
         env:
           INKLEAF_KEYSTORE_BASE64: ${{ secrets.INKLEAF_KEYSTORE_BASE64 }}
           INKLEAF_KEYSTORE_PASSWORD: ${{ secrets.INKLEAF_KEYSTORE_PASSWORD }}
           INKLEAF_KEY_ALIAS: ${{ secrets.INKLEAF_KEY_ALIAS }}
           INKLEAF_KEY_PASSWORD: ${{ secrets.INKLEAF_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          MISSING=()
+          for NAME in \
+            INKLEAF_KEYSTORE_BASE64 \
+            INKLEAF_KEYSTORE_PASSWORD \
+            INKLEAF_KEY_ALIAS \
+            INKLEAF_KEY_PASSWORD; do
+            if [ -z "${!NAME:-}" ]; then
+              MISSING+=("$NAME")
+            fi
+          done
+          if [ "${#MISSING[@]}" -ne 0 ]; then
+            printf 'Missing required signing secret: %s\n' "${MISSING[@]}" >&2
+            exit 1
+          fi
 
       - name: Restore release keystore
-        run: printf '%s' "$INKLEAF_KEYSTORE_BASE64" | base64 --decode > app/inkleaf-release.jks
+        if: steps.changes.outputs.should_build == 'true'
         env:
           INKLEAF_KEYSTORE_BASE64: ${{ secrets.INKLEAF_KEYSTORE_BASE64 }}
+        run: printf '%s' "$INKLEAF_KEYSTORE_BASE64" | base64 --decode > app/inkleaf-release.jks
 
       - name: Run unit tests and build release APK
-        # A single invocation avoids duplicate Gradle startup/configuration and
-        # lets Gradle schedule both tasks in one graph. Signing env is only read
-        # by assembleRelease; harmless to expose to testDebugUnitTest. A 6g heap leaves room for
-        # AAPT2/Kotlin workers on 4C/16G runner; Kotlin daemon (default strategy)
-        # avoids classloading contention with parallel workers.
+        if: steps.changes.outputs.should_build == 'true'
+        # A single invocation avoids duplicate Gradle startup/configuration.
         run: |
           ./gradlew testDebugUnitTest assembleRelease \
             -Dorg.gradle.jvmargs="-Xmx6g -XX:MaxMetaspaceSize=1g -XX:+UseParallelGC -Dfile.encoding=UTF-8" \
@@ -160,32 +189,254 @@ jobs:
           INKLEAF_VERSION_CODE: ${{ steps.meta.outputs.version_code }}
 
       - name: Prepare release artifacts
+        if: steps.changes.outputs.should_build == 'true'
+        id: artifacts
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
         run: |
           set -euo pipefail
           mkdir -p release
-          cp app/build/outputs/apk/release/*.apk \
-            "release/Inkleaf-${RELEASE_TAG}-release.apk"
-          cp app/build/outputs/mapping/release/mapping.txt \
-            "release/Inkleaf-${RELEASE_TAG}-mapping.txt"
-        env:
-          RELEASE_TAG: ${{ steps.meta.outputs.tag }}
 
-      - name: Create or update GitHub Release
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
-        with:
-          tag_name: ${{ steps.meta.outputs.tag }}
-          files: |
-            release/Inkleaf-${{ steps.meta.outputs.tag }}-release.apk
-            release/Inkleaf-${{ steps.meta.outputs.tag }}-mapping.txt
-          generate_release_notes: true
-          fail_on_unmatched_files: true
+          mapfile -t APK_FILES < <(
+            find app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' -print
+          )
+          if [ "${#APK_FILES[@]}" -ne 1 ]; then
+            echo "Expected exactly one release APK, found ${#APK_FILES[@]}." >&2
+            exit 1
+          fi
+
+          MAPPING_FILE="app/build/outputs/mapping/release/mapping.txt"
+          if [ ! -f "$MAPPING_FILE" ]; then
+            echo "R8 mapping file was not produced: $MAPPING_FILE" >&2
+            exit 1
+          fi
+
+          APK_PATH="release/Inkleaf-${TAG}.apk"
+          MAPPING_PATH="release/Inkleaf-${TAG}-mapping.txt.gz"
+          cp "${APK_FILES[0]}" "$APK_PATH"
+          gzip -9 -n -c "$MAPPING_FILE" > "$MAPPING_PATH"
+
+          {
+            echo "apk_path=$APK_PATH"
+            echo "mapping_path=$MAPPING_PATH"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Verify release APK
+        if: steps.changes.outputs.should_build == 'true'
+        id: verify
+        env:
+          APK_PATH: ${{ steps.artifacts.outputs.apk_path }}
+        run: |
+          set -euo pipefail
+          APKSIGNER="$(
+            find "$ANDROID_SDK_ROOT/build-tools" -type f -name apksigner -print \
+              | sort -V \
+              | tail -n 1
+          )"
+          if [ -z "$APKSIGNER" ] || [ ! -x "$APKSIGNER" ]; then
+            echo "Unable to locate apksigner in the Android SDK." >&2
+            exit 1
+          fi
+
+          "$APKSIGNER" verify --verbose --print-certs "$APK_PATH"
+          APK_SHA256="$(sha256sum "$APK_PATH" | awk '{print $1}')"
+          echo "apk_sha256=$APK_SHA256" >> "$GITHUB_OUTPUT"
+
+      - name: Write release notes
+        if: steps.changes.outputs.should_build == 'true'
+        env:
+          APK_SHA256: ${{ steps.verify.outputs.apk_sha256 }}
+          NOTES_BASE: ${{ steps.meta.outputs.notes_base }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          VERSION_CODE: ${{ steps.meta.outputs.version_code }}
+          VERSION_NAME: ${{ steps.meta.outputs.version_name }}
+        run: |
+          set -euo pipefail
+          BUILD_TIME="$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S %Z')"
+          RUN_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+          cat > release/notes.md <<EOF
+          > [!WARNING]
+          > This is an unreleased development build. Back up important data before installing it.
+
+          - Version: \`$VERSION_NAME\`
+          - Version code: \`$VERSION_CODE\`
+          - Commit: \`$GITHUB_SHA\`
+          - Built: $BUILD_TIME
+          - Workflow run: $RUN_URL
+          - APK SHA-256: \`$APK_SHA256\`
+
+          ## Changes
+
+          EOF
+
+          if [ -n "$NOTES_BASE" ] && git cat-file -e "$NOTES_BASE^{commit}" 2>/dev/null; then
+            git log \
+              --reverse \
+              --pretty=format:'- `%h` %s' \
+              "$NOTES_BASE..HEAD" > release/changes.md
+            if [ -s release/changes.md ]; then
+              cat release/changes.md >> release/notes.md
+              printf '\n' >> release/notes.md
+            else
+              echo "- No commits after \`$NOTES_BASE\`." >> release/notes.md
+            fi
+          else
+            git log -1 --pretty=format:'- `%h` %s%n' HEAD >> release/notes.md
+          fi
+
+      - name: Create draft release
+        if: steps.changes.outputs.should_build == 'true'
+        id: create
+        env:
+          APK_PATH: ${{ steps.artifacts.outputs.apk_path }}
+          GH_TOKEN: ${{ github.token }}
+          MAPPING_PATH: ${{ steps.artifacts.outputs.mapping_path }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          VERSION_NAME: ${{ steps.meta.outputs.version_name }}
+        run: |
+          set -euo pipefail
+          echo "attempted=true" >> "$GITHUB_OUTPUT"
+
+          set +e
+          gh release create "$TAG" \
+            "$APK_PATH" \
+            "$MAPPING_PATH" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Inkleaf $VERSION_NAME" \
+            --notes-file release/notes.md \
+            --draft \
+            --latest=false
+          CREATE_STATUS=$?
+          set -e
+          exit "$CREATE_STATUS"
+
+      - name: Publish release
+        if: steps.changes.outputs.should_build == 'true'
+        id: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release edit "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft=false \
+            --latest
+          echo "url=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Clean up failed draft release
+        if: failure() && steps.create.outputs.attempted == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          RELEASE_PAGES="$(
+            gh api \
+              --paginate \
+              --slurp \
+              "repos/$GITHUB_REPOSITORY/releases?per_page=100"
+          )"
+          RELEASE_STATE="$(
+            jq -r --arg tag "$TAG" '
+              (add // [])
+              | map(select(.tag_name == $tag))
+              | if length == 0 then "missing"
+                elif length == 1 and .[0].draft == true then "draft"
+                elif length == 1 then "published"
+                else "ambiguous"
+                end
+            ' <<< "$RELEASE_PAGES"
+          )"
+
+          if [ "$RELEASE_STATE" = "draft" ]; then
+            gh release delete "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --cleanup-tag \
+              --yes
+          elif [ "$RELEASE_STATE" = "published" ]; then
+            echo "Published release $TAG was preserved after a later failure."
+          elif [ "$RELEASE_STATE" = "missing" ]; then
+            set +e
+            TAG_LOOKUP="$(
+              gh api \
+                "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" 2>&1
+            )"
+            LOOKUP_STATUS=$?
+            set -e
+
+            if [ "$LOOKUP_STATUS" -eq 0 ]; then
+              gh api \
+                --method DELETE \
+                "repos/$GITHUB_REPOSITORY/git/refs/tags/$TAG"
+            elif grep -q 'HTTP 404' <<< "$TAG_LOOKUP"; then
+              echo "No draft release or leftover tag remained for $TAG."
+            else
+              echo "Unable to inspect a possible leftover tag for $TAG." >&2
+              echo "$TAG_LOOKUP" >&2
+              exit "$LOOKUP_STATUS"
+            fi
+          else
+            echo "Ambiguous release state for $TAG." >&2
+            exit 1
+          fi
+
+      - name: Prune old releases
+        if: steps.publish.outcome == 'success'
+        id: prune
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          RELEASE_PAGES="$(
+            gh api \
+              --paginate \
+              --slurp \
+              "repos/$GITHUB_REPOSITORY/releases?per_page=100"
+          )"
+          OLD_TAGS_OUTPUT="$(
+            jq -r '[
+              (add // [])[] | select(
+                .draft == false
+                and (.tag_name | test("^v[0-9]{4}\\.[0-9]{4}\\.[0-9]{4}(-r[0-9]+-a[0-9]+)?$"))
+              )
+            ] | sort_by(.published_at) | reverse | .[8:] | .[].tag_name' \
+              <<< "$RELEASE_PAGES"
+          )"
+
+          OLD_TAGS=()
+          if [ -n "$OLD_TAGS_OUTPUT" ]; then
+            mapfile -t OLD_TAGS <<< "$OLD_TAGS_OUTPUT"
+          fi
+
+          FAILED_TAGS=()
+          for TAG in "${OLD_TAGS[@]}"; do
+            if ! gh release delete "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --cleanup-tag \
+              --yes; then
+              FAILED_TAGS+=("$TAG")
+            fi
+          done
+
+          if [ "${#FAILED_TAGS[@]}" -ne 0 ]; then
+            printf 'Unable to prune old release: %s\n' "${FAILED_TAGS[@]}" >&2
+            exit 1
+          fi
 
       - name: Update app-update.json manifest
+        if: steps.publish.outcome == 'success'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION_NAME: ${{ steps.meta.outputs.version_name }}
           VERSION_CODE: ${{ steps.meta.outputs.version_code }}
-          RELEASE_TAG: ${{ steps.meta.outputs.tag }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          APK_PATH: ${{ steps.artifacts.outputs.apk_path }}
+          APK_SHA256: ${{ steps.verify.outputs.apk_sha256 }}
         run: |
           set -euo pipefail
 
@@ -193,33 +444,24 @@ jobs:
           FILE_PATH="app-update.json"
           BRANCH="main"
 
-          APK_URL="https://github.com/nuttycc/inkleaf/releases/download/${RELEASE_TAG}/Inkleaf-${RELEASE_TAG}-release.apk"
-          APK_SIZE=$(stat -c%s "release/Inkleaf-${RELEASE_TAG}-release.apk" 2>/dev/null || stat -f%z "release/Inkleaf-${RELEASE_TAG}-release.apk")
+          APK_URL="https://github.com/nuttycc/inkleaf/releases/download/${TAG}/Inkleaf-${TAG}.apk"
+          APK_SIZE=$(stat -c%s "$APK_PATH" 2>/dev/null || stat -f%z "$APK_PATH")
           PUBLISHED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-          EXISTING_MANIFEST=$(gh api "repos/$REPO/contents/$FILE_PATH?ref=$BRANCH" --jq '.content' 2>/dev/null | base64 -d 2>/dev/null || echo '{}')
-          EXISTING_SHA=$(gh api "repos/$REPO/contents/$FILE_PATH?ref=$BRANCH" --jq '.sha' 2>/dev/null || echo '')
-
-          PREVIEW_CHANNEL=$(echo "$EXISTING_MANIFEST" | jq -r '.preview // empty' 2>/dev/null || echo '')
-
-          if [ -n "$PREVIEW_CHANNEL" ]; then
-            PREVIEW_JSON="\"preview\": $PREVIEW_CHANNEL,"
-          else
-            PREVIEW_JSON=""
-          fi
+          EXISTING_SHA="$(gh api "repos/$REPO/contents/$FILE_PATH?ref=$BRANCH" --jq '.sha' 2>/dev/null || echo '')"
 
           cat > manifest.json <<EOF
           {
-            "schemaVersion": 1,
-            "stable": {
+            "schemaVersion": 2,
+            "release": {
               "version": "${VERSION_NAME}",
               "versionCode": ${VERSION_CODE},
               "apkUrl": "${APK_URL}",
-              "releaseNotes": "Release ${RELEASE_TAG}",
+              "releaseNotes": "Release ${TAG}",
               "publishedAt": "${PUBLISHED_AT}",
+              "sha256": "${APK_SHA256}",
               "sizeBytes": ${APK_SIZE}
             },
-            ${PREVIEW_JSON}
             "_comment": "Auto-generated by CI. Do not edit manually."
           }
           EOF
@@ -228,13 +470,58 @@ jobs:
 
           if [ -n "$EXISTING_SHA" ]; then
             gh api --method PUT "repos/$REPO/contents/$FILE_PATH" \
-              --field message="chore: update stable channel to ${VERSION_NAME}" \
+              --field message="chore: update release to ${VERSION_NAME}" \
               --field content="$(base64 -w0 manifest_formatted.json)" \
               --field sha="$EXISTING_SHA" \
               --field branch="$BRANCH"
           else
             gh api --method PUT "repos/$REPO/contents/$FILE_PATH" \
-              --field message="chore: add app-update.json with stable ${VERSION_NAME}" \
+              --field message="chore: add app-update.json with release ${VERSION_NAME}" \
               --field content="$(base64 -w0 manifest_formatted.json)" \
               --field branch="$BRANCH"
           fi
+
+      - name: Summarize published release
+        if: steps.publish.outcome == 'success'
+        env:
+          APK_PATH: ${{ steps.artifacts.outputs.apk_path }}
+          APK_SHA256: ${{ steps.verify.outputs.apk_sha256 }}
+          MAPPING_PATH: ${{ steps.artifacts.outputs.mapping_path }}
+          PRUNE_OUTCOME: ${{ steps.prune.outcome }}
+          RELEASE_URL: ${{ steps.publish.outputs.url }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          VERSION_CODE: ${{ steps.meta.outputs.version_code }}
+          VERSION_NAME: ${{ steps.meta.outputs.version_name }}
+        run: |
+          {
+            echo "## Android Release published"
+            echo
+            echo "- Release: [$TAG]($RELEASE_URL)"
+            echo "- Version: \`$VERSION_NAME\`"
+            echo "- Version code: \`$VERSION_CODE\`"
+            echo "- Commit: \`$GITHUB_SHA\`"
+            echo "- APK: \`$APK_PATH\`"
+            echo "- Mapping: \`$MAPPING_PATH\`"
+            echo "- APK SHA-256: \`$APK_SHA256\`"
+            if [ "$PRUNE_OUTCOME" != "success" ]; then
+              echo
+              echo "> [!WARNING]"
+              echo "> The release was published, but old release cleanup failed. The next run will retry cleanup."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Summarize release failure
+        if: failure()
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          {
+            echo "## Android Release failed"
+            echo
+            echo "- Commit: \`$GITHUB_SHA\`"
+            if [ -n "$TAG" ]; then
+              echo "- Tag: \`$TAG\`"
+            fi
+            echo "- The last published release remains the update baseline."
+            echo "- The next push to main will retry the release."
+          } >> "$GITHUB_STEP_SUMMARY"
