@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
   "stable": {
-    "version": "0.1.114",
-    "versionCode": 1000705,
-    "apkUrl": "https://github.com/nuttycc/inkleaf/releases/download/v0.1.114/Inkleaf-v0.1.114-release.apk",
-    "releaseNotes": "Release v0.1.114",
-    "publishedAt": "2026-10-12T03:36:41Z",
+    "version": "0.1.115",
+    "versionCode": 1000734,
+    "apkUrl": "https://github.com/nuttycc/inkleaf/releases/download/v0.1.115/Inkleaf-v0.1.115-release.apk",
+    "releaseNotes": "Release v0.1.115",
+    "publishedAt": "2026-10-13T02:29:35Z",
     "sizeBytes": 14353117
   },
   "preview": {
