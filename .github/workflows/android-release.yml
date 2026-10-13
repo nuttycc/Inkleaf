@@ -56,6 +56,7 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           RELEASE_TAG: ${{ steps.tag.outputs.name }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           TAG="$RELEASE_TAG"
@@ -70,10 +71,19 @@ jobs:
           PATCH="${BASH_REMATCH[3]}"
           VERSION_NAME="${MAJOR}.${MINOR}.${PATCH}"
 
-          # Preview builds use the even code for a commit. A stable release of
-          # that same commit takes the next odd code so Android can upgrade it.
+          # versionCode must strictly increase per build so a newer APK (including a rebuild of an
+          # existing tag) always outranks whatever is installed. The commit count sets a floor, the
+          # previously published codes set a ceiling; take the greater and step past it.
           COMMIT_COUNT="$(git rev-list --count HEAD)"
-          VERSION_CODE=$((1000000 + COMMIT_COUNT * 2 + 1))
+          PREV_MANIFEST="$(
+            gh api "repos/$GITHUB_REPOSITORY/contents/app-update.json?ref=main" \
+              --jq '.content' 2>/dev/null | base64 -d 2>/dev/null || echo '{}'
+          )"
+          PREV_STABLE_CODE="$(jq -r '.stable.versionCode // 0' <<< "$PREV_MANIFEST" 2>/dev/null || echo 0)"
+          PREV_PREVIEW_CODE="$(jq -r '.preview.versionCode // 0' <<< "$PREV_MANIFEST" 2>/dev/null || echo 0)"
+          PREV_MAX_CODE=$(( PREV_STABLE_CODE > PREV_PREVIEW_CODE ? PREV_STABLE_CODE : PREV_PREVIEW_CODE ))
+          STABLE_FLOOR=$((1000000 + COMMIT_COUNT * 2 + 1))
+          VERSION_CODE=$(( (STABLE_FLOOR > PREV_MAX_CODE ? STABLE_FLOOR : PREV_MAX_CODE) + 1 ))
           if (( VERSION_CODE > 2100000000 )); then
             echo "Calculated versionCode exceeds Android's 2,100,000,000 limit." >&2
             exit 1

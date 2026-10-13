@@ -92,6 +92,7 @@ jobs:
         env:
           FORCE_BUILD: ${{ github.event_name == 'workflow_dispatch' && inputs.force || false }}
           PREVIOUS_SHA: ${{ steps.detect.outputs.previous_sha }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
@@ -114,7 +115,19 @@ jobs:
           fi
 
           COMMIT_COUNT="$(git rev-list --count HEAD)"
-          VERSION_CODE=$((1000000 + COMMIT_COUNT * 2))
+
+          # versionCode must strictly increase per build so a newer APK (including a rebuild of the
+          # same commit) always outranks whatever is installed. The commit count sets a floor, the
+          # previously published codes set a ceiling; take the greater and step past it.
+          PREV_MANIFEST="$(
+            gh api "repos/$GITHUB_REPOSITORY/contents/app-update.json?ref=main" \
+              --jq '.content' 2>/dev/null | base64 -d 2>/dev/null || echo '{}'
+          )"
+          PREV_STABLE_CODE="$(jq -r '.stable.versionCode // 0' <<< "$PREV_MANIFEST" 2>/dev/null || echo 0)"
+          PREV_PREVIEW_CODE="$(jq -r '.preview.versionCode // 0' <<< "$PREV_MANIFEST" 2>/dev/null || echo 0)"
+          PREV_MAX_CODE=$(( PREV_STABLE_CODE > PREV_PREVIEW_CODE ? PREV_STABLE_CODE : PREV_PREVIEW_CODE ))
+          PREVIEW_FLOOR=$((1000000 + COMMIT_COUNT * 2))
+          VERSION_CODE=$(( (PREVIEW_FLOOR > PREV_MAX_CODE ? PREVIEW_FLOOR : PREV_MAX_CODE) + 1 ))
           if (( VERSION_CODE > 2100000000 )); then
             echo "Calculated versionCode exceeds Android's 2,100,000,000 limit." >&2
             exit 1
