@@ -41,7 +41,7 @@ class AppUpdateChecker(
                     AppUpdateChannel.PREVIEW -> manifest.preview ?: manifest.stable
                 } ?: return@withContext AppUpdateCheckResult.UpToDate
 
-            val currentCode = currentVersionCode()
+            val currentCode = installedVersionCode(context)
             if (entry.versionCode <= currentCode) return@withContext AppUpdateCheckResult.UpToDate
 
             val skipped = settings.skippedVersion.first()
@@ -68,45 +68,50 @@ class AppUpdateChecker(
         }
     }
 
-    private fun detectChannel(): AppUpdateChannel {
-        val versionName = currentVersionName() ?: return AppUpdateChannel.STABLE
-        return if (versionName.contains('-')) AppUpdateChannel.PREVIEW else AppUpdateChannel.STABLE
-    }
-
-    private fun currentVersionCode(): Long {
-        val packageInfo =
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                context.packageManager.getPackageInfo(
-                    context.packageName,
-                    PackageManager.PackageInfoFlags.of(0),
-                )
-            } else {
-                @Suppress("DEPRECATION")
-                context.packageManager.getPackageInfo(context.packageName, 0)
-            }
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            packageInfo.longVersionCode
-        } else {
-            @Suppress("DEPRECATION")
-            packageInfo.versionCode.toLong()
-        }
-    }
-
-    private fun currentVersionName(): String? {
-        val packageInfo =
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                context.packageManager.getPackageInfo(
-                    context.packageName,
-                    PackageManager.PackageInfoFlags.of(0),
-                )
-            } else {
-                @Suppress("DEPRECATION")
-                context.packageManager.getPackageInfo(context.packageName, 0)
-            }
-        return packageInfo.versionName
-    }
+    private fun detectChannel(): AppUpdateChannel = detectChannel(installedVersionName(context))
 
     companion object {
         private const val MAX_MANIFEST_BYTES = 64 * 1024
+
+        /** A preview build (version name contains a hyphen) tracks the preview channel; anything else tracks stable. */
+        fun detectChannel(versionName: String?): AppUpdateChannel =
+            if (versionName != null && versionName.contains('-')) {
+                AppUpdateChannel.PREVIEW
+            } else {
+                AppUpdateChannel.STABLE
+            }
     }
+}
+
+internal fun installedVersionCode(context: Context): Long {
+    val packageInfo =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.packageManager.getPackageInfo(
+                context.packageName,
+                PackageManager.PackageInfoFlags.of(0),
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            context.packageManager.getPackageInfo(context.packageName, 0)
+        }
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        packageInfo.longVersionCode
+    } else {
+        @Suppress("DEPRECATION")
+        packageInfo.versionCode.toLong()
+    }
+}
+
+internal fun installedVersionName(context: Context): String? {
+    val packageInfo =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.packageManager.getPackageInfo(
+                context.packageName,
+                PackageManager.PackageInfoFlags.of(0),
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            context.packageManager.getPackageInfo(context.packageName, 0)
+        }
+    return packageInfo.versionName
 }
