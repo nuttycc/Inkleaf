@@ -187,6 +187,37 @@ const LOGIN_REQUIRED_HTML =
 const LOGIN_OK_JSON = JSON.stringify({ ret: true, html: "登入成功" });
 const LOGIN_FAIL_JSON = JSON.stringify({ ret: false, html: "密碼錯誤" });
 
+// The cloud favorites list: `.asTB` rows, which is a different container from the browse lists'
+// `.gallary_item`, plus the account's folder nav and a page link that spells the folder id out.
+const FAVORITES_HTML = [
+  '<div class="fav_nav"><div class="nav_list">',
+  '<a href="/users-users_fav.html">全部</a>',
+  '<a href="/users-users_fav-c-1.html">同人志</a></div></div>',
+  '<div class="asTB">',
+  '<div class="asTBcell thumb"><a href="/photos-index-aid-394338.html">',
+  '<img src="//t4.wnimg2.cfd/data/t/3943/38/17915329324234362.png"></a></div>',
+  '<div class="asTBcell list"><div class="l_title"><a href="/photos-index-aid-394338.html">沈鸢篇 [SMHTN]</a></div>',
+  '<div class="l_detla">23張圖片， 收藏於2026-10-09</div></div>',
+  '<div class="asTBcell cate l_catg"><a href="/users-users_fav-c-1.html">同人志</a></div>',
+  '<div class="asTBcell ctrl"><a href="javascript:;" onclick="users-fav_del-id-55501(this)">刪除</a></div>',
+  "</div>",
+  // Lazy cover, exactly as the list page ships it.
+  '<div class="asTB">',
+  '<div class="asTBcell thumb"><a href="/photos-index-aid-394336.html">',
+  '<img data-src="//t4.wnimg2.cfd/data/t/3943/36/17915312496142575.webp" src="loading.jpg"></a></div>',
+  '<div class="asTBcell list"><div class="l_title"><a href="/photos-index-aid-394336.html">小姐由我來守護|第3季</a></div>',
+  '<div class="l_detla">122張圖片， 收藏於2026-10-08</div></div>',
+  '<div class="asTBcell cate l_catg"><a href="/users-users_fav-c-19.html">韓漫</a></div>',
+  '<div class="asTBcell ctrl"><a href="javascript:;" onclick="users-fav_del-id-55502(this)">刪除</a></div>',
+  "</div>",
+  '<div class="f_left paginator"><span class="thispage">1</span><a href="/users-users_fav-page-2-c-0.html">2</a><a href="/users-users_fav-page-7-c-0.html">7</a></div>',
+].join("\n");
+
+const FAVORITES_LAST_PAGE_HTML = FAVORITES_HTML.replace(
+  '<span class="thispage">1</span><a href="/users-users_fav-page-2-c-0.html">2</a><a href="/users-users_fav-page-7-c-0.html">7</a>',
+  '<span class="thispage">7</span>'
+);
+
 // --------------------------------------------------------------------------- harness
 
 /**
@@ -340,6 +371,8 @@ function siteResponse(request) {
   if (url.indexOf("/albums-index-page-15094") >= 0) return { body: LIST_LAST_PAGE_HTML };
   if (url.indexOf("/albums-favorite_ranking") >= 0) return { body: RANKING_HTML };
   if (url.indexOf("/albums-index") >= 0) return { body: LIST_HTML };
+  if (url.indexOf("/users-users_fav-page-2") >= 0) return { body: FAVORITES_LAST_PAGE_HTML };
+  if (url.indexOf("/users-users_fav") >= 0) return { body: FAVORITES_HTML };
   if (url.indexOf("/search/") >= 0) {
     return { body: url.indexOf("q=%E9%9F%93%E6%BC%A2") >= 0 ? SEARCH_EMPTY_HTML : SEARCH_HTML };
   }
@@ -377,6 +410,7 @@ const api = harness.api;
 async function main() {
   await describeContract();
   await browseLists();
+  await browsesFavorites();
   await rankingAndCategoryRequests();
   await searches();
   await readsDetail();
@@ -398,7 +432,7 @@ async function describeContract() {
     described.feeds.map(function (feed) {
       return feed.id;
     }),
-    ["latest", "category", "ranking"]
+    ["latest", "category", "ranking", "favorites"]
   );
   const category = described.feeds[1].filters[0];
   assert.equal(category.type, "select");
@@ -474,6 +508,52 @@ async function browseLists() {
     await fresh.api.browse({ feedId: "latest", cursor: "15094", limit: 40, filters: {} }, ctx())
   );
   assert.equal(last.nextCursor, null, "a paginator with nothing above the current page is the end");
+}
+
+async function browsesFavorites() {
+  const fresh = createPlugin({ seedHosts: [SITE_HOST] });
+  const page = plain(
+    await fresh.api.browse({ feedId: "favorites", cursor: null, limit: 40, filters: {} }, ctx())
+  );
+  assert.equal(fresh.urls()[0], "https://" + SITE_HOST + "/users-users_fav.html");
+  assert.equal(page.items.length, 2);
+  assert.equal(page.items[0].sourceId, "394338");
+  assert.equal(page.items[0].title, "沈鸢篇 [SMHTN]");
+  assert.equal(page.items[0].subtitle, "同人志", "the folder name is the useful subtitle");
+  assert.equal(
+    page.items[0].cover.url,
+    "https://t4.wnimg2.cfd/data/t/3943/38/17915329324234362.png"
+  );
+  assert.equal(
+    page.items[1].cover.url,
+    "https://t4.wnimg2.cfd/data/t/3943/36/17915312496142575.webp",
+    "data-src wins over loading.jpg here too"
+  );
+  assert.equal(page.nextCursor, "2");
+
+  const second = plain(
+    await fresh.api.browse({ feedId: "favorites", cursor: "2", limit: 40, filters: {} }, ctx())
+  );
+  assert.equal(
+    fresh.urls()[1],
+    "https://" + SITE_HOST + "/users-users_fav-page-2-c-0.html",
+    "later pages spell the folder id out, and 0 means every folder"
+  );
+  assert.equal(second.nextCursor, null, "a paginator on its last page ends the feed");
+
+  // Signed out, the site serves its login wall in place of the shelf, and the feed says so rather
+  // than pretending the account has no favorites.
+  const anonymous = createPlugin({
+    seedHosts: [SITE_HOST],
+    respond: function (request) {
+      if (request.url.indexOf("/users-users_fav") >= 0) return { body: LOGIN_REQUIRED_HTML };
+      return defaultRespond(request);
+    },
+  });
+  await assert.rejects(
+    () => anonymous.api.browse({ feedId: "favorites", cursor: null, limit: 40, filters: {} }, ctx()),
+    (error) => error.code === "AUTH_REQUIRED" && error.message === "请先登录绅士漫画账号"
+  );
 }
 
 async function rankingAndCategoryRequests() {

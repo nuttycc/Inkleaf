@@ -45,6 +45,7 @@ const SEARCH_PAGE_SIZE = 24;
 // The account endpoints. Login answers JSON rather than a page, so it is parsed instead of scraped;
 // the favorites pages are ordinary HTML lists.
 const LOGIN_PATH = "/users-check_login.html";
+const FAVORITES_PATH = "/users-users_fav.html";
 
 // A 合集 lists at most this many sub-albums per page, and says how many exist in its 章節 label.
 const CHAPTER_PAGE_SIZE = 12;
@@ -299,6 +300,47 @@ function parseListItems(html, base) {
       sourceId: sourceId,
       title: title || "绅士漫画 #" + sourceId,
       subtitle: info,
+      coverUrl: coverSource ? toAbsolute(coverSource, base) : "",
+    });
+  }
+  return rows;
+}
+
+/**
+ * The favorites page reuses the site's tabular row: `.asTB` with a thumb cell, a title cell, a
+ * category cell and a delete control. It is a different container from `.gallary_item`, so it gets
+ * its own parser, and rows without an album link are dropped like any other.
+ */
+function favoriteRows(html) {
+  // `asTBcell` must not count as a row marker, hence the word boundaries around `asTB`. The tag is
+  // left open because the site reuses this row component across containers.
+  const parts = String(html || "").split(/<[a-z]+[^>]*class="[^"]*\basTB\b[^"]*"[^>]*>/i);
+  parts.shift();
+  return parts;
+}
+
+function parseFavoriteRows(html, base) {
+  const rows = [];
+  const blocks = favoriteRows(html);
+  for (let index = 0; index < blocks.length; index += 1) {
+    const block = blocks[index];
+    const titleBlock = firstMatch(block, /class="l_title"[\s\S]*?<a[^>]*>([\s\S]*?)<\/a>/i);
+    const href =
+      firstMatch(block, /class="l_title"[\s\S]*?<a[^>]*href="([^"]*)"/i) ||
+      firstMatch(block, /<a[^>]*href="(\/photos-[^"]*)"/i);
+    const sourceId = albumIdFromHref(href);
+    if (!sourceId) continue;
+    const title = oneLine(titleBlock) || oneLine(firstMatch(block, /title="([^"]*)"/i));
+    const coverSource = imageSourceFromBlock(block);
+    // The folder name is the useful subtitle; only fall back to the row's own detail line.
+    const category = oneLine(
+      firstMatch(block, /class="[^"]*l_catg[^"]*"[\s\S]*?<a[^>]*>([\s\S]*?)<\/a>/i)
+    );
+    const detail = oneLine(firstMatch(block, /class="l_detla"[^>]*>([\s\S]*?)<\/div>/i));
+    rows.push({
+      sourceId: sourceId,
+      title: title || "绅士漫画 #" + sourceId,
+      subtitle: category || detail,
       coverUrl: coverSource ? toAbsolute(coverSource, base) : "",
     });
   }
@@ -795,6 +837,9 @@ async function describe() {
           { id: "cate", title: "分类", type: "select", options: options(CATEGORY_OPTIONS) },
         ],
       },
+      // The account's own bookshelf. It is always declared, because describe() cannot know whether
+      // the reader is signed in without a network call; browsing it says plainly when they are not.
+      { id: "favorites", title: "账户收藏" },
     ],
     actions: [
       { id: "refreshDomains", title: "重新获取域名", kind: "action" },
@@ -863,6 +908,10 @@ async function browse(request, context) {
   const filters = request.filters || {};
   const cate = categoryOf(filters.cate);
 
+  if (request.feedId === "favorites") {
+    return browseFavorites(page, signal);
+  }
+
   let path;
   if (request.feedId === "ranking") {
     const type = text(filters.type) || "week";
@@ -879,6 +928,24 @@ async function browse(request, context) {
 
   const found = await siteRequest(path, signal);
   const rows = parseListItems(found.html, found.base);
+  return {
+    items: rowsToItems(rows, found.base),
+    nextCursor: nextCursorFor(found.html, page, rows, LIST_PAGE_SIZE),
+  };
+}
+
+/**
+ * The account's own bookshelf. Page one lives at a bare path; later pages spell out the folder id,
+ * and "0" is the site's own sentinel for "every folder".
+ */
+async function browseFavorites(page, signal) {
+  const path = page > 1 ? "/users-users_fav-page-" + page + "-c-0.html" : FAVORITES_PATH;
+  const found = await siteFetch(
+    path,
+    { accept: HTML_ACCEPT, referer: "/", authRequired: true, authMessage: "请先登录绅士漫画账号" },
+    signal
+  );
+  const rows = parseFavoriteRows(found.html, found.base);
   return {
     items: rowsToItems(rows, found.base),
     nextCursor: nextCursorFor(found.html, page, rows, LIST_PAGE_SIZE),
