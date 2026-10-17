@@ -184,6 +184,9 @@ const RELEASE_HTML = [
 const LOGIN_REQUIRED_HTML =
   '<div id="login_form"><input name="login_name"></div><p>您沒有權限，需要登錄</p>';
 
+const LOGIN_OK_JSON = JSON.stringify({ ret: true, html: "登入成功" });
+const LOGIN_FAIL_JSON = JSON.stringify({ ret: false, html: "密碼錯誤" });
+
 // --------------------------------------------------------------------------- harness
 
 /**
@@ -207,11 +210,28 @@ function plain(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+/** The login body is the only request the source sends as a form, so it is decoded back for asserts. */
+function formBody(request) {
+  if (!request.bodyBase64) return {};
+  const fields = {};
+  Buffer.from(request.bodyBase64, "base64")
+    .toString("utf8")
+    .split("&")
+    .forEach(function (part) {
+      if (!part) return;
+      const index = part.indexOf("=");
+      const key = decodeURIComponent(index < 0 ? part : part.slice(0, index));
+      fields[key] = index < 0 ? "" : decodeURIComponent(part.slice(index + 1));
+    });
+  return fields;
+}
+
 function createPlugin(options) {
   const settings = Object.assign({ domain: "" }, (options && options.settings) || {});
   const respond = (options && options.respond) || defaultRespond;
   const requests = [];
   const store = new Map();
+  let cookieClears = 0;
   if (options && options.seedHosts) {
     store.set(HOST_STATE_KEY, { hosts: options.seedHosts, updatedAt: NOW });
   }
@@ -283,10 +303,14 @@ function createPlugin(options) {
             return Array.from(store.keys());
           },
         },
-        cookies: {
-          set: async function () { return true; },
+        cookie: {
+          set: async function () { return { stored: true }; },
           list: async function () { return []; },
-          clear: async function () { return true; },
+          clear: async function (signal) {
+            guardSignal(signal);
+            cookieClears += 1;
+            return { cleared: true };
+          },
         },
         log: { write: function () {} },
         clock: { now: function () { return NOW; } },
@@ -300,6 +324,9 @@ function createPlugin(options) {
     api: sandbox.registration,
     requests: requests,
     store: store,
+    cookieClears: function () {
+      return cookieClears;
+    },
     urls: function () {
       return requests.map(function (request) {
         return request.url;
@@ -333,6 +360,9 @@ function defaultRespond(request) {
   if (url.indexOf("wnacg01.link") >= 0 || url.indexOf("wnacg02.link") >= 0 || url.indexOf("wnlink.ru") >= 0) {
     return { body: RELEASE_HTML };
   }
+  if (url.indexOf("/users-check_login.html") >= 0) {
+    return { body: LOGIN_OK_JSON };
+  }
   if (url.indexOf(DEAD_HOST) >= 0) {
     return { statusCode: 200, headers: { Server: "Parking/1.0" }, body: "<html>domain parked</html>" };
   }
@@ -356,6 +386,7 @@ async function main() {
   await honoursManualDomain();
   await discoversMirrorsFromTheReleasePage();
   await reportsLoginWalls();
+  await logsInAndOut();
 
   process.stdout.write("wnacg fixture unit tests passed\n");
 }
@@ -389,13 +420,16 @@ async function describeContract() {
     described.settings.map(function (setting) {
       return setting.id;
     }),
-    ["domain"]
+    ["domain", "account", "password"]
   );
+  const password = described.settings[2];
+  assert.equal(password.type, "secret");
+  assert.equal(password.secret, true, "the password must never render in cleartext");
   assert.deepEqual(
     described.actions.map(function (action) {
       return action.kind;
     }),
-    ["action"]
+    ["action", "login", "verifyCredentials", "clearSession"]
   );
 }
 
@@ -676,6 +710,73 @@ async function reportsLoginWalls() {
   await assert.rejects(
     () => fresh.api.pages({ sourceId: "394338", chapterId: "394338" }, ctx()),
     (error) => error.code === "AUTH_REQUIRED" && error.retryable === true
+  );
+}
+
+async function logsInAndOut() {
+  const fresh = createPlugin({
+    seedHosts: [SITE_HOST],
+    settings: { account: "reader", password: "secret" },
+  });
+  const result = plain(await fresh.api.invokeAction({ actionId: "login", input: {} }, ctx()));
+  assert.equal(result.ok, true);
+  assert.equal(result.message, "登录成功");
+  assert.equal(result.account, "reader");
+  assert.match(result.host, /^www\./);
+
+  const loginRequest = fresh.requests[0];
+  assert.equal(loginRequest.method, "POST");
+  assert.equal(loginRequest.url, "https://" + SITE_HOST + "/users-check_login.html");
+  assert.equal(loginRequest.headers["content-type"], "application/x-www-form-urlencoded; charset=UTF-8");
+  assert.equal(loginRequest.headers["x-requested-with"], "XMLHttpRequest");
+  assert.deepEqual(formBody(loginRequest), {
+    login_name: "reader",
+    login_pass: "secret",
+    remember_pass: "1",
+  });
+  assert.equal(fresh.urls().length, 1, "the login post is the only request the action makes");
+
+  // 校验账号 re-runs the same endpoint without a separate probe.
+  const verify = createPlugin({
+    seedHosts: [SITE_HOST],
+    settings: { account: "reader", password: "secret" },
+  });
+  const checked = plain(await verify.api.invokeAction({ actionId: "verifyCredentials", input: {} }, ctx()));
+  assert.equal(checked.message, "账号校验通过");
+  assert.equal(verify.urls()[0], "https://" + SITE_HOST + "/users-check_login.html");
+
+  // Nothing to send yet: this is a settings problem, not a credentials one.
+  const anonymous = createPlugin({ seedHosts: [SITE_HOST] });
+  await assert.rejects(
+    () => anonymous.api.invokeAction({ actionId: "login", input: {} }, ctx()),
+    (error) => error.code === "INVALID_ARGUMENT",
+    "login without settings must ask the reader to fill them in"
+  );
+
+  // A rejected login surfaces the site's own message and is not retryable.
+  const wrong = createPlugin({
+    seedHosts: [SITE_HOST],
+    settings: { account: "reader", password: "nope" },
+    respond: function (request) {
+      if (request.url.indexOf("/users-check_login.html") >= 0) return { body: LOGIN_FAIL_JSON };
+      return defaultRespond(request);
+    },
+  });
+  await assert.rejects(
+    () => wrong.api.invokeAction({ actionId: "login", input: {} }, ctx()),
+    (error) => error.code === "AUTH_REQUIRED" && error.message === "密碼錯誤" && error.retryable === false
+  );
+
+  // Logout drops the persisted session cookies; the host owns the jar.
+  const session = createPlugin({ seedHosts: [SITE_HOST] });
+  const bye = plain(await session.api.invokeAction({ actionId: "logout", input: {} }, ctx()));
+  assert.equal(bye.ok, true);
+  assert.equal(session.cookieClears(), 1);
+
+  const unknown = createPlugin({ seedHosts: [SITE_HOST] });
+  await assert.rejects(
+    () => unknown.api.invokeAction({ actionId: "nope", input: {} }, ctx()),
+    (error) => error.code === "NOT_FOUND"
   );
 }
 

@@ -10,6 +10,9 @@
 //   * Signed image URLs. Each image carries `?verify=<expiry>-<signature>` and the expiry is a
 //     fixed point inside the same day, so a chapter opened after that point must have its page list
 //     refetched. The host already re-invokes pages() when an image answers 403, which covers it.
+//   * Account sessions. Members-only albums and the account cloud favorites need a login, which the
+//     site grants as cookies. The host persists those per plugin and only for the domain that issued
+//     them, so `domain` is the setting that keeps a signed-in mirror from being rotated away.
 //
 // plugin.build.json asks .scripts/plugin.py to prepend the shared runtime while packaging, so
 // text(), asObject(), asArray(), finiteNumber(), dedupeBy(), responseText() and pluginError() are
@@ -17,6 +20,9 @@
 
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0";
+
+const HTML_ACCEPT = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
+const JSON_ACCEPT = "application/json, text/javascript, */*; q=0.01";
 
 // The site's own address-release pages. Each lists the current mirrors under 紳士漫畫最新地址.
 const RELEASE_PAGES = ["https://wnacg01.link/", "https://wnacg02.link/", "https://wnlink.ru/"];
@@ -35,6 +41,10 @@ const HOST_TRY_LIMIT = 4;
 // limit, because the page is the pagination unit and a partial page would break next-page probing.
 const LIST_PAGE_SIZE = 20;
 const SEARCH_PAGE_SIZE = 24;
+
+// The account endpoints. Login answers JSON rather than a page, so it is parsed instead of scraped;
+// the favorites pages are ordinary HTML lists.
+const LOGIN_PATH = "/users-check_login.html";
 
 // A 合集 lists at most this many sub-albums per page, and says how many exist in its 章節 label.
 const CHAPTER_PAGE_SIZE = 12;
@@ -73,7 +83,7 @@ const RANKING_OPTIONS = [
   ["month", "本月排行"],
 ];
 
-const SETTING_IDS = ["domain"];
+const SETTING_IDS = ["domain", "account", "password"];
 
 // --------------------------------------------------------------------------- text
 
@@ -123,6 +133,53 @@ function firstMatch(source, pattern) {
 function firstRegion(source, pattern) {
   const found = String(source || "").match(pattern);
   return found ? found[0] : "";
+}
+
+// --------------------------------------------------------------------------- bytes
+
+// The host sends request bodies as base64, and JavaScriptEngine isolates are not guaranteed to
+// expose TextEncoder, so the encoder is spelled out here the same way the shared runtime spells out
+// its decoder.
+function utf8Bytes(value) {
+  const bytes = [];
+  const source = String(value);
+  for (let index = 0; index < source.length; index += 1) {
+    const code = source.charCodeAt(index);
+    const following = index + 1 < source.length ? source.charCodeAt(index + 1) : -1;
+    if (code < 0x80) {
+      bytes.push(code);
+    } else if (code < 0x800) {
+      bytes.push(0xc0 | (code >> 6), 0x80 | (code & 0x3f));
+    } else if (code >= 0xd800 && code < 0xdc00 && following >= 0xdc00 && following < 0xe000) {
+      index += 1;
+      const point = 0x10000 + ((code - 0xd800) << 10) + (following - 0xdc00);
+      bytes.push(
+        0xf0 | (point >> 18),
+        0x80 | ((point >> 12) & 0x3f),
+        0x80 | ((point >> 6) & 0x3f),
+        0x80 | (point & 0x3f)
+      );
+    } else {
+      bytes.push(0xe0 | (code >> 12), 0x80 | ((code >> 6) & 0x3f), 0x80 | (code & 0x3f));
+    }
+  }
+  return new Uint8Array(bytes);
+}
+
+function encodeBase64(bytes) {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  let output = "";
+  for (let index = 0; index < bytes.length; index += 3) {
+    const remaining = bytes.length - index;
+    const first = bytes[index];
+    const second = remaining > 1 ? bytes[index + 1] : 0;
+    const third = remaining > 2 ? bytes[index + 2] : 0;
+    output += alphabet.charAt(first >> 2);
+    output += alphabet.charAt(((first & 0x03) << 4) | (second >> 4));
+    output += remaining > 1 ? alphabet.charAt(((second & 0x0f) << 2) | (third >> 6)) : "=";
+    output += remaining > 2 ? alphabet.charAt(third & 0x3f) : "=";
+  }
+  return output;
 }
 
 // --------------------------------------------------------------------------- urls
@@ -588,25 +645,59 @@ function isDeadMirror(response) {
 
 /** Fetches one site page, rotating the host pool until a live mirror answers. */
 async function siteRequest(path, signal) {
+  return siteFetch(path, { accept: HTML_ACCEPT, referer: "/", authRequired: true }, signal);
+}
+
+/**
+ * The account's login endpoint. It answers JSON rather than a page, and it is the one request that
+ * must not be refused for looking like the login wall, so the page-level guard is off.
+ */
+async function siteLogin(account, password, signal) {
+  return siteFetch(
+    LOGIN_PATH,
+    {
+      method: "POST",
+      body: queryString({ login_name: account, login_pass: password, remember_pass: "1" }),
+      accept: JSON_ACCEPT,
+      referer: "/",
+      authRequired: false,
+    },
+    signal
+  );
+}
+
+/**
+ * Runs one request against the host pool, rotating past retired mirrors. [options.body] turns it into
+ * a form POST; [options.authRequired] makes a login wall an error instead of a page to parse,
+ * because every page handler here depends on the account cookies the wall is asking for.
+ */
+async function siteFetch(path, options, signal) {
   const queue = await hostQueue(signal);
+  const method = (options && options.method) || "GET";
+  const accept = (options && options.accept) || HTML_ACCEPT;
+  const refererPath = (options && options.referer) || "/";
+  const authMessage =
+    (options && options.authMessage) || "这本漫画需要登录绅士漫画账号后才能阅读";
   let lastError = null;
+
   for (let index = 0; index < Math.min(queue.length, HOST_TRY_LIMIT); index += 1) {
     const base = hostBase(queue[index]);
+    const headers = {
+      "user-agent": USER_AGENT,
+      accept: accept,
+      referer: base + refererPath,
+    };
+    const request = { method: method, url: base + path, headers: headers };
+    if (options && options.body) {
+      headers["content-type"] = "application/x-www-form-urlencoded; charset=UTF-8";
+      headers["x-requested-with"] = "XMLHttpRequest";
+      request.bodyBase64 = encodeBase64(utf8Bytes(options.body));
+    }
+
     let response;
     let body = "";
     try {
-      response = await inkleaf.host.http.request(
-        {
-          method: "GET",
-          url: base + path,
-          headers: {
-            "user-agent": USER_AGENT,
-            accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            referer: base + "/",
-          },
-        },
-        signal
-      );
+      response = await inkleaf.host.http.request(request, signal);
       body = await responseText(response, signal);
     } catch (error) {
       lastError = error;
@@ -621,13 +712,21 @@ async function siteRequest(path, signal) {
       lastError = pluginError("HTTP", "绅士漫画接口状态码 " + response.statusCode, true);
       continue;
     }
-    if (visibleText(body).indexOf("需要登錄") >= 0 || /id="login_form"/i.test(body)) {
-      throw pluginError("AUTH_REQUIRED", "这本漫画需要登录绅士漫画账号后才能阅读", true);
+    if (options && options.authRequired && isLoginRequired(body)) {
+      throw pluginError("AUTH_REQUIRED", authMessage, true);
     }
     if (index > 0) await promoteHost(queue[index], signal);
     return { html: body, base: base };
   }
   throw lastError || pluginError("NETWORK", "没有可用的绅士漫画域名", true);
+}
+
+/** The login wall is a page the site serves in place of the requested one. */
+function isLoginRequired(html) {
+  const source = String(html || "");
+  if (/id="login_form"/i.test(source)) return true;
+  const visible = visibleText(source);
+  return visible.indexOf("需要登錄") >= 0 || visible.indexOf("需要登录") >= 0;
 }
 
 /** Keeps the last mirror that answered at the front, so the next call skips the dead ones. */
@@ -697,14 +796,21 @@ async function describe() {
         ],
       },
     ],
-    actions: [{ id: "refreshDomains", title: "重新获取域名", kind: "action" }],
+    actions: [
+      { id: "refreshDomains", title: "重新获取域名", kind: "action" },
+      { id: "login", title: "登录绅士漫画账号", kind: "login" },
+      { id: "verifyCredentials", title: "校验账号", kind: "verifyCredentials" },
+      { id: "logout", title: "退出登录", kind: "clearSession", destructive: true },
+    ],
     settings: [
       {
         id: "domain",
-        title: "指定域名（留空自动从发布页获取）",
+        title: "指定域名（登录后建议固定，留空自动从发布页获取）",
         type: "text",
         section: "线路",
       },
+      { id: "account", title: "账号", type: "text", section: "登录" },
+      { id: "password", title: "密码", type: "secret", secret: true, section: "登录" },
     ],
   };
 }
@@ -898,6 +1004,26 @@ async function pages(request, context) {
   };
 }
 
+/**
+ * Posts the credentials to the site's own login endpoint. The account cookies the response sets are
+ * persisted by the host's cookie jar, so nothing is stored plugin-side. A JSON body that will not
+ * parse means the mirror answered with a page, not the endpoint.
+ */
+async function loginWithPassword(account, password, signal) {
+  const found = await siteLogin(account, password, signal);
+  let payload;
+  try {
+    payload = JSON.parse(found.html);
+  } catch (error) {
+    throw pluginError("PLUGIN_PROTOCOL", "登录响应解析失败", false);
+  }
+  const data = asObject(payload);
+  if (data.ret !== true) {
+    throw pluginError("AUTH_REQUIRED", oneLine(data.html) || "账号或密码错误", false);
+  }
+  return found.base;
+}
+
 async function invokeAction(request, context) {
   const signal = context && context.signal;
   const actionId = text(request.actionId);
@@ -921,6 +1047,29 @@ async function invokeAction(request, context) {
       active: toHost(probe.base),
       usable: parseListItems(probe.html, probe.base).length > 0,
     };
+  }
+
+  // 校验账号 re-runs the login, which both proves the credentials and refreshes the session.
+  if (actionId === "login" || actionId === "verifyCredentials") {
+    const settings = await readSettings(signal);
+    const input = asObject(request.input);
+    const account = text(input.account) || settings.account;
+    const password = text(input.password) || settings.password;
+    if (!account || !password) {
+      throw pluginError("INVALID_ARGUMENT", "请先在源设置的“登录”里填写账号和密码", false);
+    }
+    const base = await loginWithPassword(account, password, signal);
+    return {
+      ok: true,
+      message: actionId === "login" ? "登录成功" : "账号校验通过",
+      account: account,
+      host: toHost(base),
+    };
+  }
+
+  if (actionId === "logout") {
+    await inkleaf.host.cookie.clear(signal);
+    return { ok: true, message: "已退出登录" };
   }
 
   throw pluginError("NOT_FOUND", "未知操作: " + actionId, false);
