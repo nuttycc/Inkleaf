@@ -88,3 +88,24 @@ fun sourceActionEmphasis(action: PluginActionDescriptor): SourceActionEmphasis =
 
 /** True when an action clears the current session and should be hidden while signed out. */
 fun PluginActionDescriptor.isSignOut(): Boolean = kind in PluginActionKind.signOutKinds
+
+/**
+ * The actions an area offers for the current session state. A login action disappears once signed
+ * in, and a sign-out action stays hidden until then, so the heading never shows a step that cannot
+ * apply. Other actions are always offered.
+ */
+fun visibleAreaActions(
+    actions: List<PluginActionDescriptor>,
+    signedIn: Boolean,
+): List<PluginActionDescriptor> =
+    actions.filter { action ->
+        when {
+            action.kind == PluginActionKind.LOGIN -> !signedIn
+            action.isSignOut() -> signedIn
+            else -> true
+        }
+    }
+
+/** True when an area's heading should carry the signed-in state. */
+fun areaShowsSessionStatus(area: SourceArea): Boolean =
+    area.actions.any { it.kind == PluginActionKind.LOGIN || it.isSignOut() }

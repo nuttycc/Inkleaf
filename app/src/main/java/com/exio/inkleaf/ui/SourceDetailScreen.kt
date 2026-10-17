@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -71,6 +72,7 @@ import com.composables.icons.materialsymbols.outlined.R as MaterialSymbolsOutlin
 import com.exio.inkleaf.plugin.InstalledPlugin
 import com.exio.inkleaf.plugin.PluginActionDescriptor
 import com.exio.inkleaf.plugin.PluginHealth
+import com.exio.inkleaf.plugin.PluginSessionState
 import com.exio.inkleaf.plugin.PluginSettingDescriptor
 
 /**
@@ -89,6 +91,7 @@ fun SourceDetailScreen(
     val plugin by viewModel.plugin.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val actions by viewModel.actions.collectAsStateWithLifecycle()
+    val session by viewModel.session.collectAsStateWithLifecycle()
     val values by viewModel.values.collectAsStateWithLifecycle()
     val busy by viewModel.busy.collectAsStateWithLifecycle()
     val describeError by viewModel.describeError.collectAsStateWithLifecycle()
@@ -129,17 +132,9 @@ fun SourceDetailScreen(
 
     val displayName = plugin?.manifest?.name ?: pluginId
 
-    // Group by first appearance rather than sorting: the plugin's declaration order is the only
-    // ordering signal we have, and reordering it would scramble the author's intent.
-    val settingSections =
-        remember(settings) {
-            val ordered = LinkedHashMap<String?, MutableList<PluginSettingDescriptor>>()
-            settings.forEach { descriptor ->
-                val section = descriptor.section?.takeIf { it.isNotBlank() }
-                ordered.getOrPut(section) { mutableListOf() }.add(descriptor)
-            }
-            ordered.map { (section, group) -> section to group.toList() }
-        }
+    // Settings and actions merge by their declared section so an action sits with the fields it
+    // acts on (the login button beside the credentials). Section-less content keeps its old layout.
+    val areas = remember(settings, actions) { sourceAreas(settings, actions) }
 
     Scaffold(
         modifier = modifier,
@@ -203,21 +198,59 @@ fun SourceDetailScreen(
                 )
             }
 
-            if (settings.isNotEmpty()) {
-                settingSections.forEach { (section, group) ->
-                    item(key = "setting_header_${section.orEmpty()}") {
-                        SectionHeader(section ?: "设置")
-                    }
-                    item(key = "setting_card_${section.orEmpty()}") {
-                        SettingGroupCard(
-                            descriptors = group,
-                            values = values,
-                            enabled = !busy,
-                            onValueChange = { id, value -> viewModel.setValue(id, value) },
-                            onEditProtectedSetting = { descriptor ->
-                                editingDescriptor = descriptor
-                            },
-                        )
+            if (areas.isNotEmpty()) {
+                areas.forEach { area ->
+                    if (area.section != null) {
+                        // A named section is a real area: one heading that carries the section's
+                        // actions, then the fields the plugin grouped under it.
+                        item(key = "area_header_${area.section}") {
+                            AreaHeader(
+                                area = area,
+                                session = session,
+                                enabled = !busy,
+                                onActionClick = { action -> viewModel.invokeAction(action) },
+                            )
+                        }
+                        if (area.settings.isNotEmpty()) {
+                            item(key = "area_card_${area.section}") {
+                                SettingGroupCard(
+                                    descriptors = area.settings,
+                                    values = values,
+                                    enabled = !busy,
+                                    onValueChange = { id, value -> viewModel.setValue(id, value) },
+                                    onEditProtectedSetting = { descriptor ->
+                                        editingDescriptor = descriptor
+                                    },
+                                )
+                            }
+                        }
+                    } else {
+                        // Section-less content keeps the pre-section layout: ungrouped settings,
+                        // then the generic action list.
+                        if (area.settings.isNotEmpty()) {
+                            item(key = "setting_header") { SectionHeader("设置") }
+                            item(key = "setting_card") {
+                                SettingGroupCard(
+                                    descriptors = area.settings,
+                                    values = values,
+                                    enabled = !busy,
+                                    onValueChange = { id, value -> viewModel.setValue(id, value) },
+                                    onEditProtectedSetting = { descriptor ->
+                                        editingDescriptor = descriptor
+                                    },
+                                )
+                            }
+                        }
+                        if (area.actions.isNotEmpty()) {
+                            item(key = "action_header") { SectionHeader("操作") }
+                            item(key = "action_card") {
+                                ActionGroupCard(
+                                    actions = area.actions,
+                                    enabled = !busy,
+                                    onActionClick = { action -> viewModel.invokeAction(action) },
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -240,17 +273,6 @@ fun SourceDetailScreen(
                             modifier = Modifier.padding(16.dp),
                         )
                     }
-                }
-            }
-
-            if (actions.isNotEmpty()) {
-                item { SectionHeader("操作") }
-                item {
-                    ActionGroupCard(
-                        actions = actions,
-                        enabled = !busy,
-                        onActionClick = { action -> viewModel.invokeAction(action) },
-                    )
                 }
             }
         }
@@ -325,6 +347,96 @@ private fun SectionHeader(text: String) {
         color = MaterialTheme.colorScheme.primary,
         modifier = Modifier.padding(start = 24.dp, end = 16.dp, top = 8.dp),
     )
+}
+
+/**
+ * The heading of a section that carries actions. The section name rests on the left, the actions
+ * the plugin attached to that section sit on the right, and the signed-in state is shown beneath
+ * the name so the login control never asks for credentials that are already accepted.
+ */
+@Composable
+private fun AreaHeader(
+    area: SourceArea,
+    session: PluginSessionState,
+    enabled: Boolean,
+    onActionClick: (PluginActionDescriptor) -> Unit,
+) {
+    val status =
+        if (areaShowsSessionStatus(area)) {
+            if (session.signedIn) {
+                session.account?.let { "已登录：$it" } ?: "已登录"
+            } else {
+                "未登录"
+            }
+        } else {
+            null
+        }
+
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 12.dp, top = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.padding(end = 8.dp)) {
+            Text(
+                text = area.title,
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            status?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        FlowRow(
+            modifier = Modifier.weight(1f),
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            visibleAreaActions(area.actions, session.signedIn).forEach { action ->
+                SourceAreaActionButton(
+                    action = action,
+                    enabled = enabled && action.enabled,
+                    onClick = { onActionClick(action) },
+                )
+            }
+        }
+    }
+}
+
+/** Renders an in-area action at the weight its kind earns, from the single primary step down. */
+@Composable
+private fun SourceAreaActionButton(
+    action: PluginActionDescriptor,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    when (sourceActionEmphasis(action)) {
+        SourceActionEmphasis.PRIMARY -> {
+            Button(onClick = onClick, enabled = enabled) { Text(action.title) }
+        }
+        SourceActionEmphasis.TONAL -> {
+            FilledTonalButton(onClick = onClick, enabled = enabled) { Text(action.title) }
+        }
+        SourceActionEmphasis.TEXT -> {
+            TextButton(
+                onClick = onClick,
+                enabled = enabled,
+                colors =
+                    if (action.destructive) {
+                        ButtonDefaults.textButtonColors(
+                            contentColor = MaterialTheme.colorScheme.error
+                        )
+                    } else {
+                        ButtonDefaults.textButtonColors()
+                    },
+            ) {
+                Text(action.title)
+            }
+        }
+    }
 }
 
 @Composable

@@ -108,4 +108,32 @@ class SourceAreaModelsTest {
         assertFalse(action("login", kind = "login").isSignOut())
         assertFalse(action("verify", kind = "verifyCredentials").isSignOut())
     }
+
+    @Test
+    fun `signed out areas offer login but hide sign out`() {
+        val actions =
+            listOf(
+                action("login", kind = "login"),
+                action("verify", kind = "verifyCredentials"),
+                action("logout", kind = "clearSession"),
+            )
+
+        assertEquals(
+            listOf("login", "verify"),
+            visibleAreaActions(actions, signedIn = false).map { it.id },
+        )
+        assertEquals(
+            listOf("verify", "logout"),
+            visibleAreaActions(actions, signedIn = true).map { it.id },
+        )
+    }
+
+    @Test
+    fun `session status is shown only for areas that sign in or out`() {
+        val authArea = sourceAreas(emptyList(), listOf(action("login", kind = "login"))).single()
+        val plainArea = sourceAreas(emptyList(), listOf(action("refresh"))).single()
+
+        assertTrue(areaShowsSessionStatus(authArea))
+        assertFalse(areaShowsSessionStatus(plainArea))
+    }
 }
