@@ -51,6 +51,18 @@ class SourceDetailActionResultTest {
     }
 
     @Test
+    fun `verifying credentials also marks the source signed in`() {
+        val next =
+            sessionStateAfterAction(
+                PluginSessionState(),
+                PluginActionDescriptor("verify", "Verify", kind = "verifyCredentials"),
+                buildJsonObject { put("account", "alice") },
+            )
+
+        assertEquals(PluginSessionState(signedIn = true, account = "alice"), next)
+    }
+
+    @Test
     fun `sign out clears the session`() {
         val previous = PluginSessionState(signedIn = true, account = "alice")
 

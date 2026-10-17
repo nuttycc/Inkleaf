@@ -323,8 +323,8 @@ internal fun sourceActionMessage(result: JsonElement, actionTitle: String): Stri
 
 /**
  * Applies an action's outcome to the session hint. Only the protocol's kind enum drives the
- * decision; a login marks the source signed in with whatever account the plugin reported, and a
- * sign-out kind clears it. Any other action leaves the state untouched.
+ * decision; a sign-in kind marks the source signed in with whatever account the plugin reported,
+ * and a sign-out kind clears it. Any other action leaves the state untouched.
  */
 internal fun sessionStateAfterAction(
     current: PluginSessionState,
@@ -332,7 +332,7 @@ internal fun sessionStateAfterAction(
     result: JsonElement,
 ): PluginSessionState =
     when {
-        action.kind == PluginActionKind.LOGIN ->
+        action.kind in PluginActionKind.signInKinds ->
             PluginSessionState(
                 signedIn = true,
                 account = actionResultAccount(result) ?: current.account,

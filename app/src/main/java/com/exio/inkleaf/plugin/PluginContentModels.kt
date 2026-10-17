@@ -64,6 +64,9 @@ object PluginActionKind {
     const val CLEAR_SESSION = "clearSession"
     const val VERIFY_CREDENTIALS = "verifyCredentials"
 
+    /** Kinds that accept credentials and should mark the source signed in. */
+    val signInKinds: Set<String> = setOf(LOGIN, VERIFY_CREDENTIALS)
+
     /** Kinds that end the current session and should clear the host's signed-in state. */
     val signOutKinds: Set<String> = setOf(LOGOUT, CLEAR_SESSION)
 }

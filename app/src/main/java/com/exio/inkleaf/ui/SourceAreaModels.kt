@@ -108,4 +108,4 @@ fun visibleAreaActions(
 
 /** True when an area's heading should carry the signed-in state. */
 fun areaShowsSessionStatus(area: SourceArea): Boolean =
-    area.actions.any { it.kind == PluginActionKind.LOGIN || it.isSignOut() }
+    area.actions.any { it.kind in PluginActionKind.signInKinds || it.isSignOut() }
