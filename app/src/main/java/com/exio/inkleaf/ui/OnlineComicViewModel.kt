@@ -12,10 +12,14 @@ import com.exio.inkleaf.plugin.OnlineComicRecord
 import com.exio.inkleaf.plugin.OnlineContentRepository
 import com.exio.inkleaf.plugin.OnlineReadingPosition
 import com.exio.inkleaf.plugin.OnlineUserReference
+import com.exio.inkleaf.plugin.PluginActionDescriptor
+import com.exio.inkleaf.plugin.PluginActionRequest
+import com.exio.inkleaf.plugin.PluginActionScope
 import com.exio.inkleaf.plugin.PluginChapterRequest
 import com.exio.inkleaf.plugin.PluginContentCodec
 import com.exio.inkleaf.plugin.PluginDetailRequest
 import com.exio.inkleaf.plugin.PluginRpcException
+import com.exio.inkleaf.plugin.actionsInScope
 import java.nio.charset.StandardCharsets
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -31,6 +35,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 internal data class OnlineComicUiState(
     val sourceName: String,
@@ -41,9 +47,13 @@ internal data class OnlineComicUiState(
     val isRefreshing: Boolean = false,
     val isStale: Boolean = false,
     val isBookmarked: Boolean = false,
+    val comicActions: List<PluginActionDescriptor> = emptyList(),
     val position: OnlineReadingPosition? = null,
     val errorMessage: String? = null,
 )
+
+/** Transient result of a comic action, shown once and then consumed by the screen. */
+internal data class OnlineComicActionFeedback(val message: String, val isError: Boolean)
 
 internal suspend fun observeOnlineComicPosition(
     repository: OnlineContentRepository,
@@ -85,6 +95,9 @@ internal class OnlineComicViewModel(
         )
     val state: StateFlow<OnlineComicUiState> = _state.asStateFlow()
 
+    private val _actionFeedback = MutableStateFlow<OnlineComicActionFeedback?>(null)
+    val actionFeedback: StateFlow<OnlineComicActionFeedback?> = _actionFeedback.asStateFlow()
+
     init {
         viewModelScope.launch {
             observeOnlineComicPosition(
@@ -96,9 +109,63 @@ internal class OnlineComicViewModel(
             }
         }
         refresh(force = false)
+        loadComicActions()
     }
 
     fun retry() = refresh(force = true)
+
+    fun consumeActionFeedback() {
+        _actionFeedback.value = null
+    }
+
+    /**
+     * Runs a comic-scoped source action against this comic. The action decides what to do with the
+     * id; the host only supplies it and reports the outcome the plugin returned.
+     */
+    fun invokeComicAction(action: PluginActionDescriptor) {
+        viewModelScope.launch {
+            try {
+                val result =
+                    application.pluginCatalog.invokeAction(
+                        pluginId,
+                        PluginActionRequest(
+                            actionId = action.id,
+                            input = buildJsonObject { put("sourceId", sourceId) },
+                        ),
+                    )
+                _actionFeedback.value =
+                    OnlineComicActionFeedback(
+                        message = sourceActionMessage(result, action.title),
+                        isError = false,
+                    )
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                _actionFeedback.value =
+                    OnlineComicActionFeedback(
+                        message = error.toContentLoadError().message,
+                        isError = true,
+                    )
+            }
+        }
+    }
+
+    private fun loadComicActions() {
+        viewModelScope.launch {
+            val actions =
+                try {
+                    application.pluginCatalog
+                        .describe(pluginId)
+                        .actionsInScope(PluginActionScope.COMIC)
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (_: Exception) {
+                    // A source that cannot describe itself simply offers no comic actions.
+                    emptyList()
+                }
+            _state.value = _state.value.copy(comicActions = actions)
+        }
+    }
 
     fun chapterContext(chapter: ChapterSummary): JsonElement? =
         chapter.opaqueContext ?: _state.value.detail?.opaqueContext ?: routeOpaqueContext
