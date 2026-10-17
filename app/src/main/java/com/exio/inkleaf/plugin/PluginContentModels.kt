@@ -38,7 +38,22 @@ data class PluginActionDescriptor(
     val kind: String = "action",
     val destructive: Boolean = false,
     val enabled: Boolean = true,
+    /**
+     * Where the host offers the action. A source action belongs to the source screen (login,
+     * refresh); a comic action runs against one comic and receives its sourceId as input.
+     */
+    val scope: String = PluginActionScope.SOURCE,
 )
+
+object PluginActionScope {
+    const val SOURCE = "source"
+    const val COMIC = "comic"
+    val supported: Set<String> = setOf(SOURCE, COMIC)
+}
+
+/** The actions a given surface is allowed to offer. */
+fun PluginDescribeResponse.actionsInScope(scope: String): List<PluginActionDescriptor> =
+    actions.filter { it.scope == scope }
 
 @Serializable
 data class PluginFilterDescriptor(
@@ -368,7 +383,15 @@ object PluginContentCodec {
                         filters = feed.filters.filter { it.type in SUPPORTED_FEED_FILTER_TYPES }
                     )
                 },
-            actions = value.actions.filter { it.kind in SUPPORTED_ACTION_KINDS },
+            actions =
+                value.actions
+                    .filter { it.kind in SUPPORTED_ACTION_KINDS }
+                    // An unrecognised scope is a newer host's business; keep it on the source screen
+                    // rather than silently dropping the action.
+                    .map { action ->
+                        if (action.scope in PluginActionScope.supported) action
+                        else action.copy(scope = PluginActionScope.SOURCE)
+                    },
             filters = value.filters.filter { it.type in SUPPORTED_FILTER_TYPES },
             settings = value.settings.filter { it.type in SUPPORTED_SETTING_TYPES },
         )

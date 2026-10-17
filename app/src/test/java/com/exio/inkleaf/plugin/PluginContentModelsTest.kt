@@ -126,6 +126,39 @@ class PluginContentModelsTest {
     }
 
     @Test
+    fun `action scope is retained and unknown scopes fall back to source`() {
+        val encoded =
+            PluginContentCodec.json.encodeToJsonElement(
+                PluginDescribeResponse(
+                    actions =
+                        listOf(
+                            PluginActionDescriptor("refresh", "Refresh"),
+                            PluginActionDescriptor(
+                                "favorite",
+                                "Favorite",
+                                scope = PluginActionScope.COMIC,
+                            ),
+                            PluginActionDescriptor("future", "Future", scope = "futureSurface"),
+                        )
+                )
+            )
+
+        val decoded = PluginContentCodec.describe(encoded)
+        assertEquals(listOf("refresh", "favorite", "future"), decoded.actions.map { it.id })
+        assertEquals(PluginActionScope.SOURCE, decoded.actions[0].scope)
+        assertEquals(PluginActionScope.COMIC, decoded.actions[1].scope)
+        assertEquals(PluginActionScope.SOURCE, decoded.actions[2].scope)
+        assertEquals(
+            listOf("favorite"),
+            decoded.actionsInScope(PluginActionScope.COMIC).map { it.id },
+        )
+        assertEquals(
+            listOf("refresh", "future"),
+            decoded.actionsInScope(PluginActionScope.SOURCE).map { it.id },
+        )
+    }
+
+    @Test
     fun `search identity and result limit are validated`() {
         val valid =
             PluginSearchPage(

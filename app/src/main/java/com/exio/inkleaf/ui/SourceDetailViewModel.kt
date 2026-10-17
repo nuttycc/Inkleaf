@@ -9,7 +9,9 @@ import com.exio.inkleaf.diagnostics.AppErrorReporter
 import com.exio.inkleaf.plugin.InstalledPlugin
 import com.exio.inkleaf.plugin.PluginActionDescriptor
 import com.exio.inkleaf.plugin.PluginActionRequest
+import com.exio.inkleaf.plugin.PluginActionScope
 import com.exio.inkleaf.plugin.PluginSettingDescriptor
+import com.exio.inkleaf.plugin.actionsInScope
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -105,7 +107,8 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
         try {
             val described = app.pluginCatalog.describe(pluginId)
             _settings.value = described.settings
-            _actions.value = described.actions
+            // Comic-scoped actions are offered on the comic page, not here, where there is no comic.
+            _actions.value = described.actionsInScope(PluginActionScope.SOURCE)
             authoritativeSettingIds = described.settings.mapTo(linkedSetOf()) { it.id }
             _describeError.value = null
         } catch (error: CancellationException) {
