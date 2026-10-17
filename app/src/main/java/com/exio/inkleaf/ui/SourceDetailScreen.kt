@@ -242,7 +242,7 @@ fun SourceDetailScreen(
                             }
                         }
                         if (area.actions.isNotEmpty()) {
-                            item(key = "action_header") { SectionHeader("操作") }
+                            item(key = "action_header") { SectionHeader(area.title) }
                             item(key = "action_card") {
                                 ActionGroupCard(
                                     actions = area.actions,
