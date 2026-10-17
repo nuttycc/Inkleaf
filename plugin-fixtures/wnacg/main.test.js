@@ -482,7 +482,7 @@ async function describeContract() {
     described.actions.map(function (action) {
       return action.id;
     }),
-    ["refreshDomains", "login", "verifyCredentials", "logout", "addFavorite", "removeFavorite"]
+    ["refreshDomains", "login", "logout", "addFavorite", "removeFavorite"]
   );
   // Only the comic-scoped ones appear on a comic page; the rest stay on the source screen.
   assert.deepEqual(
@@ -503,7 +503,6 @@ async function describeContract() {
   assert.deepEqual(sections, {
     refreshDomains: "线路",
     login: "登录",
-    verifyCredentials: "登录",
     logout: "登录",
   });
 }
@@ -856,15 +855,6 @@ async function logsInAndOut() {
     remember_pass: "1",
   });
   assert.equal(fresh.urls().length, 1, "the login post is the only request the action makes");
-
-  // 校验账号 re-runs the same endpoint without a separate probe.
-  const verify = createPlugin({
-    seedHosts: [SITE_HOST],
-    settings: { account: "reader", password: "secret" },
-  });
-  const checked = plain(await verify.api.invokeAction({ actionId: "verifyCredentials", input: {} }, ctx()));
-  assert.equal(checked.message, "账号校验通过");
-  assert.equal(verify.urls()[0], "https://" + SITE_HOST + "/users-check_login.html");
 
   // Nothing to send yet: this is a settings problem, not a credentials one.
   const anonymous = createPlugin({ seedHosts: [SITE_HOST] });

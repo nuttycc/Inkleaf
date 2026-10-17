@@ -878,8 +878,7 @@ async function describe() {
       // Actions that share a setting's section are offered on that area's heading, beside the
       // fields they act on: login sits with the credentials, refresh with the line selection.
       { id: "refreshDomains", title: "重新获取域名", kind: "action", section: "线路" },
-      { id: "login", title: "登录绅士漫画账号", kind: "login", section: "登录" },
-      { id: "verifyCredentials", title: "校验账号", kind: "verifyCredentials", section: "登录" },
+      { id: "login", title: "登录", kind: "login", section: "登录" },
       { id: "logout", title: "退出登录", kind: "clearSession", destructive: true, section: "登录" },
       // Comic-scoped: the host offers these on a comic page and sends its sourceId as input.
       { id: "addFavorite", title: "加入账户收藏", kind: "action", scope: "comic" },
@@ -1255,8 +1254,8 @@ async function invokeAction(request, context) {
     };
   }
 
-  // 校验账号 re-runs the login, which both proves the credentials and refreshes the session.
-  if (actionId === "login" || actionId === "verifyCredentials") {
+  // Logging in re-runs the site login, which both proves the credentials and refreshes the session.
+  if (actionId === "login") {
     const settings = await readSettings(signal);
     const input = asObject(request.input);
     const account = text(input.account) || settings.account;
@@ -1267,7 +1266,7 @@ async function invokeAction(request, context) {
     const base = await loginWithPassword(account, password, signal);
     return {
       ok: true,
-      message: actionId === "login" ? "登录成功" : "账号校验通过",
+      message: "登录成功",
       account: account,
       host: toHost(base),
     };
