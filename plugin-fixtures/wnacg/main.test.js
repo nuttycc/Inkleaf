@@ -495,6 +495,17 @@ async function describeContract() {
       }),
     ["addFavorite", "removeFavorite"]
   );
+  // Actions sharing a setting's section are offered on that area instead of the generic list.
+  const sections = {};
+  described.actions.forEach(function (action) {
+    if (action.section) sections[action.id] = action.section;
+  });
+  assert.deepEqual(sections, {
+    refreshDomains: "线路",
+    login: "登录",
+    verifyCredentials: "登录",
+    logout: "登录",
+  });
 }
 
 async function browseLists() {
