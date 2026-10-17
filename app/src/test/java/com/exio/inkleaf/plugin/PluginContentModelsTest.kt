@@ -159,6 +159,24 @@ class PluginContentModelsTest {
     }
 
     @Test
+    fun `action section is retained and defaults to absent`() {
+        val encoded =
+            PluginContentCodec.json.encodeToJsonElement(
+                PluginDescribeResponse(
+                    actions =
+                        listOf(
+                            PluginActionDescriptor("login", "Login", kind = "login", section = "登录"),
+                            PluginActionDescriptor("refresh", "Refresh"),
+                        )
+                )
+            )
+
+        val decoded = PluginContentCodec.describe(encoded)
+        assertEquals("登录", decoded.actions[0].section)
+        assertEquals(null, decoded.actions[1].section)
+    }
+
+    @Test
     fun `search identity and result limit are validated`() {
         val valid =
             PluginSearchPage(

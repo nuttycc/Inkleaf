@@ -43,12 +43,29 @@ data class PluginActionDescriptor(
      * refresh); a comic action runs against one comic and receives its sourceId as input.
      */
     val scope: String = PluginActionScope.SOURCE,
+    /**
+     * Optional area heading. An action that shares a section with settings is offered inside that
+     * area (the login action sits with the credentials), instead of the generic action list.
+     * Omitting it keeps the pre-1.3 behaviour, so older plugins need no changes.
+     */
+    val section: String? = null,
 )
 
 object PluginActionScope {
     const val SOURCE = "source"
     const val COMIC = "comic"
     val supported: Set<String> = setOf(SOURCE, COMIC)
+}
+
+object PluginActionKind {
+    const val ACTION = "action"
+    const val LOGIN = "login"
+    const val LOGOUT = "logout"
+    const val CLEAR_SESSION = "clearSession"
+    const val VERIFY_CREDENTIALS = "verifyCredentials"
+
+    /** Kinds that end the current session and should clear the host's signed-in state. */
+    val signOutKinds: Set<String> = setOf(LOGOUT, CLEAR_SESSION)
 }
 
 /** The actions a given surface is allowed to offer. */
@@ -350,6 +367,7 @@ object PluginContentCodec {
         value.actions.forEach { action ->
             validateId(action.id, "action.id")
             validateText(action.title, "action.title", 256)
+            action.section?.let { validateText(it, "action.section", 256) }
         }
         validateFilters(value.filters, "filter")
         val settingIds = HashSet<String>(value.settings.size)
@@ -486,7 +504,13 @@ object PluginContentCodec {
     }
 
     private val SUPPORTED_ACTION_KINDS =
-        setOf("action", "login", "logout", "clearSession", "verifyCredentials")
+        setOf(
+            PluginActionKind.ACTION,
+            PluginActionKind.LOGIN,
+            PluginActionKind.LOGOUT,
+            PluginActionKind.CLEAR_SESSION,
+            PluginActionKind.VERIFY_CREDENTIALS,
+        )
     private val SUPPORTED_FEED_FILTER_TYPES = setOf("select")
     private val SUPPORTED_FILTER_TYPES = setOf("text", "select", "multiSelect", "boolean")
     private val SUPPORTED_SETTING_TYPES = setOf("text", "secret", "boolean", "select")
