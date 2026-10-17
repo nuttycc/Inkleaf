@@ -218,6 +218,21 @@ const FAVORITES_LAST_PAGE_HTML = FAVORITES_HTML.replace(
   '<span class="thispage">7</span>'
 );
 
+// The add-to-shelf dialog lists the account's folders. The site pre-selects one, which is what a
+// browser would submit, so it wins over the first option.
+const ADDFAV_HTML = [
+  '<div class="dialog"><form action="/users-save_fav-id-394338.html" method="post">',
+  '<select name="favc_id">',
+  '<option value="12">默認收藏夾</option>',
+  '<option value="34" selected>同人志</option>',
+  "</select>",
+  "</form></div>",
+].join("\n");
+
+const SAVE_FAV_OK_JSON = JSON.stringify({ ret: true, html: "加入成功" });
+const SAVE_FAV_FAIL_JSON = JSON.stringify({ ret: false, html: "收藏夾不存在" });
+const FAV_DEL_HTML = "刪除收藏成功";
+
 // --------------------------------------------------------------------------- harness
 
 /**
@@ -373,6 +388,9 @@ function siteResponse(request) {
   if (url.indexOf("/albums-index") >= 0) return { body: LIST_HTML };
   if (url.indexOf("/users-users_fav-page-2") >= 0) return { body: FAVORITES_LAST_PAGE_HTML };
   if (url.indexOf("/users-users_fav") >= 0) return { body: FAVORITES_HTML };
+  if (url.indexOf("/users-addfav-id-") >= 0) return { body: ADDFAV_HTML };
+  if (url.indexOf("/users-save_fav-id-") >= 0) return { body: SAVE_FAV_OK_JSON };
+  if (url.indexOf("/users-fav_del-id-") >= 0) return { body: FAV_DEL_HTML };
   if (url.indexOf("/search/") >= 0) {
     return { body: url.indexOf("q=%E9%9F%93%E6%BC%A2") >= 0 ? SEARCH_EMPTY_HTML : SEARCH_HTML };
   }
@@ -421,6 +439,7 @@ async function main() {
   await discoversMirrorsFromTheReleasePage();
   await reportsLoginWalls();
   await logsInAndOut();
+  await addsAndRemovesFavorites();
 
   process.stdout.write("wnacg fixture unit tests passed\n");
 }
@@ -461,9 +480,20 @@ async function describeContract() {
   assert.equal(password.secret, true, "the password must never render in cleartext");
   assert.deepEqual(
     described.actions.map(function (action) {
-      return action.kind;
+      return action.id;
     }),
-    ["action", "login", "verifyCredentials", "clearSession"]
+    ["refreshDomains", "login", "verifyCredentials", "logout", "addFavorite", "removeFavorite"]
+  );
+  // Only the comic-scoped ones appear on a comic page; the rest stay on the source screen.
+  assert.deepEqual(
+    described.actions
+      .filter(function (action) {
+        return action.scope === "comic";
+      })
+      .map(function (action) {
+        return action.id;
+      }),
+    ["addFavorite", "removeFavorite"]
   );
 }
 
@@ -857,6 +887,105 @@ async function logsInAndOut() {
   await assert.rejects(
     () => unknown.api.invokeAction({ actionId: "nope", input: {} }, ctx()),
     (error) => error.code === "NOT_FOUND"
+  );
+}
+
+async function addsAndRemovesFavorites() {
+  // Adding reads the site's own folder list first, then submits the folder it pre-selected.
+  const added = createPlugin({ seedHosts: [SITE_HOST] });
+  const addResult = plain(
+    await added.api.invokeAction({ actionId: "addFavorite", input: { sourceId: "394338" } }, ctx())
+  );
+  assert.equal(addResult.ok, true);
+  assert.equal(addResult.message, "已加入收藏夹");
+  assert.equal(addResult.folderId, "34", "the option the dialog marks selected beats the first one");
+  assert.deepEqual(added.urls(), [
+    "https://" + SITE_HOST + "/users-addfav-id-394338.html",
+    "https://" + SITE_HOST + "/users-save_fav-id-394338.html",
+  ]);
+  const save = added.requests[1];
+  assert.equal(save.method, "POST");
+  assert.equal(save.headers.referer, "https://" + SITE_HOST + "/users-addfav-id-394338.html");
+  assert.deepEqual(formBody(save), { favc_id: "34" });
+
+  // A form the site rejects surfaces its own message instead of a silent success.
+  const refused = createPlugin({
+    seedHosts: [SITE_HOST],
+    respond: function (request) {
+      if (request.url.indexOf("/users-save_fav-id-") >= 0) return { body: SAVE_FAV_FAIL_JSON };
+      return defaultRespond(request);
+    },
+  });
+  await assert.rejects(
+    () => refused.api.invokeAction({ actionId: "addFavorite", input: { sourceId: "394338" } }, ctx()),
+    (error) => error.code === "HTTP" && error.message === "收藏夾不存在"
+  );
+
+  // No folders offered means there is nowhere to put it.
+  const noFolders = createPlugin({
+    seedHosts: [SITE_HOST],
+    respond: function (request) {
+      if (request.url.indexOf("/users-addfav-id-") >= 0) {
+        return { body: "<html><select name='favc_id'></select></html>" };
+      }
+      return defaultRespond(request);
+    },
+  });
+  await assert.rejects(
+    () => noFolders.api.invokeAction({ actionId: "addFavorite", input: { sourceId: "394338" } }, ctx()),
+    (error) => error.code === "NOT_FOUND"
+  );
+
+  // Signed out, the dialog is the login wall.
+  const anonymous = createPlugin({
+    seedHosts: [SITE_HOST],
+    respond: function (request) {
+      if (request.url.indexOf("/users-addfav-id-") >= 0) return { body: LOGIN_REQUIRED_HTML };
+      return defaultRespond(request);
+    },
+  });
+  await assert.rejects(
+    () => anonymous.api.invokeAction({ actionId: "addFavorite", input: { sourceId: "394338" } }, ctx()),
+    (error) => error.code === "AUTH_REQUIRED" && error.message === "请先登录绅士漫画账号"
+  );
+
+  // Removing finds the shelf row the comic occupies and deletes that entry.
+  const removed = createPlugin({ seedHosts: [SITE_HOST] });
+  const removeResult = plain(
+    await removed.api.invokeAction(
+      { actionId: "removeFavorite", input: { sourceId: "394338" } },
+      ctx()
+    )
+  );
+  assert.equal(removeResult.message, "已移出账户收藏");
+  assert.deepEqual(
+    removed.urls().filter(function (url) {
+      return url.indexOf("/users-fav_del-id-") >= 0;
+    }),
+    ["https://" + SITE_HOST + "/users-fav_del-id-55501.html"]
+  );
+
+  // A comic on no shelf is already removed; nothing is sent.
+  const absent = createPlugin({ seedHosts: [SITE_HOST] });
+  const absentResult = plain(
+    await absent.api.invokeAction(
+      { actionId: "removeFavorite", input: { sourceId: "999999" } },
+      ctx()
+    )
+  );
+  assert.equal(absentResult.message, "这本漫画不在账户收藏中");
+  assert.equal(
+    absent.urls().filter(function (url) {
+      return url.indexOf("/users-fav_del-id-") >= 0;
+    }).length,
+    0
+  );
+
+  // Without a comic id the request cannot be honoured.
+  const bad = createPlugin({ seedHosts: [SITE_HOST] });
+  await assert.rejects(
+    () => bad.api.invokeAction({ actionId: "addFavorite", input: {} }, ctx()),
+    (error) => error.code === "INVALID_ARGUMENT"
   );
 }
 

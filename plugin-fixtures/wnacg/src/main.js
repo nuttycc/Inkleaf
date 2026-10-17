@@ -46,6 +46,8 @@ const SEARCH_PAGE_SIZE = 24;
 // the favorites pages are ordinary HTML lists.
 const LOGIN_PATH = "/users-check_login.html";
 const FAVORITES_PATH = "/users-users_fav.html";
+// A scan for one comic's entries stops at this many pages even if the paginator never ends.
+const MAX_FAVORITE_PAGES = 100;
 
 // A 合集 lists at most this many sub-albums per page, and says how many exist in its 章節 label.
 const CHAPTER_PAGE_SIZE = 12;
@@ -337,14 +339,45 @@ function parseFavoriteRows(html, base) {
       firstMatch(block, /class="[^"]*l_catg[^"]*"[\s\S]*?<a[^>]*>([\s\S]*?)<\/a>/i)
     );
     const detail = oneLine(firstMatch(block, /class="l_detla"[^>]*>([\s\S]*?)<\/div>/i));
+    // Removing needs the account's own row id, which the delete control carries.
+    const entryId = firstMatch(block, /users-fav_del-id-(\d+)/i);
     rows.push({
       sourceId: sourceId,
+      entryId: entryId,
       title: title || "绅士漫画 #" + sourceId,
       subtitle: category || detail,
       coverUrl: coverSource ? toAbsolute(coverSource, base) : "",
     });
   }
   return rows;
+}
+
+/**
+ * The add-to-shelf dialog offers the account's own folders in a `favc_id` select. The site marks one
+ * selected, and a browser would fall back to the first, so the same rule is used here.
+ */
+function parseFavoriteFolders(html) {
+  const select = firstRegion(
+    String(html || ""),
+    /<select[^>]*name=['"]favc_id['"][\s\S]*?<\/select>/i
+  );
+  const blocks = String(select || "").match(/<option[^>]*>[\s\S]*?<\/option>/gi) || [];
+  const folders = [];
+  for (let index = 0; index < blocks.length; index += 1) {
+    const tag = firstRegion(blocks[index], /<option[^>]*>/i);
+    const id = firstMatch(tag, /value=['"]?([^'"\s>]+)/i);
+    const name = oneLine(blocks[index]);
+    if (!id || !name) continue;
+    folders.push({ id: id, name: name, selected: /\bselected\b/i.test(tag) });
+  }
+  return folders;
+}
+
+function preferredFolderId(folders) {
+  for (let index = 0; index < folders.length; index += 1) {
+    if (folders[index].selected) return folders[index].id;
+  }
+  return folders.length ? folders[0].id : "";
 }
 
 function summaryOf(row, base) {
@@ -846,6 +879,15 @@ async function describe() {
       { id: "login", title: "登录绅士漫画账号", kind: "login" },
       { id: "verifyCredentials", title: "校验账号", kind: "verifyCredentials" },
       { id: "logout", title: "退出登录", kind: "clearSession", destructive: true },
+      // Comic-scoped: the host offers these on a comic page and sends its sourceId as input.
+      { id: "addFavorite", title: "加入账户收藏", kind: "action", scope: "comic" },
+      {
+        id: "removeFavorite",
+        title: "移出账户收藏",
+        kind: "action",
+        scope: "comic",
+        destructive: true,
+      },
     ],
     settings: [
       {
@@ -938,10 +980,15 @@ async function browse(request, context) {
  * The account's own bookshelf. Page one lives at a bare path; later pages spell out the folder id,
  * and "0" is the site's own sentinel for "every folder".
  */
+function favoritePath(page, folderId) {
+  const folder = text(folderId) || "0";
+  if (page <= 1 && folder === "0") return FAVORITES_PATH;
+  return "/users-users_fav-page-" + page + "-c-" + folder + ".html";
+}
+
 async function browseFavorites(page, signal) {
-  const path = page > 1 ? "/users-users_fav-page-" + page + "-c-0.html" : FAVORITES_PATH;
   const found = await siteFetch(
-    path,
+    favoritePath(page, "0"),
     { accept: HTML_ACCEPT, referer: "/", authRequired: true, authMessage: "请先登录绅士漫画账号" },
     signal
   );
@@ -1091,6 +1138,96 @@ async function loginWithPassword(account, password, signal) {
   return found.base;
 }
 
+/**
+ * The account form endpoints answer either JSON (`{"ret":...}`) like the login endpoint, or a short
+ * page whose text carries the outcome. Both shapes reduce to one failure, or null on success.
+ */
+function formFailure(html, fallback) {
+  if (isLoginRequired(html)) return { code: "AUTH_REQUIRED", message: "请先登录绅士漫画账号" };
+  let payload = null;
+  try {
+    payload = JSON.parse(html);
+  } catch (error) {
+    payload = null;
+  }
+  if (payload !== null && typeof payload === "object") {
+    const data = asObject(payload);
+    if (data.ret === false || data.ret === 0 || data.ret === "false") {
+      return { code: "HTTP", message: oneLine(data.html) || fallback };
+    }
+    return null;
+  }
+  const visible = oneLine(html);
+  if (visible && /失敗|失败|錯誤|错误/.test(visible)) {
+    return { code: "HTTP", message: visible || fallback };
+  }
+  return null;
+}
+
+/** Every shelf entry this comic occupies, gathered across the account's pages. */
+async function favoriteEntryIds(sourceId, signal) {
+  const entryIds = [];
+  const seen = {};
+  for (let page = 1; page <= MAX_FAVORITE_PAGES; page += 1) {
+    const found = await siteFetch(
+      favoritePath(page, "0"),
+      { accept: HTML_ACCEPT, referer: "/", authRequired: true, authMessage: "请先登录绅士漫画账号" },
+      signal
+    );
+    const rows = parseFavoriteRows(found.html, found.base);
+    for (let index = 0; index < rows.length; index += 1) {
+      const row = rows[index];
+      if (row.sourceId === sourceId && row.entryId && !seen[row.entryId]) {
+        seen[row.entryId] = true;
+        entryIds.push(row.entryId);
+      }
+    }
+    if (!nextCursorFor(found.html, page, rows, LIST_PAGE_SIZE)) break;
+  }
+  return entryIds;
+}
+
+/**
+ * Adds one comic to the account shelf. The add dialog's folder list is what makes the folder id
+ * discoverable, so it is fetched first even though the reader never sees it.
+ */
+async function addFavorite(sourceId, signal) {
+  const dialog = await siteFetch(
+    "/users-addfav-id-" + sourceId + ".html",
+    { accept: HTML_ACCEPT, referer: "/", authRequired: true, authMessage: "请先登录绅士漫画账号" },
+    signal
+  );
+  const folderId = preferredFolderId(parseFavoriteFolders(dialog.html));
+  if (!folderId) throw pluginError("NOT_FOUND", "没有可用的收藏夹", false);
+
+  const saved = await siteFetch(
+    "/users-save_fav-id-" + sourceId + ".html",
+    {
+      method: "POST",
+      body: queryString({ favc_id: folderId }),
+      accept: JSON_ACCEPT,
+      referer: "/users-addfav-id-" + sourceId + ".html",
+      authRequired: false,
+    },
+    signal
+  );
+  const failure = formFailure(saved.html, "加入收藏夹失败");
+  if (failure) throw pluginError(failure.code, failure.message, false);
+  return { ok: true, message: "已加入收藏夹", folderId: folderId };
+}
+
+/** Removes the comic from every shelf it sits on, so one tap clears it outright. */
+async function removeFavorite(sourceId, signal) {
+  const entryIds = await favoriteEntryIds(sourceId, signal);
+  if (!entryIds.length) return { ok: true, message: "这本漫画不在账户收藏中" };
+  for (let index = 0; index < entryIds.length; index += 1) {
+    const removed = await siteRequest("/users-fav_del-id-" + entryIds[index] + ".html", signal);
+    const failure = formFailure(removed.html, "移出收藏失败");
+    if (failure) throw pluginError(failure.code, failure.message, false);
+  }
+  return { ok: true, message: "已移出账户收藏" };
+}
+
 async function invokeAction(request, context) {
   const signal = context && context.signal;
   const actionId = text(request.actionId);
@@ -1137,6 +1274,16 @@ async function invokeAction(request, context) {
   if (actionId === "logout") {
     await inkleaf.host.cookie.clear(signal);
     return { ok: true, message: "已退出登录" };
+  }
+
+  // Comic-scoped actions: the host sends the album id it is showing.
+  if (actionId === "addFavorite" || actionId === "removeFavorite") {
+    const sourceId = text(asObject(request.input).sourceId);
+    if (!sourceId) {
+      throw pluginError("INVALID_ARGUMENT", "缺少漫画编号", false);
+    }
+    if (actionId === "addFavorite") return addFavorite(sourceId, signal);
+    return removeFavorite(sourceId, signal);
   }
 
   throw pluginError("NOT_FOUND", "未知操作: " + actionId, false);
