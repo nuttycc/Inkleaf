@@ -86,7 +86,12 @@ const RANKING_OPTIONS = [
   ["month", "本月排行"],
 ];
 
-const SETTING_IDS = ["domain", "account", "password"];
+const SETTING_IDS = ["route", "domain", "account", "password"];
+
+// The route setting either names a mirror outright or defers to the rotation pool / the manual
+// domain text field.
+const ROUTE_AUTO = "auto";
+const ROUTE_CUSTOM = "custom";
 
 // --------------------------------------------------------------------------- text
 
@@ -621,6 +626,22 @@ async function remember(key, value, signal) {
   await inkleaf.host.kv.set({ key: key, value: value }, signal);
 }
 
+/** The route the settings select: a special mode, a named mirror, or the pre-list manual domain. */
+function effectiveRoute(settings) {
+  const route = text(settings.route);
+  if (route === ROUTE_AUTO || route === ROUTE_CUSTOM) return route;
+  if (route) return route;
+  // Installations from before the route list kept their override in `domain` alone.
+  return text(settings.domain) ? ROUTE_CUSTOM : ROUTE_AUTO;
+}
+
+/** The mirror a manual choice leads with; blank when the pool should pick. */
+function manualHost(settings) {
+  const route = effectiveRoute(settings);
+  if (route === ROUTE_CUSTOM) return text(settings.domain);
+  return route === ROUTE_AUTO ? "" : route;
+}
+
 // --------------------------------------------------------------------------- host discovery
 
 function normaliseState(value) {
@@ -633,25 +654,23 @@ async function hostQueue(signal) {
   const settings = await readSettings(signal);
   const stored = normaliseState(await storedValue(HOST_STATE_KEY, signal));
   if (Date.now() - stored.updatedAt >= HOST_TTL_MS) {
-    const discovered = await discoverHosts(stored, settings, signal);
+    const discovered = await discoverHosts(stored, signal);
     hostState = discovered;
     await remember(HOST_STATE_KEY, discovered, signal);
   } else {
     hostState = stored;
   }
-  // A manual domain always leads; the discovered list stays behind it as the rotation pool.
-  return orderedHosts([settings.domain].concat(hostState.hosts));
+  // A manual mirror always leads; the discovered list stays behind it as the rotation pool.
+  return orderedHosts([manualHost(settings)].concat(hostState.hosts));
 }
 
 /**
  * Cheap by design: one release page is enough, and probing the mirrors for liveness is done by the
  * request loop itself so a cold isolate never pays for a sweep inside the NORMAL deadline.
  */
-async function discoverHosts(fallback, settings, signal) {
+async function discoverHosts(fallback, signal) {
   const released = await loadReleaseHosts(signal);
-  const hosts = orderedHosts(
-    [settings.domain].concat(released, fallback.hosts, FALLBACK_HOSTS)
-  );
+  const hosts = orderedHosts(released.concat(fallback.hosts, FALLBACK_HOSTS));
   return { hosts: hosts.length ? hosts : FALLBACK_HOSTS.slice(), updatedAt: Date.now() };
 }
 
@@ -845,12 +864,28 @@ function listPath(page, cate) {
 
 // --------------------------------------------------------------------------- describe
 
-async function describe() {
+async function describe(context) {
+  const signal = context && context.signal;
   function options(pairs) {
     return pairs.map(function (pair) {
       return { id: pair[0], title: pair[1] };
     });
   }
+  const settings = await readSettings(signal);
+  // The route list is whatever the source last discovered, so it is read here instead of being
+  // baked into the descriptor.
+  const stored = normaliseState(
+    await storedValue(HOST_STATE_KEY, signal).catch(function () {
+      return null;
+    })
+  );
+  const routeOptions = [{ id: ROUTE_AUTO, title: "自动（从发布页获取）" }]
+    .concat(
+      orderedHosts([settings.route].concat(stored.hosts)).map(function (host) {
+        return { id: host, title: host };
+      })
+    )
+    .concat([{ id: ROUTE_CUSTOM, title: "自定义（使用下方填写的域名）" }]);
   return {
     schemaVersion: 1,
     feeds: [
@@ -892,8 +927,16 @@ async function describe() {
     ],
     settings: [
       {
+        id: "route",
+        title: "可用线路",
+        type: "radio",
+        options: routeOptions,
+        defaultValue: effectiveRoute(settings),
+        section: "线路",
+      },
+      {
         id: "domain",
-        title: "指定域名（登录后建议固定，留空自动从发布页获取）",
+        title: "自定义域名（选择“自定义”时使用）",
         type: "text",
         section: "线路",
       },
@@ -1234,12 +1277,8 @@ async function invokeAction(request, context) {
   const actionId = text(request.actionId);
 
   if (actionId === "refreshDomains") {
-    await remember(HOST_STATE_KEY, { hosts: [], updatedAt: 0 }, signal);
-    const settings = await readSettings(signal);
     const released = await loadReleaseHosts(signal);
-    const hosts = orderedHosts(
-      [settings.domain].concat(released, normaliseState(await storedValue(HOST_STATE_KEY, signal)).hosts, FALLBACK_HOSTS)
-    );
+    const hosts = orderedHosts(released.concat(FALLBACK_HOSTS));
     hostState = { hosts: hosts, updatedAt: Date.now() };
     await remember(HOST_STATE_KEY, hostState, signal);
 

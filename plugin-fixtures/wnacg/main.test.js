@@ -273,7 +273,7 @@ function formBody(request) {
 }
 
 function createPlugin(options) {
-  const settings = Object.assign({ domain: "" }, (options && options.settings) || {});
+  const settings = Object.assign({ route: "", domain: "" }, (options && options.settings) || {});
   const respond = (options && options.respond) || defaultRespond;
   const requests = [];
   const store = new Map();
@@ -436,6 +436,8 @@ async function main() {
   await readsPages();
   await rotatesDeadMirrors();
   await honoursManualDomain();
+  await pinsSelectedRoute();
+  await describesTheDiscoveredRouteList();
   await discoversMirrorsFromTheReleasePage();
   await reportsLoginWalls();
   await logsInAndOut();
@@ -473,9 +475,23 @@ async function describeContract() {
     described.settings.map(function (setting) {
       return setting.id;
     }),
-    ["domain", "account", "password"]
+    ["route", "domain", "account", "password"]
   );
-  const password = described.settings[2];
+  const route = described.settings[0];
+  assert.equal(route.type, "radio");
+  assert.equal(route.defaultValue, "auto", "a fresh install follows the discovered pool");
+  assert.deepEqual(
+    route.options.map(function (option) {
+      return option.id;
+    }),
+    ["auto", SITE_HOST, "custom"],
+    "the mirrored pool sits between the auto and custom choices"
+  );
+  // The host rejects blank option ids, so the route list has to follow the same rule.
+  route.options.forEach(function (option) {
+    assert.ok(option.id && option.id.trim() === option.id, "a route option has a blank id");
+  });
+  const password = described.settings[3];
   assert.equal(password.type, "secret");
   assert.equal(password.secret, true, "the password must never render in cleartext");
   assert.deepEqual(
@@ -793,9 +809,44 @@ async function rotatesDeadMirrors() {
 }
 
 async function honoursManualDomain() {
-  const fresh = createPlugin({ seedHosts: [SITE_HOST], settings: { domain: "https://wn002.cfd/" } });
-  await fresh.api.browse({ feedId: "latest", cursor: null, limit: 40, filters: {} }, ctx());
+  // Before the route list existed the override lived in `domain` alone; it must keep leading.
+  const legacy = createPlugin({ seedHosts: [SITE_HOST], settings: { domain: "https://wn002.cfd/" } });
+  await legacy.api.browse({ feedId: "latest", cursor: null, limit: 40, filters: {} }, ctx());
+  assert.equal(legacy.urls()[0], "https://wn002.cfd/albums-index.html");
+
+  const custom = createPlugin({
+    seedHosts: [SITE_HOST],
+    settings: { route: "custom", domain: "https://wn003.cfd/" },
+  });
+  await custom.api.browse({ feedId: "latest", cursor: null, limit: 40, filters: {} }, ctx());
+  assert.equal(custom.urls()[0], "https://wn003.cfd/albums-index.html");
+}
+
+async function pinsSelectedRoute() {
+  const fresh = createPlugin({ seedHosts: [SITE_HOST], settings: { route: "wn002.cfd" } });
+  const page = await fresh.api.browse({ feedId: "latest", cursor: null, limit: 40, filters: {} }, ctx());
+  assert.equal(page.items.length, 3);
   assert.equal(fresh.urls()[0], "https://wn002.cfd/albums-index.html");
+}
+
+async function describesTheDiscoveredRouteList() {
+  const fresh = createPlugin({});
+  await fresh.api.invokeAction({ actionId: "refreshDomains" }, ctx());
+  const described = plain(await fresh.api.describe({}, ctx()));
+  const ids = described.settings[0].options.map(function (option) {
+    return option.id;
+  });
+  assert.equal(ids[0], "auto");
+  assert.equal(ids[ids.length - 1], "custom");
+  assert.ok(ids.indexOf(SITE_HOST) > 0, "the release-page mirror is offered");
+  assert.ok(ids.indexOf("www.wn002.cfd") > 0, "the second release-page mirror is offered");
+  assert.deepEqual(
+    ids.filter(function (id, index) {
+      return ids.indexOf(id) !== index;
+    }),
+    [],
+    "the route list must not repeat a mirror"
+  );
 }
 
 async function discoversMirrorsFromTheReleasePage() {
