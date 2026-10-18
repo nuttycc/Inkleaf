@@ -186,13 +186,13 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * Re-confirms a recorded sign-in with the source itself. Best effort: a missing method or a
-     * network failure proves nothing, so only the source's own "not signed in" answer clears the
-     * hint.
+     * Reconciles the recorded sign-in state with the source itself. The check runs both ways: a
+     * live session repairs a hint that was never recorded (cookies restored, or a login from an
+     * older build), and an explicit "not signed in" answer clears a stale one. A missing method or
+     * a network failure proves nothing, so the hint stays untouched.
      */
     private suspend fun checkSession(pluginId: String) {
         val current = _session.value
-        if (!current.signedIn) return
         val check =
             try {
                 app().pluginCatalog.checkSession(pluginId)
@@ -202,9 +202,17 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
                 return
             }
         // A login or sign-out may have landed while the check was in flight; its result is newer.
-        if (check.signedIn || _session.value != current) return
-        app().pluginSessionStateRepository.signedOut(pluginId)
-        _session.value = PluginSessionState()
+        if (_session.value != current) return
+        val next =
+            if (check.signedIn) {
+                PluginSessionState(signedIn = true, account = check.account ?: current.account)
+            } else {
+                PluginSessionState()
+            }
+        if (next == current) return
+        if (next.signedIn) app().pluginSessionStateRepository.signedIn(pluginId, next.account)
+        else app().pluginSessionStateRepository.signedOut(pluginId)
+        _session.value = next
     }
 
     fun setEnabled(enabled: Boolean) {

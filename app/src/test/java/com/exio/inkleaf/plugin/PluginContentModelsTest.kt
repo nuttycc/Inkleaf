@@ -246,9 +246,12 @@ class PluginContentModelsTest {
         fun decode(json: String) =
             PluginContentCodec.sessionCheck(PluginContentCodec.json.parseToJsonElement(json))
 
-        assertTrue(decode("""{"signedIn":true}""").signedIn)
+        val signedIn = decode("""{"signedIn":true,"account":"alice"}""")
+        assertTrue(signedIn.signedIn)
+        assertEquals("alice", signedIn.account)
         assertFalse(decode("""{"signedIn":false}""").signedIn)
         assertFalse(decode("{}").signedIn)
+        assertEquals(null, decode("{}").account)
     }
 
     @Test

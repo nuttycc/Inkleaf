@@ -25,7 +25,8 @@ data class PluginDescribeResponse(
 )
 
 /** The plugin's answer to the host's lightweight session check. */
-@Serializable data class PluginSessionCheck(val signedIn: Boolean = false)
+@Serializable
+data class PluginSessionCheck(val signedIn: Boolean = false, val account: String? = null)
 
 @Serializable
 data class PluginFeedDescriptor(
