@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -204,89 +205,18 @@ fun SourceDetailScreen(
 
             if (areas.isNotEmpty()) {
                 areas.forEach { area ->
-                    if (area.section != null) {
-                        // A named section is a real area: one heading that carries the section's
-                        // actions, then the fields the plugin grouped under it.
-                        item(key = "area_header_${area.section}") {
-                            AreaHeader(
-                                area = area,
-                                session = session,
-                                enabled = !busy,
-                                onActionClick = { action -> viewModel.invokeAction(action) },
-                            )
-                        }
-                        if (area.settings.isNotEmpty()) {
-                            item(key = "area_card_${area.section}") {
-                                SettingGroupCard(
-                                    descriptors = cardSettings(area),
-                                    values = values,
-                                    enabled = !busy,
-                                    onValueChange = { id, value -> viewModel.setValue(id, value) },
-                                    onEditProtectedSetting = { descriptor ->
-                                        editingDescriptor = descriptor
-                                    },
-                                    onChooseSetting = { descriptor ->
-                                        choosingSettingId = descriptor.id
-                                    },
-                                    header =
-                                        if (areaUsesAccountSheet(area)) {
-                                            {
-                                                AccountSummaryRow(
-                                                    session = session,
-                                                    enabled = !busy,
-                                                    onClick = { showAccountSheet = true },
-                                                )
-                                            }
-                                        } else {
-                                            null
-                                        },
-                                )
-                            }
-                        }
-                    } else {
-                        // Section-less content keeps the pre-section layout: ungrouped settings,
-                        // then the generic action list.
-                        if (area.settings.isNotEmpty()) {
-                            item(key = "setting_header") { SectionHeader("设置") }
-                            item(key = "setting_card") {
-                                SettingGroupCard(
-                                    descriptors = cardSettings(area),
-                                    values = values,
-                                    enabled = !busy,
-                                    onValueChange = { id, value -> viewModel.setValue(id, value) },
-                                    onEditProtectedSetting = { descriptor ->
-                                        editingDescriptor = descriptor
-                                    },
-                                    onChooseSetting = { descriptor ->
-                                        choosingSettingId = descriptor.id
-                                    },
-                                    header =
-                                        if (areaUsesAccountSheet(area)) {
-                                            {
-                                                AccountSummaryRow(
-                                                    session = session,
-                                                    enabled = !busy,
-                                                    onClick = { showAccountSheet = true },
-                                                )
-                                            }
-                                        } else {
-                                            null
-                                        },
-                                )
-                            }
-                        }
-                        val visibleActions = headingActions(area, session.signedIn)
-                        if (visibleActions.isNotEmpty()) {
-                            item(key = "action_header") { SectionHeader(area.title) }
-                            item(key = "action_card") {
-                                ActionGroupCard(
-                                    actions = visibleActions,
-                                    enabled = !busy,
-                                    onActionClick = { action -> viewModel.invokeAction(action) },
-                                )
-                            }
-                        }
-                    }
+                    sourceAreaSection(
+                        area = area,
+                        presentation = sourceAreaPresentation(area, session),
+                        values = values,
+                        session = session,
+                        busy = busy,
+                        onOpenAccount = { showAccountSheet = true },
+                        onValueChange = { id, value -> viewModel.setValue(id, value) },
+                        onEditProtectedSetting = { descriptor -> editingDescriptor = descriptor },
+                        onChooseSetting = { descriptor -> choosingSettingId = descriptor.id },
+                        onActionClick = { action -> viewModel.invokeAction(action) },
+                    )
                 }
             }
 
@@ -429,6 +359,75 @@ fun SourceDetailScreen(
     }
 }
 
+/**
+ * The one renderer for a source area. The presentation decides whether the heading is a named
+ * area's heading or a generic settings/action header, and where the account row and actions land.
+ * Item keys follow the old branches so LazyColumn identity and scroll positions stay unchanged.
+ */
+private fun LazyListScope.sourceAreaSection(
+    area: SourceArea,
+    presentation: SourceAreaPresentation,
+    values: Map<String, String>,
+    session: PluginSessionState,
+    busy: Boolean,
+    onOpenAccount: () -> Unit,
+    onValueChange: (String, String) -> Unit,
+    onEditProtectedSetting: (PluginSettingDescriptor) -> Unit,
+    onChooseSetting: (PluginSettingDescriptor) -> Unit,
+    onActionClick: (PluginActionDescriptor) -> Unit,
+) {
+    if (presentation.named) {
+        item(key = "area_header_${area.section}") {
+            AreaHeader(
+                presentation = presentation,
+                session = session,
+                enabled = !busy,
+                onActionClick = onActionClick,
+            )
+        }
+    } else {
+        presentation.settingsHeader?.let { header ->
+            item(key = "setting_header") { SectionHeader(header) }
+        }
+    }
+
+    if (presentation.showsSettingsCard) {
+        item(key = if (presentation.named) "area_card_${area.section}" else "setting_card") {
+            SettingGroupCard(
+                descriptors = presentation.cardSettings,
+                values = values,
+                enabled = !busy,
+                onValueChange = onValueChange,
+                onEditProtectedSetting = onEditProtectedSetting,
+                onChooseSetting = onChooseSetting,
+                header =
+                    if (presentation.showsAccountRow) {
+                        {
+                            AccountSummaryRow(
+                                session = session,
+                                enabled = !busy,
+                                onClick = onOpenAccount,
+                            )
+                        }
+                    } else {
+                        null
+                    },
+            )
+        }
+    }
+
+    presentation.actionsHeader?.let { header ->
+        item(key = "action_header") { SectionHeader(header) }
+        item(key = "action_card") {
+            ActionGroupCard(
+                actions = presentation.listActions,
+                enabled = !busy,
+                onActionClick = onActionClick,
+            )
+        }
+    }
+}
+
 @Composable
 private fun SectionHeader(text: String) {
     Text(
@@ -440,23 +439,18 @@ private fun SectionHeader(text: String) {
 }
 
 /**
- * The heading of a section that carries actions. The section name rests on the left and the
- * actions the plugin attached to that section sit on the right. An area that owns an account row
- * carries its session state there instead, together with the sign-in and sign-out actions.
+ * The heading of a named area. The presentation decides the title, whether the session status
+ * rides under it, and which actions sit on the right. An area that owns an account row carries its
+ * session state there instead, together with the sign-in and sign-out actions.
  */
 @Composable
 private fun AreaHeader(
-    area: SourceArea,
+    presentation: SourceAreaPresentation,
     session: PluginSessionState,
     enabled: Boolean,
     onActionClick: (PluginActionDescriptor) -> Unit,
 ) {
-    val status =
-        if (!areaUsesAccountSheet(area) && areaShowsSessionStatus(area)) {
-            accountStatusText(session)
-        } else {
-            null
-        }
+    val status = if (presentation.showsStatus) accountStatusText(session) else null
 
     Row(
         modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 12.dp, top = 8.dp),
@@ -464,7 +458,7 @@ private fun AreaHeader(
     ) {
         Column(modifier = Modifier.padding(end = 8.dp)) {
             Text(
-                text = area.title,
+                text = presentation.title,
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.primary,
             )
@@ -481,7 +475,7 @@ private fun AreaHeader(
             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            headingActions(area, session.signedIn).forEach { action ->
+            presentation.headingActions.forEach { action ->
                 SourceAreaActionButton(
                     action = action,
                     enabled = enabled && action.enabled,

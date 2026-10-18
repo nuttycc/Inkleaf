@@ -2,6 +2,7 @@ package com.exio.inkleaf.ui
 
 import com.exio.inkleaf.plugin.PluginActionDescriptor
 import com.exio.inkleaf.plugin.PluginActionKind
+import com.exio.inkleaf.plugin.PluginSessionState
 import com.exio.inkleaf.plugin.PluginSettingDescriptor
 
 /**
@@ -24,6 +25,7 @@ data class SourceArea(
 
     companion object {
         const val DEFAULT_ACTION_SECTION = "操作"
+        const val DEFAULT_SETTINGS_SECTION = "设置"
     }
 }
 
@@ -156,3 +158,47 @@ fun headingActions(
 /** True when an area's heading should carry the signed-in state. */
 fun areaShowsSessionStatus(area: SourceArea): Boolean =
     area.actions.any { it.kind in PluginActionKind.signInKinds || it.isSignOut() }
+
+/**
+ * What one area renders on the source detail screen. The named and section-less layouts differ
+ * only in these values, so the screen has one renderer instead of two branches.
+ */
+internal data class SourceAreaPresentation(
+    val named: Boolean,
+    val title: String,
+    val showsStatus: Boolean,
+    val headingActions: List<PluginActionDescriptor>,
+    val settingsHeader: String?,
+    val showsSettingsCard: Boolean,
+    val cardSettings: List<PluginSettingDescriptor>,
+    val showsAccountRow: Boolean,
+    val actionsHeader: String?,
+    val listActions: List<PluginActionDescriptor>,
+)
+
+/**
+ * Resolves one area into the values the source detail screen renders. A named area keeps its
+ * actions on the heading; a section-less area separates its settings and its action list with their
+ * own headers. An account area keeps its credential fields and account actions in the sheet.
+ */
+internal fun sourceAreaPresentation(
+    area: SourceArea,
+    session: PluginSessionState,
+): SourceAreaPresentation {
+    val named = area.section != null
+    val account = areaUsesAccountSheet(area)
+    val actions = headingActions(area, session.signedIn)
+    return SourceAreaPresentation(
+        named = named,
+        title = area.title,
+        showsStatus = !account && areaShowsSessionStatus(area),
+        headingActions = if (named) actions else emptyList(),
+        settingsHeader =
+            if (!named && area.settings.isNotEmpty()) SourceArea.DEFAULT_SETTINGS_SECTION else null,
+        showsSettingsCard = area.settings.isNotEmpty(),
+        cardSettings = cardSettings(area),
+        showsAccountRow = account,
+        actionsHeader = if (!named && actions.isNotEmpty()) area.title else null,
+        listActions = if (named) emptyList() else actions,
+    )
+}
