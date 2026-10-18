@@ -201,6 +201,28 @@ class PluginContentModelsTest {
     }
 
     @Test
+    fun `action picker targets are retained and default to absent`() {
+        val encoded =
+            PluginContentCodec.json.encodeToJsonElement(
+                PluginDescribeResponse(
+                    actions =
+                        listOf(
+                            PluginActionDescriptor("refresh", "Refresh"),
+                            PluginActionDescriptor(
+                                "refreshDomains",
+                                "Refresh",
+                                pickerSettingId = "route",
+                            ),
+                        )
+                )
+            )
+
+        val decoded = PluginContentCodec.describe(encoded)
+        assertEquals(null, decoded.actions[0].pickerSettingId)
+        assertEquals("route", decoded.actions[1].pickerSettingId)
+    }
+
+    @Test
     fun `action section is retained and defaults to absent`() {
         val encoded =
             PluginContentCodec.json.encodeToJsonElement(

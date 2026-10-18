@@ -104,7 +104,7 @@ fun SourceDetailScreen(
     var showUninstallConfirm by remember { mutableStateOf(false) }
     var showResetConfirm by remember { mutableStateOf(false) }
     var editingDescriptor by remember { mutableStateOf<PluginSettingDescriptor?>(null) }
-    var choosingDescriptor by remember { mutableStateOf<PluginSettingDescriptor?>(null) }
+    var choosingSettingId by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(pluginId) { viewModel.load(pluginId) }
 
@@ -224,7 +224,7 @@ fun SourceDetailScreen(
                                         editingDescriptor = descriptor
                                     },
                                     onChooseSetting = { descriptor ->
-                                        choosingDescriptor = descriptor
+                                        choosingSettingId = descriptor.id
                                     },
                                 )
                             }
@@ -244,7 +244,7 @@ fun SourceDetailScreen(
                                         editingDescriptor = descriptor
                                     },
                                     onChooseSetting = { descriptor ->
-                                        choosingDescriptor = descriptor
+                                        choosingSettingId = descriptor.id
                                     },
                                 )
                             }
@@ -299,21 +299,39 @@ fun SourceDetailScreen(
         )
     }
 
+    // The picker follows the current descriptors rather than a captured copy, so an action that
+    // refreshes the list (重新获取域名) updates the open sheet as well.
+    val choosingDescriptor = choosingSettingId?.let { id -> settings.firstOrNull { it.id == id } }
     choosingDescriptor?.let { descriptor ->
         val currentValue = values[descriptor.id] ?: descriptor.defaultValue.orEmpty()
+        val pickerActions = visiblePickerActions(actions, descriptor.id, session.signedIn)
         ModalBottomSheet(
-            onDismissRequest = { choosingDescriptor = null },
+            onDismissRequest = { choosingSettingId = null },
             sheetState = rememberExpandOnlySheetState(),
         ) {
             SheetColumn(selectable = true, scrollable = true) {
-                StandardSheetTitle(descriptor.title)
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(end = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(modifier = Modifier.weight(1f)) {
+                        StandardSheetTitle(descriptor.title)
+                    }
+                    pickerActions.forEach { action ->
+                        SourceAreaActionButton(
+                            action = action,
+                            enabled = !busy && action.enabled,
+                            onClick = { viewModel.invokeAction(action) },
+                        )
+                    }
+                }
                 descriptor.options.forEach { option ->
                     InkleafChoiceListItem(
                         headline = option.title,
                         selected = option.id == currentValue,
                         onClick = {
                             viewModel.setValue(descriptor.id, option.id)
-                            choosingDescriptor = null
+                            choosingSettingId = null
                         },
                         enabled = !busy,
                     )

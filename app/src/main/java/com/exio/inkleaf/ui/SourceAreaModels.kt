@@ -90,11 +90,25 @@ fun sourceActionEmphasis(action: PluginActionDescriptor): SourceActionEmphasis =
 fun PluginActionDescriptor.isSignOut(): Boolean = kind in PluginActionKind.signOutKinds
 
 /**
- * The actions an area offers for the current session state. A login action disappears once signed
- * in, and a sign-out action stays hidden until then, so the heading never shows a step that cannot
- * apply. Other actions are always offered.
+ * The actions an area offers on its heading. Picker actions stay with the list they act on and
+ * are rendered on that list's sheet title instead.
  */
 fun visibleAreaActions(
+    actions: List<PluginActionDescriptor>,
+    signedIn: Boolean,
+): List<PluginActionDescriptor> =
+    visibleActions(actions.filter { it.pickerSettingId == null }, signedIn)
+
+/** The actions a setting's picker carries on its title line. */
+fun visiblePickerActions(
+    actions: List<PluginActionDescriptor>,
+    settingId: String,
+    signedIn: Boolean,
+): List<PluginActionDescriptor> =
+    visibleActions(actions.filter { it.pickerSettingId == settingId }, signedIn)
+
+/** Session visibility, applied wherever an action is placed. */
+private fun visibleActions(
     actions: List<PluginActionDescriptor>,
     signedIn: Boolean,
 ): List<PluginActionDescriptor> =

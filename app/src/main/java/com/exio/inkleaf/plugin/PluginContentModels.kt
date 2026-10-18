@@ -49,6 +49,11 @@ data class PluginActionDescriptor(
      * Omitting it keeps the pre-1.3 behaviour, so older plugins need no changes.
      */
     val section: String? = null,
+    /**
+     * Optional setting id whose picker carries this action on its title line. Such an action is
+     * not offered on the area heading, because it belongs to the list it acts on.
+     */
+    val pickerSettingId: String? = null,
 )
 
 object PluginActionScope {
@@ -371,6 +376,7 @@ object PluginContentCodec {
             validateId(action.id, "action.id")
             validateText(action.title, "action.title", 256)
             action.section?.let { validateText(it, "action.section", 256) }
+            action.pickerSettingId?.let { validateId(it, "action.pickerSettingId") }
         }
         validateFilters(value.filters, "filter")
         val settingIds = HashSet<String>(value.settings.size)

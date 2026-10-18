@@ -129,6 +129,25 @@ class SourceAreaModelsTest {
     }
 
     @Test
+    fun `picker actions leave the heading and surface on their picker`() {
+        val actions =
+            listOf(
+                action("refresh"),
+                action("refreshDomains").copy(pickerSettingId = "route"),
+            )
+
+        assertEquals(
+            listOf("refresh"),
+            visibleAreaActions(actions, signedIn = false).map { it.id },
+        )
+        assertEquals(
+            listOf("refreshDomains"),
+            visiblePickerActions(actions, "route", signedIn = false).map { it.id },
+        )
+        assertTrue(visiblePickerActions(actions, "other", signedIn = false).isEmpty())
+    }
+
+    @Test
     fun `session status is shown only for areas that sign in or out`() {
         val authArea = sourceAreas(emptyList(), listOf(action("login", kind = "login"))).single()
         val plainArea = sourceAreas(emptyList(), listOf(action("refresh"))).single()
