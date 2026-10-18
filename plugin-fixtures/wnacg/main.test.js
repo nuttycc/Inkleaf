@@ -494,6 +494,9 @@ async function describeContract() {
   const password = described.settings[3];
   assert.equal(password.type, "secret");
   assert.equal(password.secret, true, "the password must never render in cleartext");
+  // The account sheet enables its login button only when every required credential is filled.
+  assert.equal(described.settings[2].required, true);
+  assert.equal(password.required, true);
   assert.deepEqual(
     described.actions.map(function (action) {
       return action.id;

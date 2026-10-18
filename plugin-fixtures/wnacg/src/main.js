@@ -947,8 +947,15 @@ async function describe(context) {
         type: "text",
         section: "线路",
       },
-      { id: "account", title: "账号", type: "text", section: "登录" },
-      { id: "password", title: "密码", type: "secret", secret: true, section: "登录" },
+      { id: "account", title: "账号", type: "text", required: true, section: "登录" },
+      {
+        id: "password",
+        title: "密码",
+        type: "secret",
+        secret: true,
+        required: true,
+        section: "登录",
+      },
     ],
   };
 }
