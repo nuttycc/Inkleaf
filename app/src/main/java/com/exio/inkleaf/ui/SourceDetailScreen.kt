@@ -722,8 +722,8 @@ private fun AccountSummaryRow(
 }
 
 /**
- * Collects the credentials and offers the sign-in or sign-out action. Both fields are shown in
- * either state, so the stored credentials stay visible and editable after signing in. Edits bind
+ * Collects the credentials while signed out and offers the sign-in or sign-out action. A signed-in
+ * sheet shows the session state alone, because the credentials have done their job. Edits bind
  * straight to the screen values, which are persisted with the rest of the source settings.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -752,26 +752,13 @@ private fun AccountSheet(
     ) {
         SheetColumn(scrollable = true) {
             StandardSheetTitle(if (session.signedIn) "账户" else loginAction?.title ?: "登录")
-            Text(
-                text = accountStatusText(session),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-            )
-            Column(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                fields.forEach { descriptor ->
-                    CredentialField(
-                        descriptor = descriptor,
-                        value = values[descriptor.id] ?: descriptor.defaultValue.orEmpty(),
-                        enabled = !busy,
-                        onValueChange = { onSetValue(descriptor.id, it) },
-                    )
-                }
-            }
             if (session.signedIn) {
+                Text(
+                    text = accountStatusText(session),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
                 signOutAction?.let { action ->
                     Button(
                         onClick = {
@@ -791,6 +778,19 @@ private fun AccountSheet(
                     }
                 }
             } else {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    fields.forEach { descriptor ->
+                        CredentialField(
+                            descriptor = descriptor,
+                            value = values[descriptor.id] ?: descriptor.defaultValue.orEmpty(),
+                            enabled = !busy,
+                            onValueChange = { onSetValue(descriptor.id, it) },
+                        )
+                    }
+                }
                 loginAction?.let { action ->
                     Button(
                         onClick = {
