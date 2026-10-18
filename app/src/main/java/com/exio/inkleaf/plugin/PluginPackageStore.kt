@@ -67,7 +67,6 @@ class PluginPackageStore(
                     activeVersion = version,
                     previousVersion =
                         state.activeVersion?.takeIf { it != version } ?: state.previousVersion,
-                    disabled = false,
                     health = PluginHealth.HEALTHY,
                     fatalFailureTimesMs = emptyList(),
                     updatedAtMs = clockMs(),
@@ -89,21 +88,6 @@ class PluginPackageStore(
                 state.copy(
                     activeVersion = null,
                     previousVersion = state.previousVersion?.takeIf { it != expectedVersion },
-                    updatedAtMs = clockMs(),
-                )
-            writeStateAtomically(directory, nextState)
-            installedPlugin(directory, nextState)
-        }
-    }
-
-    fun setEnabled(pluginId: String, enabled: Boolean): InstalledPlugin? {
-        requireValidPluginId(pluginId)
-        return synchronized(lock) {
-            val directory = pluginDirectory(pluginId)
-            val state = readState(directory) ?: return@synchronized null
-            val nextState =
-                state.copy(
-                    disabled = !enabled,
                     updatedAtMs = clockMs(),
                 )
             writeStateAtomically(directory, nextState)
@@ -469,7 +453,6 @@ class PluginPackageStore(
             state =
                 PluginState(
                     pluginId = directory.name,
-                    disabled = true,
                     health = PluginHealth.STORAGE_CORRUPT,
                     updatedAtMs = directory.resolve(STATE_FILE).lastModified(),
                 ),

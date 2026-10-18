@@ -351,12 +351,6 @@ internal fun HealthStatusBadge(pluginState: PluginState, modifier: Modifier = Mo
                     MaterialTheme.colorScheme.errorContainer,
                     MaterialTheme.colorScheme.onErrorContainer,
                 )
-            pluginState.disabled ->
-                Triple(
-                    "已禁用",
-                    MaterialTheme.colorScheme.surfaceVariant,
-                    MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             pluginState.health == PluginHealth.HEALTHY ->
                 Triple(
                     "正常",

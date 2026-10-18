@@ -100,13 +100,11 @@ object SourceLifecycleRows {
                 entry == null -> "本地导入 · v${state.activeVersion}"
                 else -> "已安装 · v${state.activeVersion}"
             }
-        // Health outranks 已停用: a plugin that broke and was disabled must not read as a
-        // choice the user made.
         val condition =
             when (state.health) {
                 PluginHealth.STORAGE_CORRUPT -> "状态损坏"
                 PluginHealth.RUNTIME_UNHEALTHY -> "运行异常"
-                PluginHealth.HEALTHY -> if (state.disabled) "已停用" else null
+                PluginHealth.HEALTHY -> null
             }
         return if (condition == null) lifecycle else "$lifecycle · $condition"
     }

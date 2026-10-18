@@ -198,7 +198,6 @@ fun SourceDetailScreen(
                     plugin = plugin,
                     pluginId = pluginId,
                     busy = busy,
-                    onToggle = { enabled -> viewModel.setEnabled(enabled) },
                     onRecover = { viewModel.recover() },
                 )
             }
@@ -531,7 +530,6 @@ private fun SourceIdentityCard(
     plugin: InstalledPlugin?,
     pluginId: String,
     busy: Boolean,
-    onToggle: (Boolean) -> Unit,
     onRecover: () -> Unit,
 ) {
     val state = plugin?.state
@@ -584,11 +582,6 @@ private fun SourceIdentityCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                Switch(
-                    checked = state?.disabled == false && state.activeVersion != null,
-                    onCheckedChange = onToggle,
-                    enabled = !busy && state?.activeVersion != null,
-                )
             }
 
             plugin

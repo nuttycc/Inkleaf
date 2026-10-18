@@ -146,7 +146,6 @@ class PluginDiagnosticActivity : AppCompatActivity() {
                     plugins.joinToString("\n\n") { plugin ->
                         "${plugin.state.pluginId}\n" +
                             "active=${plugin.state.activeVersion}\n" +
-                            "disabled=${plugin.state.disabled}\n" +
                             "health=${plugin.state.health}\n" +
                             "versions=${plugin.state.versions.joinToString { it.version }}"
                     }

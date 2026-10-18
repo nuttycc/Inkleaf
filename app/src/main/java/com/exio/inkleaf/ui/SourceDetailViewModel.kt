@@ -215,15 +215,6 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
         _session.value = next
     }
 
-    fun setEnabled(enabled: Boolean) {
-        val id = pluginId ?: return
-        launchOperation(if (enabled) "启用漫画源" else "停用漫画源") {
-            app().pluginManager.setEnabled(id, enabled)
-            reloadPlugin(id)
-            if (enabled) describe(id)
-        }
-    }
-
     fun recover() {
         val id = pluginId ?: return
         launchOperation("恢复漫画源") {
