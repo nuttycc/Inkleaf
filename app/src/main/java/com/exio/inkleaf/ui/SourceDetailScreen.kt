@@ -38,6 +38,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -103,6 +104,7 @@ fun SourceDetailScreen(
     var showUninstallConfirm by remember { mutableStateOf(false) }
     var showResetConfirm by remember { mutableStateOf(false) }
     var editingDescriptor by remember { mutableStateOf<PluginSettingDescriptor?>(null) }
+    var choosingDescriptor by remember { mutableStateOf<PluginSettingDescriptor?>(null) }
 
     LaunchedEffect(pluginId) { viewModel.load(pluginId) }
 
@@ -221,6 +223,9 @@ fun SourceDetailScreen(
                                     onEditProtectedSetting = { descriptor ->
                                         editingDescriptor = descriptor
                                     },
+                                    onChooseSetting = { descriptor ->
+                                        choosingDescriptor = descriptor
+                                    },
                                 )
                             }
                         }
@@ -237,6 +242,9 @@ fun SourceDetailScreen(
                                     onValueChange = { id, value -> viewModel.setValue(id, value) },
                                     onEditProtectedSetting = { descriptor ->
                                         editingDescriptor = descriptor
+                                    },
+                                    onChooseSetting = { descriptor ->
+                                        choosingDescriptor = descriptor
                                     },
                                 )
                             }
@@ -289,6 +297,29 @@ fun SourceDetailScreen(
                 editingDescriptor = null
             },
         )
+    }
+
+    choosingDescriptor?.let { descriptor ->
+        val currentValue = values[descriptor.id] ?: descriptor.defaultValue.orEmpty()
+        ModalBottomSheet(
+            onDismissRequest = { choosingDescriptor = null },
+            sheetState = rememberExpandOnlySheetState(),
+        ) {
+            SheetColumn(selectable = true, scrollable = true) {
+                StandardSheetTitle(descriptor.title)
+                descriptor.options.forEach { option ->
+                    InkleafChoiceListItem(
+                        headline = option.title,
+                        selected = option.id == currentValue,
+                        onClick = {
+                            viewModel.setValue(descriptor.id, option.id)
+                            choosingDescriptor = null
+                        },
+                        enabled = !busy,
+                    )
+                }
+            }
+        }
     }
 
     if (showResetConfirm) {
@@ -537,6 +568,7 @@ private fun SettingGroupCard(
     enabled: Boolean,
     onValueChange: (String, String) -> Unit,
     onEditProtectedSetting: (PluginSettingDescriptor) -> Unit,
+    onChooseSetting: (PluginSettingDescriptor) -> Unit,
 ) {
     OutlinedCard(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
@@ -555,6 +587,7 @@ private fun SettingGroupCard(
                         enabled = enabled,
                         onValueChange = { onValueChange(descriptor.id, it) },
                         onEditProtectedSetting = { onEditProtectedSetting(descriptor) },
+                        onChooseSetting = { onChooseSetting(descriptor) },
                     )
                     if (index < descriptors.lastIndex) {
                         HorizontalDivider(
@@ -608,6 +641,7 @@ private fun SettingControl(
     enabled: Boolean,
     onValueChange: (String) -> Unit,
     onEditProtectedSetting: () -> Unit,
+    onChooseSetting: () -> Unit,
 ) {
     when (descriptor.type) {
         "boolean" ->
@@ -652,30 +686,25 @@ private fun SettingControl(
             }
         }
 
-        // Every option is laid out as its own row, so a choice between a handful of values (the
-        // mirrors a source discovered) is visible without opening a menu.
+        // A single-choice setting keeps its options behind a sheet: a source can discover a dozen
+        // mirrors, and listing them all inline would dominate the card.
         "radio" -> {
-            Column {
-                Text(
-                    text = descriptor.title,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp),
-                )
-                descriptor.options.forEachIndexed { index, option ->
-                    InkleafChoiceListItem(
-                        headline = option.title,
-                        selected = option.id == value,
-                        onClick = { onValueChange(option.id) },
-                        enabled = enabled,
+            val selectedTitle =
+                descriptor.options.firstOrNull { it.id == value }?.title ?: "未选择"
+            ListItem(
+                supportingContent = {
+                    Text(
+                        text = selectedTitle,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    if (index < descriptor.options.lastIndex) {
-                        HorizontalDivider(
-                            modifier = Modifier.padding(horizontal = 16.dp),
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-                        )
-                    }
-                }
+                },
+                modifier =
+                    Modifier.then(
+                        if (enabled) Modifier.clickable(onClick = onChooseSetting) else Modifier
+                    ),
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            ) {
+                Text(descriptor.title)
             }
         }
 
