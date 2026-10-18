@@ -911,8 +911,15 @@ async function describe(context) {
     ],
     actions: [
       // Actions that share a setting's section are offered on that area's heading, beside the
-      // fields they act on: login sits with the credentials, refresh with the line selection.
-      { id: "refreshDomains", title: "重新获取域名", kind: "action", section: "线路" },
+      // fields they act on: login sits with the credentials. A picker action belongs to the list
+      // it refreshes instead, so 重新获取域名 sits on the route sheet's title line.
+      {
+        id: "refreshDomains",
+        title: "重新获取域名",
+        kind: "action",
+        section: "线路",
+        pickerSettingId: "route",
+      },
       { id: "login", title: "登录", kind: "login", section: "登录" },
       { id: "logout", title: "退出登录", kind: "clearSession", destructive: true, section: "登录" },
       // Comic-scoped: the host offers these on a comic page and sends its sourceId as input.

@@ -521,6 +521,12 @@ async function describeContract() {
     login: "登录",
     logout: "登录",
   });
+  // The refresh action lives on the route picker's title, not on the 线路 heading.
+  assert.equal(
+    described.actions[0].pickerSettingId,
+    "route",
+    "the refresh action belongs to the route picker"
+  );
 }
 
 async function browseLists() {
