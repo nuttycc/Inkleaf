@@ -2,7 +2,7 @@
   "manifestVersion": 1,
   "id": "io.inkleaf.source.wnacg",
   "name": "绅士漫画",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "apiVersion": "1.3",
   "capabilities": ["search", "detail", "chapters", "pages", "browse", "settings", "login"],
   "description": "绅士漫画 (WNACG) 在线漫画源。站点只提供 HTML 页面，图片地址带当天过期的签名，靠宿主在 403 时重新取页。",

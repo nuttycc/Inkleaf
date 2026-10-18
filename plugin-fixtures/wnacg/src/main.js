@@ -1286,6 +1286,22 @@ async function removeFavorite(sourceId, signal) {
   return { ok: true, message: "已移出账户收藏" };
 }
 
+/**
+ * Confirms the stored session without asking the reader: the favorites page is the lightest known
+ * account-only page, and the site serves its login wall in place of the page when the cookies are
+ * gone. A transport failure is not evidence either way, so the host is left to ignore it.
+ */
+async function checkSession(context) {
+  const signal = context && context.signal;
+  try {
+    await siteRequest(FAVORITES_PATH, signal);
+    return { signedIn: true };
+  } catch (error) {
+    if (error && error.code === "AUTH_REQUIRED") return { signedIn: false };
+    throw error;
+  }
+}
+
 async function invokeAction(request, context) {
   const signal = context && context.signal;
   const actionId = text(request.actionId);
@@ -1345,6 +1361,7 @@ async function invokeAction(request, context) {
 
 inkleaf.register({
   describe: describe,
+  checkSession: checkSession,
   search: search,
   browse: browse,
   detail: detail,

@@ -440,6 +440,7 @@ async function main() {
   await describesTheDiscoveredRouteList();
   await discoversMirrorsFromTheReleasePage();
   await reportsLoginWalls();
+  await checksSessionState();
   await logsInAndOut();
   await addsAndRemovesFavorites();
 
@@ -890,6 +891,31 @@ async function reportsLoginWalls() {
   await assert.rejects(
     () => fresh.api.pages({ sourceId: "394338", chapterId: "394338" }, ctx()),
     (error) => error.code === "AUTH_REQUIRED" && error.retryable === true
+  );
+}
+
+async function checksSessionState() {
+  const signedIn = createPlugin({ seedHosts: [SITE_HOST] });
+  assert.deepEqual(plain(await signedIn.api.checkSession(ctx())), { signedIn: true });
+
+  const signedOut = createPlugin({
+    seedHosts: [SITE_HOST],
+    respond: function (request) {
+      if (request.url.indexOf("/users-users_fav.html") >= 0) return { body: LOGIN_REQUIRED_HTML };
+      return defaultRespond(request);
+    },
+  });
+  assert.deepEqual(plain(await signedOut.api.checkSession(ctx())), { signedIn: false });
+
+  const offline = createPlugin({
+    seedHosts: [SITE_HOST],
+    respond: function () {
+      throw new Error("network down");
+    },
+  });
+  await assert.rejects(
+    () => offline.api.checkSession(ctx()),
+    "a transport failure must not be reported as signed out"
   );
 }
 
