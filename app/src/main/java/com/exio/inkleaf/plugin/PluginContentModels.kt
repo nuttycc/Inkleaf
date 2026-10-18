@@ -24,6 +24,9 @@ data class PluginDescribeResponse(
     val settings: List<PluginSettingDescriptor> = emptyList(),
 )
 
+/** The plugin's answer to the host's lightweight session check. */
+@Serializable data class PluginSessionCheck(val signedIn: Boolean = false)
+
 @Serializable
 data class PluginFeedDescriptor(
     val id: String,
@@ -261,6 +264,9 @@ object PluginContentCodec {
 
     fun describe(value: JsonElement): PluginDescribeResponse =
         normalizeDescribe(json.decodeFromJsonElement(value))
+
+    fun sessionCheck(value: JsonElement): PluginSessionCheck =
+        json.decodeFromJsonElement(value)
 
     fun searchPage(value: JsonElement, pluginId: String): PluginSearchPage =
         json.decodeFromJsonElement<PluginSearchPage>(value).also { page ->
@@ -543,6 +549,12 @@ class PluginCatalog(private val runtimeManager: PluginRuntimeManager) {
     suspend fun describe(pluginId: String): PluginDescribeResponse {
         val result = runtimeManager.describe(pluginId)
         return withContext(Dispatchers.Default) { PluginContentCodec.describe(result) }
+    }
+
+    /** Best-effort session confirmation; plugins without the method answer with an RPC error. */
+    suspend fun checkSession(pluginId: String): PluginSessionCheck {
+        val result = runtimeManager.checkSession(pluginId)
+        return withContext(Dispatchers.Default) { PluginContentCodec.sessionCheck(result) }
     }
 
     /**

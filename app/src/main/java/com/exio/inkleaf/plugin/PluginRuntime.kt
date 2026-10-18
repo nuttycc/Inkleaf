@@ -363,6 +363,9 @@ class PluginRuntimeManager(
     suspend fun describe(pluginId: String): JsonElement =
         invoke(pluginId, "describe", timeoutMs = PluginRuntimePolicy.LIGHT_DEADLINE_MS)
 
+    suspend fun checkSession(pluginId: String): JsonElement =
+        invoke(pluginId, "checkSession", timeoutMs = PluginRuntimePolicy.NORMAL_DEADLINE_MS)
+
     suspend fun install(packageFile: File, activate: Boolean = false): PluginInstallResult {
         val result = withContext(Dispatchers.IO) { store.install(packageFile, activate = false) }
         if (activate && result.status != PluginInstallStatus.REJECTED && result.activatable) {

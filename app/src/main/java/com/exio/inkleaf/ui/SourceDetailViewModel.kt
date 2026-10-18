@@ -101,6 +101,8 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
                 markSettingsClean()
                 loadedPluginId = pluginId
                 describe(pluginId)
+                // The hint can outlive the site session; confirm it off the main path.
+                viewModelScope.launch { checkSession(pluginId) }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Throwable) {
@@ -181,6 +183,28 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
         if (next.signedIn) app().pluginSessionStateRepository.signedIn(id, next.account)
         else app().pluginSessionStateRepository.signedOut(id)
         _session.value = next
+    }
+
+    /**
+     * Re-confirms a recorded sign-in with the source itself. Best effort: a missing method or a
+     * network failure proves nothing, so only the source's own "not signed in" answer clears the
+     * hint.
+     */
+    private suspend fun checkSession(pluginId: String) {
+        val current = _session.value
+        if (!current.signedIn) return
+        val check =
+            try {
+                app().pluginCatalog.checkSession(pluginId)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Throwable) {
+                return
+            }
+        // A login or sign-out may have landed while the check was in flight; its result is newer.
+        if (check.signedIn || _session.value != current) return
+        app().pluginSessionStateRepository.signedOut(pluginId)
+        _session.value = PluginSessionState()
     }
 
     fun setEnabled(enabled: Boolean) {

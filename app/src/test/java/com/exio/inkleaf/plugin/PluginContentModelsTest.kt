@@ -4,6 +4,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -238,6 +239,16 @@ class PluginContentModelsTest {
         val decoded = PluginContentCodec.describe(encoded)
         assertEquals("登录", decoded.actions[0].section)
         assertEquals(null, decoded.actions[1].section)
+    }
+
+    @Test
+    fun `session check decodes the reported state`() {
+        fun decode(json: String) =
+            PluginContentCodec.sessionCheck(PluginContentCodec.json.parseToJsonElement(json))
+
+        assertTrue(decode("""{"signedIn":true}""").signedIn)
+        assertFalse(decode("""{"signedIn":false}""").signedIn)
+        assertFalse(decode("{}").signedIn)
     }
 
     @Test
