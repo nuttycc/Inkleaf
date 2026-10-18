@@ -596,14 +596,18 @@ private fun SourceIdentityCard(
                     )
                 }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                state?.let { HealthStatusBadge(pluginState = it) }
-                if (state?.health == PluginHealth.RUNTIME_UNHEALTHY) {
-                    FilledTonalButton(onClick = onRecover, enabled = !busy) { Text("恢复运行") }
+            if (state != null && state.health != PluginHealth.HEALTHY) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    HealthStatusBadge(pluginState = state)
+                    if (state.health == PluginHealth.RUNTIME_UNHEALTHY) {
+                        FilledTonalButton(onClick = onRecover, enabled = !busy) {
+                            Text("恢复运行")
+                        }
+                    }
                 }
             }
         }
