@@ -899,9 +899,15 @@ async function describe(context) {
       return null;
     })
   );
+  // The selection must not reshuffle the list: a pinned mirror keeps its place in the discovered
+  // pool, and one that has dropped out of it is offered after the pool rather than at its head.
+  const selected = effectiveRoute(settings);
+  const pinned =
+    selected === ROUTE_AUTO || selected === ROUTE_CUSTOM ? [] : [selected];
+  const mirrors = orderedHosts(stored.hosts.concat(pinned));
   const routeOptions = [{ id: ROUTE_AUTO, title: "自动（从发布页获取）" }]
     .concat(
-      orderedHosts([settings.route].concat(stored.hosts)).map(function (host) {
+      mirrors.map(function (host) {
         return { id: host, title: host };
       })
     )

@@ -880,6 +880,33 @@ async function describesTheDiscoveredRouteList() {
     [],
     "the route list must not repeat a mirror"
   );
+
+  // Choosing a mirror must not move it: the list keeps the discovered order and the selected
+  // entry stays where the pool lists it.
+  const pinned = createPlugin({
+    seedHosts: [SITE_HOST, "www.wn002.cfd", "www.wn003.cfd"],
+    settings: { route: "www.wn002.cfd" },
+  });
+  assert.deepEqual(
+    plain(await pinned.api.describe(ctx())).settings[0].options.map(function (option) {
+      return option.id;
+    }),
+    ["auto", SITE_HOST, "www.wn002.cfd", "www.wn003.cfd", "custom"],
+    "the selected mirror must keep its position in the pool"
+  );
+
+  // A pinned mirror that dropped out of the pool is still selectable, and offered at the end.
+  const gone = createPlugin({
+    seedHosts: [SITE_HOST, "www.wn002.cfd"],
+    settings: { route: "www.wn009.cfd" },
+  });
+  assert.deepEqual(
+    plain(await gone.api.describe(ctx())).settings[0].options.map(function (option) {
+      return option.id;
+    }),
+    ["auto", SITE_HOST, "www.wn002.cfd", "www.wn009.cfd", "custom"],
+    "an undiscovered selection belongs after the discovered mirrors"
+  );
 }
 
 async function discoversMirrorsFromTheReleasePage() {
