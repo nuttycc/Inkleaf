@@ -78,12 +78,14 @@ internal fun InkleafChoiceListItem(
     selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
     supportingContent: @Composable (() -> Unit)? = null,
     trailingContent: @Composable (() -> Unit)? = null,
 ) {
     ListItem(
         selected = selected,
         onClick = onClick,
+        enabled = enabled,
         modifier = modifier,
         supportingContent = supportingContent,
         trailingContent = trailingContent,
@@ -91,6 +93,7 @@ internal fun InkleafChoiceListItem(
             RadioButton(
                 selected = selected,
                 onClick = null,
+                enabled = enabled,
             )
         },
     ) {

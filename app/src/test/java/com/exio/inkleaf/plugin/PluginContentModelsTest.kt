@@ -159,6 +159,48 @@ class PluginContentModelsTest {
     }
 
     @Test
+    fun `radio settings require options and are retained`() {
+        val retained =
+            PluginContentCodec.describe(
+                PluginContentCodec.json.encodeToJsonElement(
+                    PluginDescribeResponse(
+                        settings =
+                            listOf(
+                                PluginSettingDescriptor(
+                                    id = "route",
+                                    title = "Route",
+                                    type = "radio",
+                                    options =
+                                        listOf(
+                                            PluginFilterOption("auto", "Auto"),
+                                            PluginFilterOption(
+                                                "www.example.com",
+                                                "www.example.com",
+                                            ),
+                                        ),
+                                )
+                            )
+                    )
+                )
+            )
+        assertEquals(listOf("route"), retained.settings.map { it.id })
+
+        val missingOptions =
+            PluginDescribeResponse(
+                settings =
+                    listOf(PluginSettingDescriptor(id = "route", title = "Route", type = "radio"))
+            )
+        assertTrue(
+            runCatching {
+                    PluginContentCodec.describe(
+                        PluginContentCodec.json.encodeToJsonElement(missingOptions)
+                    )
+                }
+                .exceptionOrNull() is PluginContentValidationException
+        )
+    }
+
+    @Test
     fun `action section is retained and defaults to absent`() {
         val encoded =
             PluginContentCodec.json.encodeToJsonElement(

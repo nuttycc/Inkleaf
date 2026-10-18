@@ -652,6 +652,33 @@ private fun SettingControl(
             }
         }
 
+        // Every option is laid out as its own row, so a choice between a handful of values (the
+        // mirrors a source discovered) is visible without opening a menu.
+        "radio" -> {
+            Column {
+                Text(
+                    text = descriptor.title,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp),
+                )
+                descriptor.options.forEachIndexed { index, option ->
+                    InkleafChoiceListItem(
+                        headline = option.title,
+                        selected = option.id == value,
+                        onClick = { onValueChange(option.id) },
+                        enabled = enabled,
+                    )
+                    if (index < descriptor.options.lastIndex) {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                        )
+                    }
+                }
+            }
+        }
+
         // Text & Secret settings use protected read-only preview with modal editor to prevent
         // accidental edits.
         else -> {

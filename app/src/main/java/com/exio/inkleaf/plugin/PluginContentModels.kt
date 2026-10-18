@@ -393,8 +393,10 @@ object PluginContentCodec {
                 }
                 validateText(option.title, "setting.option.title", 256)
             }
-            if (setting.type == "select" && setting.options.isEmpty()) {
-                throw PluginContentValidationException("Select settings require options")
+            if (setting.type in OPTION_SETTING_TYPES && setting.options.isEmpty()) {
+                throw PluginContentValidationException(
+                    "Settings of type '${setting.type}' require options"
+                )
             }
         }
         return value.copy(
@@ -516,7 +518,9 @@ object PluginContentCodec {
         )
     private val SUPPORTED_FEED_FILTER_TYPES = setOf("select")
     private val SUPPORTED_FILTER_TYPES = setOf("text", "select", "multiSelect", "boolean")
-    private val SUPPORTED_SETTING_TYPES = setOf("text", "secret", "boolean", "select")
+    private val SUPPORTED_SETTING_TYPES = setOf("text", "secret", "boolean", "select", "radio")
+
+    private val OPTION_SETTING_TYPES = setOf("select", "radio")
 }
 
 object PluginContentLimits {
