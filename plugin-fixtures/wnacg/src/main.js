@@ -963,7 +963,7 @@ async function describe(context) {
       },
       {
         id: "domain",
-        title: "自定义域名（选择“自定义”时使用）",
+        title: "自定义域名",
         type: "text",
         section: "线路",
       },
