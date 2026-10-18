@@ -935,7 +935,7 @@ private fun LazyGridScope.discoverStructuralItem(
             DiscoverStructuralItem.SEARCH_ERROR -> M3ErrorBanner(message = message, onRetry = onRetry)
             DiscoverStructuralItem.FEED_EMPTY_TEXT ->
                 Text(
-                    "已启用的漫画源暂不支持推荐或分类浏览，请使用搜索。",
+                    "已安装的漫画源暂不支持推荐或分类浏览，请使用搜索。",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(vertical = 24.dp),
@@ -1411,7 +1411,7 @@ private fun NoSources(onOpenSources: () -> Unit) {
         )
         Text("暂无可用的漫画源", style = MaterialTheme.typography.titleMedium)
         Text(
-            "请先添加并启用插件。",
+            "请先添加并安装插件。",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

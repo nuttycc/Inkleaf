@@ -64,14 +64,6 @@ fun Throwable.toContentLoadError(isNetworkAvailable: Boolean = true): ContentLoa
                     hint = "在内容源设置中登录后再试",
                     retryable = false,
                 )
-            PluginErrorCode.PLUGIN_DISABLED ->
-                presentation(
-                    ContentLoadErrorKind.PLUGIN,
-                    this,
-                    message = "内容源插件已被停用",
-                    hint = "重新启用插件后再试",
-                    retryable = false,
-                )
             PluginErrorCode.TIMEOUT -> presentation(ContentLoadErrorKind.TIMEOUT, this)
             PluginErrorCode.HTTP ->
                 classifyChain(this).withFallback(ContentLoadErrorKind.HTTP_REJECTED)
@@ -189,6 +181,6 @@ private fun ContentLoadErrorKind.defaultHint(): String? =
         ContentLoadErrorKind.RATE_LIMITED -> "站点正在限流，请稍等片刻后重试"
         ContentLoadErrorKind.HTTP_REJECTED -> "站点返回了错误响应，请稍后重试"
         ContentLoadErrorKind.CONTENT_MISSING -> "章节可能已下架，或插件需要更新"
-        ContentLoadErrorKind.PLUGIN -> "尝试更新或重新启用插件后再试"
+        ContentLoadErrorKind.PLUGIN -> "尝试更新或重新安装插件后再试"
         ContentLoadErrorKind.UNKNOWN -> null
     }

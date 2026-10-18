@@ -348,6 +348,30 @@ class OnlineContentRepositoryTest {
         }
     }
 
+    @Test
+    fun `legacy disabled availability decodes as available`() {
+        val root = Files.createTempDirectory("inkleaf-online-legacy-availability").toFile()
+        val file = root.resolve("state.json")
+        try {
+            file.writeText(
+                """
+                {
+                  "records": [{
+                    "key": {"pluginId": "$PLUGIN_ID", "sourceId": "$SOURCE_ID"},
+                    "availability": "PLUGIN_DISABLED"
+                  }]
+                }
+                """
+                    .trimIndent()
+            )
+
+            val record = requireNotNull(OnlineContentRepository(file).get(PLUGIN_ID, SOURCE_ID))
+            assertEquals(OnlineAvailability.AVAILABLE, record.availability)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
     private fun content() = OnlineContentIdentity(PLUGIN_ID, SOURCE_ID)
 
     private fun location(pageId: String?, pageIndex: Int, revision: String) =

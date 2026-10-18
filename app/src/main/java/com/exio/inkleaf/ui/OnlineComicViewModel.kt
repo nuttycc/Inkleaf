@@ -439,8 +439,6 @@ internal fun Throwable.toOnlineAvailability(): OnlineAvailability {
     val code = (this as? PluginRpcException)?.error?.code
     return when (code) {
         com.exio.inkleaf.plugin.PluginErrorCode.AUTH_REQUIRED -> OnlineAvailability.AUTH_REQUIRED
-        com.exio.inkleaf.plugin.PluginErrorCode.PLUGIN_DISABLED ->
-            OnlineAvailability.PLUGIN_DISABLED
         com.exio.inkleaf.plugin.PluginErrorCode.NOT_FOUND -> OnlineAvailability.CONTENT_MISSING
         else -> OnlineAvailability.TEMPORARY_ERROR
     }

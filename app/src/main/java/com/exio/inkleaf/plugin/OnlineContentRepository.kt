@@ -21,7 +21,6 @@ typealias OnlineContentKey = OnlineContentIdentity
 @Serializable
 enum class OnlineAvailability {
     AVAILABLE,
-    PLUGIN_DISABLED,
     PLUGIN_UNINSTALLED,
     PLUGIN_INCOMPATIBLE,
     AUTH_REQUIRED,
@@ -654,6 +653,9 @@ class OnlineContentRepository(
             encodeDefaults = true
             explicitNulls = false
             ignoreUnknownKeys = true
+            // Legacy records may still carry the removed PLUGIN_DISABLED availability; it falls
+            // back to the AVAILABLE default instead of making the whole state unreadable.
+            coerceInputValues = true
         }
     }
 }

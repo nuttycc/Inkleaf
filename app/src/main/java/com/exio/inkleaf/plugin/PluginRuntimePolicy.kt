@@ -34,7 +34,6 @@ object PluginErrorCode {
     const val HOST_UNAVAILABLE = "HOST_UNAVAILABLE"
     const val PLUGIN_PROTOCOL = "PLUGIN_PROTOCOL"
     const val PLUGIN_ERROR = "PLUGIN_ERROR"
-    const val PLUGIN_DISABLED = "PLUGIN_DISABLED"
     const val RUNTIME_UNHEALTHY = "RUNTIME_UNHEALTHY"
     const val NOT_FOUND = "NOT_FOUND"
 }
