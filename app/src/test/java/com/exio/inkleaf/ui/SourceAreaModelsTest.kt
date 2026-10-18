@@ -166,6 +166,42 @@ class SourceAreaModelsTest {
     }
 
     @Test
+    fun `the account card leaves credential fields to the sheet`() {
+        val area =
+            sourceAreas(
+                    settings =
+                        listOf(
+                            setting("account", "登录"),
+                            setting("password", "登录").copy(type = "secret"),
+                        ),
+                    actions = listOf(action("login", kind = "login", section = "登录")),
+                )
+                .single()
+
+        assertTrue(areaUsesAccountSheet(area))
+        assertTrue(
+            "the card shows the account row; both credential inputs live in the sheet",
+            cardSettings(area).isEmpty(),
+        )
+    }
+
+    @Test
+    fun `non-credential settings stay in the account card`() {
+        val area =
+            sourceAreas(
+                    settings =
+                        listOf(
+                            setting("account", "登录"),
+                            setting("remember", "登录").copy(type = "boolean"),
+                        ),
+                    actions = listOf(action("login", kind = "login", section = "登录")),
+                )
+                .single()
+
+        assertEquals(listOf("remember"), cardSettings(area).map { it.id })
+    }
+
+    @Test
     fun `the account sheet keeps unrelated heading actions`() {
         val area =
             sourceAreas(

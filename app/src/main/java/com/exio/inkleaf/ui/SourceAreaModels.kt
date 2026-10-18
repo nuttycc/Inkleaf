@@ -9,9 +9,9 @@ import com.exio.inkleaf.plugin.PluginSettingDescriptor
  * actions the plugin attached to that same section.
  *
  * A section that carries actions renders them on the area heading line, so an action sits next to
- * the fields it acts on (the login button beside the account and password fields). A null section
- * is the generic action area, which keeps the pre-section behaviour: settings with no heading and
- * actions as list rows.
+ * the fields it acts on (the refresh button beside the route field). Sign-in and sign-out actions
+ * belong to the account sheet instead. A null section is the generic action area, which keeps the
+ * pre-section behaviour: settings with no heading and actions as list rows.
  */
 data class SourceArea(
     val section: String?,
@@ -131,6 +131,18 @@ fun PluginActionDescriptor.isAccountAction(): Boolean =
  */
 fun areaUsesAccountSheet(area: SourceArea): Boolean =
     area.settings.isNotEmpty() && area.actions.any { it.isAccountAction() }
+
+/**
+ * True for the free-text fields the account sheet collects. Keeping the predicate in one place
+ * guarantees the card and the sheet together show every setting of the area exactly once.
+ */
+fun PluginSettingDescriptor.isCredentialField(): Boolean =
+    type == "text" || type == "secret" || secret
+
+/** The settings the area's card shows; an account area leaves its credential fields to the sheet. */
+fun cardSettings(area: SourceArea): List<PluginSettingDescriptor> =
+    if (areaUsesAccountSheet(area)) area.settings.filterNot { it.isCredentialField() }
+    else area.settings
 
 /** Actions offered on the area heading; the account sheet owns the sign-in and sign-out actions. */
 fun headingActions(

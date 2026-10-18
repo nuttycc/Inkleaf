@@ -219,7 +219,7 @@ fun SourceDetailScreen(
                         if (area.settings.isNotEmpty()) {
                             item(key = "area_card_${area.section}") {
                                 SettingGroupCard(
-                                    descriptors = area.settings,
+                                    descriptors = cardSettings(area),
                                     values = values,
                                     enabled = !busy,
                                     onValueChange = { id, value -> viewModel.setValue(id, value) },
@@ -251,7 +251,7 @@ fun SourceDetailScreen(
                             item(key = "setting_header") { SectionHeader("设置") }
                             item(key = "setting_card") {
                                 SettingGroupCard(
-                                    descriptors = area.settings,
+                                    descriptors = cardSettings(area),
                                     values = values,
                                     enabled = !busy,
                                     onValueChange = { id, value -> viewModel.setValue(id, value) },
@@ -722,9 +722,9 @@ private fun AccountSummaryRow(
 }
 
 /**
- * Collects credentials while signed out and offers the sign-out action while signed in. Edits are
- * committed through [onSetValue] only when the reader submits the login, so dismissing the sheet
- * leaves the stored settings untouched.
+ * Collects the credentials and offers the sign-in or sign-out action. Both fields are shown in
+ * either state, so the stored credentials stay visible and editable after signing in. Edits bind
+ * straight to the screen values, which are persisted with the rest of the source settings.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -740,18 +740,11 @@ private fun AccountSheet(
     val actions = visibleAreaActions(area.actions, session.signedIn)
     val loginAction = actions.firstOrNull { it.kind in PluginActionKind.signInKinds }
     val signOutAction = actions.firstOrNull { it.isSignOut() }
-    val fields =
-        remember(area.settings) {
-            area.settings.filter { it.type == "text" || it.type == "secret" || it.secret }
+    val fields = remember(area.settings) { area.settings.filter { it.isCredentialField() } }
+    val canSubmit =
+        fields.filter { it.required }.all { descriptor ->
+            (values[descriptor.id] ?: descriptor.defaultValue.orEmpty()).isNotBlank()
         }
-    var drafts by remember {
-        mutableStateOf(
-            fields.associate { descriptor ->
-                descriptor.id to (values[descriptor.id] ?: descriptor.defaultValue.orEmpty())
-            }
-        )
-    }
-    val canSubmit = fields.filter { it.required }.all { drafts[it.id].orEmpty().isNotBlank() }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -759,13 +752,26 @@ private fun AccountSheet(
     ) {
         SheetColumn(scrollable = true) {
             StandardSheetTitle(if (session.signedIn) "账户" else loginAction?.title ?: "登录")
+            Text(
+                text = accountStatusText(session),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                fields.forEach { descriptor ->
+                    CredentialField(
+                        descriptor = descriptor,
+                        value = values[descriptor.id] ?: descriptor.defaultValue.orEmpty(),
+                        enabled = !busy,
+                        onValueChange = { onSetValue(descriptor.id, it) },
+                    )
+                }
+            }
             if (session.signedIn) {
-                Text(
-                    text = accountStatusText(session),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                )
                 signOutAction?.let { action ->
                     Button(
                         onClick = {
@@ -785,23 +791,9 @@ private fun AccountSheet(
                     }
                 }
             } else {
-                Column(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    fields.forEach { descriptor ->
-                        CredentialField(
-                            descriptor = descriptor,
-                            value = drafts[descriptor.id].orEmpty(),
-                            enabled = !busy,
-                            onValueChange = { drafts = drafts + (descriptor.id to it) },
-                        )
-                    }
-                }
                 loginAction?.let { action ->
                     Button(
                         onClick = {
-                            fields.forEach { onSetValue(it.id, drafts[it.id].orEmpty()) }
                             onDismiss()
                             onAction(action)
                         },
