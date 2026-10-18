@@ -72,6 +72,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.composables.icons.materialsymbols.outlined.R as MaterialSymbolsOutlinedR
 import com.exio.inkleaf.plugin.InstalledPlugin
 import com.exio.inkleaf.plugin.PluginActionDescriptor
+import com.exio.inkleaf.plugin.PluginActionKind
 import com.exio.inkleaf.plugin.PluginHealth
 import com.exio.inkleaf.plugin.PluginSessionState
 import com.exio.inkleaf.plugin.PluginSettingDescriptor
@@ -105,6 +106,7 @@ fun SourceDetailScreen(
     var showResetConfirm by remember { mutableStateOf(false) }
     var editingDescriptor by remember { mutableStateOf<PluginSettingDescriptor?>(null) }
     var choosingSettingId by remember { mutableStateOf<String?>(null) }
+    var showAccountSheet by remember { mutableStateOf(false) }
 
     LaunchedEffect(pluginId) { viewModel.load(pluginId) }
 
@@ -135,8 +137,9 @@ fun SourceDetailScreen(
     val displayName = plugin?.manifest?.name ?: pluginId
 
     // Settings and actions merge by their declared section so an action sits with the fields it
-    // acts on (the login button beside the credentials). Section-less content keeps its old layout.
+    // acts on. Sign-in and sign-out actions move into the account row and its sheet instead.
     val areas = remember(settings, actions) { sourceAreas(settings, actions) }
+    val accountArea = remember(areas) { areas.firstOrNull { areaUsesAccountSheet(it) } }
 
     Scaffold(
         modifier = modifier,
@@ -226,6 +229,18 @@ fun SourceDetailScreen(
                                     onChooseSetting = { descriptor ->
                                         choosingSettingId = descriptor.id
                                     },
+                                    header =
+                                        if (areaUsesAccountSheet(area)) {
+                                            {
+                                                AccountSummaryRow(
+                                                    session = session,
+                                                    enabled = !busy,
+                                                    onClick = { showAccountSheet = true },
+                                                )
+                                            }
+                                        } else {
+                                            null
+                                        },
                                 )
                             }
                         }
@@ -246,14 +261,27 @@ fun SourceDetailScreen(
                                     onChooseSetting = { descriptor ->
                                         choosingSettingId = descriptor.id
                                     },
+                                    header =
+                                        if (areaUsesAccountSheet(area)) {
+                                            {
+                                                AccountSummaryRow(
+                                                    session = session,
+                                                    enabled = !busy,
+                                                    onClick = { showAccountSheet = true },
+                                                )
+                                            }
+                                        } else {
+                                            null
+                                        },
                                 )
                             }
                         }
-                        if (area.actions.isNotEmpty()) {
+                        val visibleActions = headingActions(area, session.signedIn)
+                        if (visibleActions.isNotEmpty()) {
                             item(key = "action_header") { SectionHeader(area.title) }
                             item(key = "action_card") {
                                 ActionGroupCard(
-                                    actions = area.actions,
+                                    actions = visibleActions,
                                     enabled = !busy,
                                     onActionClick = { action -> viewModel.invokeAction(action) },
                                 )
@@ -340,6 +368,20 @@ fun SourceDetailScreen(
         }
     }
 
+    if (showAccountSheet) {
+        accountArea?.let { area ->
+            AccountSheet(
+                area = area,
+                session = session,
+                values = values,
+                busy = busy,
+                onSetValue = viewModel::setValue,
+                onAction = viewModel::invokeAction,
+                onDismiss = { showAccountSheet = false },
+            )
+        }
+    }
+
     if (showResetConfirm) {
         AlertDialog(
             onDismissRequest = { showResetConfirm = false },
@@ -399,9 +441,9 @@ private fun SectionHeader(text: String) {
 }
 
 /**
- * The heading of a section that carries actions. The section name rests on the left, the actions
- * the plugin attached to that section sit on the right, and the signed-in state is shown beneath
- * the name so the login control never asks for credentials that are already accepted.
+ * The heading of a section that carries actions. The section name rests on the left and the
+ * actions the plugin attached to that section sit on the right. An area that owns an account row
+ * carries its session state there instead, together with the sign-in and sign-out actions.
  */
 @Composable
 private fun AreaHeader(
@@ -411,12 +453,8 @@ private fun AreaHeader(
     onActionClick: (PluginActionDescriptor) -> Unit,
 ) {
     val status =
-        if (areaShowsSessionStatus(area)) {
-            if (session.signedIn) {
-                session.account?.let { "已登录：$it" } ?: "已登录"
-            } else {
-                "未登录"
-            }
+        if (!areaUsesAccountSheet(area) && areaShowsSessionStatus(area)) {
+            accountStatusText(session)
         } else {
             null
         }
@@ -444,7 +482,7 @@ private fun AreaHeader(
             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            visibleAreaActions(area.actions, session.signedIn).forEach { action ->
+            headingActions(area, session.signedIn).forEach { action ->
                 SourceAreaActionButton(
                     action = action,
                     enabled = enabled && action.enabled,
@@ -587,6 +625,7 @@ private fun SettingGroupCard(
     onValueChange: (String, String) -> Unit,
     onEditProtectedSetting: (PluginSettingDescriptor) -> Unit,
     onChooseSetting: (PluginSettingDescriptor) -> Unit,
+    header: (@Composable () -> Unit)? = null,
 ) {
     OutlinedCard(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
@@ -597,6 +636,15 @@ private fun SettingGroupCard(
             ),
     ) {
         Column {
+            header?.let {
+                it()
+                if (descriptors.isNotEmpty()) {
+                    HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                    )
+                }
+            }
             descriptors.forEachIndexed { index, descriptor ->
                 key(descriptor.id) {
                     SettingControl(
@@ -650,6 +698,177 @@ private fun ActionGroupCard(
         }
     }
 }
+
+/** The account row: the current session state and the entry to the account sheet. */
+@Composable
+private fun AccountSummaryRow(
+    session: PluginSessionState,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    ListItem(
+        supportingContent = {
+            Text(
+                text = accountStatusText(session),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        },
+        modifier =
+            Modifier.then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier),
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+    ) {
+        Text("登录状态")
+    }
+}
+
+/**
+ * Collects credentials while signed out and offers the sign-out action while signed in. Edits are
+ * committed through [onSetValue] only when the reader submits the login, so dismissing the sheet
+ * leaves the stored settings untouched.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AccountSheet(
+    area: SourceArea,
+    session: PluginSessionState,
+    values: Map<String, String>,
+    busy: Boolean,
+    onSetValue: (String, String) -> Unit,
+    onAction: (PluginActionDescriptor) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val actions = visibleAreaActions(area.actions, session.signedIn)
+    val loginAction = actions.firstOrNull { it.kind in PluginActionKind.signInKinds }
+    val signOutAction = actions.firstOrNull { it.isSignOut() }
+    val fields =
+        remember(area.settings) {
+            area.settings.filter { it.type == "text" || it.type == "secret" || it.secret }
+        }
+    var drafts by remember {
+        mutableStateOf(
+            fields.associate { descriptor ->
+                descriptor.id to (values[descriptor.id] ?: descriptor.defaultValue.orEmpty())
+            }
+        )
+    }
+    val canSubmit = fields.filter { it.required }.all { drafts[it.id].orEmpty().isNotBlank() }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberExpandOnlySheetState(),
+    ) {
+        SheetColumn(scrollable = true) {
+            StandardSheetTitle(if (session.signedIn) "账户" else loginAction?.title ?: "登录")
+            if (session.signedIn) {
+                Text(
+                    text = accountStatusText(session),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+                signOutAction?.let { action ->
+                    Button(
+                        onClick = {
+                            onDismiss()
+                            onAction(action)
+                        },
+                        enabled = !busy && action.enabled,
+                        colors =
+                            ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.error,
+                                contentColor = MaterialTheme.colorScheme.onError,
+                            ),
+                        modifier =
+                            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp),
+                    ) {
+                        Text(action.title)
+                    }
+                }
+            } else {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    fields.forEach { descriptor ->
+                        CredentialField(
+                            descriptor = descriptor,
+                            value = drafts[descriptor.id].orEmpty(),
+                            enabled = !busy,
+                            onValueChange = { drafts = drafts + (descriptor.id to it) },
+                        )
+                    }
+                }
+                loginAction?.let { action ->
+                    Button(
+                        onClick = {
+                            fields.forEach { onSetValue(it.id, drafts[it.id].orEmpty()) }
+                            onDismiss()
+                            onAction(action)
+                        },
+                        enabled = !busy && action.enabled && canSubmit,
+                        modifier =
+                            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp),
+                    ) {
+                        Text(action.title)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** One credential input in the account sheet. Secret values stay masked until revealed. */
+@Composable
+private fun CredentialField(
+    descriptor: PluginSettingDescriptor,
+    value: String,
+    enabled: Boolean,
+    onValueChange: (String) -> Unit,
+) {
+    val isSecret = descriptor.type == "secret" || descriptor.secret
+    var revealed by remember(descriptor.id) { mutableStateOf(false) }
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = { Text(descriptor.title) },
+        singleLine = true,
+        enabled = enabled,
+        isError = descriptor.required && value.isBlank(),
+        visualTransformation =
+            if (isSecret && !revealed) PasswordVisualTransformation()
+            else VisualTransformation.None,
+        trailingIcon =
+            if (isSecret) {
+                {
+                    IconButton(onClick = { revealed = !revealed }, enabled = enabled) {
+                        Icon(
+                            painter =
+                                painterResource(
+                                    if (revealed) {
+                                        MaterialSymbolsOutlinedR.drawable
+                                            .materialsymbols_ic_visibility_off_outlined
+                                    } else {
+                                        MaterialSymbolsOutlinedR.drawable
+                                            .materialsymbols_ic_visibility_outlined
+                                    }
+                                ),
+                            contentDescription = if (revealed) "隐藏" else "显示",
+                        )
+                    }
+                }
+            } else {
+                null
+            },
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+private fun accountStatusText(session: PluginSessionState): String =
+    if (session.signedIn) {
+        session.account?.let { "已登录：$it" } ?: "已登录"
+    } else {
+        "未登录"
+    }
 
 /** Maps plugin-declared descriptors to controls without interpreting site-specific semantics. */
 @Composable

@@ -148,6 +148,53 @@ class SourceAreaModelsTest {
     }
 
     @Test
+    fun `account actions move from the heading to the account sheet`() {
+        val area =
+            sourceAreas(
+                    settings = listOf(setting("account", "登录"), setting("password", "登录")),
+                    actions =
+                        listOf(
+                            action("login", kind = "login", section = "登录"),
+                            action("logout", kind = "clearSession", section = "登录"),
+                        ),
+                )
+                .single()
+
+        assertTrue(areaUsesAccountSheet(area))
+        assertTrue(headingActions(area, signedIn = false).isEmpty())
+        assertTrue(headingActions(area, signedIn = true).isEmpty())
+    }
+
+    @Test
+    fun `the account sheet keeps unrelated heading actions`() {
+        val area =
+            sourceAreas(
+                    settings = listOf(setting("account", "登录")),
+                    actions =
+                        listOf(
+                            action("login", kind = "login", section = "登录"),
+                            action("refresh", section = "登录"),
+                        ),
+                )
+                .single()
+
+        assertEquals(listOf("refresh"), headingActions(area, signedIn = false).map { it.id })
+    }
+
+    @Test
+    fun `a login action without settings keeps its heading button`() {
+        val area =
+            sourceAreas(
+                    settings = emptyList(),
+                    actions = listOf(action("login", kind = "login", section = "登录")),
+                )
+                .single()
+
+        assertFalse(areaUsesAccountSheet(area))
+        assertEquals(listOf("login"), headingActions(area, signedIn = false).map { it.id })
+    }
+
+    @Test
     fun `session status is shown only for areas that sign in or out`() {
         val authArea = sourceAreas(emptyList(), listOf(action("login", kind = "login"))).single()
         val plainArea = sourceAreas(emptyList(), listOf(action("refresh"))).single()

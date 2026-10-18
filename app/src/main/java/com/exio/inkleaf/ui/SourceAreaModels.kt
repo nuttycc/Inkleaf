@@ -120,6 +120,27 @@ private fun visibleActions(
         }
     }
 
+/** True when an action signs the source in or out and therefore belongs to the account sheet. */
+fun PluginActionDescriptor.isAccountAction(): Boolean =
+    kind in PluginActionKind.signInKinds || isSignOut()
+
+/**
+ * True when the host shows the session state and the credentials through an account row and its
+ * sheet. A login action without credential settings keeps its heading button, because the sheet
+ * would have no fields to collect.
+ */
+fun areaUsesAccountSheet(area: SourceArea): Boolean =
+    area.settings.isNotEmpty() && area.actions.any { it.isAccountAction() }
+
+/** Actions offered on the area heading; the account sheet owns the sign-in and sign-out actions. */
+fun headingActions(
+    area: SourceArea,
+    signedIn: Boolean,
+): List<PluginActionDescriptor> =
+    visibleAreaActions(area.actions, signedIn).filterNot {
+        areaUsesAccountSheet(area) && it.isAccountAction()
+    }
+
 /** True when an area's heading should carry the signed-in state. */
 fun areaShowsSessionStatus(area: SourceArea): Boolean =
     area.actions.any { it.kind in PluginActionKind.signInKinds || it.isSignOut() }
