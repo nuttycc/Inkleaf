@@ -11,7 +11,6 @@ import com.exio.inkleaf.data.GridColumnsMode
 import com.exio.inkleaf.plugin.ComicSummary
 import com.exio.inkleaf.plugin.InstalledPlugin
 import com.exio.inkleaf.plugin.PluginBrowseCacheKey
-import com.exio.inkleaf.plugin.PluginBrowseCacheSnapshot
 import com.exio.inkleaf.plugin.PluginBrowseRequest
 import com.exio.inkleaf.plugin.PluginFeedDescriptor
 import com.exio.inkleaf.plugin.PluginSearchRequest
@@ -24,6 +23,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -50,29 +50,48 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
         val key: String = "$pluginId:${descriptor.id}"
     }
 
-    private data class BrowseSessionSnapshot(
-        val items: List<ComicSummary>,
-        val nextCursor: String?,
-        val firstPageFetchedAtMs: Long,
-        val firstPageRevision: String,
-        val cacheGeneration: Long,
-    )
-
     private data class FeedLoadResult(
         val feeds: List<Feed>,
         val error: String? = null,
     )
 
-    private enum class BrowseFailure {
-        FIRST_PAGE,
-        NEXT_PAGE,
-    }
-
     private val settingsRepo = DiscoverSettingsRepository(app)
     private val application = getApplication<InkleafApplication>()
     private val pluginManager = application.pluginManager
     private val catalog = application.pluginCatalog
-    private val browseRepository = application.pluginBrowseRepository
+    private val browse =
+        BrowseSessions(
+            scope = viewModelScope,
+            source =
+                object : BrowseSource {
+                    override fun cacheGeneration(pluginId: String) =
+                        application.pluginBrowseRepository.cacheGeneration(pluginId)
+
+                    override fun isFresh(fetchedAtMs: Long) =
+                        application.pluginBrowseRepository.isFresh(fetchedAtMs)
+
+                    override suspend fun readFirstPage(key: PluginBrowseCacheKey) =
+                        application.pluginBrowseRepository.readFirstPage(key)
+
+                    override suspend fun refreshFirstPage(
+                        key: PluginBrowseCacheKey,
+                        request: PluginBrowseRequest,
+                        expectedRevision: String?,
+                        force: Boolean,
+                    ) =
+                        application.pluginBrowseRepository.refreshFirstPage(
+                            key = key,
+                            request = request,
+                            expectedRevision = expectedRevision,
+                            force = force,
+                        )
+
+                    override suspend fun loadPage(
+                        pluginId: String,
+                        request: PluginBrowseRequest,
+                    ) = application.pluginBrowseRepository.loadPage(pluginId, request)
+                },
+        )
 
     private val _mode = MutableStateFlow(Mode.BROWSE)
     val mode: StateFlow<Mode> = _mode.asStateFlow()
@@ -138,6 +157,20 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
     val browseFirstPageCommitRevision: StateFlow<Long> =
         _browseFirstPageCommitRevision.asStateFlow()
 
+    init {
+        viewModelScope.launch {
+            browse.state.collect { state ->
+                _browseFilters.value = state.filters
+                _browseItems.value = state.items
+                _browseNextCursor.value = state.nextCursor
+                _isBrowsing.value = state.isBrowsing
+                _browseError.value = state.error
+                _browseReady.value = state.ready
+                _browseFirstPageCommitRevision.value = state.firstPageCommitRevision
+            }
+        }
+    }
+
     private val _query = MutableStateFlow("")
     val query: StateFlow<String> = _query.asStateFlow()
 
@@ -156,40 +189,23 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
-    private val browseSessions: MutableMap<PluginBrowseCacheKey, BrowseSessionSnapshot> =
-        object : LinkedHashMap<PluginBrowseCacheKey, BrowseSessionSnapshot>(16, 0.75f, true) {
-            override fun removeEldestEntry(
-                eldest: MutableMap.MutableEntry<PluginBrowseCacheKey, BrowseSessionSnapshot>?
-            ): Boolean = size > MAX_BROWSE_SESSIONS
-        }
-    private val browseFiltersByFeed =
-        object : LinkedHashMap<String, Map<String, String>>(16, 0.75f, true) {
-            override fun removeEldestEntry(
-                eldest: MutableMap.MutableEntry<String, Map<String, String>>?
-            ): Boolean = size > MAX_BROWSE_SESSIONS
-        }
-    private val scrollAnchors = DiscoverScrollAnchorStore(MAX_SCROLL_CONTEXTS)
-    private var currentBrowseKey: PluginBrowseCacheKey? = null
     private var loadedFeedSignature: List<String>? = null
-    private var browseFailure: BrowseFailure? = null
     private var installedLoadJob: Job? = null
     private var feedLoadJob: Job? = null
-    private var browseJob: Job? = null
     private var searchJob: Job? = null
     private var installedLoadGeneration = 0L
     private var feedLoadGeneration = 0L
-    private var browseGeneration = 0L
     private var loadedSearchSignature: List<String>? = null
     private val searchRequestGate = DiscoverSearchRequestGate()
 
     fun scrollAnchor(contextKey: DiscoverScrollContextKey): DiscoverScrollAnchor? =
-        scrollAnchors.get(contextKey)
+        browse.scrollAnchor(contextKey)
 
     fun updateScrollAnchor(
         contextKey: DiscoverScrollContextKey,
         anchor: DiscoverScrollAnchor,
     ) {
-        scrollAnchors.put(contextKey, anchor)
+        browse.updateScrollAnchor(contextKey, anchor)
     }
 
     fun enterSearch() {
@@ -200,7 +216,7 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
     fun exitSearch() {
         _mode.value = Mode.BROWSE
         updateQuery("")
-        ensureCurrentBrowseFresh()
+        browse.ensureFresh()
     }
 
     /** 切换当前源：落到该源自定义排序后的第一个内容流上 */
@@ -225,9 +241,14 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
     fun refresh() {
         when (_mode.value) {
             Mode.BROWSE -> {
-                if (currentBrowseKey == null) return
+                if (!browse.hasTarget) return
                 _isRefreshing.value = true
-                loadBrowseFirstPage(force = true, manual = true)
+                val job = browse.refresh(force = true)
+                if (job == null) {
+                    _isRefreshing.value = false
+                } else {
+                    job.invokeOnCompletion { _isRefreshing.value = false }
+                }
             }
             Mode.SEARCH -> {
                 if (_query.value.isBlank()) return
@@ -291,7 +312,7 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
         val browsable = DiscoverSources.browsable(_installedPlugins.value)
         val signature = DiscoverSources.browseSignature(_installedPlugins.value)
         if (!force && loadedFeedSignature == signature) {
-            if (_mode.value == Mode.BROWSE) ensureCurrentBrowseFresh()
+            if (_mode.value == Mode.BROWSE) browse.ensureFresh()
             return
         }
 
@@ -407,15 +428,23 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
     /** Activates a feed with its remembered filters, or refreshes the current target if it is stale. */
     fun selectFeed(feedKey: String?) {
         val feed = _feeds.value.firstOrNull { it.key == feedKey }
-        val filters = feed?.selectedFilters().orEmpty()
+        val filters =
+            feed?.let { browse.selectedFilters(it.sessionKey, it.descriptor.filters) }.orEmpty()
         val key = feed?.cacheKey(filters)
-        if (key != null && key == currentBrowseKey) {
-            ensureCurrentBrowseFresh()
+        if (key != null && key == browse.currentKey) {
+            browse.ensureFresh()
             return
         }
 
         _selectedFeedKey.value = feedKey
-        activateBrowseTarget(key, filters)
+        browse.select(
+            BrowseTarget(
+                key = key,
+                feedId = feed?.descriptor?.id,
+                filters = filters,
+                loadNow = _mode.value == Mode.BROWSE,
+            )
+        )
     }
 
     /**
@@ -423,30 +452,31 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
      * entry.
      */
     fun selectBrowseFilter(filterId: String, optionId: String) {
-        if (_browseFilters.value[filterId] == optionId) return
-        val filters = _browseFilters.value + (filterId to optionId)
+        val current = browse.state.value.filters
+        if (current[filterId] == optionId) return
+        val filters = current + (filterId to optionId)
         val feed = selectedFeed() ?: return
-        browseFiltersByFeed[feed.sessionKey] = filters
-        val key = feed.cacheKey(filters)
-        activateBrowseTarget(key, filters)
+        browse.rememberFilters(feed.sessionKey, filters)
+        browse.select(
+            BrowseTarget(
+                key = feed.cacheKey(filters),
+                feedId = feed.descriptor.id,
+                filters = filters,
+                loadNow = _mode.value == Mode.BROWSE,
+            )
+        )
     }
 
     /**
-     * 触底预取会在滚动中被反复调用，这里必须挡住重入：loadBrowsePage 会先 cancel 掉 正在跑的
-     * browseJob，不挡的话每次调用都把上一次快取到手的请求掐掉，永远加载不完。
+     * 触底预取会在滚动中被反复调用；模块内部挡住重入，避免反复取消上一次尚未完成的请求。
      */
     fun loadMore() {
-        if (_isBrowsing.value) return
-        if (_browseNextCursor.value != null) loadBrowsePage()
+        browse.loadMore()
     }
 
     /** Retries the failed next page, or forces a first-page refresh for other browse failures. */
     fun retryBrowse() {
-        if (browseFailure == BrowseFailure.NEXT_PAGE) {
-            loadBrowsePage()
-        } else {
-            loadBrowseFirstPage(force = true)
-        }
+        browse.retry()
     }
 
     fun updateQuery(newQuery: String) {
@@ -552,213 +582,6 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
         performSearch()
     }
 
-    /**
-     * Cancels the previous browse target and restores a session from the current cache generation.
-     * Loads the first page in browse mode when the restored session is missing or stale.
-     */
-    private fun activateBrowseTarget(
-        key: PluginBrowseCacheKey?,
-        filters: Map<String, String>,
-    ) {
-        browseGeneration += 1
-        browseJob?.cancel()
-        currentBrowseKey = key
-        _browseFilters.value = filters
-        _browseError.value = null
-        _isBrowsing.value = false
-        browseFailure = null
-
-        val session = key?.let { resolvedKey ->
-            browseSessions[resolvedKey]?.takeIf {
-                it.cacheGeneration == browseRepository.cacheGeneration(resolvedKey.pluginId)
-            }
-        }
-        if (key != null && session == null) browseSessions.remove(key)
-        _browseReady.value = key == null || session != null
-        _browseItems.value = session?.items.orEmpty()
-        _browseNextCursor.value = session?.nextCursor
-        if (
-            _mode.value == Mode.BROWSE &&
-                key != null &&
-                (session == null || !browseRepository.isFresh(session.firstPageFetchedAtMs))
-        ) {
-            loadBrowseFirstPage(force = false)
-        }
-    }
-
-    /**
-     * Refreshes a missing, invalidated or expired browse session unless a browse request is
-     * running.
-     */
-    private fun ensureCurrentBrowseFresh() {
-        if (_isBrowsing.value || currentBrowseKey == null) return
-        val key = currentBrowseKey ?: return
-        val session = browseSessions[key]
-        if (
-            session == null ||
-                session.cacheGeneration != browseRepository.cacheGeneration(key.pluginId) ||
-                !browseRepository.isFresh(session.firstPageFetchedAtMs)
-        ) {
-            loadBrowseFirstPage(force = false)
-        }
-    }
-
-    /**
-     * Publishes a valid cached first page, then refreshes it if stale or [force] is true.
-     * Guards publication against target changes and clears the manual refresh indicator on
-     * completion.
-     */
-    private fun loadBrowseFirstPage(
-        force: Boolean,
-        manual: Boolean = false,
-    ) {
-        val feed = selectedFeed()
-        val key = currentBrowseKey
-        if (feed == null || key == null) {
-            _browseReady.value = true
-            if (manual) _isRefreshing.value = false
-            return
-        }
-        val filters = _browseFilters.value
-        val generation = ++browseGeneration
-        browseJob?.cancel()
-        browseJob = viewModelScope.launch {
-            _isBrowsing.value = true
-            _browseError.value = null
-            browseFailure = null
-            try {
-                val cached =
-                    browseRepository.readFirstPage(key)?.takeIf {
-                        it.cacheGeneration == browseRepository.cacheGeneration(key.pluginId)
-                    }
-                if (generation != browseGeneration || key != currentBrowseKey) return@launch
-
-                val session = browseSessions[key]
-                if (
-                    cached != null &&
-                        (cached.revision != session?.firstPageRevision ||
-                            cached.cacheGeneration != session.cacheGeneration)
-                ) {
-                    publishFirstPage(key, cached)
-                }
-                if (!force && cached != null && browseRepository.isFresh(cached)) return@launch
-
-                val refreshed =
-                    browseRepository.refreshFirstPage(
-                        key = key,
-                        request =
-                            PluginBrowseRequest(feedId = feed.descriptor.id, filters = filters),
-                        expectedRevision = cached?.revision,
-                        force = force,
-                    )
-                if (generation == browseGeneration && key == currentBrowseKey) {
-                    if (refreshed.cacheGeneration == browseRepository.cacheGeneration(key.pluginId)) {
-                        publishFirstPage(key, refreshed)
-                    } else {
-                        _browseError.value = "内容源版本已更新，请重试"
-                        _browseReady.value = true
-                        browseFailure = BrowseFailure.FIRST_PAGE
-                    }
-                }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Throwable) {
-                if (generation == browseGeneration && key == currentBrowseKey) {
-                    _browseError.value = error.message ?: "加载失败"
-                    _browseReady.value = true
-                    browseFailure = BrowseFailure.FIRST_PAGE
-                }
-            } finally {
-                // 刷新指示器的收尾不受 generation 守卫：刷新途中用户切了分类，
-                // 这一轮就再也满足不了 key == currentBrowseKey，圈会一直转下去
-                if (manual) _isRefreshing.value = false
-                if (generation == browseGeneration && key == currentBrowseKey) {
-                    _isBrowsing.value = false
-                }
-            }
-        }
-    }
-
-    /**
-     * Loads the current cursor and appends comics without duplicate source IDs.
-     * Discards results if the browse target or plugin cache generation changes during the request.
-     */
-    private fun loadBrowsePage() {
-        val feed = selectedFeed() ?: return
-        val key = currentBrowseKey ?: return
-        val cursor = _browseNextCursor.value ?: return
-        val filters = _browseFilters.value
-        val cacheGeneration = browseRepository.cacheGeneration(key.pluginId)
-        val generation = ++browseGeneration
-        browseJob?.cancel()
-        browseJob = viewModelScope.launch {
-            _isBrowsing.value = true
-            _browseError.value = null
-            browseFailure = null
-            try {
-                val page =
-                    browseRepository.loadPage(
-                        feed.pluginId,
-                        PluginBrowseRequest(
-                            feedId = feed.descriptor.id,
-                            cursor = cursor,
-                            filters = filters,
-                        ),
-                    )
-                if (
-                    generation == browseGeneration &&
-                        key == currentBrowseKey &&
-                        cacheGeneration == browseRepository.cacheGeneration(key.pluginId)
-                ) {
-                    _browseItems.value =
-                        (_browseItems.value + page.items).distinctBy { it.sourceId }
-                    _browseNextCursor.value = page.nextCursor
-                    val firstPageFetchedAt = browseSessions[key]?.firstPageFetchedAtMs ?: 0L
-                    val firstPageRevision = browseSessions[key]?.firstPageRevision.orEmpty()
-                    browseSessions[key] =
-                        BrowseSessionSnapshot(
-                            items = _browseItems.value,
-                            nextCursor = page.nextCursor,
-                            firstPageFetchedAtMs = firstPageFetchedAt,
-                            firstPageRevision = firstPageRevision,
-                            cacheGeneration = cacheGeneration,
-                        )
-                }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Throwable) {
-                if (generation == browseGeneration && key == currentBrowseKey) {
-                    _browseError.value = error.message ?: "加载失败"
-                    browseFailure = BrowseFailure.NEXT_PAGE
-                }
-            } finally {
-                if (generation == browseGeneration && key == currentBrowseKey) {
-                    _isBrowsing.value = false
-                }
-            }
-        }
-    }
-
-    private fun publishFirstPage(key: PluginBrowseCacheKey, snapshot: PluginBrowseCacheSnapshot) {
-        val previous = browseSessions[key]
-        val changed =
-            previous == null ||
-                previous.firstPageRevision != snapshot.revision ||
-                previous.cacheGeneration != snapshot.cacheGeneration
-        _browseItems.value = snapshot.page.items
-        _browseNextCursor.value = snapshot.page.nextCursor
-        _browseReady.value = true
-        browseSessions[key] =
-            BrowseSessionSnapshot(
-                items = snapshot.page.items,
-                nextCursor = snapshot.page.nextCursor,
-                firstPageFetchedAtMs = snapshot.fetchedAtMs,
-                firstPageRevision = snapshot.revision,
-                cacheGeneration = snapshot.cacheGeneration,
-            )
-        if (changed) _browseFirstPageCommitRevision.value += 1
-    }
-
     private fun selectedFeed(): Feed? =
         _feeds.value.firstOrNull { it.key == _selectedFeedKey.value }
 
@@ -773,27 +596,8 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
     private val Feed.sessionKey: String
         get() = "$pluginId\n$pluginVersion\n${descriptor.id}"
 
-    private fun Feed.selectedFilters(): Map<String, String> {
-        val remembered = browseFiltersByFeed[sessionKey].orEmpty()
-        return descriptor.filters
-            .mapNotNull { filter ->
-                val optionId =
-                    remembered[filter.id]?.takeIf { candidate ->
-                        filter.options.any { it.id == candidate }
-                    } ?: filter.options.firstOrNull()?.id
-                optionId?.let { filter.id to it }
-            }
-            .toMap()
-            .also { browseFiltersByFeed[sessionKey] = it }
-    }
-
     /** 本拖动手势内自定义顺序是否真的变化过（由 moveFeed 置位、落位收尾清零）。 */
     private var feedOrderMutatedThisGesture = false
-
-    private companion object {
-        const val MAX_BROWSE_SESSIONS = 32
-        const val MAX_SCROLL_CONTEXTS = 32
-    }
 }
 
 /**
