@@ -12,7 +12,8 @@
 //     refetched. The host already re-invokes pages() when an image answers 403, which covers it.
 //   * Account sessions. Members-only albums and the account cloud favorites need a login, which the
 //     site grants as cookies. The host persists those per plugin and only for the domain that issued
-//     them, so `domain` is the setting that keeps a signed-in mirror from being rotated away.
+//     them, so a mirror the reader has not signed in on answers with a login wall; the stored
+//     credentials are replayed there once, exactly when that happens.
 //
 // plugin.build.json asks .scripts/plugin.py to prepend the shared runtime while packaging, so
 // text(), asObject(), asArray(), finiteNumber(), dedupeBy(), responseText() and pluginError() are
@@ -34,7 +35,9 @@ const FALLBACK_HOSTS = ["www.wn001.cfd", "www.wn002.cfd", "www.wnacg.com", "www.
 const RELEASE_PAGE_HOSTS = ["wnacg01.link", "wnacg02.link", "wnlink.ru", "wnacg.link"];
 
 const HOST_STATE_KEY = "hosts";
-// The mirror the last successful login was issued for, plus the account name it belongs to.
+// The mirror the last successful login was issued for, plus the account name it belongs to. Its
+// presence is also the reader's consent to replay the stored credentials on a new mirror; signing
+// out deletes it, so a signed-out reader is never quietly signed back in.
 const SESSION_KEY = "session";
 const HOST_TTL_MS = 60 * 60 * 1000;
 const HOST_TRY_LIMIT = 4;
@@ -601,6 +604,10 @@ function parseGalleryPayload(html) {
 
 let settingCache = null;
 let hostState = null;
+// A mirror that rejected the stored credentials keeps answering with the wall; replaying them on
+// every request would only hammer the account. The failure sticks for this isolate, while a
+// transport error is retried on the next request.
+let loginFailures = {};
 
 async function readSettings(signal) {
   if (settingCache) return settingCache;
@@ -748,7 +755,7 @@ async function siteRequest(path, signal) {
  * The account's login endpoint. It answers JSON rather than a page, and it is the one request that
  * must not be refused for looking like the login wall, so the page-level guard is off.
  */
-async function siteLogin(account, password, signal) {
+async function siteLogin(account, password, signal, hosts) {
   return siteFetch(
     LOGIN_PATH,
     {
@@ -757,6 +764,7 @@ async function siteLogin(account, password, signal) {
       accept: JSON_ACCEPT,
       referer: "/",
       authRequired: false,
+      hosts: hosts,
     },
     signal
   );
@@ -775,6 +783,9 @@ async function siteFetch(path, options, signal) {
   const refererPath = (options && options.referer) || "/";
   const authMessage =
     (options && options.authMessage) || "这本漫画需要登录绅士漫画账号后才能阅读";
+  // Cookies are per mirror, so a wall on a mirror that has never seen this login is expected after
+  // a route change. Each mirror gets one re-login attempt per call, then the wall is reported.
+  const reauthenticated = {};
   let lastError = null;
 
   for (let index = 0; index < Math.min(queue.length, HOST_TRY_LIMIT); index += 1) {
@@ -810,6 +821,12 @@ async function siteFetch(path, options, signal) {
       continue;
     }
     if (options && options.authRequired && isLoginRequired(body)) {
+      const host = queue[index];
+      if (!reauthenticated[host] && (await autoLogin(host, signal))) {
+        reauthenticated[host] = true;
+        index -= 1;
+        continue;
+      }
       throw pluginError("AUTH_REQUIRED", authMessage, true);
     }
     if (index > 0) await promoteHost(queue[index], signal);
@@ -1184,8 +1201,8 @@ async function pages(request, context) {
  * persisted by the host's cookie jar, so nothing is stored plugin-side. A JSON body that will not
  * parse means the mirror answered with a page, not the endpoint.
  */
-async function loginWithPassword(account, password, signal) {
-  const found = await siteLogin(account, password, signal);
+async function loginWithPassword(account, password, signal, hosts) {
+  const found = await siteLogin(account, password, signal, hosts);
   let payload;
   try {
     payload = JSON.parse(found.html);
@@ -1197,6 +1214,36 @@ async function loginWithPassword(account, password, signal) {
     throw pluginError("AUTH_REQUIRED", oneLine(data.html) || "账号或密码错误", false);
   }
   return found.base;
+}
+
+/**
+ * Re-establishes the account on the mirror that just answered with a login wall. It runs only for a
+ * reader who signed in before (the session record is the consent), targets that one mirror rather
+ * than the pool, and returns false on any failure so the caller reports the wall as usual.
+ */
+async function autoLogin(host, signal) {
+  if (loginFailures[host]) return false;
+  const settings = await readSettings(signal);
+  const account = text(settings.account);
+  const password = text(settings.password);
+  if (!account || !password) return false;
+  const session = asObject(
+    await storedValue(SESSION_KEY, signal).catch(function () {
+      return null;
+    })
+  );
+  if (!toHost(session.host)) return false;
+
+  try {
+    await loginWithPassword(account, password, signal, [host]);
+  } catch (error) {
+    // Rejected credentials will keep being rejected; a transport failure may not repeat.
+    if (error && error.code === "AUTH_REQUIRED") loginFailures[host] = true;
+    return false;
+  }
+  delete loginFailures[host];
+  await remember(SESSION_KEY, { host: toHost(host), account: account }, signal);
+  return true;
 }
 
 /**
@@ -1302,12 +1349,12 @@ async function checkSession(context) {
       return null;
     })
   );
-  // Cookies are per mirror, so the check asks the mirror that issued the login. Without a login
-  // record, the manual route is the next best owner; failing that, only domains that actually
-  // carry cookies can hold a session.
+  // A pinned route is what the reader is browsing now, so it is checked first; without one, the
+  // mirror that issued the login is the owner. Failing both, only domains that actually carry
+  // cookies can hold a session.
   const sessionHost = toHost(session.host);
   const manual = toHost(manualHost(settings));
-  let candidates = sessionHost ? [sessionHost] : manual ? [manual] : [];
+  let candidates = manual ? [manual] : sessionHost ? [sessionHost] : [];
   if (!candidates.length) {
     const cookies = await inkleaf.host.cookie.list(signal).catch(function () {
       return [];
@@ -1319,7 +1366,7 @@ async function checkSession(context) {
     );
   }
   try {
-    await siteFetch(
+    const found = await siteFetch(
       FAVORITES_PATH,
       {
         accept: HTML_ACCEPT,
@@ -1329,7 +1376,14 @@ async function checkSession(context) {
       },
       signal
     );
-    return { signedIn: true, account: text(session.account) || text(settings.account) };
+    const account = text(session.account) || text(settings.account);
+    // The mirror that answered is where the cookies live. Recording it repairs installations from
+    // before the login record existed and gives autoLogin its consent.
+    const checkedHost = toHost(found.base);
+    if (checkedHost && checkedHost !== sessionHost) {
+      await remember(SESSION_KEY, { host: checkedHost, account: account }, signal).catch(function () {});
+    }
+    return { signedIn: true, account: account };
   } catch (error) {
     if (error && error.code === "AUTH_REQUIRED") return { signedIn: false };
     throw error;

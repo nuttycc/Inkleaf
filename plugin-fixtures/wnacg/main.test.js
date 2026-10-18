@@ -407,6 +407,27 @@ function siteResponse(request) {
   return { statusCode: 404, body: "" };
 }
 
+/**
+ * A site where the session belongs to the mirror that issued it: a favorites request gets the login
+ * wall until that exact host has been signed in. This is what a route change looks like on the real
+ * site, because the host's cookie jar is per domain.
+ */
+function cookieAwareResponder() {
+  const signedIn = {};
+  return function (request) {
+    const host = request.url.split("/")[2];
+    if (request.url.indexOf("/users-check_login.html") >= 0) {
+      if (formBody(request).login_pass !== "secret") return { body: LOGIN_FAIL_JSON };
+      signedIn[host] = true;
+      return { body: LOGIN_OK_JSON };
+    }
+    if (request.url.indexOf("/users-users_fav") >= 0 && !signedIn[host]) {
+      return { body: LOGIN_REQUIRED_HTML };
+    }
+    return defaultRespond(request);
+  };
+}
+
 function defaultRespond(request) {
   const url = request.url;
   if (url.indexOf("wnacg01.link") >= 0 || url.indexOf("wnacg02.link") >= 0 || url.indexOf("wnlink.ru") >= 0) {
@@ -442,6 +463,7 @@ async function main() {
   await discoversMirrorsFromTheReleasePage();
   await reportsLoginWalls();
   await checksSessionState();
+  await signsInOnANewRoute();
   await logsInAndOut();
   await addsAndRemovesFavorites();
 
@@ -938,6 +960,95 @@ async function checksSessionState() {
     () => offline.api.checkSession(ctx()),
     "a transport failure must not be reported as signed out"
   );
+}
+
+async function signsInOnANewRoute() {
+  // The reader signed in on the mirror the pool was serving, then pinned another route. The new
+  // mirror has no cookies and answers with the wall, so the stored credentials must sign in there
+  // once without another tap.
+  const switched = createPlugin({
+    seedHosts: [SITE_HOST],
+    settings: { route: "www.wn002.cfd", account: "reader", password: "secret" },
+    respond: cookieAwareResponder(),
+  });
+  switched.store.set(SESSION_KEY, { host: SITE_HOST, account: "reader" });
+  const page = plain(
+    await switched.api.browse({ feedId: "favorites", cursor: null, limit: 40, filters: {} }, ctx())
+  );
+  assert.equal(page.items.length, 2, "the shelf loads once the new route is signed in");
+  assert.deepEqual(
+    switched.urls(),
+    [
+      "https://www.wn002.cfd/users-users_fav.html",
+      "https://www.wn002.cfd/users-check_login.html",
+      "https://www.wn002.cfd/users-users_fav.html",
+    ],
+    "the wall, one login on that mirror, then the retried request"
+  );
+  const login = switched.requests[1];
+  assert.equal(login.method, "POST");
+  assert.deepEqual(formBody(login), {
+    login_name: "reader",
+    login_pass: "secret",
+    remember_pass: "1",
+  });
+  assert.deepEqual(
+    plain(switched.store.get(SESSION_KEY)),
+    { host: "www.wn002.cfd", account: "reader" },
+    "the login record follows the mirror that now holds the cookies"
+  );
+
+  // Signing out deletes that record, which withholds consent: the wall is reported, not bypassed.
+  const signedOut = createPlugin({
+    seedHosts: [SITE_HOST],
+    settings: { route: "www.wn002.cfd", account: "reader", password: "secret" },
+    respond: cookieAwareResponder(),
+  });
+  await assert.rejects(
+    () => signedOut.api.browse({ feedId: "favorites", cursor: null, limit: 40, filters: {} }, ctx()),
+    (error) => error.code === "AUTH_REQUIRED" && error.message === "请先登录绅士漫画账号"
+  );
+  assert.equal(
+    signedOut.urls().filter(function (url) {
+      return url.indexOf("/users-check_login.html") >= 0;
+    }).length,
+    0,
+    "a signed-out reader must not be signed back in"
+  );
+
+  // A rejected password is attempted once per isolate, not on every request.
+  const wrong = createPlugin({
+    seedHosts: [SITE_HOST],
+    settings: { route: "www.wn002.cfd", account: "reader", password: "nope" },
+    respond: cookieAwareResponder(),
+  });
+  wrong.store.set(SESSION_KEY, { host: SITE_HOST, account: "reader" });
+  const again = { feedId: "favorites", cursor: null, limit: 40, filters: {} };
+  await assert.rejects(() => wrong.api.browse(again, ctx()), (error) => error.code === "AUTH_REQUIRED");
+  await assert.rejects(() => wrong.api.browse(again, ctx()), (error) => error.code === "AUTH_REQUIRED");
+  assert.equal(
+    wrong.urls().filter(function (url) {
+      return url.indexOf("/users-check_login.html") >= 0;
+    }).length,
+    1,
+    "a rejected password must not be replayed on every request"
+  );
+
+  // The settings-page check follows the pinned route, signs in there, and repairs the record.
+  const checked = createPlugin({
+    seedHosts: [SITE_HOST],
+    settings: { route: "www.wn002.cfd", account: "reader", password: "secret" },
+    respond: cookieAwareResponder(),
+  });
+  checked.store.set(SESSION_KEY, { host: SITE_HOST, account: "reader" });
+  assert.deepEqual(plain(await checked.api.checkSession(ctx())), {
+    signedIn: true,
+    account: "reader",
+  });
+  assert.deepEqual(plain(checked.store.get(SESSION_KEY)), {
+    host: "www.wn002.cfd",
+    account: "reader",
+  });
 }
 
 async function logsInAndOut() {
