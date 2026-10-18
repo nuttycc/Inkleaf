@@ -34,6 +34,8 @@ const FALLBACK_HOSTS = ["www.wn001.cfd", "www.wn002.cfd", "www.wnacg.com", "www.
 const RELEASE_PAGE_HOSTS = ["wnacg01.link", "wnacg02.link", "wnlink.ru", "wnacg.link"];
 
 const HOST_STATE_KEY = "hosts";
+// The mirror the last successful login was issued for, plus the account name it belongs to.
+const SESSION_KEY = "session";
 const HOST_TTL_MS = 60 * 60 * 1000;
 const HOST_TRY_LIMIT = 4;
 
@@ -766,7 +768,8 @@ async function siteLogin(account, password, signal) {
  * because every page handler here depends on the account cookies the wall is asking for.
  */
 async function siteFetch(path, options, signal) {
-  const queue = await hostQueue(signal);
+  const queue =
+    options && options.hosts ? orderedHosts(options.hosts) : await hostQueue(signal);
   const method = (options && options.method) || "GET";
   const accept = (options && options.accept) || HTML_ACCEPT;
   const refererPath = (options && options.referer) || "/";
@@ -1293,9 +1296,40 @@ async function removeFavorite(sourceId, signal) {
  */
 async function checkSession(context) {
   const signal = context && context.signal;
+  const settings = await readSettings(signal);
+  const session = asObject(
+    await storedValue(SESSION_KEY, signal).catch(function () {
+      return null;
+    })
+  );
+  // Cookies are per mirror, so the check asks the mirror that issued the login. Without a login
+  // record, the manual route is the next best owner; failing that, only domains that actually
+  // carry cookies can hold a session.
+  const sessionHost = toHost(session.host);
+  const manual = toHost(manualHost(settings));
+  let candidates = sessionHost ? [sessionHost] : manual ? [manual] : [];
+  if (!candidates.length) {
+    const cookies = await inkleaf.host.cookie.list(signal).catch(function () {
+      return [];
+    });
+    candidates = orderedHosts(
+      asArray(cookies).map(function (cookie) {
+        return toHost(String(asObject(cookie).domain || "").replace(/^\./, ""));
+      })
+    );
+  }
   try {
-    await siteRequest(FAVORITES_PATH, signal);
-    return { signedIn: true };
+    await siteFetch(
+      FAVORITES_PATH,
+      {
+        accept: HTML_ACCEPT,
+        referer: "/",
+        authRequired: true,
+        hosts: candidates.length ? candidates : null,
+      },
+      signal
+    );
+    return { signedIn: true, account: text(session.account) || text(settings.account) };
   } catch (error) {
     if (error && error.code === "AUTH_REQUIRED") return { signedIn: false };
     throw error;
@@ -1333,6 +1367,7 @@ async function invokeAction(request, context) {
       throw pluginError("INVALID_ARGUMENT", "请先在源设置的“登录”里填写账号和密码", false);
     }
     const base = await loginWithPassword(account, password, signal);
+    await remember(SESSION_KEY, { host: toHost(base), account: account }, signal);
     return {
       ok: true,
       message: "登录成功",
@@ -1343,6 +1378,7 @@ async function invokeAction(request, context) {
 
   if (actionId === "logout") {
     await inkleaf.host.cookie.clear(signal);
+    await inkleaf.host.kv.delete({ key: SESSION_KEY }, signal).catch(function () {});
     return { ok: true, message: "已退出登录" };
   }
 

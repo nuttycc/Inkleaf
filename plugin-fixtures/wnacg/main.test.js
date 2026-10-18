@@ -21,6 +21,7 @@ const pluginSource = fs.readFileSync(path.join(__dirname, "src", "main.js"), "ut
 const SITE_HOST = "www.wn001.cfd";
 const DEAD_HOST = "wn07.example";
 const HOST_STATE_KEY = "hosts";
+const SESSION_KEY = "session";
 const NOW = 1791500000000;
 
 // --------------------------------------------------------------------------- samples
@@ -895,8 +896,14 @@ async function reportsLoginWalls() {
 }
 
 async function checksSessionState() {
-  const signedIn = createPlugin({ seedHosts: [SITE_HOST] });
-  assert.deepEqual(plain(await signedIn.api.checkSession(ctx())), { signedIn: true });
+  const signedIn = createPlugin({
+    seedHosts: [SITE_HOST],
+    settings: { account: "reader" },
+  });
+  assert.deepEqual(plain(await signedIn.api.checkSession(ctx())), {
+    signedIn: true,
+    account: "reader",
+  });
 
   const signedOut = createPlugin({
     seedHosts: [SITE_HOST],
@@ -906,6 +913,20 @@ async function checksSessionState() {
     },
   });
   assert.deepEqual(plain(await signedOut.api.checkSession(ctx())), { signedIn: false });
+
+  // Cookies live on the mirror that issued the login, so the check must not wander to another one.
+  const pinned = createPlugin({
+    seedHosts: [SITE_HOST],
+    settings: { account: "reader", password: "secret" },
+  });
+  await pinned.api.invokeAction({ actionId: "login", input: {} }, ctx());
+  pinned.store.set(HOST_STATE_KEY, { hosts: [DEAD_HOST], updatedAt: NOW });
+  assert.deepEqual(plain(await pinned.api.checkSession(ctx())), {
+    signedIn: true,
+    account: "reader",
+  });
+  const urls = pinned.urls();
+  assert.equal(urls[urls.length - 1], "https://" + SITE_HOST + "/users-users_fav.html");
 
   const offline = createPlugin({
     seedHosts: [SITE_HOST],
@@ -941,6 +962,11 @@ async function logsInAndOut() {
     remember_pass: "1",
   });
   assert.equal(fresh.urls().length, 1, "the login post is the only request the action makes");
+  assert.deepEqual(
+    plain(fresh.store.get(SESSION_KEY)),
+    { host: SITE_HOST, account: "reader" },
+    "the check must remember the mirror the cookies belong to"
+  );
 
   // Nothing to send yet: this is a settings problem, not a credentials one.
   const anonymous = createPlugin({ seedHosts: [SITE_HOST] });
@@ -969,6 +995,7 @@ async function logsInAndOut() {
   const bye = plain(await session.api.invokeAction({ actionId: "logout", input: {} }, ctx()));
   assert.equal(bye.ok, true);
   assert.equal(session.cookieClears(), 1);
+  assert.equal(session.store.has(SESSION_KEY), false, "logout forgets the session owner");
 
   const unknown = createPlugin({ seedHosts: [SITE_HOST] });
   await assert.rejects(
