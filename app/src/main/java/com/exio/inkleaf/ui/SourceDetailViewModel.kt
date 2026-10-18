@@ -164,6 +164,9 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
             applySessionOutcome(action, result)
             // An action may alter plugin-owned state, so invalidate runtime-derived data now.
             app().pluginManager.invalidateDerivedData(id)
+            // Descriptors can be derived from that state as well (the mirrors an action just
+            // refreshed), so re-read them for the screen.
+            describe(id)
         }
     }
 
