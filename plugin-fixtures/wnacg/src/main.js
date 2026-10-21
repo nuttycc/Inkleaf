@@ -10,6 +10,10 @@
 //   * Signed image URLs. Each image carries `?verify=<expiry>-<signature>` and the expiry is a
 //     fixed point inside the same day, so a chapter opened after that point must have its page list
 //     refetched. The host already re-invokes pages() when an image answers 403, which covers it.
+//   * Account sessions. Members-only albums and the account cloud favorites need a login, which the
+//     site grants as cookies. The host persists those per plugin and only for the domain that issued
+//     them, so a mirror the reader has not signed in on answers with a login wall; the stored
+//     credentials are replayed there once, exactly when that happens.
 //
 // plugin.build.json asks .scripts/plugin.py to prepend the shared runtime while packaging, so
 // text(), asObject(), asArray(), finiteNumber(), dedupeBy(), responseText() and pluginError() are
@@ -17,6 +21,9 @@
 
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0";
+
+const HTML_ACCEPT = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
+const JSON_ACCEPT = "application/json, text/javascript, */*; q=0.01";
 
 // The site's own address-release pages. Each lists the current mirrors under 紳士漫畫最新地址.
 const RELEASE_PAGES = ["https://wnacg01.link/", "https://wnacg02.link/", "https://wnlink.ru/"];
@@ -28,6 +35,10 @@ const FALLBACK_HOSTS = ["www.wn001.cfd", "www.wn002.cfd", "www.wnacg.com", "www.
 const RELEASE_PAGE_HOSTS = ["wnacg01.link", "wnacg02.link", "wnlink.ru", "wnacg.link"];
 
 const HOST_STATE_KEY = "hosts";
+// The mirror the last successful login was issued for, plus the account name it belongs to. Its
+// presence is also the reader's consent to replay the stored credentials on a new mirror; signing
+// out deletes it, so a signed-out reader is never quietly signed back in.
+const SESSION_KEY = "session";
 const HOST_TTL_MS = 60 * 60 * 1000;
 const HOST_TRY_LIMIT = 4;
 
@@ -35,6 +46,13 @@ const HOST_TRY_LIMIT = 4;
 // limit, because the page is the pagination unit and a partial page would break next-page probing.
 const LIST_PAGE_SIZE = 20;
 const SEARCH_PAGE_SIZE = 24;
+
+// The account endpoints. Login answers JSON rather than a page, so it is parsed instead of scraped;
+// the favorites pages are ordinary HTML lists.
+const LOGIN_PATH = "/users-check_login.html";
+const FAVORITES_PATH = "/users-users_fav.html";
+// A scan for one comic's entries stops at this many pages even if the paginator never ends.
+const MAX_FAVORITE_PAGES = 100;
 
 // A 合集 lists at most this many sub-albums per page, and says how many exist in its 章節 label.
 const CHAPTER_PAGE_SIZE = 12;
@@ -73,7 +91,12 @@ const RANKING_OPTIONS = [
   ["month", "本月排行"],
 ];
 
-const SETTING_IDS = ["domain"];
+const SETTING_IDS = ["route", "domain", "account", "password"];
+
+// The route setting either names a mirror outright or defers to the rotation pool / the manual
+// domain text field.
+const ROUTE_AUTO = "auto";
+const ROUTE_CUSTOM = "custom";
 
 // --------------------------------------------------------------------------- text
 
@@ -123,6 +146,53 @@ function firstMatch(source, pattern) {
 function firstRegion(source, pattern) {
   const found = String(source || "").match(pattern);
   return found ? found[0] : "";
+}
+
+// --------------------------------------------------------------------------- bytes
+
+// The host sends request bodies as base64, and JavaScriptEngine isolates are not guaranteed to
+// expose TextEncoder, so the encoder is spelled out here the same way the shared runtime spells out
+// its decoder.
+function utf8Bytes(value) {
+  const bytes = [];
+  const source = String(value);
+  for (let index = 0; index < source.length; index += 1) {
+    const code = source.charCodeAt(index);
+    const following = index + 1 < source.length ? source.charCodeAt(index + 1) : -1;
+    if (code < 0x80) {
+      bytes.push(code);
+    } else if (code < 0x800) {
+      bytes.push(0xc0 | (code >> 6), 0x80 | (code & 0x3f));
+    } else if (code >= 0xd800 && code < 0xdc00 && following >= 0xdc00 && following < 0xe000) {
+      index += 1;
+      const point = 0x10000 + ((code - 0xd800) << 10) + (following - 0xdc00);
+      bytes.push(
+        0xf0 | (point >> 18),
+        0x80 | ((point >> 12) & 0x3f),
+        0x80 | ((point >> 6) & 0x3f),
+        0x80 | (point & 0x3f)
+      );
+    } else {
+      bytes.push(0xe0 | (code >> 12), 0x80 | ((code >> 6) & 0x3f), 0x80 | (code & 0x3f));
+    }
+  }
+  return new Uint8Array(bytes);
+}
+
+function encodeBase64(bytes) {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  let output = "";
+  for (let index = 0; index < bytes.length; index += 3) {
+    const remaining = bytes.length - index;
+    const first = bytes[index];
+    const second = remaining > 1 ? bytes[index + 1] : 0;
+    const third = remaining > 2 ? bytes[index + 2] : 0;
+    output += alphabet.charAt(first >> 2);
+    output += alphabet.charAt(((first & 0x03) << 4) | (second >> 4));
+    output += remaining > 1 ? alphabet.charAt(((second & 0x0f) << 2) | (third >> 6)) : "=";
+    output += remaining > 2 ? alphabet.charAt(third & 0x3f) : "=";
+  }
+  return output;
 }
 
 // --------------------------------------------------------------------------- urls
@@ -246,6 +316,78 @@ function parseListItems(html, base) {
     });
   }
   return rows;
+}
+
+/**
+ * The favorites page reuses the site's tabular row: `.asTB` with a thumb cell, a title cell, a
+ * category cell and a delete control. It is a different container from `.gallary_item`, so it gets
+ * its own parser, and rows without an album link are dropped like any other.
+ */
+function favoriteRows(html) {
+  // `asTBcell` must not count as a row marker, hence the word boundaries around `asTB`. The tag is
+  // left open because the site reuses this row component across containers.
+  const parts = String(html || "").split(/<[a-z]+[^>]*class="[^"]*\basTB\b[^"]*"[^>]*>/i);
+  parts.shift();
+  return parts;
+}
+
+function parseFavoriteRows(html, base) {
+  const rows = [];
+  const blocks = favoriteRows(html);
+  for (let index = 0; index < blocks.length; index += 1) {
+    const block = blocks[index];
+    const titleBlock = firstMatch(block, /class="l_title"[\s\S]*?<a[^>]*>([\s\S]*?)<\/a>/i);
+    const href =
+      firstMatch(block, /class="l_title"[\s\S]*?<a[^>]*href="([^"]*)"/i) ||
+      firstMatch(block, /<a[^>]*href="(\/photos-[^"]*)"/i);
+    const sourceId = albumIdFromHref(href);
+    if (!sourceId) continue;
+    const title = oneLine(titleBlock) || oneLine(firstMatch(block, /title="([^"]*)"/i));
+    const coverSource = imageSourceFromBlock(block);
+    // The folder name is the useful subtitle; only fall back to the row's own detail line.
+    const category = oneLine(
+      firstMatch(block, /class="[^"]*l_catg[^"]*"[\s\S]*?<a[^>]*>([\s\S]*?)<\/a>/i)
+    );
+    const detail = oneLine(firstMatch(block, /class="l_detla"[^>]*>([\s\S]*?)<\/div>/i));
+    // Removing needs the account's own row id, which the delete control carries.
+    const entryId = firstMatch(block, /users-fav_del-id-(\d+)/i);
+    rows.push({
+      sourceId: sourceId,
+      entryId: entryId,
+      title: title || "绅士漫画 #" + sourceId,
+      subtitle: category || detail,
+      coverUrl: coverSource ? toAbsolute(coverSource, base) : "",
+    });
+  }
+  return rows;
+}
+
+/**
+ * The add-to-shelf dialog offers the account's own folders in a `favc_id` select. The site marks one
+ * selected, and a browser would fall back to the first, so the same rule is used here.
+ */
+function parseFavoriteFolders(html) {
+  const select = firstRegion(
+    String(html || ""),
+    /<select[^>]*name=['"]favc_id['"][\s\S]*?<\/select>/i
+  );
+  const blocks = String(select || "").match(/<option[^>]*>[\s\S]*?<\/option>/gi) || [];
+  const folders = [];
+  for (let index = 0; index < blocks.length; index += 1) {
+    const tag = firstRegion(blocks[index], /<option[^>]*>/i);
+    const id = firstMatch(tag, /value=['"]?([^'"\s>]+)/i);
+    const name = oneLine(blocks[index]);
+    if (!id || !name) continue;
+    folders.push({ id: id, name: name, selected: /\bselected\b/i.test(tag) });
+  }
+  return folders;
+}
+
+function preferredFolderId(folders) {
+  for (let index = 0; index < folders.length; index += 1) {
+    if (folders[index].selected) return folders[index].id;
+  }
+  return folders.length ? folders[0].id : "";
 }
 
 function summaryOf(row, base) {
@@ -462,6 +604,10 @@ function parseGalleryPayload(html) {
 
 let settingCache = null;
 let hostState = null;
+// A mirror that rejected the stored credentials keeps answering with the wall; replaying them on
+// every request would only hammer the account. The failure sticks for this isolate, while a
+// transport error is retried on the next request.
+let loginFailures = {};
 
 async function readSettings(signal) {
   if (settingCache) return settingCache;
@@ -489,6 +635,22 @@ async function remember(key, value, signal) {
   await inkleaf.host.kv.set({ key: key, value: value }, signal);
 }
 
+/** The route the settings select: a special mode, a named mirror, or the pre-list manual domain. */
+function effectiveRoute(settings) {
+  const route = text(settings.route);
+  if (route === ROUTE_AUTO || route === ROUTE_CUSTOM) return route;
+  if (route) return route;
+  // Installations from before the route list kept their override in `domain` alone.
+  return text(settings.domain) ? ROUTE_CUSTOM : ROUTE_AUTO;
+}
+
+/** The mirror a manual choice leads with; blank when the pool should pick. */
+function manualHost(settings) {
+  const route = effectiveRoute(settings);
+  if (route === ROUTE_CUSTOM) return text(settings.domain);
+  return route === ROUTE_AUTO ? "" : route;
+}
+
 // --------------------------------------------------------------------------- host discovery
 
 function normaliseState(value) {
@@ -501,25 +663,23 @@ async function hostQueue(signal) {
   const settings = await readSettings(signal);
   const stored = normaliseState(await storedValue(HOST_STATE_KEY, signal));
   if (Date.now() - stored.updatedAt >= HOST_TTL_MS) {
-    const discovered = await discoverHosts(stored, settings, signal);
+    const discovered = await discoverHosts(stored, signal);
     hostState = discovered;
     await remember(HOST_STATE_KEY, discovered, signal);
   } else {
     hostState = stored;
   }
-  // A manual domain always leads; the discovered list stays behind it as the rotation pool.
-  return orderedHosts([settings.domain].concat(hostState.hosts));
+  // A manual mirror always leads; the discovered list stays behind it as the rotation pool.
+  return orderedHosts([manualHost(settings)].concat(hostState.hosts));
 }
 
 /**
  * Cheap by design: one release page is enough, and probing the mirrors for liveness is done by the
  * request loop itself so a cold isolate never pays for a sweep inside the NORMAL deadline.
  */
-async function discoverHosts(fallback, settings, signal) {
+async function discoverHosts(fallback, signal) {
   const released = await loadReleaseHosts(signal);
-  const hosts = orderedHosts(
-    [settings.domain].concat(released, fallback.hosts, FALLBACK_HOSTS)
-  );
+  const hosts = orderedHosts(released.concat(fallback.hosts, FALLBACK_HOSTS));
   return { hosts: hosts.length ? hosts : FALLBACK_HOSTS.slice(), updatedAt: Date.now() };
 }
 
@@ -588,25 +748,64 @@ function isDeadMirror(response) {
 
 /** Fetches one site page, rotating the host pool until a live mirror answers. */
 async function siteRequest(path, signal) {
-  const queue = await hostQueue(signal);
+  return siteFetch(path, { accept: HTML_ACCEPT, referer: "/", authRequired: true }, signal);
+}
+
+/**
+ * The account's login endpoint. It answers JSON rather than a page, and it is the one request that
+ * must not be refused for looking like the login wall, so the page-level guard is off.
+ */
+async function siteLogin(account, password, signal, hosts) {
+  return siteFetch(
+    LOGIN_PATH,
+    {
+      method: "POST",
+      body: queryString({ login_name: account, login_pass: password, remember_pass: "1" }),
+      accept: JSON_ACCEPT,
+      referer: "/",
+      authRequired: false,
+      hosts: hosts,
+    },
+    signal
+  );
+}
+
+/**
+ * Runs one request against the host pool, rotating past retired mirrors. [options.body] turns it into
+ * a form POST; [options.authRequired] makes a login wall an error instead of a page to parse,
+ * because every page handler here depends on the account cookies the wall is asking for.
+ */
+async function siteFetch(path, options, signal) {
+  const queue =
+    options && options.hosts ? orderedHosts(options.hosts) : await hostQueue(signal);
+  const method = (options && options.method) || "GET";
+  const accept = (options && options.accept) || HTML_ACCEPT;
+  const refererPath = (options && options.referer) || "/";
+  const authMessage =
+    (options && options.authMessage) || "这本漫画需要登录绅士漫画账号后才能阅读";
+  // Cookies are per mirror, so a wall on a mirror that has never seen this login is expected after
+  // a route change. Each mirror gets one re-login attempt per call, then the wall is reported.
+  const reauthenticated = {};
   let lastError = null;
+
   for (let index = 0; index < Math.min(queue.length, HOST_TRY_LIMIT); index += 1) {
     const base = hostBase(queue[index]);
+    const headers = {
+      "user-agent": USER_AGENT,
+      accept: accept,
+      referer: base + refererPath,
+    };
+    const request = { method: method, url: base + path, headers: headers };
+    if (options && options.body) {
+      headers["content-type"] = "application/x-www-form-urlencoded; charset=UTF-8";
+      headers["x-requested-with"] = "XMLHttpRequest";
+      request.bodyBase64 = encodeBase64(utf8Bytes(options.body));
+    }
+
     let response;
     let body = "";
     try {
-      response = await inkleaf.host.http.request(
-        {
-          method: "GET",
-          url: base + path,
-          headers: {
-            "user-agent": USER_AGENT,
-            accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            referer: base + "/",
-          },
-        },
-        signal
-      );
+      response = await inkleaf.host.http.request(request, signal);
       body = await responseText(response, signal);
     } catch (error) {
       lastError = error;
@@ -621,13 +820,27 @@ async function siteRequest(path, signal) {
       lastError = pluginError("HTTP", "绅士漫画接口状态码 " + response.statusCode, true);
       continue;
     }
-    if (visibleText(body).indexOf("需要登錄") >= 0 || /id="login_form"/i.test(body)) {
-      throw pluginError("AUTH_REQUIRED", "这本漫画需要登录绅士漫画账号后才能阅读", true);
+    if (options && options.authRequired && isLoginRequired(body)) {
+      const host = queue[index];
+      if (!reauthenticated[host] && (await autoLogin(host, signal))) {
+        reauthenticated[host] = true;
+        index -= 1;
+        continue;
+      }
+      throw pluginError("AUTH_REQUIRED", authMessage, true);
     }
     if (index > 0) await promoteHost(queue[index], signal);
     return { html: body, base: base };
   }
   throw lastError || pluginError("NETWORK", "没有可用的绅士漫画域名", true);
+}
+
+/** The login wall is a page the site serves in place of the requested one. */
+function isLoginRequired(html) {
+  const source = String(html || "");
+  if (/id="login_form"/i.test(source)) return true;
+  const visible = visibleText(source);
+  return visible.indexOf("需要登錄") >= 0 || visible.indexOf("需要登录") >= 0;
 }
 
 /** Keeps the last mirror that answered at the front, so the next call skips the dead ones. */
@@ -671,12 +884,34 @@ function listPath(page, cate) {
 
 // --------------------------------------------------------------------------- describe
 
-async function describe() {
+async function describe(context) {
+  const signal = context && context.signal;
   function options(pairs) {
     return pairs.map(function (pair) {
       return { id: pair[0], title: pair[1] };
     });
   }
+  const settings = await readSettings(signal);
+  // The route list is whatever the source last discovered, so it is read here instead of being
+  // baked into the descriptor.
+  const stored = normaliseState(
+    await storedValue(HOST_STATE_KEY, signal).catch(function () {
+      return null;
+    })
+  );
+  // The selection must not reshuffle the list: a pinned mirror keeps its place in the discovered
+  // pool, and one that has dropped out of it is offered after the pool rather than at its head.
+  const selected = effectiveRoute(settings);
+  const pinned =
+    selected === ROUTE_AUTO || selected === ROUTE_CUSTOM ? [] : [selected];
+  const mirrors = orderedHosts(stored.hosts.concat(pinned));
+  const routeOptions = [{ id: ROUTE_AUTO, title: "自动（从发布页获取）" }]
+    .concat(
+      mirrors.map(function (host) {
+        return { id: host, title: host };
+      })
+    )
+    .concat([{ id: ROUTE_CUSTOM, title: "自定义（使用下方填写的域名）" }]);
   return {
     schemaVersion: 1,
     feeds: [
@@ -696,14 +931,56 @@ async function describe() {
           { id: "cate", title: "分类", type: "select", options: options(CATEGORY_OPTIONS) },
         ],
       },
+      // The account's own bookshelf. It is always declared, because describe() cannot know whether
+      // the reader is signed in without a network call; browsing it says plainly when they are not.
+      { id: "favorites", title: "账户收藏" },
     ],
-    actions: [{ id: "refreshDomains", title: "重新获取域名", kind: "action" }],
+    actions: [
+      // Actions that share a setting's section are offered on that area's heading, beside the
+      // fields they act on: login sits with the credentials. A picker action belongs to the list
+      // it refreshes instead, so 重新获取域名 sits on the route sheet's title line.
+      {
+        id: "refreshDomains",
+        title: "重新获取域名",
+        kind: "action",
+        section: "线路",
+        pickerSettingId: "route",
+      },
+      { id: "login", title: "登录", kind: "login", section: "登录" },
+      { id: "logout", title: "退出登录", kind: "clearSession", destructive: true, section: "登录" },
+      // Comic-scoped: the host offers these on a comic page and sends its sourceId as input.
+      { id: "addFavorite", title: "加入账户收藏", kind: "action", scope: "comic" },
+      {
+        id: "removeFavorite",
+        title: "移出账户收藏",
+        kind: "action",
+        scope: "comic",
+        destructive: true,
+      },
+    ],
     settings: [
       {
+        id: "route",
+        title: "可用线路",
+        type: "radio",
+        options: routeOptions,
+        defaultValue: effectiveRoute(settings),
+        section: "线路",
+      },
+      {
         id: "domain",
-        title: "指定域名（留空自动从发布页获取）",
+        title: "自定义域名",
         type: "text",
         section: "线路",
+      },
+      { id: "account", title: "账号", type: "text", required: true, section: "登录" },
+      {
+        id: "password",
+        title: "密码",
+        type: "secret",
+        secret: true,
+        required: true,
+        section: "登录",
       },
     ],
   };
@@ -757,6 +1034,10 @@ async function browse(request, context) {
   const filters = request.filters || {};
   const cate = categoryOf(filters.cate);
 
+  if (request.feedId === "favorites") {
+    return browseFavorites(page, signal);
+  }
+
   let path;
   if (request.feedId === "ranking") {
     const type = text(filters.type) || "week";
@@ -773,6 +1054,29 @@ async function browse(request, context) {
 
   const found = await siteRequest(path, signal);
   const rows = parseListItems(found.html, found.base);
+  return {
+    items: rowsToItems(rows, found.base),
+    nextCursor: nextCursorFor(found.html, page, rows, LIST_PAGE_SIZE),
+  };
+}
+
+/**
+ * The account's own bookshelf. Page one lives at a bare path; later pages spell out the folder id,
+ * and "0" is the site's own sentinel for "every folder".
+ */
+function favoritePath(page, folderId) {
+  const folder = text(folderId) || "0";
+  if (page <= 1 && folder === "0") return FAVORITES_PATH;
+  return "/users-users_fav-page-" + page + "-c-" + folder + ".html";
+}
+
+async function browseFavorites(page, signal) {
+  const found = await siteFetch(
+    favoritePath(page, "0"),
+    { accept: HTML_ACCEPT, referer: "/", authRequired: true, authMessage: "请先登录绅士漫画账号" },
+    signal
+  );
+  const rows = parseFavoriteRows(found.html, found.base);
   return {
     items: rowsToItems(rows, found.base),
     nextCursor: nextCursorFor(found.html, page, rows, LIST_PAGE_SIZE),
@@ -898,17 +1202,207 @@ async function pages(request, context) {
   };
 }
 
+/**
+ * Posts the credentials to the site's own login endpoint. The account cookies the response sets are
+ * persisted by the host's cookie jar, so nothing is stored plugin-side. A JSON body that will not
+ * parse means the mirror answered with a page, not the endpoint.
+ */
+async function loginWithPassword(account, password, signal, hosts) {
+  const found = await siteLogin(account, password, signal, hosts);
+  let payload;
+  try {
+    payload = JSON.parse(found.html);
+  } catch (error) {
+    throw pluginError("PLUGIN_PROTOCOL", "登录响应解析失败", false);
+  }
+  const data = asObject(payload);
+  if (data.ret !== true) {
+    throw pluginError("AUTH_REQUIRED", oneLine(data.html) || "账号或密码错误", false);
+  }
+  return found.base;
+}
+
+/**
+ * Re-establishes the account on the mirror that just answered with a login wall. It runs only for a
+ * reader who signed in before (the session record is the consent), targets that one mirror rather
+ * than the pool, and returns false on any failure so the caller reports the wall as usual.
+ */
+async function autoLogin(host, signal) {
+  if (loginFailures[host]) return false;
+  const settings = await readSettings(signal);
+  const account = text(settings.account);
+  const password = text(settings.password);
+  if (!account || !password) return false;
+  const session = asObject(
+    await storedValue(SESSION_KEY, signal).catch(function () {
+      return null;
+    })
+  );
+  if (!toHost(session.host)) return false;
+
+  try {
+    await loginWithPassword(account, password, signal, [host]);
+  } catch (error) {
+    // Rejected credentials will keep being rejected; a transport failure may not repeat.
+    if (error && error.code === "AUTH_REQUIRED") loginFailures[host] = true;
+    return false;
+  }
+  delete loginFailures[host];
+  await remember(SESSION_KEY, { host: toHost(host), account: account }, signal);
+  return true;
+}
+
+/**
+ * The account form endpoints answer either JSON (`{"ret":...}`) like the login endpoint, or a short
+ * page whose text carries the outcome. Both shapes reduce to one failure, or null on success.
+ */
+function formFailure(html, fallback) {
+  if (isLoginRequired(html)) return { code: "AUTH_REQUIRED", message: "请先登录绅士漫画账号" };
+  let payload = null;
+  try {
+    payload = JSON.parse(html);
+  } catch (error) {
+    payload = null;
+  }
+  if (payload !== null && typeof payload === "object") {
+    const data = asObject(payload);
+    if (data.ret === false || data.ret === 0 || data.ret === "false") {
+      return { code: "HTTP", message: oneLine(data.html) || fallback };
+    }
+    return null;
+  }
+  const visible = oneLine(html);
+  if (visible && /失敗|失败|錯誤|错误/.test(visible)) {
+    return { code: "HTTP", message: visible || fallback };
+  }
+  return null;
+}
+
+/** Every shelf entry this comic occupies, gathered across the account's pages. */
+async function favoriteEntryIds(sourceId, signal) {
+  const entryIds = [];
+  const seen = {};
+  for (let page = 1; page <= MAX_FAVORITE_PAGES; page += 1) {
+    const found = await siteFetch(
+      favoritePath(page, "0"),
+      { accept: HTML_ACCEPT, referer: "/", authRequired: true, authMessage: "请先登录绅士漫画账号" },
+      signal
+    );
+    const rows = parseFavoriteRows(found.html, found.base);
+    for (let index = 0; index < rows.length; index += 1) {
+      const row = rows[index];
+      if (row.sourceId === sourceId && row.entryId && !seen[row.entryId]) {
+        seen[row.entryId] = true;
+        entryIds.push(row.entryId);
+      }
+    }
+    if (!nextCursorFor(found.html, page, rows, LIST_PAGE_SIZE)) break;
+  }
+  return entryIds;
+}
+
+/**
+ * Adds one comic to the account shelf. The add dialog's folder list is what makes the folder id
+ * discoverable, so it is fetched first even though the reader never sees it.
+ */
+async function addFavorite(sourceId, signal) {
+  const dialog = await siteFetch(
+    "/users-addfav-id-" + sourceId + ".html",
+    { accept: HTML_ACCEPT, referer: "/", authRequired: true, authMessage: "请先登录绅士漫画账号" },
+    signal
+  );
+  const folderId = preferredFolderId(parseFavoriteFolders(dialog.html));
+  if (!folderId) throw pluginError("NOT_FOUND", "没有可用的收藏夹", false);
+
+  const saved = await siteFetch(
+    "/users-save_fav-id-" + sourceId + ".html",
+    {
+      method: "POST",
+      body: queryString({ favc_id: folderId }),
+      accept: JSON_ACCEPT,
+      referer: "/users-addfav-id-" + sourceId + ".html",
+      authRequired: false,
+    },
+    signal
+  );
+  const failure = formFailure(saved.html, "加入收藏夹失败");
+  if (failure) throw pluginError(failure.code, failure.message, false);
+  return { ok: true, message: "已加入收藏夹", folderId: folderId };
+}
+
+/** Removes the comic from every shelf it sits on, so one tap clears it outright. */
+async function removeFavorite(sourceId, signal) {
+  const entryIds = await favoriteEntryIds(sourceId, signal);
+  if (!entryIds.length) return { ok: true, message: "这本漫画不在账户收藏中" };
+  for (let index = 0; index < entryIds.length; index += 1) {
+    const removed = await siteRequest("/users-fav_del-id-" + entryIds[index] + ".html", signal);
+    const failure = formFailure(removed.html, "移出收藏失败");
+    if (failure) throw pluginError(failure.code, failure.message, false);
+  }
+  return { ok: true, message: "已移出账户收藏" };
+}
+
+/**
+ * Confirms the stored session without asking the reader: the favorites page is the lightest known
+ * account-only page, and the site serves its login wall in place of the page when the cookies are
+ * gone. A transport failure is not evidence either way, so the host is left to ignore it.
+ */
+async function checkSession(context) {
+  const signal = context && context.signal;
+  const settings = await readSettings(signal);
+  const session = asObject(
+    await storedValue(SESSION_KEY, signal).catch(function () {
+      return null;
+    })
+  );
+  // A pinned route is what the reader is browsing now, so it is checked first; without one, the
+  // mirror that issued the login is the owner. Failing both, only domains that actually carry
+  // cookies can hold a session.
+  const sessionHost = toHost(session.host);
+  const manual = toHost(manualHost(settings));
+  let candidates = manual ? [manual] : sessionHost ? [sessionHost] : [];
+  if (!candidates.length) {
+    const cookies = await inkleaf.host.cookie.list(signal).catch(function () {
+      return [];
+    });
+    candidates = orderedHosts(
+      asArray(cookies).map(function (cookie) {
+        return toHost(String(asObject(cookie).domain || "").replace(/^\./, ""));
+      })
+    );
+  }
+  try {
+    const found = await siteFetch(
+      FAVORITES_PATH,
+      {
+        accept: HTML_ACCEPT,
+        referer: "/",
+        authRequired: true,
+        hosts: candidates.length ? candidates : null,
+      },
+      signal
+    );
+    const account = text(session.account) || text(settings.account);
+    // The mirror that answered is where the cookies live. Recording it repairs installations from
+    // before the login record existed and gives autoLogin its consent.
+    const checkedHost = toHost(found.base);
+    if (checkedHost && checkedHost !== sessionHost) {
+      await remember(SESSION_KEY, { host: checkedHost, account: account }, signal).catch(function () {});
+    }
+    return { signedIn: true, account: account };
+  } catch (error) {
+    if (error && error.code === "AUTH_REQUIRED") return { signedIn: false };
+    throw error;
+  }
+}
+
 async function invokeAction(request, context) {
   const signal = context && context.signal;
   const actionId = text(request.actionId);
 
   if (actionId === "refreshDomains") {
-    await remember(HOST_STATE_KEY, { hosts: [], updatedAt: 0 }, signal);
-    const settings = await readSettings(signal);
     const released = await loadReleaseHosts(signal);
-    const hosts = orderedHosts(
-      [settings.domain].concat(released, normaliseState(await storedValue(HOST_STATE_KEY, signal)).hosts, FALLBACK_HOSTS)
-    );
+    const hosts = orderedHosts(released.concat(FALLBACK_HOSTS));
     hostState = { hosts: hosts, updatedAt: Date.now() };
     await remember(HOST_STATE_KEY, hostState, signal);
 
@@ -923,11 +1417,49 @@ async function invokeAction(request, context) {
     };
   }
 
+  // Logging in re-runs the site login, which both proves the credentials and refreshes the session.
+  if (actionId === "login") {
+    const settings = await readSettings(signal);
+    const input = asObject(request.input);
+    const account = text(input.account) || settings.account;
+    const password = text(input.password) || settings.password;
+    if (!account || !password) {
+      throw pluginError("INVALID_ARGUMENT", "请先在源设置的“登录”里填写账号和密码", false);
+    }
+    const base = await loginWithPassword(account, password, signal);
+    loginFailures = {};
+    settingCache = null;
+    await remember(SESSION_KEY, { host: toHost(base), account: account }, signal);
+    return {
+      ok: true,
+      message: "登录成功",
+      account: account,
+      host: toHost(base),
+    };
+  }
+
+  if (actionId === "logout") {
+    await inkleaf.host.cookie.clear(signal);
+    await inkleaf.host.kv.delete({ key: SESSION_KEY }, signal).catch(function () {});
+    return { ok: true, message: "已退出登录" };
+  }
+
+  // Comic-scoped actions: the host sends the album id it is showing.
+  if (actionId === "addFavorite" || actionId === "removeFavorite") {
+    const sourceId = text(asObject(request.input).sourceId);
+    if (!sourceId) {
+      throw pluginError("INVALID_ARGUMENT", "缺少漫画编号", false);
+    }
+    if (actionId === "addFavorite") return addFavorite(sourceId, signal);
+    return removeFavorite(sourceId, signal);
+  }
+
   throw pluginError("NOT_FOUND", "未知操作: " + actionId, false);
 }
 
 inkleaf.register({
   describe: describe,
+  checkSession: checkSession,
   search: search,
   browse: browse,
   detail: detail,

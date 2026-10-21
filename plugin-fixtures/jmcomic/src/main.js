@@ -795,11 +795,10 @@ async function describe() {
     ],
     filters: [{ id: "o", title: "搜索排序", type: "select", options: options(ORDER_OPTIONS) }],
     actions: [
-      { id: "login", title: "登录禁漫账号", kind: "login" },
-      { id: "verifyCredentials", title: "校验账号", kind: "verifyCredentials" },
-      { id: "logout", title: "退出登录", kind: "clearSession" },
+      { id: "login", title: "登录", kind: "login", section: "登录" },
+      { id: "logout", title: "退出登录", kind: "clearSession", section: "登录" },
       { id: "checkin", title: "每日签到", kind: "action" },
-      { id: "refreshEndpoints", title: "重新选线", kind: "action" },
+      { id: "refreshEndpoints", title: "重新选线", kind: "action", section: "线路" },
     ],
     settings: [
       { id: "account", title: "账号", type: "text", section: "登录" },
@@ -969,7 +968,7 @@ async function invokeAction(request, context) {
     return { ok: true, message: "已退出登录" };
   }
 
-  if (actionId === "login" || actionId === "verifyCredentials") {
+  if (actionId === "login") {
     const settings = await readSettings(signal);
     const account = text(input.account) || settings.account;
     const password = text(input.password) || settings.password;

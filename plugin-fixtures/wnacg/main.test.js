@@ -21,6 +21,7 @@ const pluginSource = fs.readFileSync(path.join(__dirname, "src", "main.js"), "ut
 const SITE_HOST = "www.wn001.cfd";
 const DEAD_HOST = "wn07.example";
 const HOST_STATE_KEY = "hosts";
+const SESSION_KEY = "session";
 const NOW = 1791500000000;
 
 // --------------------------------------------------------------------------- samples
@@ -184,6 +185,55 @@ const RELEASE_HTML = [
 const LOGIN_REQUIRED_HTML =
   '<div id="login_form"><input name="login_name"></div><p>您沒有權限，需要登錄</p>';
 
+const LOGIN_OK_JSON = JSON.stringify({ ret: true, html: "登入成功" });
+const LOGIN_FAIL_JSON = JSON.stringify({ ret: false, html: "密碼錯誤" });
+
+// The cloud favorites list: `.asTB` rows, which is a different container from the browse lists'
+// `.gallary_item`, plus the account's folder nav and a page link that spells the folder id out.
+const FAVORITES_HTML = [
+  '<div class="fav_nav"><div class="nav_list">',
+  '<a href="/users-users_fav.html">全部</a>',
+  '<a href="/users-users_fav-c-1.html">同人志</a></div></div>',
+  '<div class="asTB">',
+  '<div class="asTBcell thumb"><a href="/photos-index-aid-394338.html">',
+  '<img src="//t4.wnimg2.cfd/data/t/3943/38/17915329324234362.png"></a></div>',
+  '<div class="asTBcell list"><div class="l_title"><a href="/photos-index-aid-394338.html">沈鸢篇 [SMHTN]</a></div>',
+  '<div class="l_detla">23張圖片， 收藏於2026-10-09</div></div>',
+  '<div class="asTBcell cate l_catg"><a href="/users-users_fav-c-1.html">同人志</a></div>',
+  '<div class="asTBcell ctrl"><a href="javascript:;" onclick="users-fav_del-id-55501(this)">刪除</a></div>',
+  "</div>",
+  // Lazy cover, exactly as the list page ships it.
+  '<div class="asTB">',
+  '<div class="asTBcell thumb"><a href="/photos-index-aid-394336.html">',
+  '<img data-src="//t4.wnimg2.cfd/data/t/3943/36/17915312496142575.webp" src="loading.jpg"></a></div>',
+  '<div class="asTBcell list"><div class="l_title"><a href="/photos-index-aid-394336.html">小姐由我來守護|第3季</a></div>',
+  '<div class="l_detla">122張圖片， 收藏於2026-10-08</div></div>',
+  '<div class="asTBcell cate l_catg"><a href="/users-users_fav-c-19.html">韓漫</a></div>',
+  '<div class="asTBcell ctrl"><a href="javascript:;" onclick="users-fav_del-id-55502(this)">刪除</a></div>',
+  "</div>",
+  '<div class="f_left paginator"><span class="thispage">1</span><a href="/users-users_fav-page-2-c-0.html">2</a><a href="/users-users_fav-page-7-c-0.html">7</a></div>',
+].join("\n");
+
+const FAVORITES_LAST_PAGE_HTML = FAVORITES_HTML.replace(
+  '<span class="thispage">1</span><a href="/users-users_fav-page-2-c-0.html">2</a><a href="/users-users_fav-page-7-c-0.html">7</a>',
+  '<span class="thispage">7</span>'
+);
+
+// The add-to-shelf dialog lists the account's folders. The site pre-selects one, which is what a
+// browser would submit, so it wins over the first option.
+const ADDFAV_HTML = [
+  '<div class="dialog"><form action="/users-save_fav-id-394338.html" method="post">',
+  '<select name="favc_id">',
+  '<option value="12">默認收藏夾</option>',
+  '<option value="34" selected>同人志</option>',
+  "</select>",
+  "</form></div>",
+].join("\n");
+
+const SAVE_FAV_OK_JSON = JSON.stringify({ ret: true, html: "加入成功" });
+const SAVE_FAV_FAIL_JSON = JSON.stringify({ ret: false, html: "收藏夾不存在" });
+const FAV_DEL_HTML = "刪除收藏成功";
+
 // --------------------------------------------------------------------------- harness
 
 /**
@@ -207,11 +257,28 @@ function plain(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+/** The login body is the only request the source sends as a form, so it is decoded back for asserts. */
+function formBody(request) {
+  if (!request.bodyBase64) return {};
+  const fields = {};
+  Buffer.from(request.bodyBase64, "base64")
+    .toString("utf8")
+    .split("&")
+    .forEach(function (part) {
+      if (!part) return;
+      const index = part.indexOf("=");
+      const key = decodeURIComponent(index < 0 ? part : part.slice(0, index));
+      fields[key] = index < 0 ? "" : decodeURIComponent(part.slice(index + 1));
+    });
+  return fields;
+}
+
 function createPlugin(options) {
-  const settings = Object.assign({ domain: "" }, (options && options.settings) || {});
+  const settings = Object.assign({ route: "", domain: "" }, (options && options.settings) || {});
   const respond = (options && options.respond) || defaultRespond;
   const requests = [];
   const store = new Map();
+  let cookieClears = 0;
   if (options && options.seedHosts) {
     store.set(HOST_STATE_KEY, { hosts: options.seedHosts, updatedAt: NOW });
   }
@@ -283,10 +350,14 @@ function createPlugin(options) {
             return Array.from(store.keys());
           },
         },
-        cookies: {
-          set: async function () { return true; },
+        cookie: {
+          set: async function () { return { stored: true }; },
           list: async function () { return []; },
-          clear: async function () { return true; },
+          clear: async function (signal) {
+            guardSignal(signal);
+            cookieClears += 1;
+            return { cleared: true };
+          },
         },
         log: { write: function () {} },
         clock: { now: function () { return NOW; } },
@@ -298,8 +369,12 @@ function createPlugin(options) {
 
   return {
     api: sandbox.registration,
+    settings: settings,
     requests: requests,
     store: store,
+    cookieClears: function () {
+      return cookieClears;
+    },
     urls: function () {
       return requests.map(function (request) {
         return request.url;
@@ -313,6 +388,11 @@ function siteResponse(request) {
   if (url.indexOf("/albums-index-page-15094") >= 0) return { body: LIST_LAST_PAGE_HTML };
   if (url.indexOf("/albums-favorite_ranking") >= 0) return { body: RANKING_HTML };
   if (url.indexOf("/albums-index") >= 0) return { body: LIST_HTML };
+  if (url.indexOf("/users-users_fav-page-2") >= 0) return { body: FAVORITES_LAST_PAGE_HTML };
+  if (url.indexOf("/users-users_fav") >= 0) return { body: FAVORITES_HTML };
+  if (url.indexOf("/users-addfav-id-") >= 0) return { body: ADDFAV_HTML };
+  if (url.indexOf("/users-save_fav-id-") >= 0) return { body: SAVE_FAV_OK_JSON };
+  if (url.indexOf("/users-fav_del-id-") >= 0) return { body: FAV_DEL_HTML };
   if (url.indexOf("/search/") >= 0) {
     return { body: url.indexOf("q=%E9%9F%93%E6%BC%A2") >= 0 ? SEARCH_EMPTY_HTML : SEARCH_HTML };
   }
@@ -328,10 +408,34 @@ function siteResponse(request) {
   return { statusCode: 404, body: "" };
 }
 
+/**
+ * A site where the session belongs to the mirror that issued it: a favorites request gets the login
+ * wall until that exact host has been signed in. This is what a route change looks like on the real
+ * site, because the host's cookie jar is per domain.
+ */
+function cookieAwareResponder() {
+  const signedIn = {};
+  return function (request) {
+    const host = request.url.split("/")[2];
+    if (request.url.indexOf("/users-check_login.html") >= 0) {
+      if (formBody(request).login_pass !== "secret") return { body: LOGIN_FAIL_JSON };
+      signedIn[host] = true;
+      return { body: LOGIN_OK_JSON };
+    }
+    if (request.url.indexOf("/users-users_fav") >= 0 && !signedIn[host]) {
+      return { body: LOGIN_REQUIRED_HTML };
+    }
+    return defaultRespond(request);
+  };
+}
+
 function defaultRespond(request) {
   const url = request.url;
   if (url.indexOf("wnacg01.link") >= 0 || url.indexOf("wnacg02.link") >= 0 || url.indexOf("wnlink.ru") >= 0) {
     return { body: RELEASE_HTML };
+  }
+  if (url.indexOf("/users-check_login.html") >= 0) {
+    return { body: LOGIN_OK_JSON };
   }
   if (url.indexOf(DEAD_HOST) >= 0) {
     return { statusCode: 200, headers: { Server: "Parking/1.0" }, body: "<html>domain parked</html>" };
@@ -347,6 +451,7 @@ const api = harness.api;
 async function main() {
   await describeContract();
   await browseLists();
+  await browsesFavorites();
   await rankingAndCategoryRequests();
   await searches();
   await readsDetail();
@@ -354,8 +459,15 @@ async function main() {
   await readsPages();
   await rotatesDeadMirrors();
   await honoursManualDomain();
+  await pinsSelectedRoute();
+  await describesTheDiscoveredRouteList();
   await discoversMirrorsFromTheReleasePage();
   await reportsLoginWalls();
+  await checksSessionState();
+  await signsInOnANewRoute();
+  await retriesFailedMirrorsAfterLogin();
+  await logsInAndOut();
+  await addsAndRemovesFavorites();
 
   process.stdout.write("wnacg fixture unit tests passed\n");
 }
@@ -367,7 +479,7 @@ async function describeContract() {
     described.feeds.map(function (feed) {
       return feed.id;
     }),
-    ["latest", "category", "ranking"]
+    ["latest", "category", "ranking", "favorites"]
   );
   const category = described.feeds[1].filters[0];
   assert.equal(category.type, "select");
@@ -389,13 +501,60 @@ async function describeContract() {
     described.settings.map(function (setting) {
       return setting.id;
     }),
-    ["domain"]
+    ["route", "domain", "account", "password"]
   );
+  const route = described.settings[0];
+  assert.equal(route.type, "radio");
+  assert.equal(route.defaultValue, "auto", "a fresh install follows the discovered pool");
+  assert.deepEqual(
+    route.options.map(function (option) {
+      return option.id;
+    }),
+    ["auto", SITE_HOST, "custom"],
+    "the mirrored pool sits between the auto and custom choices"
+  );
+  // The host rejects blank option ids, so the route list has to follow the same rule.
+  route.options.forEach(function (option) {
+    assert.ok(option.id && option.id.trim() === option.id, "a route option has a blank id");
+  });
+  const password = described.settings[3];
+  assert.equal(password.type, "secret");
+  assert.equal(password.secret, true, "the password must never render in cleartext");
+  // The account sheet enables its login button only when every required credential is filled.
+  assert.equal(described.settings[2].required, true);
+  assert.equal(password.required, true);
   assert.deepEqual(
     described.actions.map(function (action) {
-      return action.kind;
+      return action.id;
     }),
-    ["action"]
+    ["refreshDomains", "login", "logout", "addFavorite", "removeFavorite"]
+  );
+  // Only the comic-scoped ones appear on a comic page; the rest stay on the source screen.
+  assert.deepEqual(
+    described.actions
+      .filter(function (action) {
+        return action.scope === "comic";
+      })
+      .map(function (action) {
+        return action.id;
+      }),
+    ["addFavorite", "removeFavorite"]
+  );
+  // Actions sharing a setting's section are offered on that area instead of the generic list.
+  const sections = {};
+  described.actions.forEach(function (action) {
+    if (action.section) sections[action.id] = action.section;
+  });
+  assert.deepEqual(sections, {
+    refreshDomains: "线路",
+    login: "登录",
+    logout: "登录",
+  });
+  // The refresh action lives on the route picker's title, not on the 线路 heading.
+  assert.equal(
+    described.actions[0].pickerSettingId,
+    "route",
+    "the refresh action belongs to the route picker"
   );
 }
 
@@ -440,6 +599,52 @@ async function browseLists() {
     await fresh.api.browse({ feedId: "latest", cursor: "15094", limit: 40, filters: {} }, ctx())
   );
   assert.equal(last.nextCursor, null, "a paginator with nothing above the current page is the end");
+}
+
+async function browsesFavorites() {
+  const fresh = createPlugin({ seedHosts: [SITE_HOST] });
+  const page = plain(
+    await fresh.api.browse({ feedId: "favorites", cursor: null, limit: 40, filters: {} }, ctx())
+  );
+  assert.equal(fresh.urls()[0], "https://" + SITE_HOST + "/users-users_fav.html");
+  assert.equal(page.items.length, 2);
+  assert.equal(page.items[0].sourceId, "394338");
+  assert.equal(page.items[0].title, "沈鸢篇 [SMHTN]");
+  assert.equal(page.items[0].subtitle, "同人志", "the folder name is the useful subtitle");
+  assert.equal(
+    page.items[0].cover.url,
+    "https://t4.wnimg2.cfd/data/t/3943/38/17915329324234362.png"
+  );
+  assert.equal(
+    page.items[1].cover.url,
+    "https://t4.wnimg2.cfd/data/t/3943/36/17915312496142575.webp",
+    "data-src wins over loading.jpg here too"
+  );
+  assert.equal(page.nextCursor, "2");
+
+  const second = plain(
+    await fresh.api.browse({ feedId: "favorites", cursor: "2", limit: 40, filters: {} }, ctx())
+  );
+  assert.equal(
+    fresh.urls()[1],
+    "https://" + SITE_HOST + "/users-users_fav-page-2-c-0.html",
+    "later pages spell the folder id out, and 0 means every folder"
+  );
+  assert.equal(second.nextCursor, null, "a paginator on its last page ends the feed");
+
+  // Signed out, the site serves its login wall in place of the shelf, and the feed says so rather
+  // than pretending the account has no favorites.
+  const anonymous = createPlugin({
+    seedHosts: [SITE_HOST],
+    respond: function (request) {
+      if (request.url.indexOf("/users-users_fav") >= 0) return { body: LOGIN_REQUIRED_HTML };
+      return defaultRespond(request);
+    },
+  });
+  await assert.rejects(
+    () => anonymous.api.browse({ feedId: "favorites", cursor: null, limit: 40, filters: {} }, ctx()),
+    (error) => error.code === "AUTH_REQUIRED" && error.message === "请先登录绅士漫画账号"
+  );
 }
 
 async function rankingAndCategoryRequests() {
@@ -639,9 +844,71 @@ async function rotatesDeadMirrors() {
 }
 
 async function honoursManualDomain() {
-  const fresh = createPlugin({ seedHosts: [SITE_HOST], settings: { domain: "https://wn002.cfd/" } });
-  await fresh.api.browse({ feedId: "latest", cursor: null, limit: 40, filters: {} }, ctx());
+  // Before the route list existed the override lived in `domain` alone; it must keep leading.
+  const legacy = createPlugin({ seedHosts: [SITE_HOST], settings: { domain: "https://wn002.cfd/" } });
+  await legacy.api.browse({ feedId: "latest", cursor: null, limit: 40, filters: {} }, ctx());
+  assert.equal(legacy.urls()[0], "https://wn002.cfd/albums-index.html");
+
+  const custom = createPlugin({
+    seedHosts: [SITE_HOST],
+    settings: { route: "custom", domain: "https://wn003.cfd/" },
+  });
+  await custom.api.browse({ feedId: "latest", cursor: null, limit: 40, filters: {} }, ctx());
+  assert.equal(custom.urls()[0], "https://wn003.cfd/albums-index.html");
+}
+
+async function pinsSelectedRoute() {
+  const fresh = createPlugin({ seedHosts: [SITE_HOST], settings: { route: "wn002.cfd" } });
+  const page = await fresh.api.browse({ feedId: "latest", cursor: null, limit: 40, filters: {} }, ctx());
+  assert.equal(page.items.length, 3);
   assert.equal(fresh.urls()[0], "https://wn002.cfd/albums-index.html");
+}
+
+async function describesTheDiscoveredRouteList() {
+  const fresh = createPlugin({});
+  await fresh.api.invokeAction({ actionId: "refreshDomains" }, ctx());
+  const described = plain(await fresh.api.describe({}, ctx()));
+  const ids = described.settings[0].options.map(function (option) {
+    return option.id;
+  });
+  assert.equal(ids[0], "auto");
+  assert.equal(ids[ids.length - 1], "custom");
+  assert.ok(ids.indexOf(SITE_HOST) > 0, "the release-page mirror is offered");
+  assert.ok(ids.indexOf("www.wn002.cfd") > 0, "the second release-page mirror is offered");
+  assert.deepEqual(
+    ids.filter(function (id, index) {
+      return ids.indexOf(id) !== index;
+    }),
+    [],
+    "the route list must not repeat a mirror"
+  );
+
+  // Choosing a mirror must not move it: the list keeps the discovered order and the selected
+  // entry stays where the pool lists it.
+  const pinned = createPlugin({
+    seedHosts: [SITE_HOST, "www.wn002.cfd", "www.wn003.cfd"],
+    settings: { route: "www.wn002.cfd" },
+  });
+  assert.deepEqual(
+    plain(await pinned.api.describe(ctx())).settings[0].options.map(function (option) {
+      return option.id;
+    }),
+    ["auto", SITE_HOST, "www.wn002.cfd", "www.wn003.cfd", "custom"],
+    "the selected mirror must keep its position in the pool"
+  );
+
+  // A pinned mirror that dropped out of the pool is still selectable, and offered at the end.
+  const gone = createPlugin({
+    seedHosts: [SITE_HOST, "www.wn002.cfd"],
+    settings: { route: "www.wn009.cfd" },
+  });
+  assert.deepEqual(
+    plain(await gone.api.describe(ctx())).settings[0].options.map(function (option) {
+      return option.id;
+    }),
+    ["auto", SITE_HOST, "www.wn002.cfd", "www.wn009.cfd", "custom"],
+    "an undiscovered selection belongs after the discovered mirrors"
+  );
 }
 
 async function discoversMirrorsFromTheReleasePage() {
@@ -676,6 +943,343 @@ async function reportsLoginWalls() {
   await assert.rejects(
     () => fresh.api.pages({ sourceId: "394338", chapterId: "394338" }, ctx()),
     (error) => error.code === "AUTH_REQUIRED" && error.retryable === true
+  );
+}
+
+async function checksSessionState() {
+  const signedIn = createPlugin({
+    seedHosts: [SITE_HOST],
+    settings: { account: "reader" },
+  });
+  assert.deepEqual(plain(await signedIn.api.checkSession(ctx())), {
+    signedIn: true,
+    account: "reader",
+  });
+
+  const signedOut = createPlugin({
+    seedHosts: [SITE_HOST],
+    respond: function (request) {
+      if (request.url.indexOf("/users-users_fav.html") >= 0) return { body: LOGIN_REQUIRED_HTML };
+      return defaultRespond(request);
+    },
+  });
+  assert.deepEqual(plain(await signedOut.api.checkSession(ctx())), { signedIn: false });
+
+  // Cookies live on the mirror that issued the login, so the check must not wander to another one.
+  const pinned = createPlugin({
+    seedHosts: [SITE_HOST],
+    settings: { account: "reader", password: "secret" },
+  });
+  await pinned.api.invokeAction({ actionId: "login", input: {} }, ctx());
+  pinned.store.set(HOST_STATE_KEY, { hosts: [DEAD_HOST], updatedAt: NOW });
+  assert.deepEqual(plain(await pinned.api.checkSession(ctx())), {
+    signedIn: true,
+    account: "reader",
+  });
+  const urls = pinned.urls();
+  assert.equal(urls[urls.length - 1], "https://" + SITE_HOST + "/users-users_fav.html");
+
+  const offline = createPlugin({
+    seedHosts: [SITE_HOST],
+    respond: function () {
+      throw new Error("network down");
+    },
+  });
+  await assert.rejects(
+    () => offline.api.checkSession(ctx()),
+    "a transport failure must not be reported as signed out"
+  );
+}
+
+async function signsInOnANewRoute() {
+  // The reader signed in on the mirror the pool was serving, then pinned another route. The new
+  // mirror has no cookies and answers with the wall, so the stored credentials must sign in there
+  // once without another tap.
+  const switched = createPlugin({
+    seedHosts: [SITE_HOST],
+    settings: { route: "www.wn002.cfd", account: "reader", password: "secret" },
+    respond: cookieAwareResponder(),
+  });
+  switched.store.set(SESSION_KEY, { host: SITE_HOST, account: "reader" });
+  const page = plain(
+    await switched.api.browse({ feedId: "favorites", cursor: null, limit: 40, filters: {} }, ctx())
+  );
+  assert.equal(page.items.length, 2, "the shelf loads once the new route is signed in");
+  assert.deepEqual(
+    switched.urls(),
+    [
+      "https://www.wn002.cfd/users-users_fav.html",
+      "https://www.wn002.cfd/users-check_login.html",
+      "https://www.wn002.cfd/users-users_fav.html",
+    ],
+    "the wall, one login on that mirror, then the retried request"
+  );
+  const login = switched.requests[1];
+  assert.equal(login.method, "POST");
+  assert.deepEqual(formBody(login), {
+    login_name: "reader",
+    login_pass: "secret",
+    remember_pass: "1",
+  });
+  assert.deepEqual(
+    plain(switched.store.get(SESSION_KEY)),
+    { host: "www.wn002.cfd", account: "reader" },
+    "the login record follows the mirror that now holds the cookies"
+  );
+
+  // Signing out deletes that record, which withholds consent: the wall is reported, not bypassed.
+  const signedOut = createPlugin({
+    seedHosts: [SITE_HOST],
+    settings: { route: "www.wn002.cfd", account: "reader", password: "secret" },
+    respond: cookieAwareResponder(),
+  });
+  await assert.rejects(
+    () => signedOut.api.browse({ feedId: "favorites", cursor: null, limit: 40, filters: {} }, ctx()),
+    (error) => error.code === "AUTH_REQUIRED" && error.message === "请先登录绅士漫画账号"
+  );
+  assert.equal(
+    signedOut.urls().filter(function (url) {
+      return url.indexOf("/users-check_login.html") >= 0;
+    }).length,
+    0,
+    "a signed-out reader must not be signed back in"
+  );
+
+  // A rejected password is attempted once per isolate, not on every request.
+  const wrong = createPlugin({
+    seedHosts: [SITE_HOST],
+    settings: { route: "www.wn002.cfd", account: "reader", password: "nope" },
+    respond: cookieAwareResponder(),
+  });
+  wrong.store.set(SESSION_KEY, { host: SITE_HOST, account: "reader" });
+  const again = { feedId: "favorites", cursor: null, limit: 40, filters: {} };
+  await assert.rejects(() => wrong.api.browse(again, ctx()), (error) => error.code === "AUTH_REQUIRED");
+  await assert.rejects(() => wrong.api.browse(again, ctx()), (error) => error.code === "AUTH_REQUIRED");
+  assert.equal(
+    wrong.urls().filter(function (url) {
+      return url.indexOf("/users-check_login.html") >= 0;
+    }).length,
+    1,
+    "a rejected password must not be replayed on every request"
+  );
+
+  // The settings-page check follows the pinned route, signs in there, and repairs the record.
+  const checked = createPlugin({
+    seedHosts: [SITE_HOST],
+    settings: { route: "www.wn002.cfd", account: "reader", password: "secret" },
+    respond: cookieAwareResponder(),
+  });
+  checked.store.set(SESSION_KEY, { host: SITE_HOST, account: "reader" });
+  assert.deepEqual(plain(await checked.api.checkSession(ctx())), {
+    signedIn: true,
+    account: "reader",
+  });
+  assert.deepEqual(plain(checked.store.get(SESSION_KEY)), {
+    host: "www.wn002.cfd",
+    account: "reader",
+  });
+}
+
+async function retriesFailedMirrorsAfterLogin() {
+  let signedIn = false;
+  const plugin = createPlugin({
+    seedHosts: [SITE_HOST],
+    settings: { route: SITE_HOST, account: "reader", password: "nope" },
+    respond: function (request) {
+      if (request.url.indexOf("/users-check_login.html") >= 0) {
+        const credentials = formBody(request);
+        signedIn = credentials.login_name === "new-reader" && credentials.login_pass === "secret";
+        return { body: signedIn ? LOGIN_OK_JSON : LOGIN_FAIL_JSON };
+      }
+      if (request.url.indexOf("/users-users_fav") >= 0 && !signedIn) {
+        return { body: LOGIN_REQUIRED_HTML };
+      }
+      return defaultRespond(request);
+    },
+  });
+  plugin.store.set(SESSION_KEY, { host: SITE_HOST, account: "reader" });
+  const request = { feedId: "favorites", cursor: null, limit: 40, filters: {} };
+  await assert.rejects(() => plugin.api.browse(request, ctx()), (error) => error.code === "AUTH_REQUIRED");
+
+  Object.assign(plugin.settings, { account: "new-reader", password: "secret" });
+  await plugin.api.invokeAction(
+    { actionId: "login", input: { account: "new-reader", password: "secret" } },
+    ctx()
+  );
+  signedIn = false;
+
+  const page = await plugin.api.browse(request, ctx());
+
+  assert.ok(page.items.length > 0);
+  assert.deepEqual(formBody(plugin.requests.filter(function (request) {
+    return request.url.indexOf("/users-check_login.html") >= 0;
+  }).at(-1)), {
+    login_name: "new-reader",
+    login_pass: "secret",
+    remember_pass: "1",
+  });
+}
+
+async function logsInAndOut() {
+  const fresh = createPlugin({
+    seedHosts: [SITE_HOST],
+    settings: { account: "reader", password: "secret" },
+  });
+  const result = plain(await fresh.api.invokeAction({ actionId: "login", input: {} }, ctx()));
+  assert.equal(result.ok, true);
+  assert.equal(result.message, "登录成功");
+  assert.equal(result.account, "reader");
+  assert.match(result.host, /^www\./);
+
+  const loginRequest = fresh.requests[0];
+  assert.equal(loginRequest.method, "POST");
+  assert.equal(loginRequest.url, "https://" + SITE_HOST + "/users-check_login.html");
+  assert.equal(loginRequest.headers["content-type"], "application/x-www-form-urlencoded; charset=UTF-8");
+  assert.equal(loginRequest.headers["x-requested-with"], "XMLHttpRequest");
+  assert.deepEqual(formBody(loginRequest), {
+    login_name: "reader",
+    login_pass: "secret",
+    remember_pass: "1",
+  });
+  assert.equal(fresh.urls().length, 1, "the login post is the only request the action makes");
+  assert.deepEqual(
+    plain(fresh.store.get(SESSION_KEY)),
+    { host: SITE_HOST, account: "reader" },
+    "the check must remember the mirror the cookies belong to"
+  );
+
+  // Nothing to send yet: this is a settings problem, not a credentials one.
+  const anonymous = createPlugin({ seedHosts: [SITE_HOST] });
+  await assert.rejects(
+    () => anonymous.api.invokeAction({ actionId: "login", input: {} }, ctx()),
+    (error) => error.code === "INVALID_ARGUMENT",
+    "login without settings must ask the reader to fill them in"
+  );
+
+  // A rejected login surfaces the site's own message and is not retryable.
+  const wrong = createPlugin({
+    seedHosts: [SITE_HOST],
+    settings: { account: "reader", password: "nope" },
+    respond: function (request) {
+      if (request.url.indexOf("/users-check_login.html") >= 0) return { body: LOGIN_FAIL_JSON };
+      return defaultRespond(request);
+    },
+  });
+  await assert.rejects(
+    () => wrong.api.invokeAction({ actionId: "login", input: {} }, ctx()),
+    (error) => error.code === "AUTH_REQUIRED" && error.message === "密碼錯誤" && error.retryable === false
+  );
+
+  // Logout drops the persisted session cookies; the host owns the jar.
+  const session = createPlugin({ seedHosts: [SITE_HOST] });
+  const bye = plain(await session.api.invokeAction({ actionId: "logout", input: {} }, ctx()));
+  assert.equal(bye.ok, true);
+  assert.equal(session.cookieClears(), 1);
+  assert.equal(session.store.has(SESSION_KEY), false, "logout forgets the session owner");
+
+  const unknown = createPlugin({ seedHosts: [SITE_HOST] });
+  await assert.rejects(
+    () => unknown.api.invokeAction({ actionId: "nope", input: {} }, ctx()),
+    (error) => error.code === "NOT_FOUND"
+  );
+}
+
+async function addsAndRemovesFavorites() {
+  // Adding reads the site's own folder list first, then submits the folder it pre-selected.
+  const added = createPlugin({ seedHosts: [SITE_HOST] });
+  const addResult = plain(
+    await added.api.invokeAction({ actionId: "addFavorite", input: { sourceId: "394338" } }, ctx())
+  );
+  assert.equal(addResult.ok, true);
+  assert.equal(addResult.message, "已加入收藏夹");
+  assert.equal(addResult.folderId, "34", "the option the dialog marks selected beats the first one");
+  assert.deepEqual(added.urls(), [
+    "https://" + SITE_HOST + "/users-addfav-id-394338.html",
+    "https://" + SITE_HOST + "/users-save_fav-id-394338.html",
+  ]);
+  const save = added.requests[1];
+  assert.equal(save.method, "POST");
+  assert.equal(save.headers.referer, "https://" + SITE_HOST + "/users-addfav-id-394338.html");
+  assert.deepEqual(formBody(save), { favc_id: "34" });
+
+  // A form the site rejects surfaces its own message instead of a silent success.
+  const refused = createPlugin({
+    seedHosts: [SITE_HOST],
+    respond: function (request) {
+      if (request.url.indexOf("/users-save_fav-id-") >= 0) return { body: SAVE_FAV_FAIL_JSON };
+      return defaultRespond(request);
+    },
+  });
+  await assert.rejects(
+    () => refused.api.invokeAction({ actionId: "addFavorite", input: { sourceId: "394338" } }, ctx()),
+    (error) => error.code === "HTTP" && error.message === "收藏夾不存在"
+  );
+
+  // No folders offered means there is nowhere to put it.
+  const noFolders = createPlugin({
+    seedHosts: [SITE_HOST],
+    respond: function (request) {
+      if (request.url.indexOf("/users-addfav-id-") >= 0) {
+        return { body: "<html><select name='favc_id'></select></html>" };
+      }
+      return defaultRespond(request);
+    },
+  });
+  await assert.rejects(
+    () => noFolders.api.invokeAction({ actionId: "addFavorite", input: { sourceId: "394338" } }, ctx()),
+    (error) => error.code === "NOT_FOUND"
+  );
+
+  // Signed out, the dialog is the login wall.
+  const anonymous = createPlugin({
+    seedHosts: [SITE_HOST],
+    respond: function (request) {
+      if (request.url.indexOf("/users-addfav-id-") >= 0) return { body: LOGIN_REQUIRED_HTML };
+      return defaultRespond(request);
+    },
+  });
+  await assert.rejects(
+    () => anonymous.api.invokeAction({ actionId: "addFavorite", input: { sourceId: "394338" } }, ctx()),
+    (error) => error.code === "AUTH_REQUIRED" && error.message === "请先登录绅士漫画账号"
+  );
+
+  // Removing finds the shelf row the comic occupies and deletes that entry.
+  const removed = createPlugin({ seedHosts: [SITE_HOST] });
+  const removeResult = plain(
+    await removed.api.invokeAction(
+      { actionId: "removeFavorite", input: { sourceId: "394338" } },
+      ctx()
+    )
+  );
+  assert.equal(removeResult.message, "已移出账户收藏");
+  assert.deepEqual(
+    removed.urls().filter(function (url) {
+      return url.indexOf("/users-fav_del-id-") >= 0;
+    }),
+    ["https://" + SITE_HOST + "/users-fav_del-id-55501.html"]
+  );
+
+  // A comic on no shelf is already removed; nothing is sent.
+  const absent = createPlugin({ seedHosts: [SITE_HOST] });
+  const absentResult = plain(
+    await absent.api.invokeAction(
+      { actionId: "removeFavorite", input: { sourceId: "999999" } },
+      ctx()
+    )
+  );
+  assert.equal(absentResult.message, "这本漫画不在账户收藏中");
+  assert.equal(
+    absent.urls().filter(function (url) {
+      return url.indexOf("/users-fav_del-id-") >= 0;
+    }).length,
+    0
+  );
+
+  // Without a comic id the request cannot be honoured.
+  const bad = createPlugin({ seedHosts: [SITE_HOST] });
+  await assert.rejects(
+    () => bad.api.invokeAction({ actionId: "addFavorite", input: {} }, ctx()),
+    (error) => error.code === "INVALID_ARGUMENT"
   );
 }
 

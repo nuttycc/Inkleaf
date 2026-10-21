@@ -11,15 +11,14 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Test
 
 class DiscoverSourcesTest {
-    /** Checks that discovery excludes disabled, unhealthy and inactive sources from its usable list. */
+    /** Checks that discovery excludes unhealthy and inactive sources from its usable list. */
     @Test
     fun `usable keeps only healthy active sources`() {
         val plugins =
             listOf(
                 plugin("a", capabilities = listOf(PluginCapabilities.BROWSE)),
-                plugin("b", capabilities = listOf(PluginCapabilities.BROWSE), disabled = true),
-                plugin("c", capabilities = listOf(PluginCapabilities.BROWSE), health = PluginHealth.RUNTIME_UNHEALTHY),
-                plugin("d", activeVersion = null, capabilities = listOf(PluginCapabilities.BROWSE)),
+                plugin("b", capabilities = listOf(PluginCapabilities.BROWSE), health = PluginHealth.RUNTIME_UNHEALTHY),
+                plugin("c", activeVersion = null, capabilities = listOf(PluginCapabilities.BROWSE)),
             )
 
         assertEquals(listOf("a"), DiscoverSources.usable(plugins).map { it.state.pluginId })
@@ -62,11 +61,6 @@ class DiscoverSourcesTest {
                 plugin("z", capabilities = listOf(PluginCapabilities.BROWSE)),
                 plugin("a", activeVersion = "2", capabilities = listOf(PluginCapabilities.SEARCH)),
                 plugin("c", capabilities = emptyList()),
-                plugin(
-                    "disabled",
-                    disabled = true,
-                    capabilities = listOf(PluginCapabilities.SEARCH),
-                ),
                 plugin(
                     "unhealthy",
                     health = PluginHealth.RUNTIME_UNHEALTHY,
@@ -149,7 +143,6 @@ class DiscoverSourcesTest {
         id: String,
         version: String = "1",
         activeVersion: String? = version,
-        disabled: Boolean = false,
         health: PluginHealth = PluginHealth.HEALTHY,
         capabilities: List<String>,
     ) =
@@ -158,7 +151,6 @@ class DiscoverSourcesTest {
                 PluginState(
                     pluginId = id,
                     activeVersion = activeVersion,
-                    disabled = disabled,
                     health = health,
                 ),
             directory = File(id),

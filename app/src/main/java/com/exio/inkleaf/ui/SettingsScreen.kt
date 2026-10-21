@@ -46,6 +46,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.exio.inkleaf.DeveloperMode
 import com.exio.inkleaf.data.CacheLimit
 import com.exio.inkleaf.data.ThemeSettings
+import com.exio.inkleaf.update.AppUpdateState
 import com.ms.square.debugoverlay.DebugOverlay
 
 /** General settings. Theme editing lives on its own route with an explicit apply boundary. */
@@ -79,10 +80,8 @@ fun SettingsScreen(
     val installPermissionLauncher =
         rememberLauncherForActivityResult(
             contract = ActivityResultContracts.StartActivityForResult()
-        ) { result ->
-            if (result.resultCode == android.app.Activity.RESULT_OK) {
-                updateViewModel.onInstallPermissionGranted()
-            }
+        ) {
+            updateViewModel.onInstallPermissionGranted()
         }
 
     LaunchedEffect(Unit) {
@@ -193,14 +192,16 @@ fun SettingsScreen(
             SectionLabel("关于")
             InkleafActionListItem(
                 headline = "检查更新",
-                supporting = when (updateState) {
-                    is AppUpdateUiState.Checking -> "正在检查..."
-                    is AppUpdateUiState.Downloading -> "正在下载更新..."
-                    is AppUpdateUiState.UpdateAvailable -> "发现新版本"
-                    is AppUpdateUiState.Error -> "检查失败，点击重试"
-                    is AppUpdateUiState.UpToDate -> "已是最新版本"
-                    else -> "当前版本: ${appVersionName(context)}"
-                },
+                supporting =
+                    when (updateState) {
+                        is AppUpdateState.Checking -> "正在检查..."
+                        is AppUpdateState.Downloading -> "正在下载更新..."
+                        is AppUpdateState.AwaitingInstallPermission -> "等待安装权限"
+                        is AppUpdateState.UpdateAvailable -> "发现新版本"
+                        is AppUpdateState.Error -> "检查失败，点击重试"
+                        is AppUpdateState.UpToDate -> "已是最新版本"
+                        else -> "当前版本: ${appVersionName(context)}"
+                    },
                 onClick = { updateViewModel.checkForUpdate() },
             )
             InkleafActionListItem(
@@ -270,7 +271,7 @@ fun SettingsScreen(
     }
 
     when (val state = updateState) {
-        is AppUpdateUiState.UpdateAvailable -> {
+        is AppUpdateState.UpdateAvailable -> {
             AlertDialog(
                 onDismissRequest = { updateViewModel.dismissState() },
                 title = { Text("发现新版本") },
@@ -305,7 +306,7 @@ fun SettingsScreen(
                 },
             )
         }
-        is AppUpdateUiState.Downloading -> {
+        is AppUpdateState.Downloading -> {
             AlertDialog(
                 onDismissRequest = { },
                 title = { Text("正在下载更新") },
@@ -318,7 +319,20 @@ fun SettingsScreen(
                 confirmButton = { },
             )
         }
-        is AppUpdateUiState.Error -> {
+        is AppUpdateState.AwaitingInstallPermission -> {
+            AlertDialog(
+                onDismissRequest = { updateViewModel.dismissState() },
+                title = { Text("需要安装权限") },
+                text = { Text("更新已下载，请允许安装应用后重试。") },
+                confirmButton = {
+                    TextButton(onClick = { updateViewModel.retryInstall() }) { Text("重试") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { updateViewModel.dismissState() }) { Text("取消") }
+                },
+            )
+        }
+        is AppUpdateState.Error -> {
             AlertDialog(
                 onDismissRequest = { updateViewModel.dismissState() },
                 title = { Text("更新失败") },
@@ -331,7 +345,7 @@ fun SettingsScreen(
                 },
             )
         }
-        is AppUpdateUiState.UpToDate -> {
+        is AppUpdateState.UpToDate -> {
             LaunchedEffect(Unit) {
                 snackbarHostState.showSnackbar("已是最新版本")
                 updateViewModel.consumeUpToDate()

@@ -8,7 +8,6 @@ data class PluginState(
     val pluginId: String,
     val activeVersion: String? = null,
     val previousVersion: String? = null,
-    val disabled: Boolean = false,
     val health: PluginHealth = PluginHealth.HEALTHY,
     val fatalFailureTimesMs: List<Long> = emptyList(),
     val versions: List<PluginVersionRecord> = emptyList(),
@@ -17,7 +16,6 @@ data class PluginState(
 
 internal fun PluginState.isActiveAndReady(version: String): Boolean =
     activeVersion == version &&
-        !disabled &&
         health == PluginHealth.HEALTHY &&
         fatalFailureTimesMs.isEmpty()
 
@@ -75,9 +73,9 @@ data class InstalledPlugin(
     val manifest: PluginManifest? = null,
 )
 
-/** A source browsing can offer: an active version, not disabled, and healthy. */
+/** A source browsing can offer: an active version and healthy. */
 internal val InstalledPlugin.isUsable: Boolean
-    get() = state.activeVersion != null && !state.disabled && state.health == PluginHealth.HEALTHY
+    get() = state.activeVersion != null && state.health == PluginHealth.HEALTHY
 
 internal object PluginStorageLimits {
     const val MAX_PACKAGE_BYTES = 64L * 1024L * 1024L

@@ -4,6 +4,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -123,6 +124,170 @@ class PluginContentModelsTest {
         val decoded = PluginContentCodec.describe(encoded)
         assertEquals(listOf("refresh"), decoded.actions.map { it.id })
         assertTrue(decoded.filters.isEmpty())
+    }
+
+    @Test
+    fun `action scope is retained and unknown scopes fall back to source`() {
+        val encoded =
+            PluginContentCodec.json.encodeToJsonElement(
+                PluginDescribeResponse(
+                    actions =
+                        listOf(
+                            PluginActionDescriptor("refresh", "Refresh"),
+                            PluginActionDescriptor(
+                                "favorite",
+                                "Favorite",
+                                scope = PluginActionScope.COMIC,
+                            ),
+                            PluginActionDescriptor("future", "Future", scope = "futureSurface"),
+                        )
+                )
+            )
+
+        val decoded = PluginContentCodec.describe(encoded)
+        assertEquals(listOf("refresh", "favorite", "future"), decoded.actions.map { it.id })
+        assertEquals(PluginActionScope.SOURCE, decoded.actions[0].scope)
+        assertEquals(PluginActionScope.COMIC, decoded.actions[1].scope)
+        assertEquals(PluginActionScope.SOURCE, decoded.actions[2].scope)
+        assertEquals(
+            listOf("favorite"),
+            decoded.actionsInScope(PluginActionScope.COMIC).map { it.id },
+        )
+        assertEquals(
+            listOf("refresh", "future"),
+            decoded.actionsInScope(PluginActionScope.SOURCE).map { it.id },
+        )
+    }
+
+    @Test
+    fun `radio settings require options and are retained`() {
+        val retained =
+            PluginContentCodec.describe(
+                PluginContentCodec.json.encodeToJsonElement(
+                    PluginDescribeResponse(
+                        settings =
+                            listOf(
+                                PluginSettingDescriptor(
+                                    id = "route",
+                                    title = "Route",
+                                    type = "radio",
+                                    options =
+                                        listOf(
+                                            PluginFilterOption("auto", "Auto"),
+                                            PluginFilterOption(
+                                                "www.example.com",
+                                                "www.example.com",
+                                            ),
+                                        ),
+                                )
+                            )
+                    )
+                )
+            )
+        assertEquals(listOf("route"), retained.settings.map { it.id })
+
+        val missingOptions =
+            PluginDescribeResponse(
+                settings =
+                    listOf(PluginSettingDescriptor(id = "route", title = "Route", type = "radio"))
+            )
+        assertTrue(
+            runCatching {
+                    PluginContentCodec.describe(
+                        PluginContentCodec.json.encodeToJsonElement(missingOptions)
+                    )
+                }
+                .exceptionOrNull() is PluginContentValidationException
+        )
+    }
+
+    @Test
+    fun `action picker targets require an option setting and default to absent`() {
+        val encoded =
+            PluginContentCodec.json.encodeToJsonElement(
+                PluginDescribeResponse(
+                    actions =
+                        listOf(
+                            PluginActionDescriptor("refresh", "Refresh"),
+                            PluginActionDescriptor(
+                                "refreshDomains",
+                                "Refresh",
+                                pickerSettingId = "route",
+                            ),
+                            PluginActionDescriptor("select", "Select", pickerSettingId = "choice"),
+                            PluginActionDescriptor(
+                                "missing",
+                                "Missing",
+                                pickerSettingId = "missing",
+                            ),
+                            PluginActionDescriptor("text", "Text", pickerSettingId = "account"),
+                            PluginActionDescriptor("future", "Future", pickerSettingId = "future"),
+                            PluginActionDescriptor(
+                                "unsupported",
+                                "Unsupported",
+                                kind = "futureKind",
+                            ),
+                        ),
+                    settings =
+                        listOf(
+                            PluginSettingDescriptor(
+                                "route",
+                                "Route",
+                                type = "radio",
+                                options = listOf(PluginFilterOption("auto", "Auto")),
+                            ),
+                            PluginSettingDescriptor(
+                                "choice",
+                                "Choice",
+                                type = "select",
+                                options = listOf(PluginFilterOption("default", "Default")),
+                            ),
+                            PluginSettingDescriptor("account", "Account"),
+                            PluginSettingDescriptor("future", "Future", type = "futureType"),
+                        ),
+                )
+            )
+
+        val decoded = PluginContentCodec.describe(encoded)
+        assertEquals(
+            listOf("refresh", "refreshDomains", "select", "missing", "text", "future"),
+            decoded.actions.map { it.id },
+        )
+        assertEquals(
+            listOf(null, "route", "choice", null, null, null),
+            decoded.actions.map { it.pickerSettingId },
+        )
+    }
+
+    @Test
+    fun `action section is retained and defaults to absent`() {
+        val encoded =
+            PluginContentCodec.json.encodeToJsonElement(
+                PluginDescribeResponse(
+                    actions =
+                        listOf(
+                            PluginActionDescriptor("login", "Login", kind = "login", section = "登录"),
+                            PluginActionDescriptor("refresh", "Refresh"),
+                        )
+                )
+            )
+
+        val decoded = PluginContentCodec.describe(encoded)
+        assertEquals("登录", decoded.actions[0].section)
+        assertEquals(null, decoded.actions[1].section)
+    }
+
+    @Test
+    fun `session check decodes the reported state`() {
+        fun decode(json: String) =
+            PluginContentCodec.sessionCheck(PluginContentCodec.json.parseToJsonElement(json))
+
+        val signedIn = decode("""{"signedIn":true,"account":"alice"}""")
+        assertTrue(signedIn.signedIn)
+        assertEquals("alice", signedIn.account)
+        assertFalse(decode("""{"signedIn":false}""").signedIn)
+        assertFalse(decode("{}").signedIn)
+        assertEquals(null, decode("{}").account)
     }
 
     @Test

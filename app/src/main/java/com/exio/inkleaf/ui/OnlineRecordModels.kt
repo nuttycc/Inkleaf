@@ -62,7 +62,6 @@ internal fun OnlineAvailability.canOpenReader(): Boolean =
 internal fun OnlineAvailability.displayLabel(): String =
     when (this) {
         OnlineAvailability.AVAILABLE -> "可用"
-        OnlineAvailability.PLUGIN_DISABLED -> "插件已禁用"
         OnlineAvailability.PLUGIN_UNINSTALLED -> "插件已卸载"
         OnlineAvailability.PLUGIN_INCOMPATIBLE -> "插件不兼容"
         OnlineAvailability.AUTH_REQUIRED -> "需要登录"

@@ -65,20 +65,6 @@ class PluginManager(
         }
     }
 
-    suspend fun setEnabled(pluginId: String, enabled: Boolean): InstalledPlugin? {
-        val updated = runtimeManager.setEnabled(pluginId, enabled)
-        if (updated != null) {
-            withContext(Dispatchers.IO) {
-                onlineContentRepository?.setPluginAvailability(
-                    pluginId,
-                    if (enabled) OnlineAvailability.AVAILABLE
-                    else OnlineAvailability.PLUGIN_DISABLED,
-                )
-            }
-        }
-        return updated
-    }
-
     suspend fun recover(pluginId: String): InstalledPlugin? =
         runtimeManager.recover(pluginId).also { result ->
             if (result != null) markAvailable(pluginId)

@@ -17,6 +17,7 @@ import com.exio.inkleaf.plugin.PluginNetworkPolicy
 import com.exio.inkleaf.plugin.PluginPackageStore
 import com.exio.inkleaf.plugin.PluginRepoRepository
 import com.exio.inkleaf.plugin.PluginRuntimeManager
+import com.exio.inkleaf.plugin.PluginSessionStateRepository
 import com.exio.inkleaf.plugin.PluginSettingsRepository
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -46,6 +47,9 @@ class InkleafApplication : Application(), ImageLoaderFactory {
     }
     val pluginSettingsRepository: PluginSettingsRepository by lazy {
         PluginSettingsRepository(this)
+    }
+    val pluginSessionStateRepository: PluginSessionStateRepository by lazy {
+        PluginSessionStateRepository(this)
     }
     val pluginRuntimeManager: PluginRuntimeManager by lazy {
         PluginRuntimeManager(

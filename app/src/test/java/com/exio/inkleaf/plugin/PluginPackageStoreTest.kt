@@ -215,7 +215,6 @@ class PluginPackageStoreTest {
             val corrupt =
                 requireNotNull(installed.firstOrNull { it.state.pluginId == CORRUPT_PLUGIN_ID })
             assertEquals(PluginHealth.STORAGE_CORRUPT, corrupt.state.health)
-            assertTrue(corrupt.state.disabled)
             assertNull(corrupt.manifest)
         }
 

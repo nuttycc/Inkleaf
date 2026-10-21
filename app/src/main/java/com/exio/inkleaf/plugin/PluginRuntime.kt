@@ -306,11 +306,6 @@ class PluginRuntimeManager(
                 ?: throw PluginRpcException(
                     PluginRpcError(PluginErrorCode.NOT_FOUND, "Plugin is not installed")
                 )
-        if (plugin.state.disabled) {
-            throw PluginRpcException(
-                PluginRpcError(PluginErrorCode.PLUGIN_DISABLED, "Plugin is disabled")
-            )
-        }
         if (plugin.state.health == PluginHealth.RUNTIME_UNHEALTHY) {
             throw PluginRpcException(
                 PluginRpcError(
@@ -363,6 +358,9 @@ class PluginRuntimeManager(
     suspend fun describe(pluginId: String): JsonElement =
         invoke(pluginId, "describe", timeoutMs = PluginRuntimePolicy.LIGHT_DEADLINE_MS)
 
+    suspend fun checkSession(pluginId: String): JsonElement =
+        invoke(pluginId, "checkSession", timeoutMs = PluginRuntimePolicy.NORMAL_DEADLINE_MS)
+
     suspend fun install(packageFile: File, activate: Boolean = false): PluginInstallResult {
         val result = withContext(Dispatchers.IO) { store.install(packageFile, activate = false) }
         if (activate && result.status != PluginInstallStatus.REJECTED && result.activatable) {
@@ -395,12 +393,6 @@ class PluginRuntimeManager(
         }
     }
 
-    suspend fun setEnabled(pluginId: String, enabled: Boolean): InstalledPlugin? {
-        val updated = withContext(Dispatchers.IO) { store.setEnabled(pluginId, enabled) }
-        if (!enabled) closeRuntime(pluginId)
-        return updated
-    }
-
     suspend fun recover(pluginId: String): InstalledPlugin? {
         val recovered = withContext(Dispatchers.IO) { store.clearHealth(pluginId) }
         closeRuntime(pluginId)
@@ -408,8 +400,7 @@ class PluginRuntimeManager(
     }
 
     suspend fun uninstall(pluginId: String): Boolean {
-        if (withContext(Dispatchers.IO) { store.setEnabled(pluginId, enabled = false) } == null)
-            return false
+        if (withContext(Dispatchers.IO) { store.get(pluginId) } == null) return false
         closeRuntime(pluginId)
         return withContext(Dispatchers.IO) { store.uninstall(pluginId) }
     }
@@ -443,11 +434,6 @@ class PluginRuntimeManager(
                         ?: throw PluginRpcException(
                             PluginRpcError(PluginErrorCode.NOT_FOUND, "Plugin is not installed")
                         )
-                if (currentPlugin.state.disabled) {
-                    throw PluginRpcException(
-                        PluginRpcError(PluginErrorCode.PLUGIN_DISABLED, "Plugin is disabled")
-                    )
-                }
                 if (currentPlugin.state.health == PluginHealth.RUNTIME_UNHEALTHY) {
                     throw PluginRpcException(
                         PluginRpcError(

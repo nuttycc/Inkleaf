@@ -50,7 +50,7 @@ defaults carry the calm and the options carry the depth, and depth appears when 
 rather than standing around waiting to be noticed.
 
 Online content introduces failure that local files never had: timeouts, unavailable sources, broken
-or disabled plugins, stale caches. Inkleaf stays quiet there too. Prefer self-recovery and silent
+or broken plugins, stale caches. Inkleaf stays quiet there too. Prefer self-recovery and silent
 degradation, and speak only when a failure genuinely blocks reading.
 
 ## Anti-references

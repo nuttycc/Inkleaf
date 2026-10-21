@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -37,6 +39,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -70,7 +73,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.composables.icons.materialsymbols.outlined.R as MaterialSymbolsOutlinedR
 import com.exio.inkleaf.plugin.InstalledPlugin
 import com.exio.inkleaf.plugin.PluginActionDescriptor
+import com.exio.inkleaf.plugin.PluginActionKind
 import com.exio.inkleaf.plugin.PluginHealth
+import com.exio.inkleaf.plugin.PluginSessionState
 import com.exio.inkleaf.plugin.PluginSettingDescriptor
 
 /**
@@ -89,6 +94,7 @@ fun SourceDetailScreen(
     val plugin by viewModel.plugin.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val actions by viewModel.actions.collectAsStateWithLifecycle()
+    val session by viewModel.session.collectAsStateWithLifecycle()
     val values by viewModel.values.collectAsStateWithLifecycle()
     val busy by viewModel.busy.collectAsStateWithLifecycle()
     val describeError by viewModel.describeError.collectAsStateWithLifecycle()
@@ -100,6 +106,8 @@ fun SourceDetailScreen(
     var showUninstallConfirm by remember { mutableStateOf(false) }
     var showResetConfirm by remember { mutableStateOf(false) }
     var editingDescriptor by remember { mutableStateOf<PluginSettingDescriptor?>(null) }
+    var choosingSettingId by remember { mutableStateOf<String?>(null) }
+    var showAccountSheet by remember { mutableStateOf(false) }
 
     LaunchedEffect(pluginId) { viewModel.load(pluginId) }
 
@@ -129,17 +137,10 @@ fun SourceDetailScreen(
 
     val displayName = plugin?.manifest?.name ?: pluginId
 
-    // Group by first appearance rather than sorting: the plugin's declaration order is the only
-    // ordering signal we have, and reordering it would scramble the author's intent.
-    val settingSections =
-        remember(settings) {
-            val ordered = LinkedHashMap<String?, MutableList<PluginSettingDescriptor>>()
-            settings.forEach { descriptor ->
-                val section = descriptor.section?.takeIf { it.isNotBlank() }
-                ordered.getOrPut(section) { mutableListOf() }.add(descriptor)
-            }
-            ordered.map { (section, group) -> section to group.toList() }
-        }
+    // Settings and actions merge by their declared section so an action sits with the fields it
+    // acts on. Sign-in and sign-out actions move into the account row and its sheet instead.
+    val areas = remember(settings, actions) { sourceAreas(settings, actions) }
+    val accountArea = remember(areas) { areas.firstOrNull { areaUsesAccountSheet(it) } }
 
     Scaffold(
         modifier = modifier,
@@ -198,27 +199,24 @@ fun SourceDetailScreen(
                     plugin = plugin,
                     pluginId = pluginId,
                     busy = busy,
-                    onToggle = { enabled -> viewModel.setEnabled(enabled) },
                     onRecover = { viewModel.recover() },
                 )
             }
 
-            if (settings.isNotEmpty()) {
-                settingSections.forEach { (section, group) ->
-                    item(key = "setting_header_${section.orEmpty()}") {
-                        SectionHeader(section ?: "设置")
-                    }
-                    item(key = "setting_card_${section.orEmpty()}") {
-                        SettingGroupCard(
-                            descriptors = group,
-                            values = values,
-                            enabled = !busy,
-                            onValueChange = { id, value -> viewModel.setValue(id, value) },
-                            onEditProtectedSetting = { descriptor ->
-                                editingDescriptor = descriptor
-                            },
-                        )
-                    }
+            if (areas.isNotEmpty()) {
+                areas.forEach { area ->
+                    sourceAreaSection(
+                        area = area,
+                        presentation = sourceAreaPresentation(area, session),
+                        values = values,
+                        session = session,
+                        busy = busy,
+                        onOpenAccount = { showAccountSheet = true },
+                        onValueChange = { id, value -> viewModel.setValue(id, value) },
+                        onEditProtectedSetting = { descriptor -> editingDescriptor = descriptor },
+                        onChooseSetting = { descriptor -> choosingSettingId = descriptor.id },
+                        onActionClick = { action -> viewModel.invokeAction(action) },
+                    )
                 }
             }
 
@@ -242,17 +240,6 @@ fun SourceDetailScreen(
                     }
                 }
             }
-
-            if (actions.isNotEmpty()) {
-                item { SectionHeader("操作") }
-                item {
-                    ActionGroupCard(
-                        actions = actions,
-                        enabled = !busy,
-                        onActionClick = { action -> viewModel.invokeAction(action) },
-                    )
-                }
-            }
         }
     }
 
@@ -267,6 +254,61 @@ fun SourceDetailScreen(
                 editingDescriptor = null
             },
         )
+    }
+
+    // The picker follows the current descriptors rather than a captured copy, so an action that
+    // refreshes the list (重新获取域名) updates the open sheet as well.
+    val choosingDescriptor = choosingSettingId?.let { id -> settings.firstOrNull { it.id == id } }
+    choosingDescriptor?.let { descriptor ->
+        val currentValue = values[descriptor.id] ?: descriptor.defaultValue.orEmpty()
+        val pickerActions = visiblePickerActions(actions, descriptor.id, session.signedIn)
+        ModalBottomSheet(
+            onDismissRequest = { choosingSettingId = null },
+            sheetState = rememberExpandOnlySheetState(),
+        ) {
+            SheetColumn(selectable = true, scrollable = true) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(end = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(modifier = Modifier.weight(1f)) {
+                        StandardSheetTitle(descriptor.title)
+                    }
+                    pickerActions.forEach { action ->
+                        SourceAreaActionButton(
+                            action = action,
+                            enabled = !busy && action.enabled,
+                            onClick = { viewModel.invokeAction(action) },
+                        )
+                    }
+                }
+                descriptor.options.forEach { option ->
+                    InkleafChoiceListItem(
+                        headline = option.title,
+                        selected = option.id == currentValue,
+                        onClick = {
+                            viewModel.setValue(descriptor.id, option.id)
+                            choosingSettingId = null
+                        },
+                        enabled = !busy,
+                    )
+                }
+            }
+        }
+    }
+
+    if (showAccountSheet) {
+        accountArea?.let { area ->
+            AccountSheet(
+                area = area,
+                session = session,
+                values = values,
+                busy = busy,
+                onSetValue = viewModel::setValue,
+                onAction = viewModel::invokeAction,
+                onDismiss = { showAccountSheet = false },
+            )
+        }
     }
 
     if (showResetConfirm) {
@@ -317,6 +359,75 @@ fun SourceDetailScreen(
     }
 }
 
+/**
+ * The one renderer for a source area. The presentation decides whether the heading is a named
+ * area's heading or a generic settings/action header, and where the account row and actions land.
+ * Item keys follow the old branches so LazyColumn identity and scroll positions stay unchanged.
+ */
+private fun LazyListScope.sourceAreaSection(
+    area: SourceArea,
+    presentation: SourceAreaPresentation,
+    values: Map<String, String>,
+    session: PluginSessionState,
+    busy: Boolean,
+    onOpenAccount: () -> Unit,
+    onValueChange: (String, String) -> Unit,
+    onEditProtectedSetting: (PluginSettingDescriptor) -> Unit,
+    onChooseSetting: (PluginSettingDescriptor) -> Unit,
+    onActionClick: (PluginActionDescriptor) -> Unit,
+) {
+    if (presentation.named) {
+        item(key = "area_header_${area.section}") {
+            AreaHeader(
+                presentation = presentation,
+                session = session,
+                enabled = !busy,
+                onActionClick = onActionClick,
+            )
+        }
+    } else {
+        presentation.settingsHeader?.let { header ->
+            item(key = "setting_header") { SectionHeader(header) }
+        }
+    }
+
+    if (presentation.showsSettingsCard) {
+        item(key = if (presentation.named) "area_card_${area.section}" else "setting_card") {
+            SettingGroupCard(
+                descriptors = presentation.cardSettings,
+                values = values,
+                enabled = !busy,
+                onValueChange = onValueChange,
+                onEditProtectedSetting = onEditProtectedSetting,
+                onChooseSetting = onChooseSetting,
+                header =
+                    if (presentation.showsAccountRow) {
+                        {
+                            AccountSummaryRow(
+                                session = session,
+                                enabled = !busy,
+                                onClick = onOpenAccount,
+                            )
+                        }
+                    } else {
+                        null
+                    },
+            )
+        }
+    }
+
+    presentation.actionsHeader?.let { header ->
+        item(key = "action_header") { SectionHeader(header) }
+        item(key = "action_card") {
+            ActionGroupCard(
+                actions = presentation.listActions,
+                enabled = !busy,
+                onActionClick = onActionClick,
+            )
+        }
+    }
+}
+
 @Composable
 private fun SectionHeader(text: String) {
     Text(
@@ -327,12 +438,92 @@ private fun SectionHeader(text: String) {
     )
 }
 
+/**
+ * The heading of a named area. The presentation decides the title, whether the session status
+ * rides under it, and which actions sit on the right. An area that owns an account row carries its
+ * session state there instead, together with the sign-in and sign-out actions.
+ */
+@Composable
+private fun AreaHeader(
+    presentation: SourceAreaPresentation,
+    session: PluginSessionState,
+    enabled: Boolean,
+    onActionClick: (PluginActionDescriptor) -> Unit,
+) {
+    val status = if (presentation.showsStatus) accountStatusText(session) else null
+
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 12.dp, top = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.padding(end = 8.dp)) {
+            Text(
+                text = presentation.title,
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            status?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        FlowRow(
+            modifier = Modifier.weight(1f),
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            presentation.headingActions.forEach { action ->
+                SourceAreaActionButton(
+                    action = action,
+                    enabled = enabled && action.enabled,
+                    onClick = { onActionClick(action) },
+                )
+            }
+        }
+    }
+}
+
+/** Renders an in-area action at the weight its kind earns, from the single primary step down. */
+@Composable
+private fun SourceAreaActionButton(
+    action: PluginActionDescriptor,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    when (sourceActionEmphasis(action)) {
+        SourceActionEmphasis.PRIMARY -> {
+            Button(onClick = onClick, enabled = enabled) { Text(action.title) }
+        }
+        SourceActionEmphasis.TONAL -> {
+            FilledTonalButton(onClick = onClick, enabled = enabled) { Text(action.title) }
+        }
+        SourceActionEmphasis.TEXT -> {
+            TextButton(
+                onClick = onClick,
+                enabled = enabled,
+                colors =
+                    if (action.destructive) {
+                        ButtonDefaults.textButtonColors(
+                            contentColor = MaterialTheme.colorScheme.error
+                        )
+                    } else {
+                        ButtonDefaults.textButtonColors()
+                    },
+            ) {
+                Text(action.title)
+            }
+        }
+    }
+}
+
 @Composable
 private fun SourceIdentityCard(
     plugin: InstalledPlugin?,
     pluginId: String,
     busy: Boolean,
-    onToggle: (Boolean) -> Unit,
     onRecover: () -> Unit,
 ) {
     val state = plugin?.state
@@ -385,11 +576,6 @@ private fun SourceIdentityCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                Switch(
-                    checked = state?.disabled == false && state.activeVersion != null,
-                    onCheckedChange = onToggle,
-                    enabled = !busy && state?.activeVersion != null,
-                )
             }
 
             plugin
@@ -404,14 +590,18 @@ private fun SourceIdentityCard(
                     )
                 }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                state?.let { HealthStatusBadge(pluginState = it) }
-                if (state?.health == PluginHealth.RUNTIME_UNHEALTHY) {
-                    FilledTonalButton(onClick = onRecover, enabled = !busy) { Text("恢复运行") }
+            if (state != null && state.health != PluginHealth.HEALTHY) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    HealthStatusBadge(pluginState = state)
+                    if (state.health == PluginHealth.RUNTIME_UNHEALTHY) {
+                        FilledTonalButton(onClick = onRecover, enabled = !busy) {
+                            Text("恢复运行")
+                        }
+                    }
                 }
             }
         }
@@ -425,6 +615,8 @@ private fun SettingGroupCard(
     enabled: Boolean,
     onValueChange: (String, String) -> Unit,
     onEditProtectedSetting: (PluginSettingDescriptor) -> Unit,
+    onChooseSetting: (PluginSettingDescriptor) -> Unit,
+    header: (@Composable () -> Unit)? = null,
 ) {
     OutlinedCard(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
@@ -435,6 +627,15 @@ private fun SettingGroupCard(
             ),
     ) {
         Column {
+            header?.let {
+                it()
+                if (descriptors.isNotEmpty()) {
+                    HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                    )
+                }
+            }
             descriptors.forEachIndexed { index, descriptor ->
                 key(descriptor.id) {
                     SettingControl(
@@ -443,6 +644,7 @@ private fun SettingGroupCard(
                         enabled = enabled,
                         onValueChange = { onValueChange(descriptor.id, it) },
                         onEditProtectedSetting = { onEditProtectedSetting(descriptor) },
+                        onChooseSetting = { onChooseSetting(descriptor) },
                     )
                     if (index < descriptors.lastIndex) {
                         HorizontalDivider(
@@ -488,6 +690,169 @@ private fun ActionGroupCard(
     }
 }
 
+/** The account row: the current session state and the entry to the account sheet. */
+@Composable
+private fun AccountSummaryRow(
+    session: PluginSessionState,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    ListItem(
+        supportingContent = {
+            Text(
+                text = accountStatusText(session),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        },
+        modifier =
+            Modifier.then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier),
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+    ) {
+        Text("登录状态")
+    }
+}
+
+/**
+ * Collects the credentials while signed out and offers the sign-in or sign-out action. A signed-in
+ * sheet shows the session state alone, because the credentials have done their job. Edits bind
+ * straight to the screen values, which are persisted with the rest of the source settings.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AccountSheet(
+    area: SourceArea,
+    session: PluginSessionState,
+    values: Map<String, String>,
+    busy: Boolean,
+    onSetValue: (String, String) -> Unit,
+    onAction: (PluginActionDescriptor) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val actions = visibleAreaActions(area.actions, session.signedIn)
+    val loginAction = actions.firstOrNull { it.kind in PluginActionKind.signInKinds }
+    val signOutAction = actions.firstOrNull { it.isSignOut() }
+    val fields = remember(area.settings) { area.settings.filter { it.isCredentialField() } }
+    val canSubmit =
+        fields.filter { it.required }.all { descriptor ->
+            (values[descriptor.id] ?: descriptor.defaultValue.orEmpty()).isNotBlank()
+        }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberExpandOnlySheetState(),
+    ) {
+        SheetColumn(scrollable = true) {
+            StandardSheetTitle(if (session.signedIn) "账户" else loginAction?.title ?: "登录")
+            if (session.signedIn) {
+                Text(
+                    text = accountStatusText(session),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+                signOutAction?.let { action ->
+                    Button(
+                        onClick = {
+                            onDismiss()
+                            onAction(action)
+                        },
+                        enabled = !busy && action.enabled,
+                        colors =
+                            ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.error,
+                                contentColor = MaterialTheme.colorScheme.onError,
+                            ),
+                        modifier =
+                            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp),
+                    ) {
+                        Text(action.title)
+                    }
+                }
+            } else {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    fields.forEach { descriptor ->
+                        CredentialField(
+                            descriptor = descriptor,
+                            value = values[descriptor.id] ?: descriptor.defaultValue.orEmpty(),
+                            enabled = !busy,
+                            onValueChange = { onSetValue(descriptor.id, it) },
+                        )
+                    }
+                }
+                loginAction?.let { action ->
+                    Button(
+                        onClick = {
+                            onDismiss()
+                            onAction(action)
+                        },
+                        enabled = !busy && action.enabled && canSubmit,
+                        modifier =
+                            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp),
+                    ) {
+                        Text(action.title)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** One credential input in the account sheet. Secret values stay masked until revealed. */
+@Composable
+private fun CredentialField(
+    descriptor: PluginSettingDescriptor,
+    value: String,
+    enabled: Boolean,
+    onValueChange: (String) -> Unit,
+) {
+    val isSecret = descriptor.type == "secret" || descriptor.secret
+    var revealed by remember(descriptor.id) { mutableStateOf(false) }
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = { Text(descriptor.title) },
+        singleLine = true,
+        enabled = enabled,
+        isError = descriptor.required && value.isBlank(),
+        visualTransformation =
+            if (isSecret && !revealed) PasswordVisualTransformation()
+            else VisualTransformation.None,
+        trailingIcon =
+            if (isSecret) {
+                {
+                    IconButton(onClick = { revealed = !revealed }, enabled = enabled) {
+                        Icon(
+                            painter =
+                                painterResource(
+                                    if (revealed) {
+                                        MaterialSymbolsOutlinedR.drawable
+                                            .materialsymbols_ic_visibility_off_outlined
+                                    } else {
+                                        MaterialSymbolsOutlinedR.drawable
+                                            .materialsymbols_ic_visibility_outlined
+                                    }
+                                ),
+                            contentDescription = if (revealed) "隐藏" else "显示",
+                        )
+                    }
+                }
+            } else {
+                null
+            },
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+private fun accountStatusText(session: PluginSessionState): String =
+    if (session.signedIn) {
+        session.account?.let { "已登录：$it" } ?: "已登录"
+    } else {
+        "未登录"
+    }
+
 /** Maps plugin-declared descriptors to controls without interpreting site-specific semantics. */
 @Composable
 private fun SettingControl(
@@ -496,6 +861,7 @@ private fun SettingControl(
     enabled: Boolean,
     onValueChange: (String) -> Unit,
     onEditProtectedSetting: () -> Unit,
+    onChooseSetting: () -> Unit,
 ) {
     when (descriptor.type) {
         "boolean" ->
@@ -537,6 +903,28 @@ private fun SettingControl(
                         )
                     }
                 }
+            }
+        }
+
+        // A single-choice setting keeps its options behind a sheet: a source can discover a dozen
+        // mirrors, and listing them all inline would dominate the card.
+        "radio" -> {
+            val selectedTitle =
+                descriptor.options.firstOrNull { it.id == value }?.title ?: "未选择"
+            ListItem(
+                supportingContent = {
+                    Text(
+                        text = selectedTitle,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                },
+                modifier =
+                    Modifier.then(
+                        if (enabled) Modifier.clickable(onClick = onChooseSetting) else Modifier
+                    ),
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            ) {
+                Text(descriptor.title)
             }
         }
 

@@ -340,41 +340,16 @@ internal fun SourceListScreen(
     }
 }
 
-/** Health badge shared by the source detail screen. */
+/** Failure badge for the source detail screen; a healthy source shows nothing. */
 @Composable
 internal fun HealthStatusBadge(pluginState: PluginState, modifier: Modifier = Modifier) {
-    val (label, containerColor, contentColor) =
-        when {
-            pluginState.health == PluginHealth.STORAGE_CORRUPT ->
-                Triple(
-                    "状态损坏",
-                    MaterialTheme.colorScheme.errorContainer,
-                    MaterialTheme.colorScheme.onErrorContainer,
-                )
-            pluginState.disabled ->
-                Triple(
-                    "已禁用",
-                    MaterialTheme.colorScheme.surfaceVariant,
-                    MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            pluginState.health == PluginHealth.HEALTHY ->
-                Triple(
-                    "正常",
-                    MaterialTheme.colorScheme.primaryContainer,
-                    MaterialTheme.colorScheme.onPrimaryContainer,
-                )
-            else ->
-                Triple(
-                    "运行异常",
-                    MaterialTheme.colorScheme.errorContainer,
-                    MaterialTheme.colorScheme.onErrorContainer,
-                )
-        }
+    val label = if (pluginState.health == PluginHealth.STORAGE_CORRUPT) "状态损坏" else "运行异常"
+    val contentColor = MaterialTheme.colorScheme.onErrorContainer
 
     Surface(
         modifier = modifier,
         shape = MaterialTheme.shapes.extraSmall,
-        color = containerColor,
+        color = MaterialTheme.colorScheme.errorContainer,
         contentColor = contentColor,
     ) {
         Row(

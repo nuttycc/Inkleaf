@@ -24,6 +24,10 @@ data class PluginDescribeResponse(
     val settings: List<PluginSettingDescriptor> = emptyList(),
 )
 
+/** The plugin's answer to the host's lightweight session check. */
+@Serializable
+data class PluginSessionCheck(val signedIn: Boolean = false, val account: String? = null)
+
 @Serializable
 data class PluginFeedDescriptor(
     val id: String,
@@ -38,7 +42,47 @@ data class PluginActionDescriptor(
     val kind: String = "action",
     val destructive: Boolean = false,
     val enabled: Boolean = true,
+    /**
+     * Where the host offers the action. A source action belongs to the source screen (login,
+     * refresh); a comic action runs against one comic and receives its sourceId as input.
+     */
+    val scope: String = PluginActionScope.SOURCE,
+    /**
+     * Optional area heading. An action that shares a section with settings is offered inside that
+     * area (the login action sits with the credentials), instead of the generic action list.
+     * Omitting it keeps the pre-1.3 behaviour, so older plugins need no changes.
+     */
+    val section: String? = null,
+    /**
+     * Optional setting id whose picker carries this action on its title line. Such an action is
+     * not offered on the area heading, because it belongs to the list it acts on.
+     */
+    val pickerSettingId: String? = null,
 )
+
+object PluginActionScope {
+    const val SOURCE = "source"
+    const val COMIC = "comic"
+    val supported: Set<String> = setOf(SOURCE, COMIC)
+}
+
+object PluginActionKind {
+    const val ACTION = "action"
+    const val LOGIN = "login"
+    const val LOGOUT = "logout"
+    const val CLEAR_SESSION = "clearSession"
+    const val VERIFY_CREDENTIALS = "verifyCredentials"
+
+    /** Kinds that accept credentials and should mark the source signed in. */
+    val signInKinds: Set<String> = setOf(LOGIN, VERIFY_CREDENTIALS)
+
+    /** Kinds that end the current session and should clear the host's signed-in state. */
+    val signOutKinds: Set<String> = setOf(LOGOUT, CLEAR_SESSION)
+}
+
+/** The actions a given surface is allowed to offer. */
+fun PluginDescribeResponse.actionsInScope(scope: String): List<PluginActionDescriptor> =
+    actions.filter { it.scope == scope }
 
 @Serializable
 data class PluginFilterDescriptor(
@@ -222,6 +266,9 @@ object PluginContentCodec {
     fun describe(value: JsonElement): PluginDescribeResponse =
         normalizeDescribe(json.decodeFromJsonElement(value))
 
+    fun sessionCheck(value: JsonElement): PluginSessionCheck =
+        json.decodeFromJsonElement(value)
+
     fun searchPage(value: JsonElement, pluginId: String): PluginSearchPage =
         json.decodeFromJsonElement<PluginSearchPage>(value).also { page ->
             validateContentPage(page, pluginId, "search")
@@ -335,6 +382,8 @@ object PluginContentCodec {
         value.actions.forEach { action ->
             validateId(action.id, "action.id")
             validateText(action.title, "action.title", 256)
+            action.section?.let { validateText(it, "action.section", 256) }
+            action.pickerSettingId?.let { validateId(it, "action.pickerSettingId") }
         }
         validateFilters(value.filters, "filter")
         val settingIds = HashSet<String>(value.settings.size)
@@ -357,8 +406,10 @@ object PluginContentCodec {
                 }
                 validateText(option.title, "setting.option.title", 256)
             }
-            if (setting.type == "select" && setting.options.isEmpty()) {
-                throw PluginContentValidationException("Select settings require options")
+            if (setting.type in OPTION_SETTING_TYPES && setting.options.isEmpty()) {
+                throw PluginContentValidationException(
+                    "Settings of type '${setting.type}' require options"
+                )
             }
         }
         return value.copy(
@@ -368,7 +419,26 @@ object PluginContentCodec {
                         filters = feed.filters.filter { it.type in SUPPORTED_FEED_FILTER_TYPES }
                     )
                 },
-            actions = value.actions.filter { it.kind in SUPPORTED_ACTION_KINDS },
+            actions =
+                value.actions
+                    .filter { it.kind in SUPPORTED_ACTION_KINDS }
+                    // An unrecognised scope is a newer host's business; keep it on the source screen
+                    // rather than silently dropping the action.
+                    .map { action ->
+                        if (action.scope in PluginActionScope.supported) action
+                        else action.copy(scope = PluginActionScope.SOURCE)
+                    }
+                    .map { action ->
+                        if (
+                            action.pickerSettingId == null ||
+                                value.settings.any {
+                                    it.id == action.pickerSettingId &&
+                                        it.type in OPTION_SETTING_TYPES
+                                }
+                        )
+                            action
+                        else action.copy(pickerSettingId = null)
+                    },
             filters = value.filters.filter { it.type in SUPPORTED_FILTER_TYPES },
             settings = value.settings.filter { it.type in SUPPORTED_SETTING_TYPES },
         )
@@ -463,10 +533,18 @@ object PluginContentCodec {
     }
 
     private val SUPPORTED_ACTION_KINDS =
-        setOf("action", "login", "logout", "clearSession", "verifyCredentials")
+        setOf(
+            PluginActionKind.ACTION,
+            PluginActionKind.LOGIN,
+            PluginActionKind.LOGOUT,
+            PluginActionKind.CLEAR_SESSION,
+            PluginActionKind.VERIFY_CREDENTIALS,
+        )
     private val SUPPORTED_FEED_FILTER_TYPES = setOf("select")
     private val SUPPORTED_FILTER_TYPES = setOf("text", "select", "multiSelect", "boolean")
-    private val SUPPORTED_SETTING_TYPES = setOf("text", "secret", "boolean", "select")
+    private val SUPPORTED_SETTING_TYPES = setOf("text", "secret", "boolean", "select", "radio")
+
+    private val OPTION_SETTING_TYPES = setOf("select", "radio")
 }
 
 object PluginContentLimits {
@@ -483,6 +561,12 @@ class PluginCatalog(private val runtimeManager: PluginRuntimeManager) {
     suspend fun describe(pluginId: String): PluginDescribeResponse {
         val result = runtimeManager.describe(pluginId)
         return withContext(Dispatchers.Default) { PluginContentCodec.describe(result) }
+    }
+
+    /** Best-effort session confirmation; plugins without the method answer with an RPC error. */
+    suspend fun checkSession(pluginId: String): PluginSessionCheck {
+        val result = runtimeManager.checkSession(pluginId)
+        return withContext(Dispatchers.Default) { PluginContentCodec.sessionCheck(result) }
     }
 
     /**

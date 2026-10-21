@@ -84,37 +84,24 @@ class SourceLifecycleRowsTest {
     }
 
     @Test
-    fun `health outranks a disabled flag left by the same failure`() {
+    fun `unhealthy sources state their condition`() {
         val broken =
             installed("jm", activeVersion = "0.1.3", versions = "0.1.3").let {
-                it.copy(state = it.state.copy(disabled = true, health = PluginHealth.RUNTIME_UNHEALTHY))
+                it.copy(state = it.state.copy(health = PluginHealth.RUNTIME_UNHEALTHY))
             }
 
         val rows = SourceLifecycleRows.installedRows(indexOf(entry("jm", "禁漫天堂", "0.1.3")), listOf(broken))
 
         assertEquals("已安装 · v0.1.3 · 运行异常", rows.single().statusText)
-        assertEquals(0, SourceLifecycleRows.usableCount(listOf(broken)))
     }
 
     @Test
-    fun `a disabled source states the user's own choice`() {
-        val stopped =
-            installed("jm", activeVersion = "0.1.3", versions = "0.1.3").let {
-                it.copy(state = it.state.copy(disabled = true))
-            }
-
-        val rows = SourceLifecycleRows.installedRows(indexOf(entry("jm", "禁漫天堂", "0.1.3")), listOf(stopped))
-
-        assertEquals("已安装 · v0.1.3 · 已停用", rows.single().statusText)
-    }
-
-    @Test
-    fun `usableCount excludes disabled, unhealthy and never-activated sources`() {
+    fun `usableCount excludes unhealthy and never-activated sources`() {
         val healthy = installed("a", activeVersion = "1.0.0", versions = "1.0.0")
-        val disabled = healthy.copy(state = healthy.state.copy(disabled = true))
+        val unhealthy = healthy.copy(state = healthy.state.copy(health = PluginHealth.RUNTIME_UNHEALTHY))
         val inactive = installed("c", activeVersion = null, versions = "1.0.0")
 
-        assertEquals(1, SourceLifecycleRows.usableCount(listOf(healthy, disabled, inactive)))
+        assertEquals(1, SourceLifecycleRows.usableCount(listOf(healthy, unhealthy, inactive)))
     }
 
     @Test

@@ -24,12 +24,15 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -38,12 +41,15 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -51,6 +57,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -93,17 +100,28 @@ fun OnlineComicScreen(
             )
         }
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val actionFeedback by viewModel.actionFeedback.collectAsStateWithLifecycle()
     val detail = state.detail
     val chapters = state.chapters
+    val comicActions = state.comicActions
     var isDescriptionExpanded by remember { mutableStateOf(false) }
     var isAscending by remember { mutableStateOf(true) }
+    var isActionsMenuExpanded by remember { mutableStateOf(false) }
+    val snackbarHostState = remember { SnackbarHostState() }
     val displayChapters =
         remember(chapters, isAscending) {
             if (isAscending) chapters else chapters.reversed()
         }
 
+    LaunchedEffect(actionFeedback) {
+        val feedback = actionFeedback ?: return@LaunchedEffect
+        snackbarHostState.showSnackbar(feedback.message)
+        viewModel.consumeActionFeedback()
+    }
+
     Scaffold(
         modifier = modifier,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
@@ -116,6 +134,43 @@ fun OnlineComicScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    }
+                },
+                actions = {
+                    if (comicActions.isNotEmpty()) {
+                        Box {
+                            IconButton(
+                                onClick = { isActionsMenuExpanded = true },
+                                enabled = !state.isComicActionRunning,
+                            ) {
+                                Icon(Icons.Default.MoreVert, contentDescription = "漫画操作")
+                            }
+                            DropdownMenu(
+                                expanded = isActionsMenuExpanded && !state.isComicActionRunning,
+                                onDismissRequest = { isActionsMenuExpanded = false },
+                            ) {
+                                comicActions.forEach { action ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                text = action.title,
+                                                color =
+                                                    if (action.destructive) {
+                                                        MaterialTheme.colorScheme.error
+                                                    } else {
+                                                        Color.Unspecified
+                                                    },
+                                            )
+                                        },
+                                        enabled = action.enabled && !state.isComicActionRunning,
+                                        onClick = {
+                                            isActionsMenuExpanded = false
+                                            viewModel.invokeComicAction(action)
+                                        },
+                                    )
+                                }
+                            }
+                        }
                     }
                 },
             )
