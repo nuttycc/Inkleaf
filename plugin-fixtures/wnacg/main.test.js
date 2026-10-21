@@ -369,6 +369,7 @@ function createPlugin(options) {
 
   return {
     api: sandbox.registration,
+    settings: settings,
     requests: requests,
     store: store,
     cookieClears: function () {
@@ -464,6 +465,7 @@ async function main() {
   await reportsLoginWalls();
   await checksSessionState();
   await signsInOnANewRoute();
+  await retriesFailedMirrorsAfterLogin();
   await logsInAndOut();
   await addsAndRemovesFavorites();
 
@@ -1075,6 +1077,46 @@ async function signsInOnANewRoute() {
   assert.deepEqual(plain(checked.store.get(SESSION_KEY)), {
     host: "www.wn002.cfd",
     account: "reader",
+  });
+}
+
+async function retriesFailedMirrorsAfterLogin() {
+  let signedIn = false;
+  const plugin = createPlugin({
+    seedHosts: [SITE_HOST],
+    settings: { route: SITE_HOST, account: "reader", password: "nope" },
+    respond: function (request) {
+      if (request.url.indexOf("/users-check_login.html") >= 0) {
+        const credentials = formBody(request);
+        signedIn = credentials.login_name === "new-reader" && credentials.login_pass === "secret";
+        return { body: signedIn ? LOGIN_OK_JSON : LOGIN_FAIL_JSON };
+      }
+      if (request.url.indexOf("/users-users_fav") >= 0 && !signedIn) {
+        return { body: LOGIN_REQUIRED_HTML };
+      }
+      return defaultRespond(request);
+    },
+  });
+  plugin.store.set(SESSION_KEY, { host: SITE_HOST, account: "reader" });
+  const request = { feedId: "favorites", cursor: null, limit: 40, filters: {} };
+  await assert.rejects(() => plugin.api.browse(request, ctx()), (error) => error.code === "AUTH_REQUIRED");
+
+  Object.assign(plugin.settings, { account: "new-reader", password: "secret" });
+  await plugin.api.invokeAction(
+    { actionId: "login", input: { account: "new-reader", password: "secret" } },
+    ctx()
+  );
+  signedIn = false;
+
+  const page = await plugin.api.browse(request, ctx());
+
+  assert.ok(page.items.length > 0);
+  assert.deepEqual(formBody(plugin.requests.filter(function (request) {
+    return request.url.indexOf("/users-check_login.html") >= 0;
+  }).at(-1)), {
+    login_name: "new-reader",
+    login_pass: "secret",
+    remember_pass: "1",
   });
 }
 

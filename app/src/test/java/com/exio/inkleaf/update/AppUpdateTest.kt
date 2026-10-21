@@ -18,6 +18,7 @@ class AppUpdateTest {
         val downloadedEntries = mutableListOf<AppUpdateEntry>()
         var progressSteps: List<ApkDownloadProgress> = emptyList()
         var downloadFailure: Exception? = null
+        var afterProgress: (() -> Unit)? = null
         var downloadedApk = File("Inkleaf-test.apk")
         var permissionGranted = true
         var permissionRequests = 0
@@ -36,6 +37,7 @@ class AppUpdateTest {
         ): File {
             downloadedEntries += entry
             progressSteps.forEach(onProgress)
+            afterProgress?.invoke()
             downloadFailure?.let { throw it }
             return downloadedApk
         }
@@ -137,13 +139,30 @@ class AppUpdateTest {
             progressSteps = listOf(ApkDownloadProgress(downloadedBytes = 50, totalBytes = 100))
         }
         val update = AppUpdate(this, platform)
+        platform.afterProgress = {
+            assertEquals(AppUpdateState.Downloading(0.5f), update.state.value)
+        }
         update.check()?.join()
 
-        update.downloadAndInstall { platform.permissionRequests += 1 }?.join()
+        update
+            .downloadAndInstall {
+                assertEquals(AppUpdateState.AwaitingInstallPermission, update.state.value)
+                platform.permissionRequests += 1
+            }
+            ?.join()
 
         assertEquals(1, platform.permissionRequests)
-        assertEquals(AppUpdateState.Downloading(0.5f), update.state.value)
+        assertEquals(AppUpdateState.AwaitingInstallPermission, update.state.value)
         assertTrue(platform.installedApks.isEmpty())
+
+        update.onInstallPermissionGranted()
+        assertEquals(AppUpdateState.AwaitingInstallPermission, update.state.value)
+        assertEquals(1, platform.permissionRequests)
+        assertTrue(platform.installedApks.isEmpty())
+
+        update.retryInstall()
+        assertEquals(2, platform.permissionRequests)
+        assertEquals(1, platform.downloadedEntries.size)
 
         platform.permissionGranted = true
         update.onInstallPermissionGranted()
@@ -184,17 +203,42 @@ class AppUpdateTest {
 
     @Test
     fun `an unknown download size reports zero progress`() = runBlocking {
-        val platform = FakePlatform().apply {
-            checkResult = AppUpdateCheckResult.UpdateAvailable(entry())
-            permissionGranted = false
-            progressSteps = listOf(ApkDownloadProgress(downloadedBytes = 50, totalBytes = null))
-        }
+        val platform =
+            FakePlatform().apply {
+                checkResult = AppUpdateCheckResult.UpdateAvailable(entry())
+                permissionGranted = false
+                progressSteps = listOf(ApkDownloadProgress(downloadedBytes = 50, totalBytes = null))
+            }
         val update = AppUpdate(this, platform)
+        platform.afterProgress = {
+            assertEquals(AppUpdateState.Downloading(0f), update.state.value)
+        }
         update.check()?.join()
 
         update.downloadAndInstall { platform.permissionRequests += 1 }?.join()
 
-        assertEquals(AppUpdateState.Downloading(0f), update.state.value)
+        assertEquals(AppUpdateState.AwaitingInstallPermission, update.state.value)
+    }
+
+    @Test
+    fun `cancelling install permission discards the pending install`() = runBlocking {
+        val platform =
+            FakePlatform().apply {
+                checkResult = AppUpdateCheckResult.UpdateAvailable(entry())
+                permissionGranted = false
+            }
+        val update = AppUpdate(this, platform)
+        update.check()?.join()
+        update.downloadAndInstall { platform.permissionRequests += 1 }?.join()
+
+        update.dismissState()
+        platform.permissionGranted = true
+        update.onInstallPermissionGranted()
+        update.retryInstall()
+
+        assertEquals(AppUpdateState.Idle, update.state.value)
+        assertTrue(platform.installedApks.isEmpty())
+        assertEquals(1, platform.permissionRequests)
     }
 
     @Test

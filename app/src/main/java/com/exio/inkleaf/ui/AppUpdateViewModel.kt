@@ -70,6 +70,10 @@ class AppUpdateViewModel(app: Application) : AndroidViewModel(app) {
         update.onInstallPermissionGranted()
     }
 
+    fun retryInstall() {
+        update.retryInstall()
+    }
+
     fun dismissState() {
         update.dismissState()
     }

@@ -92,6 +92,7 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
     private var pluginId: String? = null
     private var loadedPluginId: String? = null
     private var loadJob: Job? = null
+    private var reconcileJob: Job? = null
 
     fun load(pluginId: String) {
         if (loadedPluginId == pluginId) {
@@ -104,6 +105,7 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         if (this.pluginId != pluginId) {
+            reconcileJob?.cancel()
             _settings.value = emptyList()
             _actions.value = emptyList()
             settingsDraft.load(emptyMap())
@@ -123,7 +125,8 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
                 loadedPluginId = pluginId
                 describe(pluginId)
                 // The hint can outlive the site session; confirm it off the main path.
-                viewModelScope.launch { sessionHint.reconcile(pluginId) }
+                reconcileJob?.cancel()
+                reconcileJob = viewModelScope.launch { sessionHint.reconcile(pluginId) }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Throwable) {

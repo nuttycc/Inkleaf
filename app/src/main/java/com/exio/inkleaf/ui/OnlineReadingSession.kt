@@ -45,6 +45,7 @@ internal class OnlineReadingSession(
 
     /** Starts the session at the first readable position. */
     fun begin(initialLocation: OnlinePageLocation) {
+        if (ended) return
         sessionId = newSessionId()
         startedAtMs = nowMs()
         start = initialLocation
@@ -52,7 +53,6 @@ internal class OnlineReadingSession(
         activeReadingMillis = 0L
         segmentStartedAtElapsedMs = null
         chapterReady = false
-        ended = false
     }
 
     /** Moves the latest position; a finish without a final page falls back to it. */

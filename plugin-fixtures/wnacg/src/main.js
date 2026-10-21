@@ -1427,6 +1427,8 @@ async function invokeAction(request, context) {
       throw pluginError("INVALID_ARGUMENT", "请先在源设置的“登录”里填写账号和密码", false);
     }
     const base = await loginWithPassword(account, password, signal);
+    loginFailures = {};
+    settingCache = null;
     await remember(SESSION_KEY, { host: toHost(base), account: account }, signal);
     return {
       ok: true,

@@ -205,7 +205,7 @@ internal class BrowseSessions(
         val cacheGeneration = source.cacheGeneration(key.pluginId)
         val loadGeneration = ++generation
         browseJob?.cancel()
-        return scope.launch {
+        val job = scope.launch {
             _state.value = _state.value.copy(isBrowsing = true, error = null)
             failure = null
             try {
@@ -246,6 +246,8 @@ internal class BrowseSessions(
                 }
             }
         }
+        browseJob = job
+        return job
     }
 
     /** Retries the failed next page, or refreshes the first page for other failures. */
@@ -263,7 +265,7 @@ internal class BrowseSessions(
         val filters = next.filters
         val loadGeneration = ++generation
         browseJob?.cancel()
-        return scope.launch {
+        val job = scope.launch {
             _state.value = _state.value.copy(isBrowsing = true, error = null)
             failure = null
             try {
@@ -323,6 +325,8 @@ internal class BrowseSessions(
                 }
             }
         }
+        browseJob = job
+        return job
     }
 
     private fun publishFirstPage(key: PluginBrowseCacheKey, snapshot: PluginBrowseCacheSnapshot) {

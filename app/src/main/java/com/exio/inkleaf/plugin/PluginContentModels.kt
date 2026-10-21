@@ -427,6 +427,17 @@ object PluginContentCodec {
                     .map { action ->
                         if (action.scope in PluginActionScope.supported) action
                         else action.copy(scope = PluginActionScope.SOURCE)
+                    }
+                    .map { action ->
+                        if (
+                            action.pickerSettingId == null ||
+                                value.settings.any {
+                                    it.id == action.pickerSettingId &&
+                                        it.type in OPTION_SETTING_TYPES
+                                }
+                        )
+                            action
+                        else action.copy(pickerSettingId = null)
                     },
             filters = value.filters.filter { it.type in SUPPORTED_FILTER_TYPES },
             settings = value.settings.filter { it.type in SUPPORTED_SETTING_TYPES },

@@ -48,6 +48,7 @@ internal data class OnlineComicUiState(
     val isStale: Boolean = false,
     val isBookmarked: Boolean = false,
     val comicActions: List<PluginActionDescriptor> = emptyList(),
+    val isComicActionRunning: Boolean = false,
     val position: OnlineReadingPosition? = null,
     val errorMessage: String? = null,
 )
@@ -82,6 +83,7 @@ internal class OnlineComicViewModel(
     private var bookmarkMutationVersion = 0
     private var persistedBookmarkState = false
     private var refreshJob: Job? = null
+    private var comicActionJob: Job? = null
     private var refreshGeneration = 0
 
     private val _state =
@@ -123,7 +125,9 @@ internal class OnlineComicViewModel(
      * id; the host only supplies it and reports the outcome the plugin returned.
      */
     fun invokeComicAction(action: PluginActionDescriptor) {
-        viewModelScope.launch {
+        if (comicActionJob?.isActive == true) return
+        comicActionJob = viewModelScope.launch {
+            _state.value = _state.value.copy(isComicActionRunning = true)
             try {
                 val result =
                     application.pluginCatalog.invokeAction(
@@ -146,6 +150,8 @@ internal class OnlineComicViewModel(
                         message = error.toContentLoadError().message,
                         isError = true,
                     )
+            } finally {
+                _state.value = _state.value.copy(isComicActionRunning = false)
             }
         }
     }

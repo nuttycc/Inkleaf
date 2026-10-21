@@ -139,11 +139,14 @@ fun OnlineComicScreen(
                 actions = {
                     if (comicActions.isNotEmpty()) {
                         Box {
-                            IconButton(onClick = { isActionsMenuExpanded = true }) {
+                            IconButton(
+                                onClick = { isActionsMenuExpanded = true },
+                                enabled = !state.isComicActionRunning,
+                            ) {
                                 Icon(Icons.Default.MoreVert, contentDescription = "漫画操作")
                             }
                             DropdownMenu(
-                                expanded = isActionsMenuExpanded,
+                                expanded = isActionsMenuExpanded && !state.isComicActionRunning,
                                 onDismissRequest = { isActionsMenuExpanded = false },
                             ) {
                                 comicActions.forEach { action ->
@@ -159,7 +162,7 @@ fun OnlineComicScreen(
                                                     },
                                             )
                                         },
-                                        enabled = action.enabled,
+                                        enabled = action.enabled && !state.isComicActionRunning,
                                         onClick = {
                                             isActionsMenuExpanded = false
                                             viewModel.invokeComicAction(action)

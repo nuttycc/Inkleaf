@@ -7,7 +7,9 @@ import com.exio.inkleaf.plugin.PluginBrowseRequest
 import com.exio.inkleaf.plugin.PluginFilterDescriptor
 import com.exio.inkleaf.plugin.PluginFilterOption
 import com.exio.inkleaf.plugin.PluginSearchPage
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -24,6 +26,8 @@ class BrowseSessionsTest {
         var nextPage: PluginSearchPage? = null
         var failFirstPage: Throwable? = null
         var failNextPage: Throwable? = null
+        var firstPageGate: CompletableDeferred<Unit>? = null
+        var nextPageGate: CompletableDeferred<Unit>? = null
         val refreshCalls = mutableListOf<RefreshCall>()
         val pageCalls = mutableListOf<PluginBrowseRequest>()
 
@@ -40,6 +44,7 @@ class BrowseSessionsTest {
             force: Boolean,
         ): PluginBrowseCacheSnapshot {
             refreshCalls += RefreshCall(request, expectedRevision, force)
+            firstPageGate?.await()
             failFirstPage?.let { throw it }
             return checkNotNull(refreshed) { "no refreshed snapshot configured" }
         }
@@ -49,6 +54,7 @@ class BrowseSessionsTest {
             request: PluginBrowseRequest,
         ): PluginSearchPage {
             pageCalls += request
+            nextPageGate?.await()
             failNextPage?.let { throw it }
             return checkNotNull(nextPage) { "no next page configured" }
         }
@@ -198,6 +204,49 @@ class BrowseSessionsTest {
         val sessions = BrowseSessions(this, FakeSource())
 
         assertNull(sessions.refresh(force = true))
+    }
+
+    @Test
+    fun `refresh cancels a superseded first page request`() = runBlocking {
+        val source =
+            FakeSource().apply {
+                refreshed = snapshot(page("a"))
+                firstPageGate = CompletableDeferred()
+            }
+        val sessions = BrowseSessions(this, source)
+        val first = requireNotNull(sessions.select(target()))
+        yield()
+        assertEquals(1, source.refreshCalls.size)
+
+        val replacement = requireNotNull(sessions.refresh(force = true))
+
+        assertTrue(first.isCancelled)
+        source.firstPageGate?.complete(Unit)
+        replacement.join()
+        assertEquals(listOf("a"), idsOf(sessions.state.value.items))
+        assertFalse(sessions.state.value.isBrowsing)
+    }
+
+    @Test
+    fun `changing targets cancels a running next page request`() = runBlocking {
+        val source =
+            FakeSource().apply {
+                cached = snapshot(page("a", nextCursor = "c1"))
+                nextPage = page("b")
+                nextPageGate = CompletableDeferred()
+            }
+        val sessions = BrowseSessions(this, source)
+        sessions.select(target())?.join()
+        val nextPage = requireNotNull(sessions.loadMore())
+        yield()
+        assertEquals(1, source.pageCalls.size)
+
+        sessions.select(BrowseTarget(null, null, emptyMap(), loadNow = false))
+
+        assertTrue(nextPage.isCancelled)
+        nextPage.join()
+        assertTrue(sessions.state.value.items.isEmpty())
+        assertFalse(sessions.state.value.isBrowsing)
     }
 
     @Test

@@ -202,7 +202,7 @@ class PluginContentModelsTest {
     }
 
     @Test
-    fun `action picker targets are retained and default to absent`() {
+    fun `action picker targets require an option setting and default to absent`() {
         val encoded =
             PluginContentCodec.json.encodeToJsonElement(
                 PluginDescribeResponse(
@@ -214,13 +214,49 @@ class PluginContentModelsTest {
                                 "Refresh",
                                 pickerSettingId = "route",
                             ),
-                        )
+                            PluginActionDescriptor("select", "Select", pickerSettingId = "choice"),
+                            PluginActionDescriptor(
+                                "missing",
+                                "Missing",
+                                pickerSettingId = "missing",
+                            ),
+                            PluginActionDescriptor("text", "Text", pickerSettingId = "account"),
+                            PluginActionDescriptor("future", "Future", pickerSettingId = "future"),
+                            PluginActionDescriptor(
+                                "unsupported",
+                                "Unsupported",
+                                kind = "futureKind",
+                            ),
+                        ),
+                    settings =
+                        listOf(
+                            PluginSettingDescriptor(
+                                "route",
+                                "Route",
+                                type = "radio",
+                                options = listOf(PluginFilterOption("auto", "Auto")),
+                            ),
+                            PluginSettingDescriptor(
+                                "choice",
+                                "Choice",
+                                type = "select",
+                                options = listOf(PluginFilterOption("default", "Default")),
+                            ),
+                            PluginSettingDescriptor("account", "Account"),
+                            PluginSettingDescriptor("future", "Future", type = "futureType"),
+                        ),
                 )
             )
 
         val decoded = PluginContentCodec.describe(encoded)
-        assertEquals(null, decoded.actions[0].pickerSettingId)
-        assertEquals("route", decoded.actions[1].pickerSettingId)
+        assertEquals(
+            listOf("refresh", "refreshDomains", "select", "missing", "text", "future"),
+            decoded.actions.map { it.id },
+        )
+        assertEquals(
+            listOf(null, "route", "choice", null, null, null),
+            decoded.actions.map { it.pickerSettingId },
+        )
     }
 
     @Test

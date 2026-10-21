@@ -21,6 +21,8 @@ sealed interface AppUpdateState {
 
     data class Downloading(val progress: Float) : AppUpdateState
 
+    data object AwaitingInstallPermission : AppUpdateState
+
     data object UpToDate : AppUpdateState
 
     data class Error(val message: String) : AppUpdateState
@@ -134,13 +136,20 @@ internal class AppUpdate(
     fun onInstallPermissionGranted() {
         val apk = downloadedApk
         if (apk != null) {
-            triggerInstall(apk)
+            triggerInstall(apk, requestPermission = false)
         } else {
             pendingPermissionRequest?.let { request -> downloadAndInstall(request) }
         }
     }
 
+    fun retryInstall() {
+        if (_state.value !is AppUpdateState.AwaitingInstallPermission) return
+        downloadedApk?.let { triggerInstall(it) }
+    }
+
     fun dismissState() {
+        downloadedApk = null
+        pendingPermissionRequest = null
         _state.value = AppUpdateState.Idle
     }
 
@@ -153,9 +162,10 @@ internal class AppUpdate(
     /** The settings screen's entry check: reports the result without touching [state]. */
     suspend fun checkOnStartup(): AppUpdateCheckResult = platform.check()
 
-    private fun triggerInstall(apk: File) {
+    private fun triggerInstall(apk: File, requestPermission: Boolean = true) {
         if (!platform.hasInstallPermission()) {
-            pendingPermissionRequest?.invoke()
+            _state.value = AppUpdateState.AwaitingInstallPermission
+            if (requestPermission) pendingPermissionRequest?.invoke()
             return
         }
         platform.startInstall(apk)

@@ -119,6 +119,33 @@ class OnlineReadingSessionTest {
     }
 
     @Test
+    fun `begin after finish cannot restart a session`() {
+        val session = session()
+        session.begin(location(0))
+        assertNotNull(session.finish(location(1)))
+
+        session.begin(location(2))
+        session.setChapterReady(true)
+        session.resumeSegment()
+        elapsedMs = 10_000L
+
+        assertTrue(session.isEnded)
+        assertNull(session.finish(location(3)))
+    }
+
+    @Test
+    fun `begin after finish before initialization cannot start a session`() {
+        val session = session()
+        assertNull(session.finish(null))
+
+        session.begin(location(0))
+
+        assertFalse(session.hasStarted)
+        assertTrue(session.isEnded)
+        assertNull(session.finish(null))
+    }
+
+    @Test
     fun `endedAt never precedes the start`() {
         val session = session()
         session.begin(location(0))
