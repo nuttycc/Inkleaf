@@ -23,7 +23,7 @@ class PluginToolTest(unittest.TestCase):
         plugins = plugin_tool.discover_plugins()
 
         self.assertEqual(
-            ["copycomic", "inkleaf-fixture", "zaimanhua"],
+            ["copycomic", "inkleaf-fixture", "jmcomic", "wnacg", "zaimanhua"],
             [plugin.name for plugin in plugins],
         )
         zaimanhua = next(plugin for plugin in plugins if plugin.name == "zaimanhua")
@@ -33,6 +33,8 @@ class PluginToolTest(unittest.TestCase):
         expected_entries = {
             "copycomic": ["main.js", "manifest.json"],
             "inkleaf-fixture": ["assets/icon.txt", "main.js", "manifest.json"],
+            "jmcomic": ["main.js", "manifest.json"],
+            "wnacg": ["main.js", "manifest.json"],
             "zaimanhua": ["main.js", "manifest.json"],
         }
 
@@ -59,7 +61,7 @@ class PluginToolTest(unittest.TestCase):
             )
 
             self.assertEqual(
-                ["copycomic-plugin-v0.4.1.zip", "zaimanhua-plugin-v0.1.0.zip"],
+                ["copycomic-plugin-v0.4.4.zip", "zaimanhua-plugin-v0.1.0.zip"],
                 [package.name for package in packages],
             )
 
@@ -85,7 +87,7 @@ class PluginToolTest(unittest.TestCase):
             plugin_tool.find_plugin("copycomic"),
             plugin_tool.find_plugin("zaimanhua"),
         ]
-        successful = plugin_tool.DIST_ROOT / "copycomic-plugin-v0.4.1.zip"
+        successful = plugin_tool.DIST_ROOT / "copycomic-plugin-v0.4.4.zip"
         with mock.patch.object(
             plugin_tool,
             "package_plugin",
@@ -93,7 +95,7 @@ class PluginToolTest(unittest.TestCase):
         ):
             with self.assertRaisesRegex(
                 plugin_tool.PluginToolError,
-                r"succeeded: copycomic-plugin-v0\.4\.1\.zip\):\n  - zaimanhua: broken",
+                r"succeeded: copycomic-plugin-v0\.4\.4\.zip\):\n  - zaimanhua: broken",
             ):
                 plugin_tool.package_plugins(plugins)
 
