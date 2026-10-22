@@ -23,7 +23,6 @@ class AppUpdateTest {
         var permissionGranted = true
         var permissionRequests = 0
         val installedApks = mutableListOf<File>()
-        val skippedVersions = mutableListOf<String>()
 
         override suspend fun check(): AppUpdateCheckResult {
             checkCalls += 1
@@ -40,10 +39,6 @@ class AppUpdateTest {
             afterProgress?.invoke()
             downloadFailure?.let { throw it }
             return downloadedApk
-        }
-
-        override suspend fun setSkippedVersion(version: String) {
-            skippedVersions += version
         }
 
         override fun hasInstallPermission(): Boolean = permissionGranted
@@ -239,20 +234,6 @@ class AppUpdateTest {
         assertEquals(AppUpdateState.Idle, update.state.value)
         assertTrue(platform.installedApks.isEmpty())
         assertEquals(1, platform.permissionRequests)
-    }
-
-    @Test
-    fun `skip remembers the version and returns to idle`() = runBlocking {
-        val platform = FakePlatform().apply {
-            checkResult = AppUpdateCheckResult.UpdateAvailable(entry())
-        }
-        val update = AppUpdate(this, platform)
-        update.check()?.join()
-
-        update.skipThisVersion()?.join()
-
-        assertEquals(listOf("2026.1018.1200"), platform.skippedVersions)
-        assertEquals(AppUpdateState.Idle, update.state.value)
     }
 
     @Test

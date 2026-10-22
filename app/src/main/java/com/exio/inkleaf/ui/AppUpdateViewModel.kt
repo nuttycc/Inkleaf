@@ -14,7 +14,6 @@ import com.exio.inkleaf.update.AppUpdateChecker
 import com.exio.inkleaf.update.AppUpdateEntry
 import com.exio.inkleaf.update.AppUpdateInstaller
 import com.exio.inkleaf.update.AppUpdatePlatform
-import com.exio.inkleaf.update.AppUpdateSettings
 import com.exio.inkleaf.update.AppUpdateState
 import java.io.File
 import kotlinx.coroutines.flow.StateFlow
@@ -24,10 +23,8 @@ class AppUpdateViewModel(app: Application) : AndroidViewModel(app) {
 
     private val platform =
         object : AppUpdatePlatform {
-            private val settings = AppUpdateSettings(app)
-
             override suspend fun check(): AppUpdateCheckResult =
-                AppUpdateChecker(app, application.onlineImageCallFactory, settings).check()
+                AppUpdateChecker(app, application.onlineImageCallFactory).check()
 
             override suspend fun download(
                 entry: AppUpdateEntry,
@@ -35,10 +32,6 @@ class AppUpdateViewModel(app: Application) : AndroidViewModel(app) {
             ): File =
                 AppUpdateApkDownloader(app, application.onlineImageCallFactory)
                     .download(entry, onProgress)
-
-            override suspend fun setSkippedVersion(version: String) {
-                settings.setSkippedVersion(version)
-            }
 
             override fun hasInstallPermission(): Boolean =
                 AppUpdateInstaller.hasInstallPermission(app)
@@ -60,10 +53,6 @@ class AppUpdateViewModel(app: Application) : AndroidViewModel(app) {
         update.downloadAndInstall {
             installPermissionLauncher.launch(AppUpdateInstaller.createPermissionIntent(application))
         }
-    }
-
-    fun skipThisVersion() {
-        update.skipThisVersion()
     }
 
     fun onInstallPermissionGranted() {

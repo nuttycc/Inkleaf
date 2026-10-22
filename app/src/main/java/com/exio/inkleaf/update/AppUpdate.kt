@@ -37,8 +37,6 @@ internal interface AppUpdatePlatform {
         onProgress: (ApkDownloadProgress) -> Unit,
     ): File
 
-    suspend fun setSkippedVersion(version: String)
-
     fun hasInstallPermission(): Boolean
 
     fun startInstall(apk: File)
@@ -121,15 +119,6 @@ internal class AppUpdate(
                 _state.value =
                     AppUpdateState.Error("下载失败: ${error.message ?: "未知错误"}")
             }
-        }
-    }
-
-    fun skipThisVersion(): Job? {
-        val current = _state.value
-        if (current !is AppUpdateState.UpdateAvailable) return null
-        return scope.launch {
-            platform.setSkippedVersion(current.version)
-            _state.value = AppUpdateState.Idle
         }
     }
 

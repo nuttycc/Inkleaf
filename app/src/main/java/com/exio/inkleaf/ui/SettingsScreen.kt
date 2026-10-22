@@ -46,6 +46,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.exio.inkleaf.DeveloperMode
 import com.exio.inkleaf.data.CacheLimit
 import com.exio.inkleaf.data.ThemeSettings
+import com.exio.inkleaf.update.AppUpdateCheckResult
 import com.exio.inkleaf.update.AppUpdateState
 import com.ms.square.debugoverlay.DebugOverlay
 
@@ -74,6 +75,7 @@ fun SettingsScreen(
     var showClearOnlineCacheDialog by rememberSaveable { mutableStateOf(false) }
     var showAboutSheet by remember { mutableStateOf(false) }
     var showFoldersSheet by rememberSaveable { mutableStateOf(false) }
+    var inlineUpdateVersion by rememberSaveable { mutableStateOf<String?>(null) }
     val lastPickedFolder by foldersViewModel.lastPickedFolder.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -85,11 +87,17 @@ fun SettingsScreen(
         }
 
     LaunchedEffect(Unit) {
-        val result = updateViewModel.checkOnStartup()
-        when (result) {
-            is com.exio.inkleaf.update.AppUpdateCheckResult.UpdateAvailable -> {
-                snackbarHostState.showSnackbar("发现新版本 ${result.entry.version}")
-            }
+        when (val result = updateViewModel.checkOnStartup()) {
+            is AppUpdateCheckResult.UpdateAvailable -> inlineUpdateVersion = result.entry.version
+            is AppUpdateCheckResult.UpToDate -> inlineUpdateVersion = null
+            is AppUpdateCheckResult.Error -> Unit
+        }
+    }
+
+    LaunchedEffect(updateState) {
+        when (val state = updateState) {
+            is AppUpdateState.UpdateAvailable -> inlineUpdateVersion = state.version
+            is AppUpdateState.UpToDate -> inlineUpdateVersion = null
             else -> {}
         }
     }
@@ -200,7 +208,9 @@ fun SettingsScreen(
                         is AppUpdateState.UpdateAvailable -> "发现新版本"
                         is AppUpdateState.Error -> "检查失败，点击重试"
                         is AppUpdateState.UpToDate -> "已是最新版本"
-                        else -> "当前版本: ${appVersionName(context)}"
+                        is AppUpdateState.Idle ->
+                            inlineUpdateVersion?.let { "发现新版本 $it（点击更新）" }
+                                ?: "当前版本: ${appVersionName(context)}"
                     },
                 onClick = { updateViewModel.checkForUpdate() },
             )
@@ -295,14 +305,7 @@ fun SettingsScreen(
                     ) { Text("下载更新") }
                 },
                 dismissButton = {
-                    Column {
-                        TextButton(onClick = { updateViewModel.skipThisVersion() }) {
-                            Text("跳过此版本")
-                        }
-                        TextButton(onClick = { updateViewModel.dismissState() }) {
-                            Text("取消")
-                        }
-                    }
+                    TextButton(onClick = { updateViewModel.dismissState() }) { Text("取消") }
                 },
             )
         }

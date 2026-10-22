@@ -5,7 +5,6 @@ import android.content.pm.PackageManager
 import android.os.Build
 import java.io.IOException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import okhttp3.Call
 import okhttp3.Request
@@ -18,8 +17,6 @@ import okhttp3.Request
 class AppUpdateChecker(
     private val context: Context,
     private val callFactory: Call.Factory,
-    private val settings: AppUpdateSettings,
-    private val clock: () -> Long = System::currentTimeMillis,
 ) {
     suspend fun check(): AppUpdateCheckResult =
         withContext(Dispatchers.IO) {
@@ -37,17 +34,11 @@ class AppUpdateChecker(
             val currentCode = installedVersionCode(context)
             if (entry.versionCode <= currentCode) return@withContext AppUpdateCheckResult.UpToDate
 
-            val skipped = settings.skippedVersion.first()
-            if (skipped != null && skipped == entry.version) {
-                return@withContext AppUpdateCheckResult.UpToDate
-            }
-
-            settings.setLastCheckMs(clock())
             AppUpdateCheckResult.UpdateAvailable(entry)
         }
 
     private suspend fun fetchManifest(): AppUpdateManifest {
-        val request = Request.Builder().url(AppUpdateSettings.MANIFEST_URL).build()
+        val request = Request.Builder().url(MANIFEST_URL).build()
         val response = callFactory.newCall(request).execute()
         response.use { result ->
             if (!result.isSuccessful) {
@@ -62,6 +53,8 @@ class AppUpdateChecker(
     }
 
     companion object {
+        private const val MANIFEST_URL =
+            "https://raw.githubusercontent.com/nuttycc/inkleaf/main/app-update.json"
         private const val MAX_MANIFEST_BYTES = 64 * 1024
     }
 }
