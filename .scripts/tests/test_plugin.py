@@ -70,14 +70,14 @@ class PluginToolTest(unittest.TestCase):
         ]
 
         with self.assertRaisesRegex(plugin_tool.PluginToolError, "one plugin"):
-            plugin_tool.package_plugins(plugins, output="plugin-fixtures/dist/custom.zip")
+            plugin_tool.package_plugins(plugins, output="plugin-sources/dist/custom.zip")
 
     def test_output_directory_is_rejected_for_one_plugin(self) -> None:
         plugin = plugin_tool.find_plugin("copycomic")
 
         with self.assertRaisesRegex(plugin_tool.PluginToolError, "multiple plugins"):
             plugin_tool.package_plugins(
-                [plugin], output_directory="plugin-fixtures/dist/release"
+                [plugin], output_directory="plugin-sources/dist/release"
             )
 
     def test_batch_failure_reports_packages_that_succeeded(self) -> None:
@@ -141,7 +141,7 @@ class PluginToolTest(unittest.TestCase):
 
         with self.assertRaisesRegex(plugin_tool.PluginToolError, "staging directory"):
             plugin_tool.resolve_output_path(
-                plugin, "plugin-fixtures/dist/build/copycomic/nested.zip"
+                plugin, "plugin-sources/dist/build/copycomic/nested.zip"
             )
 
     def test_output_directory_link_is_rejected(self) -> None:

@@ -12,7 +12,7 @@ local.properties
 *.keystore
 !app/debug.keystore
 /app/release/
-/plugin-fixtures/dist/
+/plugin-sources/dist/
 __pycache__/
 *.py[cod]
 

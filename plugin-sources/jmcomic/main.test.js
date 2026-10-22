@@ -2,7 +2,7 @@
 
 // Offline unit tests for the 禁漫天堂 source. No network.
 //
-//   node plugin-fixtures/jmcomic/main.test.js
+//   node plugin-sources/jmcomic/main.test.js
 //
 // Every API reply travels in the site's real envelope: the model is AES-256-ECB encrypted under
 // md5(ts + secret) with the ts taken from the request's own tokenparam header, so signing and

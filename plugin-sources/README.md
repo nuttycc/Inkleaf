@@ -33,7 +33,7 @@ For non-interactive use, select actions and plugins explicitly:
 python .scripts/plugin.py package copycomic
 python .scripts/plugin.py package copycomic zaimanhua
 python .scripts/plugin.py package --all
-python .scripts/plugin.py package --all --output-dir plugin-fixtures/dist/release
+python .scripts/plugin.py package --all --output-dir plugin-sources/dist/release
 python .scripts/plugin.py deploy copycomic
 python .scripts/plugin.py deploy zaimanhua --serial emulator-5554 `
   --package-id com.exio.inkleaf.debug
@@ -51,7 +51,7 @@ one plugin; `--output-dir` is available when packaging multiple plugins.
 Every checked-in plugin uses the same source layout:
 
 ```text
-plugin-fixtures/<plugin>/
+plugin-sources/<plugin>/
 |-- manifest.json
 |-- src/
 |   `-- main.js
@@ -61,7 +61,7 @@ plugin-fixtures/<plugin>/
 
 `plugin.build.json` is not part of the plugin distribution protocol. It can
 declare a shared runtime that the tool prepends to `src/main.js`; `zaimanhua`
-uses this to include `plugin-fixtures/shared/runtime.js` without committing a
+uses this to include `plugin-sources/shared/runtime.js` without committing a
 generated file. The resulting ZIP always has the host-facing layout:
 
 ```text
@@ -70,7 +70,7 @@ main.js
 assets/                     # optional
 ```
 
-Packages are written below `plugin-fixtures/dist/` as
+Packages are written below `plugin-sources/dist/` as
 `<plugin>-plugin-v<manifest.version>.zip`. The tool rebuilds each staging
 directory from scratch so removed assets cannot remain in a later ZIP. ZIP
 entries carry a fixed 1980 timestamp, so rebuilding unchanged source produces
@@ -117,7 +117,7 @@ feeds, detail, chapter listing, reading, source settings, and route health check
 Its dependency-free transformation and host-body tests run separately:
 
 ```powershell
-node plugin-fixtures/copycomic/main.test.js
+node plugin-sources/copycomic/main.test.js
 ```
 
 The versioned deployment ZIP is retained under `/sdcard/Download/Inkleaf/` for

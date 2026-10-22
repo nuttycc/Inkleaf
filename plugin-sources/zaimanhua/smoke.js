@@ -3,7 +3,7 @@
 // Manual smoke check for the 再漫画 source. NOT part of the test suite: it hits the real site, so it
 // is slow, non-deterministic, and will fail whenever the network or the site is down.
 //
-//   node plugin-fixtures/zaimanhua/smoke.js
+//   node plugin-sources/zaimanhua/smoke.js
 //
 // Two jobs:
 //   1. Prove the plugin still works end to end against the live API.

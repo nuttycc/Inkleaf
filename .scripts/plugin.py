@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Package and deploy Inkleaf plugins from one cross-platform entry point.
 
-Plugin source lives at ``plugin-fixtures/<name>/src/main.js``. Optional
+Plugin source lives at ``plugin-sources/<name>/src/main.js``. Optional
 ``plugin.build.json`` data affects only the build; every ZIP exposes the same
 root-level ``manifest.json`` and ``main.js`` contract to the Android host.
 """
@@ -41,7 +41,7 @@ BROADCAST_RESULT_PATTERN = re.compile(
 
 SCRIPT_DIRECTORY = Path(__file__).resolve().parent
 REPOSITORY_ROOT = SCRIPT_DIRECTORY.parent
-FIXTURES_ROOT = REPOSITORY_ROOT / "plugin-fixtures"
+FIXTURES_ROOT = REPOSITORY_ROOT / "plugin-sources"
 DIST_ROOT = FIXTURES_ROOT / "dist"
 INTERACTIVE_REQUIREMENTS = SCRIPT_DIRECTORY / "requirements.txt"
 # ZIP cannot store a date before 1980; pinning it keeps builds reproducible.
@@ -266,7 +266,7 @@ def resolve_output_path(plugin: Plugin, value: str | None) -> Path:
     candidate = (
         Path(value)
         if value
-        else Path("plugin-fixtures/dist") / versioned_package_name(plugin)
+        else Path("plugin-sources/dist") / versioned_package_name(plugin)
     )
     if not candidate.is_absolute():
         candidate = REPOSITORY_ROOT / candidate
@@ -332,7 +332,7 @@ def stage_plugin(plugin: Plugin) -> Path:
         runtime_text = plugin.runtime.read_text(encoding="utf-8")
         generated = (
             "// GENERATED FILE -- do not edit.\n"
-            f"// Built from plugin-fixtures/{plugin.name}/src/main.js.\n"
+            f"// Built from plugin-sources/{plugin.name}/src/main.js.\n"
             "(function () {\n"
             '  "use strict";\n'
             f"{runtime_text}\n{source_text}\n"
@@ -1190,29 +1190,29 @@ def build_parser() -> argparse.ArgumentParser:
         "plugins",
         nargs="*",
         metavar="plugin",
-        help="Directory names below plugin-fixtures.",
+        help="Directory names below plugin-sources.",
     )
     package_parser.add_argument(
         "--all", action="store_true", help="Package every discovered plugin."
     )
     output_group = package_parser.add_mutually_exclusive_group()
     output_group.add_argument(
-        "--output", help="ZIP path for a single plugin below plugin-fixtures/dist."
+        "--output", help="ZIP path for a single plugin below plugin-sources/dist."
     )
     output_group.add_argument(
         "--output-dir",
-        help="Output directory for multiple versioned ZIPs below plugin-fixtures/dist.",
+        help="Output directory for multiple versioned ZIPs below plugin-sources/dist.",
     )
 
     deploy_parser = subparsers.add_parser(
         "deploy", help="Package, push, install, and activate a plugin over ADB."
     )
-    deploy_parser.add_argument("plugin", help="Directory name below plugin-fixtures.")
+    deploy_parser.add_argument("plugin", help="Directory name below plugin-sources.")
     deploy_parser.add_argument(
         "--serial", help="ADB device serial; required when several are ready."
     )
     deploy_parser.add_argument("--device-directory", default=DEFAULT_DEVICE_DIRECTORY)
-    deploy_parser.add_argument("--output", help="ZIP path below plugin-fixtures/dist.")
+    deploy_parser.add_argument("--output", help="ZIP path below plugin-sources/dist.")
     deploy_parser.add_argument("--package-id", default=DEFAULT_PACKAGE_ID)
 
     publish_parser = subparsers.add_parser(
@@ -1220,7 +1220,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Build plugins, update the repository index, and optionally push the release.",
     )
     publish_parser.add_argument(
-        "plugins", nargs="+", metavar="plugin", help="Directory names below plugin-fixtures."
+        "plugins", nargs="+", metavar="plugin", help="Directory names below plugin-sources."
     )
     publish_parser.add_argument(
         "--repo-dir",

@@ -2,7 +2,7 @@
 
 // Offline unit tests for the 紳士漫畫 (WNACG) source. No network.
 //
-//   node plugin-fixtures/wnacg/main.test.js
+//   node plugin-sources/wnacg/main.test.js
 //
 // The samples are hand-written from pages recorded off the live site (see smoke.js for the live
 // counterpart). They keep the markup quirks the parser exists to survive: a `.info` div that is

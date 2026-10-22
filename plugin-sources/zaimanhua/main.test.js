@@ -3,7 +3,7 @@
 // Offline unit tests for the 再漫画 source. No network: every response comes from a recorded
 // fixture (see docs/sources/zaimanhua.md for how to re-record them).
 //
-//   node plugin-fixtures/zaimanhua/main.test.js
+//   node plugin-sources/zaimanhua/main.test.js
 //
 // Scope is deliberately narrow -- the parsing layer, one structural-failure case, and one check
 // that settings actually reach the wire. Live-site behaviour is smoke.js's job, not this file's.
