@@ -19,6 +19,11 @@ SPEC.loader.exec_module(plugin_tool)
 
 
 class PluginToolTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        # Temporary build directories live below the ignored dist root.
+        plugin_tool.DIST_ROOT.mkdir(parents=True, exist_ok=True)
+
     def test_current_plugins_are_discoverable(self) -> None:
         plugins = plugin_tool.discover_plugins()
 
