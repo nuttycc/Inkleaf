@@ -13,8 +13,11 @@ import com.exio.inkleaf.plugin.OnlineContentRepository
 import com.exio.inkleaf.plugin.OnlineReadingPosition
 import com.exio.inkleaf.plugin.OnlineUserReference
 import com.exio.inkleaf.plugin.PluginActionDescriptor
+import com.exio.inkleaf.plugin.PluginActionKind
 import com.exio.inkleaf.plugin.PluginActionRequest
 import com.exio.inkleaf.plugin.PluginActionScope
+import com.exio.inkleaf.plugin.PluginErrorCode
+import com.exio.inkleaf.plugin.PluginFilterOption
 import com.exio.inkleaf.plugin.PluginChapterRequest
 import com.exio.inkleaf.plugin.PluginContentCodec
 import com.exio.inkleaf.plugin.PluginDetailRequest
@@ -56,6 +59,30 @@ internal data class OnlineComicUiState(
 /** Transient result of a comic action, shown once and then consumed by the screen. */
 internal data class OnlineComicActionFeedback(val message: String, val isError: Boolean)
 
+internal enum class FavoriteSheetAction {
+    ADD,
+    REMOVE,
+}
+
+/** The account-favorite sheet: the add action's folder choices and the remove action. */
+internal data class OnlineFavoriteSheetState(
+    val addAction: PluginActionDescriptor? = null,
+    val removeAction: PluginActionDescriptor? = null,
+    val options: List<PluginFilterOption> = emptyList(),
+    val selectedOptionId: String? = null,
+    val isLoading: Boolean = false,
+    val runningAction: FavoriteSheetAction? = null,
+    val errorMessage: String? = null,
+    val authRequired: Boolean = false,
+    val canRetryOptions: Boolean = false,
+) {
+    val needsOptions: Boolean
+        get() = addAction?.optionTitle != null
+
+    val isRunning: Boolean
+        get() = runningAction != null
+}
+
 internal suspend fun observeOnlineComicPosition(
     repository: OnlineContentRepository,
     pluginId: String,
@@ -84,6 +111,7 @@ internal class OnlineComicViewModel(
     private var persistedBookmarkState = false
     private var refreshJob: Job? = null
     private var comicActionJob: Job? = null
+    private var favoriteJob: Job? = null
     private var refreshGeneration = 0
 
     private val _state =
@@ -99,6 +127,9 @@ internal class OnlineComicViewModel(
 
     private val _actionFeedback = MutableStateFlow<OnlineComicActionFeedback?>(null)
     val actionFeedback: StateFlow<OnlineComicActionFeedback?> = _actionFeedback.asStateFlow()
+
+    private val _favoriteSheet = MutableStateFlow<OnlineFavoriteSheetState?>(null)
+    val favoriteSheet: StateFlow<OnlineFavoriteSheetState?> = _favoriteSheet.asStateFlow()
 
     init {
         viewModelScope.launch {
@@ -155,6 +186,195 @@ internal class OnlineComicViewModel(
             }
         }
     }
+
+    /**
+     * Opens the account-favorite sheet. The add action may need runtime choices (folder lists),
+     * which are fetched before the sheet can offer a primary action.
+     */
+    fun openFavoriteSheet() {
+        if (_favoriteSheet.value != null) return
+        val favoriteActions =
+            _state.value.comicActions.filter { it.kind == PluginActionKind.FAVORITE }
+        val addAction = favoriteActions.firstOrNull { !it.destructive }
+        val removeAction = favoriteActions.firstOrNull { it.destructive }
+        if (addAction == null && removeAction == null) return
+
+        _favoriteSheet.value =
+            OnlineFavoriteSheetState(
+                addAction = addAction,
+                removeAction = removeAction,
+                isLoading = addAction?.optionTitle != null,
+            )
+        if (addAction?.optionTitle != null) loadFavoriteOptions(addAction)
+    }
+
+    fun dismissFavoriteSheet() {
+        if (_favoriteSheet.value?.isRunning == true) return
+        favoriteJob?.cancel()
+        favoriteJob = null
+        _favoriteSheet.value = null
+    }
+
+    fun selectFavoriteOption(optionId: String) {
+        val sheet = _favoriteSheet.value ?: return
+        if (sheet.options.none { it.id == optionId }) return
+        _favoriteSheet.value = sheet.copy(selectedOptionId = optionId)
+    }
+
+    fun retryFavoriteOptions() {
+        val action = _favoriteSheet.value?.addAction ?: return
+        if (action.optionTitle == null) return
+        loadFavoriteOptions(action)
+    }
+
+    fun addAccountFavorite() {
+        val sheet = _favoriteSheet.value ?: return
+        val action = sheet.addAction ?: return
+        if (sheet.isRunning) return
+        val optionId = sheet.selectedOptionId
+        favoriteJob?.cancel()
+        favoriteJob =
+            viewModelScope.launch {
+                _favoriteSheet.value =
+                    _favoriteSheet.value?.copy(
+                        runningAction = FavoriteSheetAction.ADD,
+                        errorMessage = null,
+                    )
+                try {
+                    val result =
+                        application.pluginCatalog.invokeAction(
+                            pluginId,
+                            PluginActionRequest(
+                                actionId = action.id,
+                                input =
+                                    buildJsonObject {
+                                        put("sourceId", sourceId)
+                                        optionId?.let {
+                                            put(PluginActionDescriptor.OPTION_INPUT_ID, it)
+                                        }
+                                    },
+                            ),
+                        )
+                    val folderTitle = sheet.options.firstOrNull { it.id == optionId }?.title
+                    application.pluginBrowseRepository.clear(pluginId)
+                    _favoriteSheet.value = null
+                    _actionFeedback.value =
+                        OnlineComicActionFeedback(
+                            message =
+                                if (folderTitle != null) {
+                                    "已加入「$folderTitle」"
+                                } else {
+                                    sourceActionMessage(result, action.title)
+                                },
+                            isError = false,
+                        )
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    publishFavoriteFailure(error)
+                }
+            }
+    }
+
+    fun removeAccountFavorite() {
+        val sheet = _favoriteSheet.value ?: return
+        val action = sheet.removeAction ?: return
+        if (sheet.isRunning) return
+        favoriteJob?.cancel()
+        favoriteJob =
+            viewModelScope.launch {
+                _favoriteSheet.value =
+                    _favoriteSheet.value?.copy(
+                        runningAction = FavoriteSheetAction.REMOVE,
+                        errorMessage = null,
+                    )
+                try {
+                    val result =
+                        application.pluginCatalog.invokeAction(
+                            pluginId,
+                            PluginActionRequest(
+                                actionId = action.id,
+                                input = buildJsonObject { put("sourceId", sourceId) },
+                            ),
+                        )
+                    _favoriteSheet.value = null
+                    _actionFeedback.value =
+                        OnlineComicActionFeedback(
+                            sourceActionMessage(result, action.title),
+                            isError = false,
+                        )
+                    application.pluginBrowseRepository.clear(pluginId)
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    publishFavoriteFailure(error)
+                }
+            }
+    }
+
+    private fun loadFavoriteOptions(action: PluginActionDescriptor) {
+        favoriteJob?.cancel()
+        favoriteJob =
+            viewModelScope.launch {
+                _favoriteSheet.value =
+                    _favoriteSheet.value?.copy(
+                        isLoading = true,
+                        errorMessage = null,
+                        authRequired = false,
+                        canRetryOptions = false,
+                    )
+                try {
+                    val result =
+                        application.pluginCatalog.actionOptions(
+                            pluginId,
+                            PluginActionRequest(
+                                actionId = action.id,
+                                input = buildJsonObject { put("sourceId", sourceId) },
+                            ),
+                        )
+                    _favoriteSheet.value =
+                        _favoriteSheet.value?.copy(
+                            options = result.options,
+                            selectedOptionId =
+                                result.selected ?: result.options.firstOrNull()?.id,
+                            isLoading = false,
+                        )
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    val authRequired =
+                        (error as? PluginRpcException)?.error?.code ==
+                            PluginErrorCode.AUTH_REQUIRED
+                    _favoriteSheet.value =
+                        _favoriteSheet.value?.copy(
+                            isLoading = false,
+                            errorMessage = favoriteErrorMessage(error, authRequired),
+                            authRequired = authRequired,
+                            canRetryOptions = !authRequired,
+                        )
+                }
+            }
+    }
+
+    private fun publishFavoriteFailure(error: Exception) {
+        val authRequired =
+            (error as? PluginRpcException)?.error?.code == PluginErrorCode.AUTH_REQUIRED
+        _favoriteSheet.value =
+            _favoriteSheet.value?.copy(
+                runningAction = null,
+                isLoading = false,
+                errorMessage = favoriteErrorMessage(error, authRequired),
+                authRequired = authRequired,
+                canRetryOptions = false,
+            )
+    }
+
+    private fun favoriteErrorMessage(error: Exception, authRequired: Boolean): String =
+        if (authRequired) {
+            error.message?.takeIf { it.isNotBlank() } ?: error.toContentLoadError().message
+        } else {
+            error.toContentLoadError().message
+        }
 
     private fun loadComicActions() {
         viewModelScope.launch {

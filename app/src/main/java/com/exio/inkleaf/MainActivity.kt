@@ -603,6 +603,11 @@ class MainActivity : AppCompatActivity() {
                                             onOpenSources = {
                                                 outerNavController.navigate(SourcesRoute)
                                             },
+                                            onOpenSource = { pluginId ->
+                                                outerNavController.navigate(
+                                                    SourceDetailRoute(pluginId)
+                                                )
+                                            },
                                         )
                                     }
                                 }
@@ -748,6 +753,9 @@ class MainActivity : AppCompatActivity() {
                                             initialPageIndex = position.pageIndex,
                                         )
                                     )
+                                },
+                                onOpenSource = {
+                                    outerNavController.navigate(SourceDetailRoute(route.pluginId))
                                 },
                             )
                         }

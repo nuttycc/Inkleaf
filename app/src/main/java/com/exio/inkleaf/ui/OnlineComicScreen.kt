@@ -73,6 +73,7 @@ import com.exio.inkleaf.InkleafApplication
 import com.exio.inkleaf.R
 import com.exio.inkleaf.plugin.ChapterSummary
 import com.exio.inkleaf.plugin.OnlineReadingPosition
+import com.exio.inkleaf.plugin.PluginActionKind
 import kotlinx.serialization.json.JsonElement
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -85,6 +86,7 @@ fun OnlineComicScreen(
     onBack: () -> Unit,
     onOpenChapter: (ChapterSummary, JsonElement?) -> Unit,
     onContinueReading: ((OnlineReadingPosition) -> Unit)? = null,
+    onOpenSource: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val application = LocalContext.current.applicationContext as InkleafApplication
@@ -101,9 +103,16 @@ fun OnlineComicScreen(
         }
     val state by viewModel.state.collectAsStateWithLifecycle()
     val actionFeedback by viewModel.actionFeedback.collectAsStateWithLifecycle()
+    val favoriteSheet by viewModel.favoriteSheet.collectAsStateWithLifecycle()
     val detail = state.detail
     val chapters = state.chapters
     val comicActions = state.comicActions
+    val favoriteActions =
+        remember(comicActions) { comicActions.filter { it.kind == PluginActionKind.FAVORITE } }
+    val otherComicActions =
+        remember(comicActions) {
+            comicActions.filterNot { it.kind == PluginActionKind.FAVORITE }
+        }
     var isDescriptionExpanded by remember { mutableStateOf(false) }
     var isAscending by remember { mutableStateOf(true) }
     var isActionsMenuExpanded by remember { mutableStateOf(false) }
@@ -137,7 +146,7 @@ fun OnlineComicScreen(
                     }
                 },
                 actions = {
-                    if (comicActions.isNotEmpty()) {
+                    if (otherComicActions.isNotEmpty()) {
                         Box {
                             IconButton(
                                 onClick = { isActionsMenuExpanded = true },
@@ -149,7 +158,7 @@ fun OnlineComicScreen(
                                 expanded = isActionsMenuExpanded && !state.isComicActionRunning,
                                 onDismissRequest = { isActionsMenuExpanded = false },
                             ) {
-                                comicActions.forEach { action ->
+                                otherComicActions.forEach { action ->
                                     DropdownMenuItem(
                                         text = {
                                             Text(
@@ -243,7 +252,7 @@ fun OnlineComicScreen(
                                         )
                                     }
 
-                                // Right: Title, Author, Source & Bookmark Action
+                                // Right: title, source, and the two save actions.
                                 Column(
                                     modifier = Modifier.weight(1f).height(120.dp),
                                     verticalArrangement = Arrangement.SpaceBetween,
@@ -256,93 +265,44 @@ fun OnlineComicScreen(
                                             maxLines = 2,
                                             overflow = TextOverflow.Ellipsis,
                                         )
-
-                                        comic.subtitle
-                                            ?.takeIf { it.isNotBlank() }
-                                            ?.let { author ->
-                                                Text(
-                                                    text = author,
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis,
-                                                )
-                                            }
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        ) {
+                                            OnlineSourceChip(state.sourceName)
+                                            comic.subtitle
+                                                ?.takeIf { it.isNotBlank() }
+                                                ?.let { author ->
+                                                    Text(
+                                                        text = author,
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color =
+                                                            MaterialTheme.colorScheme
+                                                                .onSurfaceVariant,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis,
+                                                        modifier = Modifier.weight(1f),
+                                                    )
+                                                }
+                                        }
                                     }
 
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
-                                        Surface(
-                                            color = MaterialTheme.colorScheme.primaryContainer,
-                                            contentColor =
-                                                MaterialTheme.colorScheme.onPrimaryContainer,
-                                            shape = RoundedCornerShape(6.dp),
-                                        ) {
-                                            Text(
-                                                text = state.sourceName,
-                                                style = MaterialTheme.typography.labelMedium,
-                                                modifier =
-                                                    Modifier.padding(
-                                                        horizontal = 8.dp,
-                                                        vertical = 4.dp,
-                                                    ),
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
+                                        OnlineShelfAction(
+                                            isBookmarked = state.isBookmarked,
+                                            onClick = viewModel::toggleBookmark,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        if (favoriteActions.isNotEmpty()) {
+                                            OnlineFavoriteAction(
+                                                onClick = viewModel::openFavoriteSheet,
+                                                enabled = !state.isComicActionRunning,
+                                                modifier = Modifier.weight(1f),
                                             )
-                                        }
-
-                                        // Quick Bookmark Action
-                                        if (state.isBookmarked) {
-                                            FilledTonalButton(
-                                                onClick = viewModel::toggleBookmark,
-                                                contentPadding =
-                                                    PaddingValues(
-                                                        horizontal = 10.dp,
-                                                        vertical = 4.dp,
-                                                    ),
-                                            ) {
-                                                Icon(
-                                                    painter =
-                                                        painterResource(
-                                                            MaterialSymbolsOutlinedR.drawable
-                                                                .materialsymbols_ic_library_add_check_outlined
-                                                        ),
-                                                    contentDescription = "已在书架",
-                                                    modifier = Modifier.size(16.dp),
-                                                )
-                                                Spacer(modifier = Modifier.width(4.dp))
-                                                Text(
-                                                    "已在书架",
-                                                    style = MaterialTheme.typography.labelMedium,
-                                                )
-                                            }
-                                        } else {
-                                            OutlinedButton(
-                                                onClick = viewModel::toggleBookmark,
-                                                contentPadding =
-                                                    PaddingValues(
-                                                        horizontal = 10.dp,
-                                                        vertical = 4.dp,
-                                                    ),
-                                            ) {
-                                                Icon(
-                                                    painter =
-                                                        painterResource(
-                                                            MaterialSymbolsOutlinedR.drawable
-                                                                .materialsymbols_ic_library_add_outlined
-                                                        ),
-                                                    contentDescription = "加入书架",
-                                                    modifier = Modifier.size(16.dp),
-                                                )
-                                                Spacer(modifier = Modifier.width(4.dp))
-                                                Text(
-                                                    "加入书架",
-                                                    style = MaterialTheme.typography.labelMedium,
-                                                )
-                                            }
                                         }
                                     }
                                 }
@@ -559,6 +519,111 @@ fun OnlineComicScreen(
                 )
             }
         }
+    }
+
+    favoriteSheet?.let { sheet ->
+        AccountFavoriteSheet(
+            state = sheet,
+            sourceName = state.sourceName,
+            comicTitle = detail?.title,
+            onSelectOption = viewModel::selectFavoriteOption,
+            onAdd = viewModel::addAccountFavorite,
+            onRemove = viewModel::removeAccountFavorite,
+            onRetry = viewModel::retryFavoriteOptions,
+            onSignIn = {
+                viewModel.dismissFavoriteSheet()
+                onOpenSource()
+            },
+            onDismiss = viewModel::dismissFavoriteSheet,
+        )
+    }
+}
+
+@Composable
+private fun OnlineSourceChip(name: String) {
+    Surface(
+        color = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        shape = RoundedCornerShape(6.dp),
+    ) {
+        Text(
+            text = name,
+            style = MaterialTheme.typography.labelMedium,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun OnlineShelfAction(
+    isBookmarked: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+    if (isBookmarked) {
+        FilledTonalButton(
+            onClick = onClick,
+            contentPadding = contentPadding,
+            modifier = modifier,
+        ) {
+            Icon(
+                painter =
+                    painterResource(
+                        MaterialSymbolsOutlinedR.drawable
+                            .materialsymbols_ic_library_add_check_outlined
+                    ),
+                contentDescription = "已在书架",
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text("书架", style = MaterialTheme.typography.labelMedium)
+        }
+    } else {
+        OutlinedButton(
+            onClick = onClick,
+            contentPadding = contentPadding,
+            modifier = modifier,
+        ) {
+            Icon(
+                painter =
+                    painterResource(
+                        MaterialSymbolsOutlinedR.drawable
+                            .materialsymbols_ic_library_add_outlined
+                    ),
+                contentDescription = "加入书架",
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text("书架", style = MaterialTheme.typography.labelMedium)
+        }
+    }
+}
+
+@Composable
+private fun OnlineFavoriteAction(
+    onClick: () -> Unit,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    OutlinedButton(
+        onClick = onClick,
+        enabled = enabled,
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+        modifier = modifier,
+    ) {
+        Icon(
+            painter =
+                painterResource(
+                    MaterialSymbolsOutlinedR.drawable.materialsymbols_ic_bookmark_heart_outlined
+                ),
+            contentDescription = null,
+            modifier = Modifier.size(16.dp),
+        )
+        Spacer(modifier = Modifier.width(4.dp))
+        Text("收藏", style = MaterialTheme.typography.labelMedium)
     }
 }
 
