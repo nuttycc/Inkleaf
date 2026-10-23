@@ -13,6 +13,7 @@ import com.exio.inkleaf.plugin.InstalledPlugin
 import com.exio.inkleaf.plugin.PluginBrowseCacheKey
 import com.exio.inkleaf.plugin.PluginBrowseRequest
 import com.exio.inkleaf.plugin.PluginFeedDescriptor
+import com.exio.inkleaf.plugin.PluginFilterDescriptor
 import com.exio.inkleaf.plugin.PluginSearchRequest
 import com.exio.inkleaf.plugin.PluginSearchResult
 import kotlinx.coroutines.CancellationException
@@ -138,6 +139,10 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
     private val _browseFilters = MutableStateFlow<Map<String, String>>(emptyMap())
     val browseFilters: StateFlow<Map<String, String>> = _browseFilters.asStateFlow()
 
+    /** Filters the loaded page introduced, such as an account's favorite folders. */
+    private val _dynamicFilters = MutableStateFlow<List<PluginFilterDescriptor>>(emptyList())
+    val dynamicFilters: StateFlow<List<PluginFilterDescriptor>> = _dynamicFilters.asStateFlow()
+
     private val _browseItems = MutableStateFlow<List<ComicSummary>>(emptyList())
     val browseItems: StateFlow<List<ComicSummary>> = _browseItems.asStateFlow()
 
@@ -150,6 +155,9 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
     private val _browseError = MutableStateFlow<String?>(null)
     val browseError: StateFlow<String?> = _browseError.asStateFlow()
 
+    private val _browseErrorCode = MutableStateFlow<String?>(null)
+    val browseErrorCode: StateFlow<String?> = _browseErrorCode.asStateFlow()
+
     private val _browseReady = MutableStateFlow(false)
     val browseReady: StateFlow<Boolean> = _browseReady.asStateFlow()
 
@@ -161,10 +169,12 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             browse.state.collect { state ->
                 _browseFilters.value = state.filters
+                _dynamicFilters.value = state.dynamicFilters
                 _browseItems.value = state.items
                 _browseNextCursor.value = state.nextCursor
                 _isBrowsing.value = state.isBrowsing
                 _browseError.value = state.error
+                _browseErrorCode.value = state.errorCode
                 _browseReady.value = state.ready
                 _browseFirstPageCommitRevision.value = state.firstPageCommitRevision
             }

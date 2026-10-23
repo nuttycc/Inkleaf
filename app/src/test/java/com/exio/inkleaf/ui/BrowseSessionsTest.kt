@@ -4,8 +4,11 @@ import com.exio.inkleaf.plugin.ComicSummary
 import com.exio.inkleaf.plugin.PluginBrowseCacheKey
 import com.exio.inkleaf.plugin.PluginBrowseCacheSnapshot
 import com.exio.inkleaf.plugin.PluginBrowseRequest
+import com.exio.inkleaf.plugin.PluginErrorCode
 import com.exio.inkleaf.plugin.PluginFilterDescriptor
 import com.exio.inkleaf.plugin.PluginFilterOption
+import com.exio.inkleaf.plugin.PluginRpcError
+import com.exio.inkleaf.plugin.PluginRpcException
 import com.exio.inkleaf.plugin.PluginSearchPage
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
@@ -81,8 +84,19 @@ class BrowseSessionsTest {
 
     private fun comic(id: String) = ComicSummary(sourceId = id, title = id)
 
-    private fun page(vararg ids: String, nextCursor: String? = null) =
-        PluginSearchPage(items = ids.map(::comic), nextCursor = nextCursor)
+    private fun page(
+        vararg ids: String,
+        nextCursor: String? = null,
+        filters: List<PluginFilterDescriptor> = emptyList(),
+    ) = PluginSearchPage(items = ids.map(::comic), nextCursor = nextCursor, filters = filters)
+
+    private val folderFilter =
+        PluginFilterDescriptor(
+            "folder",
+            "收藏夹",
+            type = "select",
+            options = listOf(PluginFilterOption("0", "全部"), PluginFilterOption("19", "韓漫")),
+        )
 
     private fun snapshot(
         page: PluginSearchPage,
@@ -325,6 +339,76 @@ class BrowseSessionsTest {
 
         sessions.rememberFilters("feed", mapOf("sort" to "gone"))
         assertEquals(mapOf("sort" to "new"), sessions.selectedFilters("feed", filters))
+    }
+
+    @Test
+    fun `first page publishes dynamic filters and a new target clears them`() = runBlocking {
+        val source =
+            FakeSource().apply { cached = snapshot(page("a", filters = listOf(folderFilter))) }
+        val sessions = BrowseSessions(this, source)
+        sessions.select(target()).also { it?.join() }
+
+        assertEquals(listOf("folder"), sessions.state.value.dynamicFilters.map { it.id })
+
+        sessions.select(BrowseTarget(null, null, emptyMap(), loadNow = true))
+
+        assertTrue(sessions.state.value.dynamicFilters.isEmpty())
+    }
+
+    @Test
+    fun `next page fills in dynamic filters and keeps them when a page omits them`() = runBlocking {
+        val source =
+            FakeSource().apply {
+                cached = snapshot(page("a", nextCursor = "c1"))
+                nextPage = page("b", nextCursor = "c2", filters = listOf(folderFilter))
+            }
+        val sessions = BrowseSessions(this, source)
+        sessions.select(target()).also { it?.join() }
+
+        sessions.loadMore()?.join()
+        assertEquals(listOf("folder"), sessions.state.value.dynamicFilters.map { it.id })
+
+        source.nextPage = page("c", nextCursor = "c3")
+        sessions.loadMore()?.join()
+        assertEquals(listOf("folder"), sessions.state.value.dynamicFilters.map { it.id })
+        assertEquals(listOf("a", "b", "c"), idsOf(sessions.state.value.items))
+    }
+
+    @Test
+    fun `browse failures expose the plugin error code`() = runBlocking {
+        val source =
+            FakeSource().apply {
+                failFirstPage =
+                    PluginRpcException(
+                        PluginRpcError(PluginErrorCode.AUTH_REQUIRED, "sign in first")
+                    )
+            }
+        val sessions = BrowseSessions(this, source)
+
+        sessions.select(target())?.join()
+
+        assertEquals(PluginErrorCode.AUTH_REQUIRED, sessions.state.value.errorCode)
+    }
+
+    @Test
+    fun `remembered dynamic filter selections survive declared filter resolution`() {
+        val declared =
+            listOf(
+                PluginFilterDescriptor(
+                    "sort",
+                    "Sort",
+                    options =
+                        listOf(PluginFilterOption("new", "New"), PluginFilterOption("hot", "Hot")),
+                )
+            )
+        val sessions = BrowseSessions(runBlockingScope(), FakeSource())
+
+        sessions.rememberFilters("feed", mapOf("sort" to "hot", "folder" to "19"))
+
+        assertEquals(
+            mapOf("sort" to "hot", "folder" to "19"),
+            sessions.selectedFilters("feed", declared),
+        )
     }
 
     @Test

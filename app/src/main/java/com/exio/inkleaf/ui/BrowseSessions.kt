@@ -5,6 +5,7 @@ import com.exio.inkleaf.plugin.PluginBrowseCacheKey
 import com.exio.inkleaf.plugin.PluginBrowseCacheSnapshot
 import com.exio.inkleaf.plugin.PluginBrowseRequest
 import com.exio.inkleaf.plugin.PluginFilterDescriptor
+import com.exio.inkleaf.plugin.PluginRpcException
 import com.exio.inkleaf.plugin.PluginSearchPage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -19,9 +20,12 @@ internal data class BrowseState(
     val items: List<ComicSummary> = emptyList(),
     val nextCursor: String? = null,
     val filters: Map<String, String> = emptyMap(),
+    /** Filters discovered from the loaded page, such as an account's folders. */
+    val dynamicFilters: List<PluginFilterDescriptor> = emptyList(),
     val ready: Boolean = false,
     val isBrowsing: Boolean = false,
     val error: String? = null,
+    val errorCode: String? = null,
     val firstPageCommitRevision: Long = 0L,
 )
 
@@ -117,15 +121,20 @@ internal class BrowseSessions(
         filters: List<PluginFilterDescriptor>,
     ): Map<String, String> {
         val remembered = filtersByFeed[sessionKey].orEmpty()
-        return filters
-            .mapNotNull { filter ->
-                val optionId =
-                    remembered[filter.id]?.takeIf { candidate ->
-                        filter.options.any { it.id == candidate }
-                    } ?: filter.options.firstOrNull()?.id
-                optionId?.let { filter.id to it }
-            }
-            .toMap()
+        val declaredIds = filters.mapTo(HashSet(filters.size)) { it.id }
+        val declared =
+            filters
+                .mapNotNull { filter ->
+                    val optionId =
+                        remembered[filter.id]?.takeIf { candidate ->
+                            filter.options.any { it.id == candidate }
+                        } ?: filter.options.firstOrNull()?.id
+                    optionId?.let { filter.id to it }
+                }
+                .toMap()
+        // Dynamic filters (an account's folders, for example) are only known after a page loads,
+        // so their remembered selections have no declared filter to resolve against.
+        return (declared + remembered.filterKeys { it !in declaredIds })
             .also { filtersByFeed[sessionKey] = it }
     }
 
@@ -154,7 +163,9 @@ internal class BrowseSessions(
         _state.value =
             _state.value.copy(
                 filters = next.filters,
+                dynamicFilters = emptyList(),
                 error = null,
+                errorCode = null,
                 isBrowsing = false,
                 ready = key == null || session != null,
                 items = session?.items.orEmpty(),
@@ -220,7 +231,14 @@ internal class BrowseSessions(
                         cacheGeneration == source.cacheGeneration(key.pluginId)
                 ) {
                     val items = (_state.value.items + page.items).distinctBy { it.sourceId }
-                    _state.value = _state.value.copy(items = items, nextCursor = page.nextCursor)
+                    _state.value =
+                        _state.value.copy(
+                            items = items,
+                            nextCursor = page.nextCursor,
+                            dynamicFilters =
+                                page.filters.ifEmpty { _state.value.dynamicFilters },
+                            errorCode = null,
+                        )
                     val firstPageFetchedAt = sessions[key]?.firstPageFetchedAtMs ?: 0L
                     val firstPageRevision = sessions[key]?.firstPageRevision.orEmpty()
                     sessions[key] =
@@ -237,7 +255,10 @@ internal class BrowseSessions(
             } catch (error: Throwable) {
                 if (loadGeneration == generation && key == target?.key) {
                     _state.value =
-                        _state.value.copy(error = error.message ?: "加载失败")
+                        _state.value.copy(
+                            error = error.message ?: "加载失败",
+                            errorCode = (error as? PluginRpcException)?.error?.code,
+                        )
                     failure = Failure.NEXT_PAGE
                 }
             } finally {
@@ -315,6 +336,7 @@ internal class BrowseSessions(
                     _state.value =
                         _state.value.copy(
                             error = error.message ?: "加载失败",
+                            errorCode = (error as? PluginRpcException)?.error?.code,
                             ready = true,
                         )
                     failure = Failure.FIRST_PAGE
@@ -339,6 +361,9 @@ internal class BrowseSessions(
             _state.value.copy(
                 items = snapshot.page.items,
                 nextCursor = snapshot.page.nextCursor,
+                dynamicFilters = snapshot.page.filters,
+                error = null,
+                errorCode = null,
                 ready = true,
                 firstPageCommitRevision =
                     if (changed) _state.value.firstPageCommitRevision + 1

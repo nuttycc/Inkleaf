@@ -89,8 +89,10 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
@@ -102,6 +104,7 @@ import com.exio.inkleaf.data.GridColumnsMode
 import com.exio.inkleaf.plugin.ComicSummary
 import com.exio.inkleaf.plugin.InstalledPlugin
 import com.exio.inkleaf.plugin.PageImage
+import com.exio.inkleaf.plugin.PluginErrorCode
 import com.exio.inkleaf.plugin.PluginFilterDescriptor
 import com.exio.inkleaf.plugin.PluginSearchResult
 import kotlinx.coroutines.flow.first
@@ -118,6 +121,7 @@ private const val LOAD_MORE_PREFETCH = 6
 fun PluginDiscoverScreen(
     onOpenComic: (String, ComicSummary) -> Unit = { _, _ -> },
     onOpenSources: () -> Unit = {},
+    onOpenSource: (String) -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: DiscoverViewModel = viewModel(),
 ) {
@@ -129,6 +133,8 @@ fun PluginDiscoverScreen(
     val feedLoadError by viewModel.feedLoadError.collectAsStateWithLifecycle()
     val selectedFeedKey by viewModel.selectedFeedKey.collectAsStateWithLifecycle()
     val browseFilters by viewModel.browseFilters.collectAsStateWithLifecycle()
+    val dynamicFilters by viewModel.dynamicFilters.collectAsStateWithLifecycle()
+    val browseErrorCode by viewModel.browseErrorCode.collectAsStateWithLifecycle()
     val browseItems by viewModel.browseItems.collectAsStateWithLifecycle()
     val browseNextCursor by viewModel.browseNextCursor.collectAsStateWithLifecycle()
     val isBrowsing by viewModel.isBrowsing.collectAsStateWithLifecycle()
@@ -179,6 +185,22 @@ fun PluginDiscoverScreen(
                 userOrder = feedOrder[selectedFeed?.pluginId].orEmpty(),
             ).mapNotNull { byKey[it] }
         }
+    // A page can introduce filters that describe() cannot know, such as an account's folders.
+    val dynamicFilterRows =
+        remember(selectedFeed, dynamicFilters) {
+            val declaredIds = selectedFeed?.descriptor?.filters.orEmpty().mapTo(HashSet()) { it.id }
+            dynamicFilters.filter { it.id !in declaredIds && it.options.size > 1 }
+        }
+    val browseAuthRequired = browseErrorCode == PluginErrorCode.AUTH_REQUIRED
+
+    // Coming back from the source's login screen should replace the sign-in state with the feed.
+    val latestBrowseAuthRequired by rememberUpdatedState(browseAuthRequired)
+    var hasResumedOnce by remember { mutableStateOf(false) }
+    LifecycleResumeEffect(Unit) {
+        if (hasResumedOnce && latestBrowseAuthRequired) viewModel.retryBrowse()
+        hasResumedOnce = true
+        onPauseOrDispose {}
+    }
 
     val contentAlpha = remember { Animatable(1f) }
     val isListLayout = layoutSettings.layout == DiscoverLayoutMode.LIST
@@ -433,6 +455,15 @@ fun PluginDiscoverScreen(
                                 },
                             )
                         }
+                    dynamicFilterRows.forEach { filter ->
+                        BrowseDynamicFilterRow(
+                            filter = filter,
+                            selectedOptionId = browseFilters[filter.id],
+                            onSelected = { optionId ->
+                                viewModel.selectBrowseFilter(filter.id, optionId)
+                            },
+                        )
+                    }
                 }
             }
         },
@@ -500,9 +531,13 @@ fun PluginDiscoverScreen(
                         browseError = browseError,
                         browseItems = browseItems,
                         isListLayout = isListLayout,
+                        emptyMessage = selectedFeed?.descriptor?.emptyMessage,
+                        authRequired = browseAuthRequired,
+                        sourceName = selectedFeed?.pluginName,
                         onOpenComic = onOpenComic,
                         onReloadFeeds = { viewModel.reloadFeeds() },
                         onRetryBrowse = { viewModel.retryBrowse() },
+                        onOpenSource = { selectedFeed?.let { onOpenSource(it.pluginId) } },
                     )
                 } else {
                     searchContent(
@@ -922,6 +957,7 @@ private fun LazyGridScope.discoverStructuralItem(
     message: String,
     onRetry: () -> Unit,
     retryLabel: String = "加载更多",
+    emptyMessage: String = "暂无内容",
 ) {
     item(span = { GridItemSpan(maxLineSpan) }) {
         when (item) {
@@ -942,7 +978,7 @@ private fun LazyGridScope.discoverStructuralItem(
                 )
             DiscoverStructuralItem.BROWSE_EMPTY ->
                 Text(
-                    "暂无内容",
+                    emptyMessage,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(vertical = 16.dp),
@@ -996,11 +1032,25 @@ private fun LazyGridScope.browseContent(
     browseError: String?,
     browseItems: List<ComicSummary>,
     isListLayout: Boolean,
+    emptyMessage: String?,
+    authRequired: Boolean,
+    sourceName: String?,
     onOpenComic: (String, ComicSummary) -> Unit,
     onReloadFeeds: () -> Unit,
     onRetryBrowse: () -> Unit,
+    onOpenSource: () -> Unit,
 ) {
     layout.leading.forEach { entry ->
+        if (entry == DiscoverStructuralItem.BROWSE_ERROR && authRequired) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                SourceSignInState(
+                    sourceName = sourceName.orEmpty(),
+                    message = browseError.orEmpty(),
+                    onSignIn = onOpenSource,
+                )
+            }
+            return@forEach
+        }
         when (entry) {
             DiscoverStructuralItem.FEED_LOADING,
             DiscoverStructuralItem.FEED_EMPTY_ERROR,
@@ -1010,7 +1060,13 @@ private fun LazyGridScope.browseContent(
                 discoverStructuralItem(entry, browseError.orEmpty(), onRetryBrowse)
             DiscoverStructuralItem.FEED_ERROR ->
                 discoverStructuralItem(entry, feedLoadError.orEmpty(), onReloadFeeds)
-            else -> discoverStructuralItem(entry, "", onRetryBrowse)
+            else ->
+                discoverStructuralItem(
+                    item = entry,
+                    message = "",
+                    onRetry = onRetryBrowse,
+                    emptyMessage = emptyMessage ?: "暂无内容",
+                )
         }
     }
 
@@ -1351,6 +1407,54 @@ private fun SearchEmptyState(modifier: Modifier = Modifier) {
     }
 }
 
+/**
+ * A page-supplied filter, such as an account's folders. These options arrive with the first page
+ * and act more like shelves than like the feed's own categorical filters, so they read as chips.
+ */
+@Composable
+private fun BrowseDynamicFilterRow(
+    filter: PluginFilterDescriptor,
+    selectedOptionId: String?,
+    onSelected: (String) -> Unit,
+) {
+    val selectedId = selectedOptionId ?: filter.options.firstOrNull()?.id
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = filter.title,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 16.dp, end = 4.dp),
+        )
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(end = 16.dp),
+            modifier = Modifier.weight(1f),
+        ) {
+            items(filter.options, key = { it.id }) { option ->
+                val isSelected = option.id == selectedId
+                FilterChip(
+                    selected = isSelected,
+                    onClick = { if (!isSelected) onSelected(option.id) },
+                    label = { Text(option.title) },
+                    leadingIcon =
+                        if (isSelected) {
+                            {
+                                Icon(
+                                    Icons.Default.Check,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(FilterChipDefaults.IconSize),
+                                )
+                            }
+                        } else null,
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun BrowseFilterMenu(
     filter: PluginFilterDescriptor,
@@ -1389,6 +1493,46 @@ private fun BrowseFilterMenu(
                     },
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun SourceSignInState(
+    sourceName: String,
+    message: String,
+    onSignIn: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(
+            painter =
+                painterResource(
+                    MaterialSymbolsOutlinedR.drawable.materialsymbols_ic_login_outlined
+                ),
+            contentDescription = null,
+            modifier = Modifier.size(48.dp),
+            tint = MaterialTheme.colorScheme.outline,
+        )
+        Text(
+            text = if (sourceName.isBlank()) "需要登录" else "需要登录 $sourceName",
+            style = MaterialTheme.typography.titleMedium,
+            textAlign = TextAlign.Center,
+        )
+        Text(
+            text = message.ifBlank { "登录后即可查看账户收藏" },
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+        FilledTonalButton(
+            onClick = onSignIn,
+            modifier = Modifier.padding(top = 8.dp),
+        ) {
+            Text("前往登录")
         }
     }
 }
