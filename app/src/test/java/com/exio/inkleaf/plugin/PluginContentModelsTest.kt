@@ -291,6 +291,112 @@ class PluginContentModelsTest {
     }
 
     @Test
+    fun `favorite actions and feed empty messages are retained`() {
+        val encoded =
+            PluginContentCodec.json.encodeToJsonElement(
+                PluginDescribeResponse(
+                    feeds =
+                        listOf(
+                            PluginFeedDescriptor(
+                                id = "favorites",
+                                title = "Favorites",
+                                emptyMessage = "Nothing saved yet",
+                            )
+                        ),
+                    actions =
+                        listOf(
+                            PluginActionDescriptor(
+                                "favorite",
+                                "收藏",
+                                kind = PluginActionKind.FAVORITE,
+                                scope = PluginActionScope.COMIC,
+                                optionTitle = "收藏夹",
+                            ),
+                            PluginActionDescriptor(
+                                "removeFavorite",
+                                "移出收藏",
+                                scope = PluginActionScope.COMIC,
+                                destructive = true,
+                            ),
+                        ),
+                )
+            )
+
+        val decoded = PluginContentCodec.describe(encoded)
+        assertEquals("Nothing saved yet", decoded.feeds.single().emptyMessage)
+        assertEquals(PluginActionKind.FAVORITE, decoded.actions[0].kind)
+        assertEquals("收藏夹", decoded.actions[0].optionTitle)
+        assertTrue(decoded.actions[1].destructive)
+    }
+
+    @Test
+    fun `browse pages retain supported dynamic filters and drop unknown types`() {
+        val filters =
+            listOf(
+                PluginFilterDescriptor(
+                    "folder",
+                    "收藏夹",
+                    type = "select",
+                    options =
+                        listOf(
+                            PluginFilterOption("0", "全部"),
+                            PluginFilterOption("1", "同人志"),
+                        ),
+                ),
+                PluginFilterDescriptor("future", "Future", type = "range"),
+            )
+        val encoded =
+            PluginContentCodec.json.encodeToJsonElement(
+                PluginSearchPage(filters = filters)
+            )
+
+        val decoded = PluginContentCodec.browsePage(encoded, "io.example.source")
+
+        assertEquals(listOf("folder"), decoded.filters.map { it.id })
+        assertEquals(listOf("0", "1"), decoded.filters.single().options.map { it.id })
+    }
+
+    @Test
+    fun `select dynamic filters require options`() {
+        val encoded =
+            PluginContentCodec.json.encodeToJsonElement(
+                PluginSearchPage(
+                    filters = listOf(PluginFilterDescriptor("folder", "收藏夹", type = "select"))
+                )
+            )
+
+        assertTrue(
+            runCatching { PluginContentCodec.browsePage(encoded, "io.example.source") }
+                .exceptionOrNull() is PluginContentValidationException
+        )
+    }
+
+    @Test
+    fun `action options validate ids and the selected option`() {
+        fun decode(json: String) =
+            PluginContentCodec.actionOptions(PluginContentCodec.json.parseToJsonElement(json))
+
+        val options =
+            decode(
+                """{"options":[{"id":"12","title":"A"},{"id":"34","title":"B"}],"selected":"34"}"""
+            )
+        assertEquals(listOf("12", "34"), options.options.map { it.id })
+        assertEquals("34", options.selected)
+
+        listOf(
+                """{"options":[{"id":"12","title":"A"},{"id":"12","title":"B"}]}""",
+                """{"options":[{"id":"12","title":"A"}],"selected":"99"}""",
+                """{"options":[{"id":"","title":"A"}]}""",
+            )
+            .forEach { json ->
+                assertTrue(
+                    runCatching { decode(json) }.exceptionOrNull()
+                        is PluginContentValidationException
+                )
+            }
+    }
+
+    @Test
     fun `search identity and result limit are validated`() {
         val valid =
             PluginSearchPage(

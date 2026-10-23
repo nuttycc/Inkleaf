@@ -33,6 +33,8 @@ data class PluginFeedDescriptor(
     val id: String,
     val title: String,
     val filters: List<PluginFilterDescriptor> = emptyList(),
+    /** Shown by the host when this feed returns no items. */
+    val emptyMessage: String? = null,
 )
 
 @Serializable
@@ -58,7 +60,17 @@ data class PluginActionDescriptor(
      * not offered on the area heading, because it belongs to the list it acts on.
      */
     val pickerSettingId: String? = null,
-)
+    /**
+     * When set, the host asks the plugin for choices with `actionOptions` and sends the chosen
+     * option id as input[OPTION_INPUT_ID]. Used for choices only known at runtime, such as an
+     * account's favorite folders.
+     */
+    val optionTitle: String? = null,
+) {
+    companion object {
+        const val OPTION_INPUT_ID = "optionId"
+    }
+}
 
 object PluginActionScope {
     const val SOURCE = "source"
@@ -72,6 +84,9 @@ object PluginActionKind {
     const val LOGOUT = "logout"
     const val CLEAR_SESSION = "clearSession"
     const val VERIFY_CREDENTIALS = "verifyCredentials"
+
+    /** Account-scoped favorites; the host groups these into one save surface. */
+    const val FAVORITE = "favorite"
 
     /** Kinds that accept credentials and should mark the source signed in. */
     val signInKinds: Set<String> = setOf(LOGIN, VERIFY_CREDENTIALS)
@@ -131,6 +146,11 @@ data class PluginBrowseRequest(
 data class PluginSearchPage(
     val items: List<ComicSummary> = emptyList(),
     val nextCursor: String? = null,
+    /**
+     * Filters discovered while browsing, such as an account's folders. The host shows them beside
+     * the feed's declared filters; they cannot be known at describe() time.
+     */
+    val filters: List<PluginFilterDescriptor> = emptyList(),
 )
 
 @Serializable
@@ -235,6 +255,13 @@ data class PluginActionRequest(
     val input: JsonElement = JsonObject(emptyMap()),
 )
 
+/** Runtime choices for an action that declares [PluginActionDescriptor.optionTitle]. */
+@Serializable
+data class PluginActionOptions(
+    val options: List<PluginFilterOption> = emptyList(),
+    val selected: String? = null,
+)
+
 data class PluginSearchResult(
     val pluginId: String,
     val page: PluginSearchPage? = null,
@@ -270,13 +297,23 @@ object PluginContentCodec {
         json.decodeFromJsonElement(value)
 
     fun searchPage(value: JsonElement, pluginId: String): PluginSearchPage =
-        json.decodeFromJsonElement<PluginSearchPage>(value).also { page ->
+        json.decodeFromJsonElement<PluginSearchPage>(value).let { page ->
             validateContentPage(page, pluginId, "search")
+            page.copy(filters = page.filters.filter { it.type in SUPPORTED_FEED_FILTER_TYPES })
         }
 
     fun browsePage(value: JsonElement, pluginId: String): PluginSearchPage =
-        json.decodeFromJsonElement<PluginSearchPage>(value).also { page ->
+        json.decodeFromJsonElement<PluginSearchPage>(value).let { page ->
             validateContentPage(page, pluginId, "browse")
+            page.copy(filters = page.filters.filter { it.type in SUPPORTED_FEED_FILTER_TYPES })
+        }
+
+    fun actionOptions(value: JsonElement): PluginActionOptions =
+        json.decodeFromJsonElement<PluginActionOptions>(value).also { options ->
+            validateOptions(options.options, "actionOption")
+            if (options.selected != null && options.options.none { it.id == options.selected }) {
+                throw PluginContentValidationException("Selected action option is not offered")
+            }
         }
 
     fun detail(value: JsonElement, pluginId: String): ComicDetail =
@@ -365,6 +402,7 @@ object PluginContentCodec {
                 throw PluginContentValidationException("Feed ids must be unique")
             }
             validateText(feed.title, "feed.title", 256)
+            feed.emptyMessage?.let { validateText(it, "feed.emptyMessage", 512) }
             if (feed.filters.size > PluginContentLimits.MAX_DESCRIPTORS) {
                 throw PluginContentValidationException("Feed contains too many filters")
             }
@@ -384,6 +422,7 @@ object PluginContentCodec {
             validateText(action.title, "action.title", 256)
             action.section?.let { validateText(it, "action.section", 256) }
             action.pickerSettingId?.let { validateId(it, "action.pickerSettingId") }
+            action.optionTitle?.let { validateText(it, "action.optionTitle", 256) }
         }
         validateFilters(value.filters, "filter")
         val settingIds = HashSet<String>(value.settings.size)
@@ -452,17 +491,21 @@ object PluginContentCodec {
                 throw PluginContentValidationException("Filter ids must be unique")
             }
             validateText(filter.title, "$field.title", 256)
-            if (filter.options.size > PluginContentLimits.MAX_DESCRIPTORS) {
-                throw PluginContentValidationException("Filter contains too many options")
+            validateOptions(filter.options, "$field.option")
+        }
+    }
+
+    private fun validateOptions(options: List<PluginFilterOption>, field: String) {
+        if (options.size > PluginContentLimits.MAX_DESCRIPTORS) {
+            throw PluginContentValidationException("Filter contains too many options")
+        }
+        val optionIds = HashSet<String>(options.size)
+        options.forEach { option ->
+            validateId(option.id, "$field.id")
+            if (!optionIds.add(option.id)) {
+                throw PluginContentValidationException("Filter option ids must be unique")
             }
-            val optionIds = HashSet<String>(filter.options.size)
-            filter.options.forEach { option ->
-                validateId(option.id, "$field.option.id")
-                if (!optionIds.add(option.id)) {
-                    throw PluginContentValidationException("Filter option ids must be unique")
-                }
-                validateText(option.title, "$field.option.title", 256)
-            }
+            validateText(option.title, "$field.title", 256)
         }
     }
 
@@ -471,6 +514,19 @@ object PluginContentCodec {
         if (page.items.size > PluginContentLimits.MAX_SEARCH_ITEMS) {
             throw PluginContentValidationException("Plugin returned too many $field items")
         }
+        if (page.filters.size > PluginContentLimits.MAX_DESCRIPTORS) {
+            throw PluginContentValidationException("Plugin returned too many $field filters")
+        }
+        validateFilters(page.filters, "$field.filter")
+        page.filters
+            .filter { it.type == "select" }
+            .forEach { filter ->
+                if (filter.options.isEmpty()) {
+                    throw PluginContentValidationException(
+                        "Select $field filters require options"
+                    )
+                }
+            }
         val sourceIds = HashSet<String>(page.items.size)
         page.items.forEach { item ->
             validateId(item.sourceId, "$field.item.sourceId")
@@ -539,6 +595,7 @@ object PluginContentCodec {
             PluginActionKind.LOGOUT,
             PluginActionKind.CLEAR_SESSION,
             PluginActionKind.VERIFY_CREDENTIALS,
+            PluginActionKind.FAVORITE,
         )
     private val SUPPORTED_FEED_FILTER_TYPES = setOf("select")
     private val SUPPORTED_FILTER_TYPES = setOf("text", "select", "multiSelect", "boolean")
@@ -687,4 +744,13 @@ class PluginCatalog(private val runtimeManager: PluginRuntimeManager) {
         PluginContentCodec.actionResult(
             runtimeManager.invoke(pluginId, "invokeAction", PluginContentCodec.encode(request))
         )
+
+    suspend fun actionOptions(
+        pluginId: String,
+        request: PluginActionRequest,
+    ): PluginActionOptions {
+        val result =
+            runtimeManager.invoke(pluginId, "actionOptions", PluginContentCodec.encode(request))
+        return withContext(Dispatchers.Default) { PluginContentCodec.actionOptions(result) }
+    }
 }
