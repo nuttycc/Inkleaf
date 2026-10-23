@@ -933,7 +933,12 @@ async function describe(context) {
       },
       // The account's own bookshelf. It is always declared, because describe() cannot know whether
       // the reader is signed in without a network call; browsing it says plainly when they are not.
-      { id: "favorites", title: "账户收藏" },
+      // The folder filter arrives with the page instead, because folders belong to the account.
+      {
+        id: "favorites",
+        title: "账户收藏",
+        emptyMessage: "账户收藏还是空的。在漫画详情页点“收藏”，选择收藏夹即可保存。",
+      },
     ],
     actions: [
       // Actions that share a setting's section are offered on that area's heading, beside the
@@ -948,12 +953,19 @@ async function describe(context) {
       },
       { id: "login", title: "登录", kind: "login", section: "登录" },
       { id: "logout", title: "退出登录", kind: "clearSession", destructive: true, section: "登录" },
-      // Comic-scoped: the host offers these on a comic page and sends its sourceId as input.
-      { id: "addFavorite", title: "加入账户收藏", kind: "action", scope: "comic" },
+      // Comic-scoped: the host offers these as one account-favorite surface and sends its sourceId
+      // as input. The add action asks the host to offer the account's folders before it runs.
+      {
+        id: "addFavorite",
+        title: "加入账户收藏",
+        kind: "favorite",
+        scope: "comic",
+        optionTitle: "收藏夹",
+      },
       {
         id: "removeFavorite",
         title: "移出账户收藏",
-        kind: "action",
+        kind: "favorite",
         scope: "comic",
         destructive: true,
       },
@@ -1035,7 +1047,7 @@ async function browse(request, context) {
   const cate = categoryOf(filters.cate);
 
   if (request.feedId === "favorites") {
-    return browseFavorites(page, signal);
+    return browseFavorites(page, filters.folder, signal);
   }
 
   let path;
@@ -1061,25 +1073,60 @@ async function browse(request, context) {
 }
 
 /**
- * The account's own bookshelf. Page one lives at a bare path; later pages spell out the folder id,
- * and "0" is the site's own sentinel for "every folder".
+ * The account's own bookshelf. Page one lives at a bare path or the folder's own path; later pages
+ * spell out both the page and the folder id, where "0" is the site's sentinel for "every folder".
  */
 function favoritePath(page, folderId) {
   const folder = text(folderId) || "0";
-  if (page <= 1 && folder === "0") return FAVORITES_PATH;
+  if (page <= 1) {
+    return folder === "0" ? FAVORITES_PATH : "/users-users_fav-c-" + folder + ".html";
+  }
   return "/users-users_fav-page-" + page + "-c-" + folder + ".html";
 }
 
-async function browseFavorites(page, signal) {
+/** The page navigation doubles as the feed's folder filter, so it is parsed as UI options. */
+function parseFavoriteFolderNav(html) {
+  const links =
+    String(html || "").match(/<a[^>]*href="[^"]*users-users_fav[^"]*"[^>]*>[\s\S]*?<\/a>/gi) || [];
+  const seen = {};
+  const folders = [];
+  for (let index = 0; index < links.length; index += 1) {
+    const href = firstMatch(links[index], /href="([^"]*)"/i);
+    const found = String(href || "").match(/users-users_fav(?:-c-(\d+))?\.html/i);
+    if (!found) continue;
+    // The row's category cell repeats the folder link; dedupe keeps the page navigation first.
+    const id = found[1] || "0";
+    if (seen[id]) continue;
+    const title = oneLine(links[index]);
+    if (!title) continue;
+    seen[id] = true;
+    folders.push({ id: id, title: title });
+  }
+  if (
+    !folders.some(function (folder) {
+      return folder.id === "0";
+    })
+  ) {
+    folders.unshift({ id: "0", title: "全部" });
+  }
+  return folders;
+}
+
+async function browseFavorites(page, folderId, signal) {
   const found = await siteFetch(
-    favoritePath(page, "0"),
+    favoritePath(page, folderId),
     { accept: HTML_ACCEPT, referer: "/", authRequired: true, authMessage: "请先登录绅士漫画账号" },
     signal
   );
   const rows = parseFavoriteRows(found.html, found.base);
+  const folders = parseFavoriteFolderNav(found.html);
   return {
     items: rowsToItems(rows, found.base),
     nextCursor: nextCursorFor(found.html, page, rows, LIST_PAGE_SIZE),
+    filters:
+      folders.length > 1
+        ? [{ id: "folder", title: "收藏夹", type: "select", options: folders }]
+        : [],
   };
 }
 
@@ -1302,23 +1349,26 @@ async function favoriteEntryIds(sourceId, signal) {
 }
 
 /**
- * Adds one comic to the account shelf. The add dialog's folder list is what makes the folder id
- * discoverable, so it is fetched first even though the reader never sees it.
+ * Adds one comic to the account shelf. The host normally supplies the folder the reader chose;
+ * without one, the add dialog's own selection is used so older hosts keep working.
  */
-async function addFavorite(sourceId, signal) {
-  const dialog = await siteFetch(
-    "/users-addfav-id-" + sourceId + ".html",
-    { accept: HTML_ACCEPT, referer: "/", authRequired: true, authMessage: "请先登录绅士漫画账号" },
-    signal
-  );
-  const folderId = preferredFolderId(parseFavoriteFolders(dialog.html));
-  if (!folderId) throw pluginError("NOT_FOUND", "没有可用的收藏夹", false);
+async function addFavorite(sourceId, folderId, signal) {
+  let chosen = text(folderId);
+  if (!chosen) {
+    const dialog = await siteFetch(
+      "/users-addfav-id-" + sourceId + ".html",
+      { accept: HTML_ACCEPT, referer: "/", authRequired: true, authMessage: "请先登录绅士漫画账号" },
+      signal
+    );
+    chosen = preferredFolderId(parseFavoriteFolders(dialog.html));
+  }
+  if (!chosen) throw pluginError("NOT_FOUND", "没有可用的收藏夹", false);
 
   const saved = await siteFetch(
     "/users-save_fav-id-" + sourceId + ".html",
     {
       method: "POST",
-      body: queryString({ favc_id: folderId }),
+      body: queryString({ favc_id: chosen }),
       accept: JSON_ACCEPT,
       referer: "/users-addfav-id-" + sourceId + ".html",
       authRequired: false,
@@ -1327,7 +1377,36 @@ async function addFavorite(sourceId, signal) {
   );
   const failure = formFailure(saved.html, "加入收藏夹失败");
   if (failure) throw pluginError(failure.code, failure.message, false);
-  return { ok: true, message: "已加入收藏夹", folderId: folderId };
+  return { ok: true, message: "已加入收藏夹", folderId: chosen };
+}
+
+/**
+ * Offers the add action's runtime choices. The folders live in the site's add dialog, which is
+ * also the only place that marks the site's preferred folder.
+ */
+async function actionOptions(request, context) {
+  const signal = context && context.signal;
+  const actionId = text(request.actionId);
+  if (actionId !== "addFavorite") {
+    throw pluginError("NOT_FOUND", "未知操作: " + actionId, false);
+  }
+  const sourceId = text(asObject(request.input).sourceId);
+  if (!sourceId) {
+    throw pluginError("INVALID_ARGUMENT", "缺少漫画编号", false);
+  }
+  const dialog = await siteFetch(
+    "/users-addfav-id-" + sourceId + ".html",
+    { accept: HTML_ACCEPT, referer: "/", authRequired: true, authMessage: "请先登录绅士漫画账号" },
+    signal
+  );
+  const folders = parseFavoriteFolders(dialog.html);
+  if (!folders.length) throw pluginError("NOT_FOUND", "没有可用的收藏夹", false);
+  return {
+    options: folders.map(function (folder) {
+      return { id: folder.id, title: folder.name };
+    }),
+    selected: preferredFolderId(folders),
+  };
 }
 
 /** Removes the comic from every shelf it sits on, so one tap clears it outright. */
@@ -1444,13 +1523,15 @@ async function invokeAction(request, context) {
     return { ok: true, message: "已退出登录" };
   }
 
-  // Comic-scoped actions: the host sends the album id it is showing.
+  // Comic-scoped actions: the host sends the album id it is showing, and the add action also
+  // carries the folder the reader chose.
   if (actionId === "addFavorite" || actionId === "removeFavorite") {
-    const sourceId = text(asObject(request.input).sourceId);
+    const input = asObject(request.input);
+    const sourceId = text(input.sourceId);
     if (!sourceId) {
       throw pluginError("INVALID_ARGUMENT", "缺少漫画编号", false);
     }
-    if (actionId === "addFavorite") return addFavorite(sourceId, signal);
+    if (actionId === "addFavorite") return addFavorite(sourceId, input.optionId, signal);
     return removeFavorite(sourceId, signal);
   }
 
@@ -1466,4 +1547,5 @@ inkleaf.register({
   chapters: chapters,
   pages: pages,
   invokeAction: invokeAction,
+  actionOptions: actionOptions,
 });

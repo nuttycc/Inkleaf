@@ -452,6 +452,7 @@ async function main() {
   await describeContract();
   await browseLists();
   await browsesFavorites();
+  await offersFavoriteFolders();
   await rankingAndCategoryRequests();
   await searches();
   await readsDetail();
@@ -529,6 +530,20 @@ async function describeContract() {
     }),
     ["refreshDomains", "login", "logout", "addFavorite", "removeFavorite"]
   );
+  const addFavorite = described.actions.find(function (action) {
+    return action.id === "addFavorite";
+  });
+  const removeFavorite = described.actions.find(function (action) {
+    return action.id === "removeFavorite";
+  });
+  assert.equal(addFavorite.kind, "favorite", "the host groups favorite actions into one surface");
+  assert.equal(addFavorite.optionTitle, "收藏夹", "the add action asks for a runtime folder");
+  assert.equal(removeFavorite.kind, "favorite");
+  assert.equal(removeFavorite.destructive, true);
+  const favoritesFeed = described.feeds.find(function (feed) {
+    return feed.id === "favorites";
+  });
+  assert.ok(favoritesFeed.emptyMessage, "an empty shelf explains itself in the host");
   // Only the comic-scoped ones appear on a comic page; the rest stay on the source screen.
   assert.deepEqual(
     described.actions
@@ -621,6 +636,22 @@ async function browsesFavorites() {
     "data-src wins over loading.jpg here too"
   );
   assert.equal(page.nextCursor, "2");
+  assert.deepEqual(
+    page.filters,
+    [
+      {
+        id: "folder",
+        title: "收藏夹",
+        type: "select",
+        options: [
+          { id: "0", title: "全部" },
+          { id: "1", title: "同人志" },
+          { id: "19", title: "韓漫" },
+        ],
+      },
+    ],
+    "the page navigation doubles as the folder filter"
+  );
 
   const second = plain(
     await fresh.api.browse({ feedId: "favorites", cursor: "2", limit: 40, filters: {} }, ctx())
@@ -631,6 +662,28 @@ async function browsesFavorites() {
     "later pages spell the folder id out, and 0 means every folder"
   );
   assert.equal(second.nextCursor, null, "a paginator on its last page ends the feed");
+
+  const folderPage = plain(
+    await fresh.api.browse(
+      { feedId: "favorites", cursor: null, limit: 40, filters: { folder: "1" } },
+      ctx()
+    )
+  );
+  assert.equal(
+    fresh.urls()[2],
+    "https://" + SITE_HOST + "/users-users_fav-c-1.html",
+    "page one of a folder uses the folder's own path"
+  );
+  assert.equal(folderPage.nextCursor, "2");
+  await fresh.api.browse(
+    { feedId: "favorites", cursor: "2", limit: 40, filters: { folder: "1" } },
+    ctx()
+  );
+  assert.equal(
+    fresh.urls()[3],
+    "https://" + SITE_HOST + "/users-users_fav-page-2-c-1.html",
+    "later pages keep the folder id"
+  );
 
   // Signed out, the site serves its login wall in place of the shelf, and the feed says so rather
   // than pretending the account has no favorites.
@@ -644,6 +697,68 @@ async function browsesFavorites() {
   await assert.rejects(
     () => anonymous.api.browse({ feedId: "favorites", cursor: null, limit: 40, filters: {} }, ctx()),
     (error) => error.code === "AUTH_REQUIRED" && error.message === "请先登录绅士漫画账号"
+  );
+}
+
+async function offersFavoriteFolders() {
+  // The host asks for the folders before it can show the add sheet.
+  const fresh = createPlugin({ seedHosts: [SITE_HOST] });
+  const options = plain(
+    await fresh.api.actionOptions(
+      { actionId: "addFavorite", input: { sourceId: "394338" } },
+      ctx()
+    )
+  );
+  assert.deepEqual(options, {
+    options: [
+      { id: "12", title: "默認收藏夾" },
+      { id: "34", title: "同人志" },
+    ],
+    selected: "34",
+  });
+  assert.deepEqual(fresh.urls(), [
+    "https://" + SITE_HOST + "/users-addfav-id-394338.html",
+  ]);
+
+  // The chosen folder rides on the add action, so the add request skips the dialog.
+  const chosen = createPlugin({ seedHosts: [SITE_HOST] });
+  const added = plain(
+    await chosen.api.invokeAction(
+      { actionId: "addFavorite", input: { sourceId: "394338", optionId: "12" } },
+      ctx()
+    )
+  );
+  assert.equal(added.folderId, "12");
+  assert.deepEqual(chosen.urls(), [
+    "https://" + SITE_HOST + "/users-save_fav-id-394338.html",
+  ]);
+  assert.deepEqual(formBody(chosen.requests[0]), { favc_id: "12" });
+
+  // Choosing a folder is still account content, so the login wall wins.
+  const anonymous = createPlugin({
+    seedHosts: [SITE_HOST],
+    respond: function (request) {
+      if (request.url.indexOf("/users-addfav-id-") >= 0) return { body: LOGIN_REQUIRED_HTML };
+      return defaultRespond(request);
+    },
+  });
+  await assert.rejects(
+    () =>
+      anonymous.api.actionOptions(
+        { actionId: "addFavorite", input: { sourceId: "394338" } },
+        ctx()
+      ),
+    (error) => error.code === "AUTH_REQUIRED"
+  );
+
+  // Only the add action has runtime choices.
+  await assert.rejects(
+    () =>
+      fresh.api.actionOptions(
+        { actionId: "removeFavorite", input: { sourceId: "394338" } },
+        ctx()
+      ),
+    (error) => error.code === "NOT_FOUND"
   );
 }
 
