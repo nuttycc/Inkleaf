@@ -146,7 +146,7 @@ fun OnlineComicScreen(
                     }
                 },
                 actions = {
-                    if (otherComicActions.isNotEmpty()) {
+                    if (favoriteActions.isNotEmpty() || otherComicActions.isNotEmpty()) {
                         Box {
                             IconButton(
                                 onClick = { isActionsMenuExpanded = true },
@@ -158,6 +158,16 @@ fun OnlineComicScreen(
                                 expanded = isActionsMenuExpanded && !state.isComicActionRunning,
                                 onDismissRequest = { isActionsMenuExpanded = false },
                             ) {
+                                if (favoriteActions.isNotEmpty()) {
+                                    DropdownMenuItem(
+                                        text = { Text("账户收藏") },
+                                        enabled = !state.isComicActionRunning,
+                                        onClick = {
+                                            isActionsMenuExpanded = false
+                                            viewModel.openFavoriteSheet()
+                                        },
+                                    )
+                                }
                                 otherComicActions.forEach { action ->
                                     DropdownMenuItem(
                                         text = {
@@ -287,24 +297,11 @@ fun OnlineComicScreen(
                                         }
                                     }
 
-                                    Row(
+                                    OnlineShelfAction(
+                                        isBookmarked = state.isBookmarked,
+                                        onClick = viewModel::toggleBookmark,
                                         modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        OnlineShelfAction(
-                                            isBookmarked = state.isBookmarked,
-                                            onClick = viewModel::toggleBookmark,
-                                            modifier = Modifier.weight(1f),
-                                        )
-                                        if (favoriteActions.isNotEmpty()) {
-                                            OnlineFavoriteAction(
-                                                onClick = viewModel::openFavoriteSheet,
-                                                enabled = !state.isComicActionRunning,
-                                                modifier = Modifier.weight(1f),
-                                            )
-                                        }
-                                    }
+                                    )
                                 }
                             }
                         }
@@ -599,31 +596,6 @@ private fun OnlineShelfAction(
             Spacer(modifier = Modifier.width(4.dp))
             Text("书架", style = MaterialTheme.typography.labelMedium)
         }
-    }
-}
-
-@Composable
-private fun OnlineFavoriteAction(
-    onClick: () -> Unit,
-    enabled: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    OutlinedButton(
-        onClick = onClick,
-        enabled = enabled,
-        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-        modifier = modifier,
-    ) {
-        Icon(
-            painter =
-                painterResource(
-                    MaterialSymbolsOutlinedR.drawable.materialsymbols_ic_bookmark_heart_outlined
-                ),
-            contentDescription = null,
-            modifier = Modifier.size(16.dp),
-        )
-        Spacer(modifier = Modifier.width(4.dp))
-        Text("收藏", style = MaterialTheme.typography.labelMedium)
     }
 }
 

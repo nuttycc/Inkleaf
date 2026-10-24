@@ -77,6 +77,7 @@ internal fun AccountFavoriteSheet(
                 state.authRequired ->
                     AccountFavoriteSignIn(message = error, onSignIn = onSignIn)
                 state.isLoading -> AccountFavoriteLoading()
+                state.favorited -> AccountFavoriteApplied(state = state, onRemove = onRemove)
                 optionsUnavailable && error != null ->
                     AccountFavoriteOptionsError(
                         message = error,
@@ -88,7 +89,6 @@ internal fun AccountFavoriteSheet(
                         state = state,
                         onSelectOption = onSelectOption,
                         onAdd = onAdd,
-                        onRemove = onRemove,
                     )
             }
         }
@@ -100,7 +100,6 @@ private fun AccountFavoriteContent(
     state: OnlineFavoriteSheetState,
     onSelectOption: (String) -> Unit,
     onAdd: () -> Unit,
-    onRemove: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
         if (state.needsOptions) {
@@ -159,43 +158,77 @@ private fun AccountFavoriteContent(
                 }
             }
         }
+    }
+}
 
-        state.removeAction?.let { action ->
-            HorizontalDivider(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                color = MaterialTheme.colorScheme.outlineVariant,
+/** The comic is already on the account, so only its removal is offered. */
+@Composable
+private fun AccountFavoriteApplied(
+    state: OnlineFavoriteSheetState,
+    onRemove: () -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                painter =
+                    painterResource(
+                        MaterialSymbolsOutlinedR.drawable
+                            .materialsymbols_ic_bookmark_heart_outlined
+                    ),
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = MaterialTheme.colorScheme.primary,
             )
-            Row(modifier = Modifier.fillMaxWidth()) {
-                TextButton(
-                    onClick = onRemove,
-                    enabled = !state.isRunning,
-                    colors =
-                        ButtonDefaults.textButtonColors(
-                            contentColor = MaterialTheme.colorScheme.error
-                        ),
-                    modifier = Modifier.padding(start = 8.dp),
-                ) {
-                    if (state.runningAction == FavoriteSheetAction.REMOVE) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            strokeWidth = 2.dp,
-                            color = LocalContentColor.current,
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text("正在移出…")
-                    } else {
-                        Icon(
-                            painter =
-                                painterResource(
-                                    MaterialSymbolsOutlinedR.drawable
-                                        .materialsymbols_ic_bookmark_remove_outlined
-                                ),
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp),
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(action.title)
-                    }
+            Text("已加入账户收藏", style = MaterialTheme.typography.bodyMedium)
+        }
+
+        state.errorMessage?.let { message ->
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+        }
+
+        HorizontalDivider(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            color = MaterialTheme.colorScheme.outlineVariant,
+        )
+        Row(modifier = Modifier.fillMaxWidth()) {
+            TextButton(
+                onClick = onRemove,
+                enabled = !state.isRunning,
+                colors =
+                    ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    ),
+                modifier = Modifier.padding(start = 8.dp),
+            ) {
+                if (state.runningAction == FavoriteSheetAction.REMOVE) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = LocalContentColor.current,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("正在移出…")
+                } else {
+                    Icon(
+                        painter =
+                            painterResource(
+                                MaterialSymbolsOutlinedR.drawable
+                                    .materialsymbols_ic_bookmark_remove_outlined
+                            ),
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(state.removeAction?.title ?: "移出账户收藏")
                 }
             }
         }

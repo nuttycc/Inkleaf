@@ -70,6 +70,8 @@ internal data class OnlineFavoriteSheetState(
     val removeAction: PluginActionDescriptor? = null,
     val options: List<PluginFilterOption> = emptyList(),
     val selectedOptionId: String? = null,
+    /** Whether the comic already sits in the account, so the sheet offers removal instead of add. */
+    val favorited: Boolean = false,
     val isLoading: Boolean = false,
     val runningAction: FavoriteSheetAction? = null,
     val errorMessage: String? = null,
@@ -337,6 +339,7 @@ internal class OnlineComicViewModel(
                             options = result.options,
                             selectedOptionId =
                                 result.selected ?: result.options.firstOrNull()?.id,
+                            favorited = result.applied,
                             isLoading = false,
                         )
                 } catch (error: CancellationException) {
@@ -351,6 +354,7 @@ internal class OnlineComicViewModel(
                             errorMessage = favoriteErrorMessage(error, authRequired),
                             authRequired = authRequired,
                             canRetryOptions = !authRequired,
+                            favorited = false,
                         )
                 }
             }
