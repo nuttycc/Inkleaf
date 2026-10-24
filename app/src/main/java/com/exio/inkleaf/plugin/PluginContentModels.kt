@@ -619,7 +619,27 @@ object PluginContentLimits {
 }
 
 /** Small source-aware facade used by discovery/search UI and manual diagnostics. */
-class PluginCatalog(private val runtimeManager: PluginRuntimeManager) {
+class PluginCatalog(
+    private val runtimeManager: PluginRuntimeManager,
+    /** Told whenever a source answers that it needs a sign-in. */
+    private val onAuthRequired: suspend (pluginId: String) -> Unit = {},
+) {
+    private suspend fun call(pluginId: String, method: String, params: JsonElement): JsonElement =
+        try {
+            runtimeManager.invoke(pluginId, method, params)
+        } catch (error: PluginRpcException) {
+            if (error.error.code == PluginErrorCode.AUTH_REQUIRED) {
+                try {
+                    onAuthRequired(pluginId)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (secondary: Exception) {
+                    error.addSuppressed(secondary)
+                }
+            }
+            throw error
+        }
+
     suspend fun describe(pluginId: String): PluginDescribeResponse {
         val result = runtimeManager.describe(pluginId)
         return withContext(Dispatchers.Default) { PluginContentCodec.describe(result) }
@@ -657,7 +677,7 @@ class PluginCatalog(private val runtimeManager: PluginRuntimeManager) {
                         try {
                             val params = copy(limit = boundedLimit)
                             val result =
-                                runtimeManager.invoke(
+                                call(
                                     pluginId,
                                     "search",
                                     PluginContentCodec.encode(params),
@@ -712,12 +732,12 @@ class PluginCatalog(private val runtimeManager: PluginRuntimeManager) {
             }
             val params = copy(limit = limit.coerceIn(1, PluginContentLimits.MAX_SEARCH_ITEMS))
             val result =
-                runtimeManager.invoke(pluginId, "browse", PluginContentCodec.encode(params))
+                call(pluginId, "browse", PluginContentCodec.encode(params))
             withContext(Dispatchers.Default) { PluginContentCodec.browsePage(result, pluginId) }
         }
 
     suspend fun detail(pluginId: String, request: PluginDetailRequest): ComicDetail {
-        val result = runtimeManager.invoke(pluginId, "detail", PluginContentCodec.encode(request))
+        val result = call(pluginId, "detail", PluginContentCodec.encode(request))
         val detail =
             withContext(Dispatchers.Default) { PluginContentCodec.detail(result, pluginId) }
         if (detail.sourceId != request.sourceId) {
@@ -727,7 +747,7 @@ class PluginCatalog(private val runtimeManager: PluginRuntimeManager) {
     }
 
     suspend fun chapters(pluginId: String, request: PluginChapterRequest): PluginChaptersResponse {
-        val result = runtimeManager.invoke(pluginId, "chapters", PluginContentCodec.encode(request))
+        val result = call(pluginId, "chapters", PluginContentCodec.encode(request))
         val chapters =
             withContext(Dispatchers.Default) { PluginContentCodec.chapters(result, pluginId) }
         if (chapters.sourceId != request.sourceId) {
@@ -737,7 +757,7 @@ class PluginCatalog(private val runtimeManager: PluginRuntimeManager) {
     }
 
     suspend fun pages(pluginId: String, request: PluginPagesRequest): PluginPagesResponse {
-        val result = runtimeManager.invoke(pluginId, "pages", PluginContentCodec.encode(request))
+        val result = call(pluginId, "pages", PluginContentCodec.encode(request))
         val pages = withContext(Dispatchers.Default) { PluginContentCodec.pages(result, pluginId) }
         if (pages.sourceId != request.sourceId || pages.chapterId != request.chapterId) {
             throw PluginContentValidationException("Pages identity does not match the request")
@@ -747,7 +767,7 @@ class PluginCatalog(private val runtimeManager: PluginRuntimeManager) {
 
     suspend fun invokeAction(pluginId: String, request: PluginActionRequest): JsonElement =
         PluginContentCodec.actionResult(
-            runtimeManager.invoke(pluginId, "invokeAction", PluginContentCodec.encode(request))
+            call(pluginId, "invokeAction", PluginContentCodec.encode(request))
         )
 
     suspend fun actionOptions(
@@ -755,7 +775,7 @@ class PluginCatalog(private val runtimeManager: PluginRuntimeManager) {
         request: PluginActionRequest,
     ): PluginActionOptions {
         val result =
-            runtimeManager.invoke(pluginId, "actionOptions", PluginContentCodec.encode(request))
+            call(pluginId, "actionOptions", PluginContentCodec.encode(request))
         return withContext(Dispatchers.Default) { PluginContentCodec.actionOptions(result) }
     }
 }

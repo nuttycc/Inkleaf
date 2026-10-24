@@ -19,6 +19,9 @@ import com.exio.inkleaf.plugin.PluginRepoRepository
 import com.exio.inkleaf.plugin.PluginRuntimeManager
 import com.exio.inkleaf.plugin.PluginSessionStateRepository
 import com.exio.inkleaf.plugin.PluginSettingsRepository
+import com.exio.inkleaf.plugin.SourceActionRunner
+import com.exio.inkleaf.plugin.SourceSessionHint
+import com.exio.inkleaf.plugin.asSessionStore
 import java.io.File
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
@@ -51,6 +54,17 @@ class InkleafApplication : Application(), ImageLoaderFactory {
     val pluginSessionStateRepository: PluginSessionStateRepository by lazy {
         PluginSessionStateRepository(this)
     }
+    internal val sourceSessionHint: SourceSessionHint by lazy {
+        SourceSessionHint(pluginSessionStateRepository.asSessionStore(), pluginCatalog::checkSession)
+    }
+    internal val sourceActionRunner: SourceActionRunner by lazy {
+        SourceActionRunner(
+            invoke = pluginCatalog::invokeAction,
+            fetchOptions = pluginCatalog::actionOptions,
+            sessionHint = sourceSessionHint,
+            invalidateDerivedData = pluginManager::invalidateDerivedData,
+        )
+    }
     val pluginRuntimeManager: PluginRuntimeManager by lazy {
         PluginRuntimeManager(
             this,
@@ -59,7 +73,7 @@ class InkleafApplication : Application(), ImageLoaderFactory {
         )
     }
     val pluginCatalog: PluginCatalog by lazy {
-        PluginCatalog(pluginRuntimeManager)
+        PluginCatalog(pluginRuntimeManager) { pluginId -> sourceSessionHint.authRequired(pluginId) }
     }
     val pluginBrowseRepository: PluginBrowseRepository by lazy {
         PluginBrowseRepository(File(cacheDir, "plugin-browse"), pluginCatalog::browse)

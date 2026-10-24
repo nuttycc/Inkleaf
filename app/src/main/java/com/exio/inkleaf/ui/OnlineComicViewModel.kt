@@ -14,7 +14,6 @@ import com.exio.inkleaf.plugin.OnlineReadingPosition
 import com.exio.inkleaf.plugin.OnlineUserReference
 import com.exio.inkleaf.plugin.PluginActionDescriptor
 import com.exio.inkleaf.plugin.PluginActionKind
-import com.exio.inkleaf.plugin.PluginActionRequest
 import com.exio.inkleaf.plugin.PluginActionScope
 import com.exio.inkleaf.plugin.PluginErrorCode
 import com.exio.inkleaf.plugin.PluginFilterOption
@@ -38,8 +37,6 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 
 internal data class OnlineComicUiState(
     val sourceName: String,
@@ -162,17 +159,9 @@ internal class OnlineComicViewModel(
         comicActionJob = viewModelScope.launch {
             _state.value = _state.value.copy(isComicActionRunning = true)
             try {
-                val result =
-                    application.pluginCatalog.invokeAction(
-                        pluginId,
-                        PluginActionRequest(
-                            actionId = action.id,
-                            input = buildJsonObject { put("sourceId", sourceId) },
-                        ),
-                    )
                 _actionFeedback.value =
                     OnlineComicActionFeedback(
-                        message = sourceActionMessage(result, action.title),
+                        message = application.sourceActionRunner.run(pluginId, action, sourceId),
                         isError = false,
                     )
             } catch (error: CancellationException) {
@@ -243,31 +232,13 @@ internal class OnlineComicViewModel(
                         errorMessage = null,
                     )
                 try {
-                    val result =
-                        application.pluginCatalog.invokeAction(
-                            pluginId,
-                            PluginActionRequest(
-                                actionId = action.id,
-                                input =
-                                    buildJsonObject {
-                                        put("sourceId", sourceId)
-                                        optionId?.let {
-                                            put(PluginActionDescriptor.OPTION_INPUT_ID, it)
-                                        }
-                                    },
-                            ),
-                        )
+                    val message =
+                        application.sourceActionRunner.run(pluginId, action, sourceId, optionId)
                     val folderTitle = sheet.options.firstOrNull { it.id == optionId }?.title
-                    application.pluginBrowseRepository.clear(pluginId)
                     _favoriteSheet.value = null
                     _actionFeedback.value =
                         OnlineComicActionFeedback(
-                            message =
-                                if (folderTitle != null) {
-                                    "已加入「$folderTitle」"
-                                } else {
-                                    sourceActionMessage(result, action.title)
-                                },
+                            message = folderTitle?.let { "已加入「$it」" } ?: message,
                             isError = false,
                         )
                 } catch (error: CancellationException) {
@@ -291,21 +262,9 @@ internal class OnlineComicViewModel(
                         errorMessage = null,
                     )
                 try {
-                    val result =
-                        application.pluginCatalog.invokeAction(
-                            pluginId,
-                            PluginActionRequest(
-                                actionId = action.id,
-                                input = buildJsonObject { put("sourceId", sourceId) },
-                            ),
-                        )
+                    val message = application.sourceActionRunner.run(pluginId, action, sourceId)
                     _favoriteSheet.value = null
-                    _actionFeedback.value =
-                        OnlineComicActionFeedback(
-                            sourceActionMessage(result, action.title),
-                            isError = false,
-                        )
-                    application.pluginBrowseRepository.clear(pluginId)
+                    _actionFeedback.value = OnlineComicActionFeedback(message, isError = false)
                 } catch (error: CancellationException) {
                     throw error
                 } catch (error: Exception) {
@@ -326,14 +285,7 @@ internal class OnlineComicViewModel(
                         canRetryOptions = false,
                     )
                 try {
-                    val result =
-                        application.pluginCatalog.actionOptions(
-                            pluginId,
-                            PluginActionRequest(
-                                actionId = action.id,
-                                input = buildJsonObject { put("sourceId", sourceId) },
-                            ),
-                        )
+                    val result = application.sourceActionRunner.options(pluginId, action, sourceId)
                     _favoriteSheet.value =
                         _favoriteSheet.value?.copy(
                             options = result.options,

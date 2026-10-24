@@ -8,7 +8,6 @@ import com.exio.inkleaf.diagnostics.AppErrorReport
 import com.exio.inkleaf.diagnostics.AppErrorReporter
 import com.exio.inkleaf.plugin.InstalledPlugin
 import com.exio.inkleaf.plugin.PluginActionDescriptor
-import com.exio.inkleaf.plugin.PluginActionRequest
 import com.exio.inkleaf.plugin.PluginActionScope
 import com.exio.inkleaf.plugin.PluginSessionState
 import com.exio.inkleaf.plugin.PluginSettingDescriptor
@@ -21,10 +20,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.contentOrNull
 
 /** Coordinates plugin-declared settings, actions, status, and uninstall state for one source. */
 data class SourceDetailFeedback(val text: String, val copyDetails: String? = null)
@@ -45,24 +40,7 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
             }
         )
 
-    private val sessionHint =
-        SourceSessionHint(
-            store =
-                object : SourceSessionStore {
-                    override suspend fun read(pluginId: String) =
-                        app().pluginSessionStateRepository.state(pluginId)
-
-                    override suspend fun signedIn(pluginId: String, account: String?) =
-                        app().pluginSessionStateRepository.signedIn(pluginId, account)
-
-                    override suspend fun signedOut(pluginId: String) =
-                        app().pluginSessionStateRepository.signedOut(pluginId)
-
-                    override suspend fun clear(pluginId: String) =
-                        app().pluginSessionStateRepository.clear(pluginId)
-                },
-            checkSession = { pluginId -> app().pluginCatalog.checkSession(pluginId) },
-        )
+    private val sessionHint = app().sourceSessionHint
 
     private val _plugin = MutableStateFlow<InstalledPlugin?>(null)
     val plugin: StateFlow<InstalledPlugin?> = _plugin.asStateFlow()
@@ -76,8 +54,10 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
     /** Persisted values and pending edits, owned by the draft. */
     val values: StateFlow<Map<String, String>> = settingsDraft.values
 
-    /** Host-side view of the source's sign-in state, owned by the session hint. */
-    val session: StateFlow<PluginSessionState> = sessionHint.state
+    private val _session = MutableStateFlow(PluginSessionState())
+
+    /** Host-side view of the source's sign-in state, owned by the app's session hint. */
+    val session: StateFlow<PluginSessionState> = _session.asStateFlow()
 
     private val _busy = MutableStateFlow(false)
     val busy: StateFlow<Boolean> = _busy.asStateFlow()
@@ -93,6 +73,7 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
     private var loadedPluginId: String? = null
     private var loadJob: Job? = null
     private var reconcileJob: Job? = null
+    private var sessionJob: Job? = null
 
     fun load(pluginId: String) {
         if (loadedPluginId == pluginId) {
@@ -106,10 +87,14 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
         }
         if (this.pluginId != pluginId) {
             reconcileJob?.cancel()
+            sessionJob?.cancel()
             _settings.value = emptyList()
             _actions.value = emptyList()
             settingsDraft.load(emptyMap())
-            sessionHint.reset()
+            _session.value = PluginSessionState()
+            sessionJob = viewModelScope.launch {
+                sessionHint.observe(pluginId).collect { _session.value = it }
+            }
         }
         this.pluginId = pluginId
         loadJob?.cancel()
@@ -121,7 +106,6 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
                         app.pluginManager.installed().firstOrNull { it.state.pluginId == pluginId }
                     }
                 settingsDraft.load(app.pluginSettingsRepository.storedValues(pluginId))
-                sessionHint.load(pluginId)
                 loadedPluginId = pluginId
                 describe(pluginId)
                 // The hint can outlive the site session; confirm it off the main path.
@@ -172,23 +156,14 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /**
-     * Saves pending settings before invoking a source action, then reports its result and
-     * invalidates derived data.
-     */
+    /** Saves pending settings before running a source action, then re-reads the descriptors. */
     fun invokeAction(action: PluginActionDescriptor) {
         val id = pluginId ?: return
         launchOperation("运行漫画源操作：${action.title}") {
             settingsDraft.flush(id)
-            val result =
-                app().pluginCatalog.invokeAction(id, PluginActionRequest(actionId = action.id))
-            // Only a top-level message has a defined UI representation.
-            _message.value = SourceDetailFeedback(sourceActionMessage(result, action.title))
-            sessionHint.applyOutcome(id, action, result)
-            // An action may alter plugin-owned state, so invalidate runtime-derived data now.
-            app().pluginManager.invalidateDerivedData(id)
-            // Descriptors can be derived from that state as well (the mirrors an action just
-            // refreshed), so re-read them for the screen.
+            _message.value = SourceDetailFeedback(app().sourceActionRunner.run(id, action))
+            // Descriptors can be derived from plugin-owned state as well (the mirrors an action
+            // just refreshed), so re-read them for the screen.
             describe(id)
         }
     }
@@ -272,7 +247,3 @@ class SourceDetailViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun app() = getApplication<InkleafApplication>()
 }
-
-internal fun sourceActionMessage(result: JsonElement, actionTitle: String): String =
-    ((result as? JsonObject)?.get("message") as? JsonPrimitive)?.contentOrNull
-        ?: "$actionTitle：操作完成"
