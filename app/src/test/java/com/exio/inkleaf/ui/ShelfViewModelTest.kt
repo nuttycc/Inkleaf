@@ -1,10 +1,14 @@
 package com.exio.inkleaf.ui
 
+import com.exio.inkleaf.plugin.OnlineComicRecord
+import com.exio.inkleaf.plugin.OnlineContentKey
 import com.exio.inkleaf.plugin.OnlineContentRepository
 import java.nio.file.Files
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.shareIn
@@ -57,6 +61,38 @@ class ShelfViewModelTest {
         } finally {
             shareScope.cancel()
             root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `online snapshot recovers after a failed read`() = runBlocking {
+        val revisions = MutableStateFlow(0)
+        val fail = AtomicBoolean(true)
+        val shareScope = CoroutineScope(coroutineContext + SupervisorJob())
+        try {
+            val snapshots =
+                observeOnlineBookmarked(revisions) {
+                        if (fail.get()) error("corrupt")
+                        listOf(OnlineComicRecord(OnlineContentKey(PLUGIN_ID, SOURCE_ID)))
+                    }
+                    .shareIn(shareScope, SharingStarted.Eagerly, replay = 1)
+
+            withTimeout(1_000) {
+                while (snapshots.replayCache.isEmpty()) yield()
+            }
+            assertEquals(emptyList<OnlineComicRecord>(), snapshots.replayCache.single())
+
+            fail.set(false)
+            revisions.value = 1
+            withTimeout(1_000) {
+                while (snapshots.replayCache.lastOrNull()?.isEmpty() != false) yield()
+            }
+            assertEquals(
+                listOf(SOURCE_ID),
+                snapshots.replayCache.last().map { it.key.sourceId },
+            )
+        } finally {
+            shareScope.cancel()
         }
     }
 

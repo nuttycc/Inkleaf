@@ -6,6 +6,7 @@ import android.net.Uri
 import android.provider.DocumentsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -15,6 +16,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -36,14 +38,18 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -88,9 +94,10 @@ import com.exio.inkleaf.data.CoverAspect
 import com.exio.inkleaf.data.CoverCrop
 import com.exio.inkleaf.data.GridColumnsMode
 import com.exio.inkleaf.data.LibraryScanner
-import com.exio.inkleaf.data.ShelfGroupFilterKind
-import com.exio.inkleaf.data.ShelfGroupSelection
+import com.exio.inkleaf.data.ShelfFilter
+import com.exio.inkleaf.data.ShelfGroupFilter
 import com.exio.inkleaf.data.ShelfLayoutSettings
+import com.exio.inkleaf.data.ShelfSourceFilter
 import com.exio.inkleaf.data.db.BookSourceType
 import com.exio.inkleaf.data.db.ComicEntity
 import com.exio.inkleaf.data.db.GroupWithCount
@@ -144,12 +151,14 @@ fun ShelfScreen(
     val context = LocalContext.current
     val shelfState by viewModel.shelfState.collectAsStateWithLifecycle()
     val groups by viewModel.groups.collectAsStateWithLifecycle()
-    val selectedGroup by viewModel.selectedGroup.collectAsStateWithLifecycle()
+    val filter by viewModel.filter.collectAsStateWithLifecycle()
     val scanState by viewModel.scanState.collectAsStateWithLifecycle()
     val layout by viewModel.layoutSettings.collectAsStateWithLifecycle()
     val lastPickedFolder by viewModel.lastPickedFolder.collectAsStateWithLifecycle()
 
     var pendingDelete by remember { mutableStateOf<ComicEntity?>(null) }
+    var pendingOnlineAction by remember { mutableStateOf<ShelfEntry.Online?>(null) }
+    var pendingOnlineGroupAssignment by remember { mutableStateOf<ShelfEntry.Online?>(null) }
     var pendingOnlineDelete by remember { mutableStateOf<OnlineComicRecord?>(null) }
     var pendingAction by remember { mutableStateOf<ComicEntity?>(null) }
     var pendingGroupAssignment by remember { mutableStateOf<ComicEntity?>(null) }
@@ -280,8 +289,8 @@ fun ShelfScreen(
                             scrolledContainerColor = MaterialTheme.colorScheme.background,
                         ),
                 )
-                ShelfGroupFilterBar(
-                    label = groupTitle(selectedGroup, groups),
+                ShelfFilterBar(
+                    label = shelfFilterTitle(filter, groups),
                     onClick = { showGroupSheet = true },
                 )
             }
@@ -334,8 +343,8 @@ fun ShelfScreen(
                             // Filtered list can be empty for two reasons: brand-new library, or
                             // the active group filter matches nothing. Copy and CTAs differ.
                             ShelfEmptyState(
-                                selection = selectedGroup,
-                                groupLabel = groupTitle(selectedGroup, groups),
+                                filter = filter,
+                                filterLabel = shelfFilterTitle(filter, groups),
                                 onAddContent = { showAddSheet = true },
                                 modifier = Modifier.padding(32.dp),
                             )
@@ -370,7 +379,7 @@ fun ShelfScreen(
                                             record = entry.record,
                                             aspect = layout.aspect.ratio,
                                             onClick = { onOpenOnlineComic(entry.record) },
-                                            onLongClick = { pendingOnlineDelete = entry.record },
+                                            onLongClick = { pendingOnlineAction = entry },
                                         )
                                 }
                             }
@@ -429,13 +438,13 @@ fun ShelfScreen(
             onDismissRequest = { showGroupSheet = false },
             sheetState = rememberExpandOnlySheetState(),
         ) {
-            GroupPickerSheetContent(
+            ShelfFilterSheetContent(
                 groups = groups,
-                selected = selectedGroup,
-                onSelect = {
-                    viewModel.selectGroup(it)
-                    showGroupSheet = false
-                },
+                selected = filter,
+                onSourceSelect = viewModel::selectSource,
+                onAllGroups = viewModel::selectAllGroups,
+                onUngroupedToggle = viewModel::toggleUngrouped,
+                onGroupToggle = viewModel::toggleGroup,
                 onCreate = { showCreateGroupDialog = true },
                 onRename = { pendingGroupRename = it },
                 onDelete = { pendingGroupDelete = it },
@@ -491,7 +500,7 @@ fun ShelfScreen(
             sheetState = rememberExpandOnlySheetState(),
         ) {
             AssignGroupSheetContent(
-                comic = comic,
+                selectedGroupId = comic.groupId,
                 groups = groups,
                 onSelect = { groupId ->
                     viewModel.setComicGroup(comic, groupId)
@@ -501,10 +510,46 @@ fun ShelfScreen(
         }
     }
 
+    pendingOnlineAction?.let { entry ->
+        ModalBottomSheet(
+            onDismissRequest = { pendingOnlineAction = null },
+            sheetState = rememberExpandOnlySheetState(),
+        ) {
+            OnlineActionSheetContent(
+                title = entry.title,
+                onAssignGroup = {
+                    pendingOnlineAction = null
+                    pendingOnlineGroupAssignment = entry
+                },
+                onRemove = {
+                    pendingOnlineAction = null
+                    pendingOnlineDelete = entry.record
+                },
+            )
+        }
+    }
+
+    pendingOnlineGroupAssignment?.let { entry ->
+        ModalBottomSheet(
+            onDismissRequest = { pendingOnlineGroupAssignment = null },
+            sheetState = rememberExpandOnlySheetState(),
+        ) {
+            AssignGroupSheetContent(
+                selectedGroupId = entry.groupId,
+                groups = groups,
+                onSelect = { groupId ->
+                    viewModel.setOnlineComicGroup(entry.record, groupId)
+                    pendingOnlineGroupAssignment = null
+                },
+            )
+        }
+    }
+
     if (showCreateGroupDialog) {
         GroupNameDialog(
             title = "新建分组",
             confirmLabel = "创建",
+            existingNames = groups.orEmpty().map { it.group.name }.toSet(),
             onDismiss = { showCreateGroupDialog = false },
             onConfirm = {
                 viewModel.createGroup(it)
@@ -519,10 +564,16 @@ fun ShelfScreen(
             title = "重命名分组",
             initialName = item.group.name,
             confirmLabel = "保存",
+            existingNames =
+                groups.orEmpty()
+                    .filter { it.group.id != item.group.id }
+                    .map { it.group.name }
+                    .toSet(),
             onDismiss = { pendingGroupRename = null },
             onConfirm = {
                 viewModel.renameGroup(item.group.id, it)
                 pendingGroupRename = null
+                showGroupSheet = false
             },
         )
     }
@@ -581,75 +632,163 @@ fun ShelfScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun GroupPickerSheetContent(
+private fun ShelfFilterSheetContent(
     groups: List<GroupWithCount>?,
-    selected: ShelfGroupSelection,
-    onSelect: (ShelfGroupSelection) -> Unit,
+    selected: ShelfFilter,
+    onSourceSelect: (ShelfSourceFilter) -> Unit,
+    onAllGroups: () -> Unit,
+    onUngroupedToggle: () -> Unit,
+    onGroupToggle: (Long) -> Unit,
     onCreate: () -> Unit,
     onRename: (GroupWithCount) -> Unit,
     onDelete: (GroupWithCount) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    SheetColumn(modifier = modifier, scrollable = true, selectable = true) {
-        StandardSheetTitle("选择分组")
-        GroupFilterRow(
-            title = "全部",
-            selected = selected.kind == ShelfGroupFilterKind.ALL,
-            onClick = { onSelect(ShelfGroupSelection()) },
-        )
-        GroupFilterRow(
-            title = "本地",
-            selected = selected.kind == ShelfGroupFilterKind.LOCAL,
-            onClick = { onSelect(ShelfGroupSelection(ShelfGroupFilterKind.LOCAL)) },
-        )
-        GroupFilterRow(
-            title = "在线",
-            selected = selected.kind == ShelfGroupFilterKind.ONLINE,
-            onClick = { onSelect(ShelfGroupSelection(ShelfGroupFilterKind.ONLINE)) },
-        )
-        GroupFilterRow(
-            title = "未分组",
-            selected = selected.kind == ShelfGroupFilterKind.UNGROUPED,
-            onClick = {
-                onSelect(ShelfGroupSelection(ShelfGroupFilterKind.UNGROUPED))
-            },
-        )
-        groups.orEmpty().forEach { item ->
-            val isSelected =
-                selected.kind == ShelfGroupFilterKind.GROUP && selected.groupId == item.group.id
-            InkleafChoiceListItem(
-                headline = item.group.name,
-                selected = isSelected,
-                onClick = {
-                    onSelect(
-                        ShelfGroupSelection(
-                            kind = ShelfGroupFilterKind.GROUP,
-                            groupId = item.group.id,
-                        )
-                    )
-                },
-                supportingContent = { Text("${item.comicCount} 本漫画") },
-                trailingContent = {
-                    Row {
-                        IconButton(onClick = { onRename(item) }) {
-                            Icon(Icons.Filled.Edit, contentDescription = "重命名分组")
-                        }
-                        IconButton(onClick = { onDelete(item) }) {
-                            Icon(Icons.Filled.Delete, contentDescription = "删除分组")
-                        }
+    var showGroupManagement by remember { mutableStateOf(false) }
+
+    SheetColumn(modifier = modifier, scrollable = true) {
+        StandardSheetTitle("筛选书架")
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+            SheetSectionLabel("来源")
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                ShelfSourceFilter.entries.forEachIndexed { index, source ->
+                    SegmentedButton(
+                        selected = selected.source == source,
+                        onClick = { onSourceSelect(source) },
+                        shape =
+                            SegmentedButtonDefaults.itemShape(
+                                index,
+                                ShelfSourceFilter.entries.size,
+                            ),
+                    ) {
+                        Text(shelfSourceLabel(source))
                     }
-                },
-            )
+                }
+            }
+
+            SheetSectionLabel("分组")
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                GroupFilterChip(
+                    label = "全部分组",
+                    selected = selected.group == ShelfGroupFilter.All,
+                    onClick = onAllGroups,
+                )
+                GroupFilterChip(
+                    label = "未分组",
+                    selected = selected.group == ShelfGroupFilter.Ungrouped,
+                    onClick = onUngroupedToggle,
+                )
+                groups.orEmpty().forEach { item ->
+                    GroupFilterChip(
+                        label = item.group.name,
+                        selected =
+                            (selected.group as? ShelfGroupFilter.Group)?.id == item.group.id,
+                        onClick = { onGroupToggle(item.group.id) },
+                    )
+                }
+                AssistChip(onClick = onCreate, label = { Text("新建分组") })
+            }
+
+            if (!groups.isNullOrEmpty()) {
+                TextButton(
+                    onClick = { showGroupManagement = !showGroupManagement },
+                    modifier = Modifier.padding(top = 8.dp),
+                ) {
+                    Text(if (showGroupManagement) "收起管理" else "管理分组")
+                }
+            }
         }
+
+        AnimatedVisibility(visible = showGroupManagement) {
+            Column {
+                groups.orEmpty().forEach { item ->
+                    InkleafInfoListItem(
+                        headline = item.group.name,
+                        supporting = "${item.comicCount} 本漫画",
+                        trailingContent = {
+                            Row {
+                                IconButton(onClick = { onRename(item) }) {
+                                    Icon(Icons.Filled.Edit, contentDescription = "重命名分组")
+                                }
+                                IconButton(onClick = { onDelete(item) }) {
+                                    Icon(Icons.Filled.Delete, contentDescription = "删除分组")
+                                }
+                            }
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GroupFilterChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = {
+            Text(
+                text = label,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+        leadingIcon =
+            if (selected) {
+                {
+                    Icon(
+                        Icons.Filled.Check,
+                        contentDescription = null,
+                        modifier = Modifier.size(FilterChipDefaults.IconSize),
+                    )
+                }
+            } else {
+                null
+            },
+        modifier = modifier.widthIn(max = 240.dp),
+    )
+}
+
+@Composable
+private fun OnlineActionSheetContent(
+    title: String,
+    onAssignGroup: () -> Unit,
+    onRemove: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    SheetColumn(modifier = modifier, scrollable = true) {
+        StandardSheetTitle(title)
         InkleafActionListItem(
-            headline = "新建分组",
-            onClick = onCreate,
+            headline = "设置分组",
+            onClick = onAssignGroup,
             leadingContent = {
                 Icon(
-                    Icons.Filled.Add,
+                    painterResource(R.drawable.ic_folder),
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
+                )
+            },
+        )
+        InkleafActionListItem(
+            headline = "从书架移除",
+            onClick = onRemove,
+            leadingContent = {
+                Icon(
+                    Icons.Filled.Delete,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error,
                 )
             },
         )
@@ -746,7 +885,7 @@ private fun ComicActionSheetContent(
 
 @Composable
 private fun AssignGroupSheetContent(
-    comic: ComicEntity,
+    selectedGroupId: Long?,
     groups: List<GroupWithCount>?,
     onSelect: (Long?) -> Unit,
     modifier: Modifier = Modifier,
@@ -755,13 +894,13 @@ private fun AssignGroupSheetContent(
         StandardSheetTitle("设置分组")
         GroupFilterRow(
             title = "未分组",
-            selected = comic.groupId == null,
+            selected = selectedGroupId == null,
             onClick = { onSelect(null) },
         )
         groups.orEmpty().forEach { item ->
             GroupFilterRow(
                 title = item.group.name,
-                selected = comic.groupId == item.group.id,
+                selected = selectedGroupId == item.group.id,
                 onClick = { onSelect(item.group.id) },
             )
         }
@@ -776,8 +915,16 @@ private fun GroupNameDialog(
     onConfirm: (String) -> Unit,
     modifier: Modifier = Modifier,
     initialName: String = "",
+    existingNames: Set<String> = emptySet(),
 ) {
     var name by remember(initialName) { mutableStateOf(initialName) }
+    val trimmedName = name.trim()
+    val error =
+        when {
+            trimmedName.isEmpty() -> "分组名不能为空"
+            trimmedName in existingNames -> "分组已存在"
+            else -> null
+        }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -787,12 +934,19 @@ private fun GroupNameDialog(
                 value = name,
                 onValueChange = { name = it },
                 label = "分组名",
+                supporting = error?.takeIf { name.isNotEmpty() },
+                isError = error != null && name.isNotEmpty(),
                 singleLine = true,
                 modifier = modifier.fillMaxWidth(),
             )
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(name) }) { Text(confirmLabel) }
+            TextButton(
+                onClick = { onConfirm(trimmedName) },
+                enabled = error == null,
+            ) {
+                Text(confirmLabel)
+            }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("取消") }
@@ -800,31 +954,18 @@ private fun GroupNameDialog(
     )
 }
 
-private fun groupTitle(
-    selected: ShelfGroupSelection,
-    groups: List<GroupWithCount>?,
-): String =
-    when (selected.kind) {
-        ShelfGroupFilterKind.ALL -> "全部"
-        ShelfGroupFilterKind.LOCAL -> "本地"
-        ShelfGroupFilterKind.ONLINE -> "在线"
-        ShelfGroupFilterKind.UNGROUPED -> "未分组"
-        ShelfGroupFilterKind.GROUP ->
-            groups?.firstOrNull { it.group.id == selected.groupId }?.group?.name ?: "全部"
-    }
-
 /**
  * Empty shelf body. Library-empty (filter = all) offers one primary CTA into the shared add sheet;
- * group-filter empty only explains how to switch groups — imports stay on the top bar.
+ * filtered-empty only explains how to switch filters — imports stay on the top bar.
  */
 @Composable
 private fun ShelfEmptyState(
-    selection: ShelfGroupSelection,
-    groupLabel: String,
+    filter: ShelfFilter,
+    filterLabel: String,
     onAddContent: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val isLibraryEmpty = selection.kind == ShelfGroupFilterKind.ALL
+    val isLibraryEmpty = filter.isDefault
     Column(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -858,22 +999,14 @@ private fun ShelfEmptyState(
                 Text("添加内容")
             }
         } else {
-            val title =
-                when (selection.kind) {
-                    ShelfGroupFilterKind.LOCAL -> "还没有本地漫画"
-                    ShelfGroupFilterKind.ONLINE -> "还没有在线追读"
-                    ShelfGroupFilterKind.UNGROUPED -> "没有未分组的漫画"
-                    ShelfGroupFilterKind.GROUP -> "这个分组里还没有漫画"
-                    ShelfGroupFilterKind.ALL -> error("library-empty branch handles ALL")
-                }
             Text(
-                text = title,
+                text = shelfEmptyTitle(filter),
                 style = MaterialTheme.typography.titleLarge,
                 textAlign = TextAlign.Center,
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "点上方「$groupLabel」可切换分组。",
+                text = "点上方「$filterLabel」可切换筛选。",
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -882,9 +1015,9 @@ private fun ShelfEmptyState(
     }
 }
 
-/** Pinned under the top app bar: shows the active group and opens the existing picker sheet. */
+/** Pinned under the top app bar: shows the active filter and opens the filter sheet. */
 @Composable
-private fun ShelfGroupFilterBar(
+private fun ShelfFilterBar(
     label: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -895,7 +1028,7 @@ private fun ShelfGroupFilterBar(
                 .fillMaxWidth()
                 .background(MaterialTheme.colorScheme.background)
                 .clickable(onClick = onClick)
-                .semantics { contentDescription = "选择分组，$label" }
+                .semantics { contentDescription = "筛选书架，$label" }
                 .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

@@ -1,6 +1,8 @@
 package com.exio.inkleaf.data
 
 import android.content.Context
+import androidx.datastore.preferences.core.MutablePreferences
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -41,18 +43,28 @@ data class ShelfLayoutSettings(
     val crop: CoverCrop = CoverCrop.CROP,
 )
 
-enum class ShelfGroupFilterKind {
+enum class ShelfSourceFilter {
     ALL,
     LOCAL,
     ONLINE,
-    UNGROUPED,
-    GROUP,
 }
 
-data class ShelfGroupSelection(
-    val kind: ShelfGroupFilterKind = ShelfGroupFilterKind.ALL,
-    val groupId: Long? = null,
-)
+sealed interface ShelfGroupFilter {
+    data object All : ShelfGroupFilter
+
+    data object Ungrouped : ShelfGroupFilter
+
+    data class Group(val id: Long) : ShelfGroupFilter
+}
+
+/** 书架筛选：来源与自定义分组是两个独立维度，可以任意组合。 */
+data class ShelfFilter(
+    val source: ShelfSourceFilter = ShelfSourceFilter.ALL,
+    val group: ShelfGroupFilter = ShelfGroupFilter.All,
+) {
+    val isDefault: Boolean
+        get() = source == ShelfSourceFilter.ALL && group == ShelfGroupFilter.All
+}
 
 /** 书架排版设置的唯一持久化来源。 读取是一个 Flow：任何一处写入，所有订阅者（书架网格、排版抽屉）自动收到 新值——"点选即生效 + 持久化 + 各处一致"由同一条数据链路保证。 */
 class ShelfSettingsRepository(context: Context) {
@@ -67,20 +79,7 @@ class ShelfSettingsRepository(context: Context) {
             )
         }
 
-    val selectedGroup: Flow<ShelfGroupSelection> =
-        dataStore.data.map { prefs ->
-            val kind = prefs[KEY_GROUP_FILTER_KIND].toEnum(ShelfGroupFilterKind.ALL)
-            val groupId = prefs[KEY_GROUP_FILTER_ID]
-            ShelfGroupSelection(
-                kind =
-                    if (kind == ShelfGroupFilterKind.GROUP && groupId == null) {
-                        ShelfGroupFilterKind.ALL
-                    } else {
-                        kind
-                    },
-                groupId = groupId.takeIf { kind == ShelfGroupFilterKind.GROUP },
-            )
-        }
+    val filter: Flow<ShelfFilter> = dataStore.data.map(::readFilter)
 
     suspend fun setColumns(value: GridColumnsMode) {
         dataStore.edit { it[KEY_COLUMNS] = value.name }
@@ -109,24 +108,61 @@ class ShelfSettingsRepository(context: Context) {
         }
     }
 
-    suspend fun setSelectedGroup(value: ShelfGroupSelection) {
-        dataStore.edit {
-            it[KEY_GROUP_FILTER_KIND] = value.kind.name
-            val groupId = value.groupId
-            if (value.kind == ShelfGroupFilterKind.GROUP && groupId != null) {
-                it[KEY_GROUP_FILTER_ID] = groupId
-            } else {
-                it.remove(KEY_GROUP_FILTER_ID)
+    /** Read-modify-write inside DataStore's edit so rapid taps cannot overwrite each other. */
+    suspend fun updateFilter(transform: (ShelfFilter) -> ShelfFilter) {
+        dataStore.edit { prefs ->
+            writeFilter(prefs, transform(readFilter(prefs)))
+        }
+    }
+
+    private fun readFilter(prefs: Preferences): ShelfFilter {
+        val group =
+            when (prefs[KEY_FILTER_GROUP_KIND].toEnum(StoredGroupFilter.ALL)) {
+                StoredGroupFilter.ALL -> ShelfGroupFilter.All
+                StoredGroupFilter.UNGROUPED -> ShelfGroupFilter.Ungrouped
+                StoredGroupFilter.GROUP ->
+                    prefs[KEY_FILTER_GROUP_ID]?.let { ShelfGroupFilter.Group(it) }
+                        ?: ShelfGroupFilter.All
+            }
+        return ShelfFilter(
+            source = prefs[KEY_FILTER_SOURCE].toEnum(ShelfSourceFilter.ALL),
+            group = group,
+        )
+    }
+
+    private fun writeFilter(prefs: MutablePreferences, value: ShelfFilter) {
+        prefs[KEY_FILTER_SOURCE] = value.source.name
+        when (val group = value.group) {
+            ShelfGroupFilter.All -> {
+                prefs[KEY_FILTER_GROUP_KIND] = StoredGroupFilter.ALL.name
+                prefs.remove(KEY_FILTER_GROUP_ID)
+            }
+
+            ShelfGroupFilter.Ungrouped -> {
+                prefs[KEY_FILTER_GROUP_KIND] = StoredGroupFilter.UNGROUPED.name
+                prefs.remove(KEY_FILTER_GROUP_ID)
+            }
+
+            is ShelfGroupFilter.Group -> {
+                prefs[KEY_FILTER_GROUP_KIND] = StoredGroupFilter.GROUP.name
+                prefs[KEY_FILTER_GROUP_ID] = group.id
             }
         }
+    }
+
+    private enum class StoredGroupFilter {
+        ALL,
+        UNGROUPED,
+        GROUP,
     }
 
     companion object {
         private val KEY_COLUMNS = stringPreferencesKey("grid_columns")
         private val KEY_ASPECT = stringPreferencesKey("cover_aspect")
         private val KEY_CROP = stringPreferencesKey("cover_crop")
-        private val KEY_GROUP_FILTER_KIND = stringPreferencesKey("group_filter_kind")
-        private val KEY_GROUP_FILTER_ID = longPreferencesKey("group_filter_id")
+        private val KEY_FILTER_SOURCE = stringPreferencesKey("filter_source")
+        private val KEY_FILTER_GROUP_KIND = stringPreferencesKey("filter_group_kind")
+        private val KEY_FILTER_GROUP_ID = longPreferencesKey("filter_group_id")
         private val KEY_LAST_PICKED_FOLDER = stringPreferencesKey("last_picked_folder")
     }
 }

@@ -1,16 +1,21 @@
 package com.exio.inkleaf.ui
 
-import com.exio.inkleaf.data.ShelfGroupFilterKind
-import com.exio.inkleaf.data.ShelfGroupSelection
+import com.exio.inkleaf.data.ShelfFilter
+import com.exio.inkleaf.data.ShelfGroupFilter
+import com.exio.inkleaf.data.ShelfSourceFilter
 import com.exio.inkleaf.data.db.BookSourceType
 import com.exio.inkleaf.data.db.ChapterEntity
 import com.exio.inkleaf.data.db.ComicEntity
+import com.exio.inkleaf.data.db.ComicGroupEntity
+import com.exio.inkleaf.data.db.GroupWithCount
 import com.exio.inkleaf.plugin.ChapterSummary
 import com.exio.inkleaf.plugin.OnlineComicRecord
 import com.exio.inkleaf.plugin.OnlineContentKey
 import com.exio.inkleaf.plugin.OnlineReadingPosition
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ShelfEntryModelsTest {
@@ -59,11 +64,266 @@ class ShelfEntryModelsTest {
             buildShelfEntries(
                 comics = listOf(comic()),
                 chapters = emptyList(),
-                online = emptyList(),
-                selection = ShelfGroupSelection(ShelfGroupFilterKind.LOCAL),
+                online = listOf(onlineItem(onlineRecord())),
+                filter = ShelfFilter(source = ShelfSourceFilter.LOCAL),
             )
 
         assertEquals(listOf("local:1"), entries.map(ShelfEntry::key))
+    }
+
+    @Test
+    fun `online filter excludes local entries`() {
+        val entries =
+            buildShelfEntries(
+                comics = listOf(comic()),
+                chapters = emptyList(),
+                online = listOf(onlineItem(onlineRecord())),
+                filter = ShelfFilter(source = ShelfSourceFilter.ONLINE),
+            )
+
+        assertEquals(listOf("online:io.example.source:comic-1"), entries.map(ShelfEntry::key))
+    }
+
+    @Test
+    fun `all source combines local and online entries`() {
+        val entries =
+            buildShelfEntries(
+                comics = listOf(comic()),
+                chapters = emptyList(),
+                online = listOf(onlineItem(onlineRecord())),
+                filter = ShelfFilter(),
+            )
+
+        assertEquals(
+            setOf("local:1", "online:io.example.source:comic-1"),
+            entries.map(ShelfEntry::key).toSet(),
+        )
+    }
+
+    @Test
+    fun `group filter matches both local and online members`() {
+        val entries =
+            buildShelfEntries(
+                comics = listOf(comic(id = 1, groupId = 7), comic(id = 2, groupId = 8)),
+                chapters = emptyList(),
+                online =
+                    listOf(
+                        onlineItem(onlineRecord(), groupId = 7),
+                        onlineItem(onlineRecord(sourceId = "comic-2")),
+                    ),
+                filter =
+                    ShelfFilter(
+                        source = ShelfSourceFilter.ALL,
+                        group = ShelfGroupFilter.Group(7),
+                    ),
+            )
+
+        assertEquals(
+            setOf("local:1", "online:io.example.source:comic-1"),
+            entries.map(ShelfEntry::key).toSet(),
+        )
+        assertEquals(7L, entries.filterIsInstance<ShelfEntry.Online>().single().groupId)
+    }
+
+    @Test
+    fun `source and group filters compose independently`() {
+        val comics = listOf(comic(id = 1, groupId = 7), comic(id = 2))
+        val online =
+            listOf(
+                onlineItem(onlineRecord(), groupId = 7),
+                onlineItem(onlineRecord(sourceId = "comic-2")),
+            )
+
+        assertEquals(
+            setOf("local:1"),
+            keys(
+                ShelfFilter(ShelfSourceFilter.LOCAL, ShelfGroupFilter.Group(7)),
+                comics,
+                online,
+            ),
+        )
+        assertEquals(
+            setOf("online:io.example.source:comic-1"),
+            keys(
+                ShelfFilter(ShelfSourceFilter.ONLINE, ShelfGroupFilter.Group(7)),
+                comics,
+                online,
+            ),
+        )
+        assertEquals(
+            setOf("local:2"),
+            keys(
+                ShelfFilter(ShelfSourceFilter.LOCAL, ShelfGroupFilter.Ungrouped),
+                comics,
+                online,
+            ),
+        )
+        assertEquals(
+            setOf("online:io.example.source:comic-2"),
+            keys(
+                ShelfFilter(ShelfSourceFilter.ONLINE, ShelfGroupFilter.Ungrouped),
+                comics,
+                online,
+            ),
+        )
+    }
+
+    @Test
+    fun `ungrouped filter matches ungrouped local and online entries`() {
+        val entries =
+            buildShelfEntries(
+                comics = listOf(comic(id = 1), comic(id = 2, groupId = 7)),
+                chapters = emptyList(),
+                online =
+                    listOf(
+                        onlineItem(onlineRecord()),
+                        onlineItem(onlineRecord(sourceId = "comic-2"), groupId = 7),
+                    ),
+                filter = ShelfFilter(group = ShelfGroupFilter.Ungrouped),
+            )
+
+        assertEquals(
+            setOf("local:1", "online:io.example.source:comic-1"),
+            entries.map(ShelfEntry::key).toSet(),
+        )
+    }
+
+    @Test
+    fun `default filter requires both dimensions to be all`() {
+        assertTrue(ShelfFilter().isDefault)
+        assertFalse(ShelfFilter(source = ShelfSourceFilter.LOCAL).isDefault)
+        assertFalse(ShelfFilter(group = ShelfGroupFilter.Ungrouped).isDefault)
+    }
+
+    @Test
+    fun `empty title reflects source and group`() {
+        assertEquals(
+            "还没有在线追读",
+            shelfEmptyTitle(ShelfFilter(source = ShelfSourceFilter.ONLINE)),
+        )
+        assertEquals(
+            "这个分组里还没有在线漫画",
+            shelfEmptyTitle(
+                ShelfFilter(
+                    source = ShelfSourceFilter.ONLINE,
+                    group = ShelfGroupFilter.Group(7),
+                )
+            ),
+        )
+        assertEquals(
+            "没有未分组的本地漫画",
+            shelfEmptyTitle(
+                ShelfFilter(
+                    source = ShelfSourceFilter.LOCAL,
+                    group = ShelfGroupFilter.Ungrouped,
+                )
+            ),
+        )
+        assertEquals("还没有漫画", shelfEmptyTitle(ShelfFilter()))
+        assertEquals(
+            "没有未分组的漫画",
+            shelfEmptyTitle(ShelfFilter(group = ShelfGroupFilter.Ungrouped)),
+        )
+        assertEquals(
+            "这个分组里还没有漫画",
+            shelfEmptyTitle(ShelfFilter(group = ShelfGroupFilter.Group(7))),
+        )
+        assertEquals(
+            "这个分组里还没有本地漫画",
+            shelfEmptyTitle(
+                ShelfFilter(
+                    source = ShelfSourceFilter.LOCAL,
+                    group = ShelfGroupFilter.Group(7),
+                )
+            ),
+        )
+    }
+
+    @Test
+    fun `filter title combines source and group labels`() {
+        val groups =
+            listOf(
+                GroupWithCount(
+                    ComicGroupEntity(id = 7, name = "Favorite 1", createdAt = 1),
+                    3,
+                )
+            )
+
+        assertEquals("全部", shelfFilterTitle(ShelfFilter(), groups))
+        assertEquals(
+            "本地",
+            shelfFilterTitle(ShelfFilter(source = ShelfSourceFilter.LOCAL), groups),
+        )
+        assertEquals(
+            "Favorite 1",
+            shelfFilterTitle(ShelfFilter(group = ShelfGroupFilter.Group(7)), groups),
+        )
+        assertEquals(
+            "本地 · Favorite 1",
+            shelfFilterTitle(
+                ShelfFilter(
+                    source = ShelfSourceFilter.LOCAL,
+                    group = ShelfGroupFilter.Group(7),
+                ),
+                groups,
+            ),
+        )
+        assertEquals(
+            "在线 · 未分组",
+            shelfFilterTitle(
+                ShelfFilter(
+                    source = ShelfSourceFilter.ONLINE,
+                    group = ShelfGroupFilter.Ungrouped,
+                ),
+                groups,
+            ),
+        )
+        assertEquals(
+            "分组",
+            shelfFilterTitle(ShelfFilter(group = ShelfGroupFilter.Group(99)), groups),
+        )
+    }
+
+    @Test
+    fun `removing active group preserves source`() {
+        val filter =
+            ShelfFilter(
+                source = ShelfSourceFilter.ONLINE,
+                group = ShelfGroupFilter.Group(7),
+            )
+
+        assertEquals(
+            ShelfFilter(source = ShelfSourceFilter.ONLINE),
+            filter.withoutGroup(7),
+        )
+        assertEquals(filter, filter.withoutGroup(8))
+    }
+
+    @Test
+    fun `group counts include matching online shelf items`() {
+        val groups =
+            listOf(
+                GroupWithCount(ComicGroupEntity(id = 7, name = "Favorite 1", createdAt = 1), 2),
+                GroupWithCount(ComicGroupEntity(id = 8, name = "Favorite 2", createdAt = 2), 1),
+            )
+        val online =
+            listOf(
+                onlineItem(onlineRecord(), groupId = 7),
+                onlineItem(onlineRecord(sourceId = "comic-2"), groupId = 7),
+                onlineItem(onlineRecord(sourceId = "comic-3")),
+            )
+
+        val merged = withOnlineGroupCounts(groups, online)
+
+        assertEquals(listOf(4, 1), merged.map(GroupWithCount::comicCount))
+        assertEquals(groups, withOnlineGroupCounts(groups, emptyList()))
+        assertEquals(
+            groups,
+            withOnlineGroupCounts(
+                groups,
+                listOf(onlineItem(onlineRecord(), groupId = 99)),
+            ),
+        )
     }
 
     @Test
@@ -172,19 +432,22 @@ class ShelfEntryModelsTest {
     }
 
     private fun comic(
+        id: Long = 1,
         pageCount: Int = 10,
         chapterIndex: Int = 0,
         page: Int = 0,
+        groupId: Long? = null,
     ) =
         ComicEntity(
-            id = 1,
-            uri = "content://comic/1",
-            fileKey = "comic-1",
-            title = "Comic",
+            id = id,
+            uri = "content://comic/$id",
+            fileKey = "comic-$id",
+            title = "Comic $id",
             pageCount = pageCount,
             lastReadChapterIndex = chapterIndex,
             lastReadPage = page,
             addedAt = 1,
+            groupId = groupId,
             sourceType = BookSourceType.PDF_SERIES,
         )
 
@@ -201,12 +464,13 @@ class ShelfEntryModelsTest {
         )
 
     private fun onlineRecord(
-        chapters: List<ChapterSummary>,
-        chapterId: String?,
-        pageIndex: Int,
+        chapters: List<ChapterSummary> = emptyList(),
+        chapterId: String? = null,
+        pageIndex: Int = 0,
+        sourceId: String = "comic-1",
     ) =
         OnlineComicRecord(
-            key = OnlineContentKey("io.example.source", "comic-1"),
+            key = OnlineContentKey("io.example.source", sourceId),
             chapters = chapters,
             position =
                 chapterId?.let {
@@ -217,4 +481,21 @@ class ShelfEntryModelsTest {
                     )
                 },
         )
+
+    private fun onlineItem(record: OnlineComicRecord, groupId: Long? = null) =
+        ShelfOnlineItem(record = record, groupId = groupId)
+
+    private fun keys(
+        filter: ShelfFilter,
+        comics: List<ComicEntity>,
+        online: List<ShelfOnlineItem>,
+    ): Set<String> =
+        buildShelfEntries(
+                comics = comics,
+                chapters = emptyList(),
+                online = online,
+                filter = filter,
+            )
+            .map(ShelfEntry::key)
+            .toSet()
 }
