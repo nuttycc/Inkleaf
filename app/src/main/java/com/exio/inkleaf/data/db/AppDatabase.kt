@@ -4,8 +4,13 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 
-/** App database. Version changes intentionally rebuild local data for this unreleased app. */
+/**
+ * App database. New versions need an explicit migration to preserve existing data; an unmigrated
+ * version jump still falls back to a destructive rebuild for this unreleased app.
+ */
 @Database(
     entities =
         [
@@ -15,6 +20,7 @@ import androidx.room.RoomDatabase
             LibraryExclusionEntity::class,
             FavoritePageEntity::class,
             ComicGroupEntity::class,
+            OnlineComicGroupEntity::class,
             AlbumPageEntity::class,
             BookmarkEntity::class,
             ReadingSessionEntity::class,
@@ -22,7 +28,8 @@ import androidx.room.RoomDatabase
     // v13+: reading activity history schema. No data migration — destructive rebuild is intentional
     // (#15).
     // v17 persists comics explicitly excluded from directory scans.
-    version = 17,
+    // v18 keeps custom group membership for online shelf comics alongside local groups.
+    version = 18,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -37,6 +44,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun favoriteDao(): FavoriteDao
 
     abstract fun comicGroupDao(): ComicGroupDao
+
+    abstract fun onlineComicGroupDao(): OnlineComicGroupDao
 
     abstract fun albumPageDao(): AlbumPageDao
 
@@ -58,9 +67,27 @@ abstract class AppDatabase : RoomDatabase() {
                                 AppDatabase::class.java,
                                 "comic_reader.db",
                             )
+                            .addMigrations(MIGRATION_17_18)
                             .fallbackToDestructiveMigration(dropAllTables = true)
                             .build()
                             .also { instance = it }
                 }
+
+        private val MIGRATION_17_18 =
+            object : Migration(17, 18) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    db.execSQL(
+                        "CREATE TABLE IF NOT EXISTS `online_comic_groups` (" +
+                            "`pluginId` TEXT NOT NULL, " +
+                            "`sourceId` TEXT NOT NULL, " +
+                            "`groupId` INTEGER NOT NULL, " +
+                            "PRIMARY KEY(`pluginId`, `sourceId`))"
+                    )
+                    db.execSQL(
+                        "CREATE INDEX IF NOT EXISTS `index_online_comic_groups_groupId` " +
+                            "ON `online_comic_groups` (`groupId`)"
+                    )
+                }
+            }
     }
 }

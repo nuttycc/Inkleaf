@@ -16,6 +16,7 @@ import com.exio.inkleaf.data.db.GroupWithCount
 import com.exio.inkleaf.data.db.LibraryExclusionEntity
 import com.exio.inkleaf.data.db.LibraryFolderEntity
 import com.exio.inkleaf.data.db.LibraryFolderType
+import com.exio.inkleaf.data.db.OnlineComicGroupEntity
 import java.io.File
 import java.util.zip.ZipInputStream
 import kotlinx.coroutines.CancellationException
@@ -113,6 +114,7 @@ class ComicRepository(context: Context) {
     private val folderDao = db.libraryFolderDao()
     private val exclusionDao = db.libraryExclusionDao()
     private val groupDao = db.comicGroupDao()
+    private val onlineGroupDao = db.onlineComicGroupDao()
     private val scanner = LibraryScanner(appContext)
 
     private sealed interface SeriesFolderSyncOutcome {
@@ -167,6 +169,8 @@ class ComicRepository(context: Context) {
 
     fun observeGroups(): Flow<List<GroupWithCount>> = groupDao.observeGroupsWithCount()
 
+    fun observeOnlineGroups(): Flow<List<OnlineComicGroupEntity>> = onlineGroupDao.observeAll()
+
     suspend fun groupExists(id: Long): Boolean = groupDao.getById(id) != null
 
     suspend fun createGroup(name: String): GroupWriteOutcome {
@@ -200,16 +204,40 @@ class ComicRepository(context: Context) {
     }
 
     suspend fun deleteGroup(id: Long) {
-        groupDao.deleteKeepingComics(id)
+        // Group and online memberships share one database, so a single transaction covers both.
+        db.withTransaction {
+            onlineGroupDao.clearGroup(id)
+            groupDao.deleteKeepingComics(id)
+        }
     }
 
-    suspend fun setComicGroup(comicId: Long, groupId: Long?): GroupWriteOutcome {
-        if (groupId != null && groupDao.getById(groupId) == null) {
-            return GroupWriteOutcome.Missing
+    suspend fun setComicGroup(comicId: Long, groupId: Long?): GroupWriteOutcome =
+        db.withTransaction {
+            if (groupId != null && groupDao.getById(groupId) == null) {
+                GroupWriteOutcome.Missing
+            } else {
+                dao.updateGroup(comicId, groupId)
+                GroupWriteOutcome.Success(groupId)
+            }
         }
-        dao.updateGroup(comicId, groupId)
-        return GroupWriteOutcome.Success(groupId)
-    }
+
+    suspend fun setOnlineComicGroup(
+        pluginId: String,
+        sourceId: String,
+        groupId: Long?,
+    ): GroupWriteOutcome =
+        db.withTransaction {
+            if (groupId != null && groupDao.getById(groupId) == null) {
+                GroupWriteOutcome.Missing
+            } else {
+                if (groupId == null) {
+                    onlineGroupDao.delete(pluginId, sourceId)
+                } else {
+                    onlineGroupDao.upsert(OnlineComicGroupEntity(pluginId, sourceId, groupId))
+                }
+                GroupWriteOutcome.Success(groupId)
+            }
+        }
 
     /**
      * 手动添加单个漫画；同一文件已在书架时直接返回已有记录，失效记录会恢复。
