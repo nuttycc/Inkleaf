@@ -4,9 +4,9 @@ import android.content.ActivityNotFoundException
 import android.content.ContentResolver
 import android.net.Uri
 import android.provider.DocumentsContract
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -29,24 +29,29 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items as lazyItems
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -554,7 +559,6 @@ fun ShelfScreen(
             onConfirm = {
                 viewModel.createGroup(it)
                 showCreateGroupDialog = false
-                showGroupSheet = false
             },
         )
     }
@@ -573,7 +577,6 @@ fun ShelfScreen(
             onConfirm = {
                 viewModel.renameGroup(item.group.id, it)
                 pendingGroupRename = null
-                showGroupSheet = false
             },
         )
     }
@@ -647,6 +650,20 @@ private fun ShelfFilterSheetContent(
     modifier: Modifier = Modifier,
 ) {
     var showGroupManagement by remember { mutableStateOf(false) }
+    // 后注册的返回回调先执行：管理页先回到筛选，再交给抽屉自身的返回处理
+    BackHandler(enabled = showGroupManagement) { showGroupManagement = false }
+
+    if (showGroupManagement) {
+        GroupManagementSheetContent(
+            groups = groups.orEmpty(),
+            onBack = { showGroupManagement = false },
+            onCreate = onCreate,
+            onRename = onRename,
+            onDelete = onDelete,
+            modifier = modifier,
+        )
+        return
+    }
 
     SheetColumn(modifier = modifier, scrollable = true) {
         StandardSheetTitle("筛选书架")
@@ -668,9 +685,25 @@ private fun ShelfFilterSheetContent(
                 }
             }
 
-            SheetSectionLabel("分组")
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "分组",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(
+                    onClick = { showGroupManagement = true },
+                    modifier = Modifier.semantics { contentDescription = "管理分组" },
+                ) {
+                    Text("管理")
+                }
+            }
             FlowRow(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -692,40 +725,129 @@ private fun ShelfFilterSheetContent(
                         onClick = { onGroupToggle(item.group.id) },
                     )
                 }
-                AssistChip(onClick = onCreate, label = { Text("新建分组") })
-            }
-
-            if (!groups.isNullOrEmpty()) {
-                TextButton(
-                    onClick = { showGroupManagement = !showGroupManagement },
-                    modifier = Modifier.padding(top = 8.dp),
-                ) {
-                    Text(if (showGroupManagement) "收起管理" else "管理分组")
-                }
             }
         }
+    }
+}
 
-        AnimatedVisibility(visible = showGroupManagement) {
-            Column {
-                groups.orEmpty().forEach { item ->
-                    InkleafInfoListItem(
-                        headline = item.group.name,
-                        supporting = "${item.comicCount} 本漫画",
-                        trailingContent = {
-                            Row {
-                                IconButton(onClick = { onRename(item) }) {
-                                    Icon(Icons.Filled.Edit, contentDescription = "重命名分组")
-                                }
-                                IconButton(onClick = { onDelete(item) }) {
-                                    Icon(Icons.Filled.Delete, contentDescription = "删除分组")
-                                }
-                            }
-                        },
+@Composable
+private fun GroupManagementSheetContent(
+    groups: List<GroupWithCount>,
+    onBack: () -> Unit,
+    onCreate: () -> Unit,
+    onRename: (GroupWithCount) -> Unit,
+    onDelete: (GroupWithCount) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    SheetColumn(modifier = modifier, scrollable = false) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(start = 4.dp, end = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回筛选")
+            }
+            Text(
+                text = "管理分组",
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.padding(start = 4.dp),
+            )
+        }
+        if (groups.isEmpty()) {
+            Text(
+                text = "还没有自定义分组。新建一个，把本地和在线漫画归到一起。",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            )
+        } else {
+            Text(
+                text = "${groups.size} 个分组 · 点行尾 ⋮ 重命名或删除",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
+            )
+            LazyColumn(modifier = Modifier.weight(1f, fill = false)) {
+                lazyItems(groups, key = { it.group.id }) { item ->
+                    GroupManagementRow(
+                        item = item,
+                        onRename = { onRename(item) },
+                        onDelete = { onDelete(item) },
+                        modifier = Modifier.animateItem(),
                     )
                 }
             }
         }
+        InkleafActionListItem(
+            headline = "新建分组",
+            onClick = onCreate,
+            leadingContent = {
+                Icon(
+                    Icons.Filled.Add,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            },
+        )
     }
+}
+
+@Composable
+private fun GroupManagementRow(
+    item: GroupWithCount,
+    onRename: () -> Unit,
+    onDelete: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var menuOpen by remember { mutableStateOf(false) }
+    InkleafInfoListItem(
+        headline = item.group.name,
+        supporting = if (item.comicCount == 0) "空分组" else "${item.comicCount} 本漫画",
+        modifier = modifier,
+        leadingContent = {
+            Icon(
+                painterResource(R.drawable.ic_folder),
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        },
+        trailingContent = {
+            Box {
+                IconButton(onClick = { menuOpen = true }) {
+                    Icon(
+                        Icons.Filled.MoreVert,
+                        contentDescription = "分组「${item.group.name}」的更多操作",
+                    )
+                }
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text("重命名") },
+                        leadingIcon = {
+                            Icon(Icons.Filled.Edit, contentDescription = null)
+                        },
+                        onClick = {
+                            menuOpen = false
+                            onRename()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("删除分组", color = MaterialTheme.colorScheme.error) },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Filled.Delete,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error,
+                            )
+                        },
+                        onClick = {
+                            menuOpen = false
+                            onDelete()
+                        },
+                    )
+                }
+            }
+        },
+    )
 }
 
 @Composable
