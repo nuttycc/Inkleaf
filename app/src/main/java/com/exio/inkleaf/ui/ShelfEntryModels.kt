@@ -6,15 +6,10 @@ import com.exio.inkleaf.data.ShelfSourceFilter
 import com.exio.inkleaf.data.db.ChapterEntity
 import com.exio.inkleaf.data.db.ComicEntity
 import com.exio.inkleaf.data.db.GroupWithCount
+import com.exio.inkleaf.data.db.OnlineComicGroupEntity
 import com.exio.inkleaf.plugin.OnlineComicRecord
 
 internal data class ShelfProgress(val currentPage: Int, val totalPages: Int)
-
-/** 在线书架条目 + 它的自定义分组；分组关系来自 Room，与在线 JSON 记录分开存储。 */
-internal data class ShelfOnlineItem(
-    val record: OnlineComicRecord,
-    val groupId: Long?,
-)
 
 internal sealed interface ShelfEntry {
     val key: String
@@ -42,10 +37,21 @@ internal sealed interface ShelfEntry {
 
 internal data class ShelfUiState(val entries: List<ShelfEntry>)
 
+/** 在线书架条目 + 它的自定义分组；分组关系来自 Room，与在线 JSON 记录分开存储，在这里合并。 */
+internal fun onlineShelfEntries(
+    records: List<OnlineComicRecord>,
+    memberships: List<OnlineComicGroupEntity>,
+): List<ShelfEntry.Online> {
+    val groupIds = memberships.associate { (it.pluginId to it.sourceId) to it.groupId }
+    return records.map { record ->
+        ShelfEntry.Online(record, groupIds[record.key.pluginId to record.key.sourceId])
+    }
+}
+
 internal fun buildShelfEntries(
     comics: List<ComicEntity>,
     chapters: List<ChapterEntity>,
-    online: List<ShelfOnlineItem>,
+    online: List<ShelfEntry.Online>,
     filter: ShelfFilter,
 ): List<ShelfEntry> {
     val chaptersByComic = chapters.groupBy(ChapterEntity::comicId)
@@ -63,10 +69,7 @@ internal fun buildShelfEntries(
         if (filter.source == ShelfSourceFilter.LOCAL) {
             emptySequence()
         } else {
-            online
-                .asSequence()
-                .filter { filter.matchesGroup(it.groupId) }
-                .map { ShelfEntry.Online(it.record, it.groupId) }
+            online.asSequence().filter { filter.matchesGroup(it.groupId) }
         }
     return (localEntries + onlineEntries)
         .sortedWith(
@@ -90,6 +93,28 @@ internal fun ShelfFilter.withoutGroup(groupId: Long): ShelfFilter =
     } else {
         this
     }
+
+/** Selecting the active group chip again returns to all groups. */
+internal fun ShelfFilter.toggleGroup(groupId: Long): ShelfFilter =
+    copy(
+        group =
+            if ((group as? ShelfGroupFilter.Group)?.id == groupId) ShelfGroupFilter.All
+            else ShelfGroupFilter.Group(groupId)
+    )
+
+internal fun ShelfFilter.toggleUngrouped(): ShelfFilter =
+    copy(
+        group =
+            if (group == ShelfGroupFilter.Ungrouped) ShelfGroupFilter.All
+            else ShelfGroupFilter.Ungrouped
+    )
+
+/**
+ * The selected group when [groups] no longer lists it. Such a filter would show a shelf that stays
+ * empty with nothing explaining why.
+ */
+internal fun ShelfFilter.missingGroupId(groups: List<GroupWithCount>): Long? =
+    (group as? ShelfGroupFilter.Group)?.id?.takeIf { id -> groups.none { it.group.id == id } }
 
 internal fun shelfSourceLabel(source: ShelfSourceFilter): String =
     when (source) {
@@ -135,10 +160,10 @@ internal fun shelfEmptyTitle(filter: ShelfFilter): String {
 /** 分组数量 = 本地漫画数 + 当前书架上的在线漫画数；在线记录不在 Room 中，所以在这里合并。 */
 internal fun withOnlineGroupCounts(
     groups: List<GroupWithCount>,
-    online: List<ShelfOnlineItem>,
+    online: List<ShelfEntry.Online>,
 ): List<GroupWithCount> {
     if (online.isEmpty()) return groups
-    val countsByGroup = online.mapNotNull(ShelfOnlineItem::groupId).groupingBy { it }.eachCount()
+    val countsByGroup = online.mapNotNull(ShelfEntry.Online::groupId).groupingBy { it }.eachCount()
     return groups.map { item ->
         val onlineCount = countsByGroup[item.group.id] ?: 0
         if (onlineCount == 0) item else item.copy(comicCount = item.comicCount + onlineCount)

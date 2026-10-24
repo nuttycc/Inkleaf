@@ -29,7 +29,6 @@ import com.exio.inkleaf.data.ShelfLayoutSettings
 import com.exio.inkleaf.data.ShelfSettingsRepository
 import com.exio.inkleaf.data.ShelfSourceFilter
 import com.exio.inkleaf.data.db.ComicEntity
-import com.exio.inkleaf.data.db.FolderWithCount
 import com.exio.inkleaf.data.db.GroupWithCount
 import com.exio.inkleaf.data.db.OnlineComicGroupEntity
 import com.exio.inkleaf.plugin.OnlineComicRecord
@@ -79,9 +78,6 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycle
     private val albumExporter = AlbumExporter(app)
     private val settingsRepo = ShelfSettingsRepository(app)
 
-    val folders: StateFlow<List<FolderWithCount>?> =
-        repo.observeFolders().stateIn(viewModelScope, SharingStarted.Eagerly, null)
-
     private val onlineRepo = (app as InkleafApplication).onlineContentRepository
 
     /** 阅读页覆盖书架时仍持续刷新在线快照，返回书架直接拿到最新记录。 */
@@ -96,26 +92,17 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycle
             emit(emptyList())
         }
 
-    private val onlineShelfItems: SharedFlow<List<ShelfOnlineItem>> =
-        combine(onlineBookmarked, onlineMemberships) { records, memberships ->
-                val groupIds = memberships.associate { (it.pluginId to it.sourceId) to it.groupId }
-                records.map { record ->
-                    ShelfOnlineItem(
-                        record = record,
-                        groupId = groupIds[record.key.pluginId to record.key.sourceId],
-                    )
-                }
-            }
+    private val onlineEntries: SharedFlow<List<ShelfEntry.Online>> =
+        combine(onlineBookmarked, onlineMemberships, ::onlineShelfEntries)
             .shareIn(viewModelScope, SharingStarted.Eagerly, replay = 1)
 
     val groups: StateFlow<List<GroupWithCount>?> =
         combine(
                 repo.observeGroups(),
                 // Local group management stays available while online counts are still loading.
-                onlineShelfItems.onStart { emit(emptyList()) },
-            ) { groups, online ->
-                withOnlineGroupCounts(groups, online)
-            }
+                onlineEntries.onStart { emit(emptyList()) },
+                ::withOnlineGroupCounts,
+            )
             .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     /** One presentation state gates the first frame on both stores and keeps ordering stable. */
@@ -123,7 +110,7 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycle
         combine(
                 repo.observeAll(),
                 repo.observeAllChapters(),
-                onlineShelfItems,
+                onlineEntries,
                 settingsRepo.filter,
             ) { comics, chapters, online, filter ->
                 ShelfUiState(buildShelfEntries(comics, chapters, online, filter))
@@ -178,14 +165,11 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycle
         // 如果当前筛选的分组被删除，回到"全部"；否则用户会看到一个
         // 永远为空、也没有入口解释原因的书架。
         viewModelScope.launch {
-            combine(groups, filter) { groups, filter -> groups to filter }
-                .collect { (list, current) ->
-                    if (list == null) return@collect
-                    val selectedGroupId =
-                        (current.group as? ShelfGroupFilter.Group)?.id ?: return@collect
-                    val selectedExists = list.any { it.group.id == selectedGroupId }
-                    if (!selectedExists && !repo.groupExists(selectedGroupId)) {
-                        settingsRepo.updateFilter { it.withoutGroup(selectedGroupId) }
+            combine(groups, filter) { groups, filter -> groups?.let(filter::missingGroupId) }
+                .collect { missingId ->
+                    // The groups flow can lag a just-created group, so confirm before resetting.
+                    if (missingId != null && !repo.groupExists(missingId)) {
+                        settingsRepo.updateFilter { it.withoutGroup(missingId) }
                     }
                 }
         }
@@ -480,34 +464,11 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycle
     }
 
     fun toggleUngrouped() {
-        viewModelScope.launch {
-            settingsRepo.updateFilter { current ->
-                current.copy(
-                    group =
-                        if (current.group == ShelfGroupFilter.Ungrouped) {
-                            ShelfGroupFilter.All
-                        } else {
-                            ShelfGroupFilter.Ungrouped
-                        }
-                )
-            }
-        }
+        viewModelScope.launch { settingsRepo.updateFilter { it.toggleUngrouped() } }
     }
 
     fun toggleGroup(groupId: Long) {
-        viewModelScope.launch {
-            settingsRepo.updateFilter { current ->
-                val selected = (current.group as? ShelfGroupFilter.Group)?.id == groupId
-                current.copy(
-                    group =
-                        if (selected) {
-                            ShelfGroupFilter.All
-                        } else {
-                            ShelfGroupFilter.Group(groupId)
-                        }
-                )
-            }
-        }
+        viewModelScope.launch { settingsRepo.updateFilter { it.toggleGroup(groupId) } }
     }
 
     fun createGroup(name: String) {
@@ -532,11 +493,9 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app), DefaultLifecycle
         }
     }
 
+    /** The filter watcher in init returns a shelf filtered by this group to all groups. */
     fun deleteGroup(groupId: Long) {
-        viewModelScope.launch {
-            repo.deleteGroup(groupId)
-            settingsRepo.updateFilter { it.withoutGroup(groupId) }
-        }
+        viewModelScope.launch { repo.deleteGroup(groupId) }
     }
 
     fun setComicGroup(comic: ComicEntity, groupId: Long?) {

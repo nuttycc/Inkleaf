@@ -8,6 +8,7 @@ import com.exio.inkleaf.data.db.ChapterEntity
 import com.exio.inkleaf.data.db.ComicEntity
 import com.exio.inkleaf.data.db.ComicGroupEntity
 import com.exio.inkleaf.data.db.GroupWithCount
+import com.exio.inkleaf.data.db.OnlineComicGroupEntity
 import com.exio.inkleaf.plugin.ChapterSummary
 import com.exio.inkleaf.plugin.OnlineComicRecord
 import com.exio.inkleaf.plugin.OnlineContentKey
@@ -300,6 +301,44 @@ class ShelfEntryModelsTest {
     }
 
     @Test
+    fun `online entries take the group recorded for their plugin and source`() {
+        val grouped = onlineRecord(sourceId = "comic-1")
+        val ungrouped = onlineRecord(sourceId = "comic-2")
+        val memberships =
+            listOf(
+                OnlineComicGroupEntity("io.example.source", "comic-1", groupId = 7),
+                OnlineComicGroupEntity("io.other.source", "comic-2", groupId = 8),
+            )
+
+        val entries = onlineShelfEntries(listOf(grouped, ungrouped), memberships)
+
+        assertEquals(listOf(7L, null), entries.map(ShelfEntry.Online::groupId))
+    }
+
+    @Test
+    fun `group chips toggle between one group and all groups`() {
+        val online = ShelfFilter(source = ShelfSourceFilter.ONLINE)
+
+        val selected = online.toggleGroup(7)
+        assertEquals(ShelfFilter(ShelfSourceFilter.ONLINE, ShelfGroupFilter.Group(7)), selected)
+        assertEquals(ShelfGroupFilter.Group(8), selected.toggleGroup(8).group)
+        assertEquals(online, selected.toggleGroup(7))
+
+        val ungrouped = selected.toggleUngrouped()
+        assertEquals(ShelfGroupFilter.Ungrouped, ungrouped.group)
+        assertEquals(online, ungrouped.toggleUngrouped())
+    }
+
+    @Test
+    fun `a selected group missing from the list is reported`() {
+        val groups = listOf(GroupWithCount(ComicGroupEntity(id = 7, name = "A", createdAt = 1), 0))
+
+        assertNull(ShelfFilter(group = ShelfGroupFilter.Group(7)).missingGroupId(groups))
+        assertEquals(8L, ShelfFilter(group = ShelfGroupFilter.Group(8)).missingGroupId(groups))
+        assertNull(ShelfFilter(group = ShelfGroupFilter.Ungrouped).missingGroupId(emptyList()))
+    }
+
+    @Test
     fun `group counts include matching online shelf items`() {
         val groups =
             listOf(
@@ -483,12 +522,12 @@ class ShelfEntryModelsTest {
         )
 
     private fun onlineItem(record: OnlineComicRecord, groupId: Long? = null) =
-        ShelfOnlineItem(record = record, groupId = groupId)
+        ShelfEntry.Online(record = record, groupId = groupId)
 
     private fun keys(
         filter: ShelfFilter,
         comics: List<ComicEntity>,
-        online: List<ShelfOnlineItem>,
+        online: List<ShelfEntry.Online>,
     ): Set<String> =
         buildShelfEntries(
                 comics = comics,
