@@ -5,6 +5,7 @@ import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -382,6 +383,12 @@ class PluginContentModelsTest {
             )
         assertEquals(listOf("12", "34"), options.options.map { it.id })
         assertEquals("34", options.selected)
+        assertFalse(options.applied)
+
+        val applied = decode("""{"applied":true}""")
+        assertTrue(applied.applied)
+        assertTrue(applied.options.isEmpty())
+        assertNull(applied.selected)
 
         listOf(
                 """{"options":[{"id":"12","title":"A"},{"id":"12","title":"B"}]}""",

@@ -260,6 +260,11 @@ data class PluginActionRequest(
 data class PluginActionOptions(
     val options: List<PluginFilterOption> = emptyList(),
     val selected: String? = null,
+    /**
+     * Whether the action's effect is already present, such as a comic already sitting in an
+     * account folder. The host then offers the matching destructive action instead of adding.
+     */
+    val applied: Boolean = false,
 )
 
 data class PluginSearchResult(
