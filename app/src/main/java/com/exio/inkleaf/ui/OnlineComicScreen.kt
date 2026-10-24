@@ -262,7 +262,7 @@ fun OnlineComicScreen(
                                         )
                                     }
 
-                                // Right: title, source, and the two save actions.
+                                // Right: Title, Author, Source & Bookmark Action
                                 Column(
                                     modifier = Modifier.weight(1f).height(120.dp),
                                     verticalArrangement = Arrangement.SpaceBetween,
@@ -275,33 +275,95 @@ fun OnlineComicScreen(
                                             maxLines = 2,
                                             overflow = TextOverflow.Ellipsis,
                                         )
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                        ) {
-                                            OnlineSourceChip(state.sourceName)
-                                            comic.subtitle
-                                                ?.takeIf { it.isNotBlank() }
-                                                ?.let { author ->
-                                                    Text(
-                                                        text = author,
-                                                        style = MaterialTheme.typography.bodySmall,
-                                                        color =
-                                                            MaterialTheme.colorScheme
-                                                                .onSurfaceVariant,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis,
-                                                        modifier = Modifier.weight(1f),
-                                                    )
-                                                }
-                                        }
+
+                                        comic.subtitle
+                                            ?.takeIf { it.isNotBlank() }
+                                            ?.let { author ->
+                                                Text(
+                                                    text = author,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                )
+                                            }
                                     }
 
-                                    OnlineShelfAction(
-                                        isBookmarked = state.isBookmarked,
-                                        onClick = viewModel::toggleBookmark,
+                                    Row(
                                         modifier = Modifier.fillMaxWidth(),
-                                    )
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Surface(
+                                            color = MaterialTheme.colorScheme.primaryContainer,
+                                            contentColor =
+                                                MaterialTheme.colorScheme.onPrimaryContainer,
+                                            shape = RoundedCornerShape(6.dp),
+                                        ) {
+                                            Text(
+                                                text = state.sourceName,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                modifier =
+                                                    Modifier.padding(
+                                                        horizontal = 8.dp,
+                                                        vertical = 4.dp,
+                                                    ),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        }
+
+                                        // Quick Bookmark Action
+                                        if (state.isBookmarked) {
+                                            FilledTonalButton(
+                                                onClick = viewModel::toggleBookmark,
+                                                contentPadding =
+                                                    PaddingValues(
+                                                        horizontal = 10.dp,
+                                                        vertical = 4.dp,
+                                                    ),
+                                            ) {
+                                                Icon(
+                                                    painter =
+                                                        painterResource(
+                                                            MaterialSymbolsOutlinedR.drawable
+                                                                .materialsymbols_ic_library_add_check_outlined
+                                                        ),
+                                                    contentDescription = "已在书架",
+                                                    modifier = Modifier.size(16.dp),
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text(
+                                                    "已在书架",
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                )
+                                            }
+                                        } else {
+                                            OutlinedButton(
+                                                onClick = viewModel::toggleBookmark,
+                                                contentPadding =
+                                                    PaddingValues(
+                                                        horizontal = 10.dp,
+                                                        vertical = 4.dp,
+                                                    ),
+                                            ) {
+                                                Icon(
+                                                    painter =
+                                                        painterResource(
+                                                            MaterialSymbolsOutlinedR.drawable
+                                                                .materialsymbols_ic_library_add_outlined
+                                                        ),
+                                                    contentDescription = "加入书架",
+                                                    modifier = Modifier.size(16.dp),
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text(
+                                                    "加入书架",
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -533,69 +595,6 @@ fun OnlineComicScreen(
             },
             onDismiss = viewModel::dismissFavoriteSheet,
         )
-    }
-}
-
-@Composable
-private fun OnlineSourceChip(name: String) {
-    Surface(
-        color = MaterialTheme.colorScheme.primaryContainer,
-        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-        shape = RoundedCornerShape(6.dp),
-    ) {
-        Text(
-            text = name,
-            style = MaterialTheme.typography.labelMedium,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
-}
-
-@Composable
-private fun OnlineShelfAction(
-    isBookmarked: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
-    if (isBookmarked) {
-        FilledTonalButton(
-            onClick = onClick,
-            contentPadding = contentPadding,
-            modifier = modifier,
-        ) {
-            Icon(
-                painter =
-                    painterResource(
-                        MaterialSymbolsOutlinedR.drawable
-                            .materialsymbols_ic_library_add_check_outlined
-                    ),
-                contentDescription = "已在书架",
-                modifier = Modifier.size(16.dp),
-            )
-            Spacer(modifier = Modifier.width(4.dp))
-            Text("书架", style = MaterialTheme.typography.labelMedium)
-        }
-    } else {
-        OutlinedButton(
-            onClick = onClick,
-            contentPadding = contentPadding,
-            modifier = modifier,
-        ) {
-            Icon(
-                painter =
-                    painterResource(
-                        MaterialSymbolsOutlinedR.drawable
-                            .materialsymbols_ic_library_add_outlined
-                    ),
-                contentDescription = "加入书架",
-                modifier = Modifier.size(16.dp),
-            )
-            Spacer(modifier = Modifier.width(4.dp))
-            Text("书架", style = MaterialTheme.typography.labelMedium)
-        }
     }
 }
 
