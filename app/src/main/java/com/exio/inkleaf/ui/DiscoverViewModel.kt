@@ -13,7 +13,6 @@ import com.exio.inkleaf.plugin.InstalledPlugin
 import com.exio.inkleaf.plugin.PluginBrowseCacheKey
 import com.exio.inkleaf.plugin.PluginBrowseRequest
 import com.exio.inkleaf.plugin.PluginFeedDescriptor
-import com.exio.inkleaf.plugin.PluginFilterDescriptor
 import com.exio.inkleaf.plugin.PluginSearchRequest
 import com.exio.inkleaf.plugin.PluginSearchResult
 import kotlinx.coroutines.CancellationException
@@ -140,8 +139,8 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
     val browseFilters: StateFlow<Map<String, String>> = _browseFilters.asStateFlow()
 
     /** Filters the loaded page introduced, such as an account's favorite folders. */
-    private val _dynamicFilters = MutableStateFlow<List<PluginFilterDescriptor>>(emptyList())
-    val dynamicFilters: StateFlow<List<PluginFilterDescriptor>> = _dynamicFilters.asStateFlow()
+    private val _pageFilters = MutableStateFlow<List<BrowsePageFilter>>(emptyList())
+    internal val pageFilters: StateFlow<List<BrowsePageFilter>> = _pageFilters.asStateFlow()
 
     private val _browseItems = MutableStateFlow<List<ComicSummary>>(emptyList())
     val browseItems: StateFlow<List<ComicSummary>> = _browseItems.asStateFlow()
@@ -169,7 +168,7 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             browse.state.collect { state ->
                 _browseFilters.value = state.filters
-                _dynamicFilters.value = state.dynamicFilters
+                _pageFilters.value = state.pageFilters
                 _browseItems.value = state.items
                 _browseNextCursor.value = state.nextCursor
                 _isBrowsing.value = state.isBrowsing
@@ -453,26 +452,24 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
                 feedId = feed?.descriptor?.id,
                 filters = filters,
                 loadNow = _mode.value == Mode.BROWSE,
+                sessionKey = feed?.sessionKey,
+                declaredFilterIds = feed?.declaredFilterIds.orEmpty(),
             )
         )
     }
 
-    /**
-     * Remembers the selected filter for this feed and activates the corresponding browse cache
-     * entry.
-     */
+    /** Applies a filter choice to the selected feed and activates its browse cache entry. */
     fun selectBrowseFilter(filterId: String, optionId: String) {
-        val current = browse.state.value.filters
-        if (current[filterId] == optionId) return
-        val filters = current + (filterId to optionId)
         val feed = selectedFeed() ?: return
-        browse.rememberFilters(feed.sessionKey, filters)
+        val filters = browse.chooseFilter(filterId, optionId) ?: return
         browse.select(
             BrowseTarget(
                 key = feed.cacheKey(filters),
                 feedId = feed.descriptor.id,
                 filters = filters,
                 loadNow = _mode.value == Mode.BROWSE,
+                sessionKey = feed.sessionKey,
+                declaredFilterIds = feed.declaredFilterIds,
             )
         )
     }
@@ -605,6 +602,9 @@ class DiscoverViewModel(app: Application) : AndroidViewModel(app) {
 
     private val Feed.sessionKey: String
         get() = "$pluginId\n$pluginVersion\n${descriptor.id}"
+
+    private val Feed.declaredFilterIds: Set<String>
+        get() = descriptor.filters.mapTo(HashSet()) { it.id }
 
     /** 本拖动手势内自定义顺序是否真的变化过（由 moveFeed 置位、落位收尾清零）。 */
     private var feedOrderMutatedThisGesture = false

@@ -80,7 +80,8 @@ class BrowseSessionsTest {
     private fun target(
         filters: Map<String, String> = emptyMap(),
         loadNow: Boolean = true,
-    ) = BrowseTarget(key(filters), "feed", filters, loadNow)
+        declared: Set<String> = emptySet(),
+    ) = BrowseTarget(key(filters), "feed", filters, loadNow, sessionKey = "feed", declared)
 
     private fun comic(id: String) = ComicSummary(sourceId = id, title = id)
 
@@ -321,25 +322,29 @@ class BrowseSessionsTest {
     }
 
     @Test
-    fun `selectedFilters remembers a valid choice and falls back to the first option`() {
-        val filters =
-            listOf(
-                PluginFilterDescriptor(
-                    id = "sort",
-                    title = "Sort",
-                    options = listOf(PluginFilterOption("new", "New"), PluginFilterOption("hot", "Hot")),
+    fun `selectedFilters remembers a valid choice and falls back to the first option`() =
+        runBlocking {
+            val filters =
+                listOf(
+                    PluginFilterDescriptor(
+                        id = "sort",
+                        title = "Sort",
+                        options =
+                            listOf(PluginFilterOption("new", "New"), PluginFilterOption("hot", "Hot")),
+                    )
                 )
-            )
-        val sessions = BrowseSessions(runBlockingScope(), FakeSource())
+            val sessions = BrowseSessions(this, FakeSource())
 
-        assertEquals(mapOf("sort" to "new"), sessions.selectedFilters("feed", filters))
+            val initial = sessions.selectedFilters("feed", filters)
+            assertEquals(mapOf("sort" to "new"), initial)
+            sessions.select(target(initial, loadNow = false, declared = setOf("sort")))
 
-        sessions.rememberFilters("feed", mapOf("sort" to "hot"))
-        assertEquals(mapOf("sort" to "hot"), sessions.selectedFilters("feed", filters))
+            assertEquals(mapOf("sort" to "hot"), sessions.chooseFilter("sort", "hot"))
+            assertEquals(mapOf("sort" to "hot"), sessions.selectedFilters("feed", filters))
 
-        sessions.rememberFilters("feed", mapOf("sort" to "gone"))
-        assertEquals(mapOf("sort" to "new"), sessions.selectedFilters("feed", filters))
-    }
+            sessions.chooseFilter("sort", "gone")
+            assertEquals(mapOf("sort" to "new"), sessions.selectedFilters("feed", filters))
+        }
 
     @Test
     fun `first page publishes dynamic filters and a new target clears them`() = runBlocking {
@@ -348,11 +353,11 @@ class BrowseSessionsTest {
         val sessions = BrowseSessions(this, source)
         sessions.select(target()).also { it?.join() }
 
-        assertEquals(listOf("folder"), sessions.state.value.dynamicFilters.map { it.id })
+        assertEquals(listOf("folder"), sessions.state.value.pageFilters.map { it.filter.id })
 
         sessions.select(BrowseTarget(null, null, emptyMap(), loadNow = true))
 
-        assertTrue(sessions.state.value.dynamicFilters.isEmpty())
+        assertTrue(sessions.state.value.pageFilters.isEmpty())
     }
 
     @Test
@@ -366,11 +371,11 @@ class BrowseSessionsTest {
         sessions.select(target()).also { it?.join() }
 
         sessions.loadMore()?.join()
-        assertEquals(listOf("folder"), sessions.state.value.dynamicFilters.map { it.id })
+        assertEquals(listOf("folder"), sessions.state.value.pageFilters.map { it.filter.id })
 
         source.nextPage = page("c", nextCursor = "c3")
         sessions.loadMore()?.join()
-        assertEquals(listOf("folder"), sessions.state.value.dynamicFilters.map { it.id })
+        assertEquals(listOf("folder"), sessions.state.value.pageFilters.map { it.filter.id })
         assertEquals(listOf("a", "b", "c"), idsOf(sessions.state.value.items))
     }
 
@@ -391,7 +396,7 @@ class BrowseSessionsTest {
     }
 
     @Test
-    fun `remembered dynamic filter selections survive declared filter resolution`() {
+    fun `remembered page filter selections survive declared filter resolution`() = runBlocking {
         val declared =
             listOf(
                 PluginFilterDescriptor(
@@ -401,14 +406,86 @@ class BrowseSessionsTest {
                         listOf(PluginFilterOption("new", "New"), PluginFilterOption("hot", "Hot")),
                 )
             )
-        val sessions = BrowseSessions(runBlockingScope(), FakeSource())
+        val source =
+            FakeSource().apply { cached = snapshot(page("a", filters = listOf(folderFilter))) }
+        val sessions = BrowseSessions(this, source)
+        sessions.select(target(mapOf("sort" to "new"), declared = setOf("sort")))?.join()
 
-        sessions.rememberFilters("feed", mapOf("sort" to "hot", "folder" to "19"))
+        sessions.chooseFilter("folder", "19")
 
         assertEquals(
-            mapOf("sort" to "hot", "folder" to "19"),
+            mapOf("sort" to "new", "folder" to "19"),
             sessions.selectedFilters("feed", declared),
         )
+    }
+
+    @Test
+    fun `returning to a session restores its page filters`() = runBlocking {
+        val source =
+            FakeSource().apply { cached = snapshot(page("a", filters = listOf(folderFilter))) }
+        val sessions = BrowseSessions(this, source)
+        sessions.select(target())?.join()
+        sessions.select(BrowseTarget(null, null, emptyMap(), loadNow = true))
+
+        val returned = sessions.select(target())
+
+        assertNull(returned)
+        assertEquals(listOf("folder"), sessions.state.value.pageFilters.map { it.filter.id })
+    }
+
+    @Test
+    fun `a page filter shows its first option until another is chosen`() = runBlocking {
+        val source =
+            FakeSource().apply { cached = snapshot(page("a", filters = listOf(folderFilter))) }
+        val sessions = BrowseSessions(this, source)
+        sessions.select(target())?.join()
+        assertEquals("0", sessions.state.value.pageFilters.single().selectedOptionId)
+
+        val chosen = requireNotNull(sessions.chooseFilter("folder", "19"))
+        sessions.select(target(chosen))?.join()
+
+        assertEquals(mapOf("folder" to "19"), chosen)
+        assertEquals("19", sessions.state.value.pageFilters.single().selectedOptionId)
+    }
+
+    @Test
+    fun `choosing a page filter's first option drops it from the request`() = runBlocking {
+        val source =
+            FakeSource().apply { cached = snapshot(page("a", filters = listOf(folderFilter))) }
+        val sessions = BrowseSessions(this, source)
+        sessions.select(target(mapOf("folder" to "19")))?.join()
+
+        assertEquals(emptyMap<String, String>(), sessions.chooseFilter("folder", "0"))
+        assertEquals(emptyMap<String, String>(), sessions.selectedFilters("feed", emptyList()))
+    }
+
+    @Test
+    fun `page filters the feed declares or with one option are not shown`() = runBlocking {
+        val single =
+            PluginFilterDescriptor("one", "One", options = listOf(PluginFilterOption("x", "X")))
+        val source =
+            FakeSource().apply {
+                cached = snapshot(page("a", filters = listOf(folderFilter, single)))
+            }
+        val sessions = BrowseSessions(this, source)
+
+        sessions.select(target(declared = setOf("folder")))?.join()
+
+        assertTrue(sessions.state.value.pageFilters.isEmpty())
+    }
+
+    @Test
+    fun `a choice the first page no longer offers is forgotten`() = runBlocking {
+        val source =
+            FakeSource().apply { cached = snapshot(page("a", filters = listOf(folderFilter))) }
+        val sessions = BrowseSessions(this, source)
+        sessions.select(target())?.join()
+        val chosen = requireNotNull(sessions.chooseFilter("folder", "19"))
+
+        source.cached = snapshot(page("b"), revision = "r2")
+        sessions.select(target(chosen))?.join()
+
+        assertEquals(emptyMap<String, String>(), sessions.selectedFilters("feed", emptyList()))
     }
 
     @Test

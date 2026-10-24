@@ -133,7 +133,7 @@ fun PluginDiscoverScreen(
     val feedLoadError by viewModel.feedLoadError.collectAsStateWithLifecycle()
     val selectedFeedKey by viewModel.selectedFeedKey.collectAsStateWithLifecycle()
     val browseFilters by viewModel.browseFilters.collectAsStateWithLifecycle()
-    val dynamicFilters by viewModel.dynamicFilters.collectAsStateWithLifecycle()
+    val pageFilters by viewModel.pageFilters.collectAsStateWithLifecycle()
     val browseErrorCode by viewModel.browseErrorCode.collectAsStateWithLifecycle()
     val browseItems by viewModel.browseItems.collectAsStateWithLifecycle()
     val browseNextCursor by viewModel.browseNextCursor.collectAsStateWithLifecycle()
@@ -184,12 +184,6 @@ fun PluginDiscoverScreen(
                 keys = pluginFeeds.map { it.key },
                 userOrder = feedOrder[selectedFeed?.pluginId].orEmpty(),
             ).mapNotNull { byKey[it] }
-        }
-    // A page can introduce filters that describe() cannot know, such as an account's folders.
-    val dynamicFilterRows =
-        remember(selectedFeed, dynamicFilters) {
-            val declaredIds = selectedFeed?.descriptor?.filters.orEmpty().mapTo(HashSet()) { it.id }
-            dynamicFilters.filter { it.id !in declaredIds && it.options.size > 1 }
         }
     val browseAuthRequired = browseErrorCode == PluginErrorCode.AUTH_REQUIRED
 
@@ -455,12 +449,11 @@ fun PluginDiscoverScreen(
                                 },
                             )
                         }
-                    dynamicFilterRows.forEach { filter ->
+                    pageFilters.forEach { row ->
                         BrowseDynamicFilterRow(
-                            filter = filter,
-                            selectedOptionId = browseFilters[filter.id],
+                            row = row,
                             onSelected = { optionId ->
-                                viewModel.selectBrowseFilter(filter.id, optionId)
+                                viewModel.selectBrowseFilter(row.filter.id, optionId)
                             },
                         )
                     }
@@ -1413,11 +1406,11 @@ private fun SearchEmptyState(modifier: Modifier = Modifier) {
  */
 @Composable
 private fun BrowseDynamicFilterRow(
-    filter: PluginFilterDescriptor,
-    selectedOptionId: String?,
+    row: BrowsePageFilter,
     onSelected: (String) -> Unit,
 ) {
-    val selectedId = selectedOptionId ?: filter.options.firstOrNull()?.id
+    val filter = row.filter
+    val selectedId = row.selectedOptionId
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,

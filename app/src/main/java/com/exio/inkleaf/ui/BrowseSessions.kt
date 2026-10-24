@@ -20,8 +20,8 @@ internal data class BrowseState(
     val items: List<ComicSummary> = emptyList(),
     val nextCursor: String? = null,
     val filters: Map<String, String> = emptyMap(),
-    /** Filters discovered from the loaded page, such as an account's folders. */
-    val dynamicFilters: List<PluginFilterDescriptor> = emptyList(),
+    /** Filters the loaded page introduced, such as an account's folders, ready to render. */
+    val pageFilters: List<BrowsePageFilter> = emptyList(),
     val ready: Boolean = false,
     val isBrowsing: Boolean = false,
     val error: String? = null,
@@ -47,12 +47,21 @@ internal interface BrowseSource {
     suspend fun loadPage(pluginId: String, request: PluginBrowseRequest): PluginSearchPage
 }
 
-/** What the view model asks the module to show. A null key means no feed is selected. */
+/** A page-supplied filter row and the option it shows as selected. */
+internal data class BrowsePageFilter(val filter: PluginFilterDescriptor, val selectedOptionId: String)
+
+/**
+ * What the view model asks the module to show. A null key means no feed is selected. Filter
+ * choices are remembered under [sessionKey]; [declaredFilterIds] are the feed's own filters, which
+ * a page cannot re-declare.
+ */
 internal data class BrowseTarget(
     val key: PluginBrowseCacheKey?,
     val feedId: String?,
     val filters: Map<String, String>,
     val loadNow: Boolean,
+    val sessionKey: String? = null,
+    val declaredFilterIds: Set<String> = emptySet(),
 )
 
 /**
@@ -70,6 +79,7 @@ internal class BrowseSessions(
     private data class Session(
         val items: List<ComicSummary>,
         val nextCursor: String?,
+        val pageFilters: List<PluginFilterDescriptor>,
         val firstPageFetchedAtMs: Long,
         val firstPageRevision: String,
         val cacheGeneration: Long,
@@ -98,6 +108,7 @@ internal class BrowseSessions(
     private val scrollAnchors = DiscoverScrollAnchorStore(MAX_SCROLL_CONTEXTS)
 
     private var target: BrowseTarget? = null
+    private var pageFilters: List<PluginFilterDescriptor> = emptyList()
     private var browseJob: Job? = null
     private var generation = 0L
     private var failure: Failure? = null
@@ -138,9 +149,25 @@ internal class BrowseSessions(
             .also { filtersByFeed[sessionKey] = it }
     }
 
-    /** Remembers the filter set the user chose for one feed session. */
-    fun rememberFilters(sessionKey: String, filters: Map<String, String>) {
-        filtersByFeed[sessionKey] = filters
+    /**
+     * The active target's filters after choosing [optionId] for [filterId], remembered for its feed,
+     * or null when nothing changes. A page filter's first option is its default, which the page
+     * already shows without being asked, so choosing it drops the key instead of sending it.
+     */
+    fun chooseFilter(filterId: String, optionId: String): Map<String, String>? {
+        val current = target ?: return null
+        val pageDefault =
+            pageFilters
+                .firstOrNull { it.id == filterId && it.id !in current.declaredFilterIds }
+                ?.options
+                ?.firstOrNull()
+                ?.id
+        val next =
+            if (optionId == pageDefault) current.filters - filterId
+            else current.filters + (filterId to optionId)
+        if (next == current.filters) return null
+        current.sessionKey?.let { filtersByFeed[it] = next }
+        return next
     }
 
     /**
@@ -160,10 +187,11 @@ internal class BrowseSessions(
                 }
             }
         if (key != null && session == null) sessions.remove(key)
+        pageFilters = session?.pageFilters.orEmpty()
         _state.value =
             _state.value.copy(
                 filters = next.filters,
-                dynamicFilters = emptyList(),
+                pageFilters = pageFilterRows(),
                 error = null,
                 errorCode = null,
                 isBrowsing = false,
@@ -231,12 +259,12 @@ internal class BrowseSessions(
                         cacheGeneration == source.cacheGeneration(key.pluginId)
                 ) {
                     val items = (_state.value.items + page.items).distinctBy { it.sourceId }
+                    pageFilters = page.filters.ifEmpty { pageFilters }
                     _state.value =
                         _state.value.copy(
                             items = items,
                             nextCursor = page.nextCursor,
-                            dynamicFilters =
-                                page.filters.ifEmpty { _state.value.dynamicFilters },
+                            pageFilters = pageFilterRows(),
                             errorCode = null,
                         )
                     val firstPageFetchedAt = sessions[key]?.firstPageFetchedAtMs ?: 0L
@@ -245,6 +273,7 @@ internal class BrowseSessions(
                         Session(
                             items = items,
                             nextCursor = page.nextCursor,
+                            pageFilters = pageFilters,
                             firstPageFetchedAtMs = firstPageFetchedAt,
                             firstPageRevision = firstPageRevision,
                             cacheGeneration = cacheGeneration,
@@ -357,11 +386,13 @@ internal class BrowseSessions(
             previous == null ||
                 previous.firstPageRevision != snapshot.revision ||
                 previous.cacheGeneration != snapshot.cacheGeneration
+        pageFilters = snapshot.page.filters
+        forgetStalePageChoices()
         _state.value =
             _state.value.copy(
                 items = snapshot.page.items,
                 nextCursor = snapshot.page.nextCursor,
-                dynamicFilters = snapshot.page.filters,
+                pageFilters = pageFilterRows(),
                 error = null,
                 errorCode = null,
                 ready = true,
@@ -373,10 +404,44 @@ internal class BrowseSessions(
             Session(
                 items = snapshot.page.items,
                 nextCursor = snapshot.page.nextCursor,
+                pageFilters = snapshot.page.filters,
                 firstPageFetchedAtMs = snapshot.fetchedAtMs,
                 firstPageRevision = snapshot.revision,
                 cacheGeneration = snapshot.cacheGeneration,
             )
+    }
+
+    /** Page filters the target's feed does not declare itself, with more than one choice. */
+    private fun pageFilterRows(): List<BrowsePageFilter> {
+        val current = target ?: return emptyList()
+        return pageFilters
+            .filter { it.id !in current.declaredFilterIds && it.options.size > 1 }
+            .map { filter ->
+                val chosen = current.filters[filter.id]
+                BrowsePageFilter(
+                    filter = filter,
+                    selectedOptionId =
+                        chosen?.takeIf { id -> filter.options.any { it.id == id } }
+                            ?: filter.options.first().id,
+                )
+            }
+    }
+
+    /**
+     * Forgets remembered page-filter choices the first page no longer offers (a deleted folder, or
+     * every folder after signing out), so the feed stops sending them next time.
+     */
+    private fun forgetStalePageChoices() {
+        val current = target ?: return
+        val sessionKey = current.sessionKey ?: return
+        val remembered = filtersByFeed[sessionKey] ?: return
+        val offered = pageFilters.associateBy { it.id }
+        val kept =
+            remembered.filter { (id, optionId) ->
+                id in current.declaredFilterIds ||
+                    offered[id]?.options?.any { it.id == optionId } == true
+            }
+        if (kept != remembered) filtersByFeed[sessionKey] = kept
     }
 
     private companion object {
