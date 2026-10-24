@@ -234,6 +234,10 @@ const SAVE_FAV_OK_JSON = JSON.stringify({ ret: true, html: "加入成功" });
 const SAVE_FAV_FAIL_JSON = JSON.stringify({ ret: false, html: "收藏夾不存在" });
 const FAV_DEL_HTML = "刪除收藏成功";
 
+// The site replaces the add dialog with this notice once the album is already on the shelf.
+const ALREADY_FAVOURITED_HTML =
+  '<div class="ajax-notify-box"><p class="ajax-notify-msg">您已經收藏過此漫畫</p></div>';
+
 // --------------------------------------------------------------------------- harness
 
 /**
@@ -710,6 +714,7 @@ async function offersFavoriteFolders() {
     )
   );
   assert.deepEqual(options, {
+    applied: false,
     options: [
       { id: "12", title: "默認收藏夾" },
       { id: "34", title: "同人志" },
@@ -719,6 +724,23 @@ async function offersFavoriteFolders() {
   assert.deepEqual(fresh.urls(), [
     "https://" + SITE_HOST + "/users-addfav-id-394338.html",
   ]);
+
+  // An album already on the shelf answers with the notice, so the host offers removal only.
+  const existing = createPlugin({
+    seedHosts: [SITE_HOST],
+    respond: function (request) {
+      if (request.url.indexOf("/users-addfav-id-") >= 0)
+        return { body: ALREADY_FAVOURITED_HTML };
+      return defaultRespond(request);
+    },
+  });
+  const state = plain(
+    await existing.api.actionOptions(
+      { actionId: "addFavorite", input: { sourceId: "394338" } },
+      ctx()
+    )
+  );
+  assert.deepEqual(state, { applied: true, options: [], selected: null });
 
   // The chosen folder rides on the add action, so the add request skips the dialog.
   const chosen = createPlugin({ seedHosts: [SITE_HOST] });

@@ -1381,8 +1381,8 @@ async function addFavorite(sourceId, folderId, signal) {
 }
 
 /**
- * Offers the add action's runtime choices. The folders live in the site's add dialog, which is
- * also the only place that marks the site's preferred folder.
+ * Offers the add action's runtime choices and whether the album is already on the shelf. The site
+ * replaces the folder dialog with a notice for an existing favorite, which is the state signal.
  */
 async function actionOptions(request, context) {
   const signal = context && context.signal;
@@ -1400,8 +1400,14 @@ async function actionOptions(request, context) {
     signal
   );
   const folders = parseFavoriteFolders(dialog.html);
-  if (!folders.length) throw pluginError("NOT_FOUND", "没有可用的收藏夹", false);
+  if (!folders.length) {
+    if (/ajax-notify-box/i.test(dialog.html)) {
+      return { applied: true, options: [], selected: null };
+    }
+    throw pluginError("NOT_FOUND", "没有可用的收藏夹", false);
+  }
   return {
+    applied: false,
     options: folders.map(function (folder) {
       return { id: folder.id, title: folder.name };
     }),
