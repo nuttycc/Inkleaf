@@ -33,9 +33,6 @@ AGENTS.md
 CLAUDE.md
 CONTEXT.md
 
-# Frozen legacy manifest on main; CI now maintains it on the release-manifest branch
-app-update.json
-
 .impeccable/
 
 # impeccable-ignore-start

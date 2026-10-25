@@ -80,22 +80,20 @@ jobs:
 
           # versionCode is a strictly increasing release counter, hidden from users. It must
           # exceed whatever is installed, so it steps past the greatest previously published
-          # code (stable/preview hold the legacy values during the transition). A constant floor
-          # guards against a missing manifest.
-          # The manifest lives on release-manifest so CI never commits to main. main still
-          # holds the frozen legacy copy, read only as a fallback during the migration.
-          read_manifest() {
-            gh api "repos/$GITHUB_REPOSITORY/contents/app-update.json?ref=$1" \
-              --jq '.content' 2>/dev/null | base64 -d 2>/dev/null || true
-          }
-          PREV_MANIFEST="$(read_manifest release-manifest)"
-          if ! jq -e . >/dev/null 2>&1 <<< "$PREV_MANIFEST"; then
-            PREV_MANIFEST="$(read_manifest main)"
-          fi
-          PREV_MAX="$(
-            jq -r '[(.release.versionCode // 0), (.stable.versionCode // 0), (.preview.versionCode // 0)] | max' \
-              <<< "$PREV_MANIFEST" 2>/dev/null || echo 0
+          # code (stable/preview hold the legacy values during the transition). The release
+          # fails if the manifest cannot be read, so the counter never regresses.
+          # The manifest lives on release-manifest so CI never commits to main.
+          PREV_MANIFEST="$(
+            gh api "repos/$GITHUB_REPOSITORY/contents/app-update.json?ref=release-manifest" \
+              --jq '.content' 2>/dev/null | base64 -d 2>/dev/null
           )"
+          if ! PREV_MAX="$(
+            jq -er '[(.release.versionCode // 0), (.stable.versionCode // 0), (.preview.versionCode // 0)] | max' \
+              <<< "$PREV_MANIFEST" 2>/dev/null
+          )"; then
+            echo "Unable to read the release manifest from release-manifest." >&2
+            exit 1
+          fi
           MIN_VERSION_CODE=1000000
           VERSION_CODE=$(( (PREV_MAX > MIN_VERSION_CODE ? PREV_MAX : MIN_VERSION_CODE) + 1 ))
 
