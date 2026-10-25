@@ -82,10 +82,16 @@ jobs:
           # exceed whatever is installed, so it steps past the greatest previously published
           # code (stable/preview hold the legacy values during the transition). A constant floor
           # guards against a missing manifest.
-          PREV_MANIFEST="$(
-            gh api "repos/$GITHUB_REPOSITORY/contents/app-update.json?ref=main" \
-              --jq '.content' 2>/dev/null | base64 -d 2>/dev/null || echo '{}'
-          )"
+          # The manifest lives on release-manifest so CI never commits to main. main still
+          # holds the frozen legacy copy, read only as a fallback during the migration.
+          read_manifest() {
+            gh api "repos/$GITHUB_REPOSITORY/contents/app-update.json?ref=$1" \
+              --jq '.content' 2>/dev/null | base64 -d 2>/dev/null || true
+          }
+          PREV_MANIFEST="$(read_manifest release-manifest)"
+          if ! jq -e . >/dev/null 2>&1 <<< "$PREV_MANIFEST"; then
+            PREV_MANIFEST="$(read_manifest main)"
+          fi
           PREV_MAX="$(
             jq -r '[(.release.versionCode // 0), (.stable.versionCode // 0), (.preview.versionCode // 0)] | max' \
               <<< "$PREV_MANIFEST" 2>/dev/null || echo 0
@@ -442,7 +448,14 @@ jobs:
 
           REPO="$GITHUB_REPOSITORY"
           FILE_PATH="app-update.json"
-          BRANCH="main"
+          BRANCH="release-manifest"
+
+          # Keep CI updates off main; create the manifest branch on first use.
+          if ! gh api "repos/$REPO/git/ref/heads/$BRANCH" >/dev/null 2>&1; then
+            gh api --method POST "repos/$REPO/git/refs" \
+              --field ref="refs/heads/$BRANCH" \
+              --field sha="$GITHUB_SHA"
+          fi
 
           APK_URL="https://github.com/nuttycc/inkleaf/releases/download/${TAG}/Inkleaf-${TAG}.apk"
           APK_SIZE=$(stat -c%s "$APK_PATH" 2>/dev/null || stat -f%z "$APK_PATH")

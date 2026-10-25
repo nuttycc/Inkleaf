@@ -54,7 +54,7 @@ class AppUpdateChecker(
 
     companion object {
         private const val MANIFEST_URL =
-            "https://raw.githubusercontent.com/nuttycc/inkleaf/main/app-update.json"
+            "https://raw.githubusercontent.com/nuttycc/inkleaf/release-manifest/app-update.json"
         private const val MAX_MANIFEST_BYTES = 64 * 1024
     }
 }
