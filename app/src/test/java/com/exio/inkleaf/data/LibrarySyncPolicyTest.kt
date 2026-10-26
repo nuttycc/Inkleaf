@@ -10,8 +10,18 @@ class LibrarySyncPolicyTest {
     @Test
     fun `external archives persist an exclusion regardless of folder ownership`() {
         assertTrue(shouldPersistLibraryExclusion(BookSourceType.EXTERNAL_ARCHIVE))
+        assertFalse(shouldPersistLibraryExclusion(BookSourceType.IMPORTED_ARCHIVE))
         assertFalse(shouldPersistLibraryExclusion(BookSourceType.PDF_SERIES))
         assertFalse(shouldPersistLibraryExclusion(BookSourceType.CREATED_ALBUM))
+    }
+
+    @Test
+    fun `imported comic file name is stable and safe`() {
+        val first = importedComicFileName("content://provider/temporary/123")
+        val second = importedComicFileName("content://provider/temporary/123")
+
+        assertEquals(first, second)
+        assertTrue(first.matches(Regex("[0-9a-f]{64}\\.cbz")))
     }
 
     @Test

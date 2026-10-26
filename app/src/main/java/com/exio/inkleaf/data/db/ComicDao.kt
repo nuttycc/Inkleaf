@@ -82,6 +82,16 @@ interface ComicDao {
     suspend fun updateIdentity(id: Long, uri: String, fileKey: String)
 
     @Query(
+        "UPDATE comics SET uri = :uri, sourceType = :sourceType, isMissing = 0, pageCount = :pageCount WHERE id = :id"
+    )
+    suspend fun updateImportedIdentity(
+        id: Long,
+        uri: String,
+        sourceType: BookSourceType,
+        pageCount: Int,
+    )
+
+    @Query(
         """UPDATE comics SET
                title = :title,
                pageCount = :pageCount,

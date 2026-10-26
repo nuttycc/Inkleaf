@@ -17,8 +17,8 @@ import androidx.room.PrimaryKey
 )
 data class ComicEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val uri: String, // SAF Uri.toString()，重新打开文件的"钥匙"
-    val fileKey: String, // 稳定文件身份：同一 SAF 文档不重复入库
+    val uri: String, // 外部 SAF Uri 或应用自有副本的 file Uri
+    val fileKey: String, // 稳定文件身份：同一文件跨链接与导入不重复入库
     val title: String, // 文件名去掉扩展名
     val pageCount: Int = 0, // 0 = 还没成功打开过，首次打开后回填真实总页数
     val lastReadChapterIndex: Int = 0, // 阅读进度：章节索引（单文件漫画固定为 0）

@@ -6,6 +6,7 @@ import android.net.Uri
 import androidx.core.net.toUri
 import androidx.documentfile.provider.DocumentFile
 import androidx.room.withTransaction
+import com.exio.inkleaf.replaceFileAtomically
 import com.exio.inkleaf.data.db.AppDatabase
 import com.exio.inkleaf.data.db.BookSourceType
 import com.exio.inkleaf.data.db.ComicEntity
@@ -18,9 +19,12 @@ import com.exio.inkleaf.data.db.LibraryFolderEntity
 import com.exio.inkleaf.data.db.LibraryFolderType
 import com.exio.inkleaf.data.db.OnlineComicGroupEntity
 import java.io.File
+import java.io.FileNotFoundException
+import java.io.IOException
 import java.util.zip.ZipInputStream
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.sync.Mutex
@@ -147,6 +151,10 @@ class ComicRepository(context: Context) {
         }
         // Keep missing chapters in the volume so the reader can preserve their position
         // and show them as disabled in the chapter list.
+        if (comic.sourceType == BookSourceType.IMPORTED_ARCHIVE) {
+            val book = ComicBook.openOwned(importedComicFile(comic.fileKey))
+            return ZipComicVolume(book, comic.title)
+        }
         val chapters = db.chapterDao().getByComicId(comic.id)
         return if (comic.sourceType == BookSourceType.PDF_SERIES || chapters.isNotEmpty()) {
             PdfComicVolume(
@@ -287,6 +295,135 @@ class ComicRepository(context: Context) {
         }
     }
 
+    suspend fun previewComic(uri: Uri): ComicEntity {
+        val fileKey = withContext(Dispatchers.IO) { ComicIdentity.fileKey(appContext, uri) }
+        return ComicEntity(
+            uri = uri.toString(),
+            fileKey = fileKey,
+            title = guessTitle(uri),
+            addedAt = 0,
+        )
+    }
+
+    suspend fun importComic(uri: Uri): AddComicOutcome {
+        val fileKey = withContext(Dispatchers.IO) { ComicIdentity.fileKey(appContext, uri) }
+        val title = guessTitle(uri)
+        return syncMutex.withLock {
+            val existing = dao.getByFileKey(fileKey) ?: dao.getByUri(uri.toString())
+            if (
+                existing?.sourceType == BookSourceType.IMPORTED_ARCHIVE &&
+                    importedComicFile(fileKey).isFile
+            ) {
+                return@withLock existingComicOutcome(existing)
+            }
+            val destination = importedComicFile(fileKey)
+            var committed = false
+            try {
+                copyImportedComic(uri, destination)
+                val book = ComicBook.openOwned(destination)
+                val pageCount = book.pageCount
+                book.close()
+                val outcome =
+                    db.withTransaction {
+                        exclusionDao.deleteByFileKey(fileKey)
+                        val current = dao.getByFileKey(fileKey) ?: dao.getByUri(uri.toString())
+                        if (current != null) {
+                            dao.updateImportedIdentity(
+                                id = current.id,
+                                uri = Uri.fromFile(destination).toString(),
+                                sourceType = BookSourceType.IMPORTED_ARCHIVE,
+                                pageCount = pageCount,
+                            )
+                            val updated = dao.getById(current.id)!!
+                            if (current.isMissing) {
+                                AddComicOutcome.Restored(updated)
+                            } else {
+                                AddComicOutcome.AlreadyInLibrary(updated)
+                            }
+                        } else {
+                            val now = System.currentTimeMillis()
+                            val id =
+                                dao.insert(
+                                    ComicEntity(
+                                        uri = Uri.fromFile(destination).toString(),
+                                        fileKey = fileKey,
+                                        title = title,
+                                        pageCount = pageCount,
+                                        addedAt = now,
+                                        lastReadAt = now,
+                                        sourceType = BookSourceType.IMPORTED_ARCHIVE,
+                                    )
+                                )
+                            if (id != -1L) {
+                                AddComicOutcome.Added(dao.getById(id)!!)
+                            } else {
+                                val conflict =
+                                    dao.getByFileKey(fileKey)
+                                        ?: dao.getByUri(Uri.fromFile(destination).toString())
+                                        ?: error("Comic insert conflicted but no existing row was found")
+                                dao.updateImportedIdentity(
+                                    conflict.id,
+                                    Uri.fromFile(destination).toString(),
+                                    BookSourceType.IMPORTED_ARCHIVE,
+                                    pageCount,
+                                )
+                                AddComicOutcome.AlreadyInLibrary(dao.getById(conflict.id)!!)
+                            }
+                        }
+                    }
+                committed = true
+                if (existing?.sourceType == BookSourceType.EXTERNAL_ARCHIVE) {
+                    runCatching {
+                        appContext.contentResolver.releasePersistableUriPermission(
+                            existing.uri.toUri(),
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                        )
+                    }
+                }
+                outcome
+            } finally {
+                if (!committed) destination.delete()
+            }
+        }
+    }
+
+    private fun importedComicFile(fileKey: String): File =
+        File(File(appContext.filesDir, "imported"), importedComicFileName(fileKey))
+
+    private suspend fun copyImportedComic(uri: Uri, destination: File) =
+        withContext(Dispatchers.IO) {
+            destination.parentFile?.mkdirs()
+            val temporary = File(destination.parentFile, destination.name + ".tmp")
+            try {
+                val input =
+                    appContext.contentResolver.openInputStream(uri)
+                        ?: throw ComicOpenException("无法读取所选文件")
+                input.use { source ->
+                    temporary.outputStream().use { output ->
+                        val buffer = ByteArray(64 * 1024)
+                        while (true) {
+                            currentCoroutineContext().ensureActive()
+                            val read = source.read(buffer)
+                            if (read == -1) break
+                            output.write(buffer, 0, read)
+                        }
+                    }
+                }
+                replaceFileAtomically(temporary.toPath(), destination.toPath())
+            } catch (error: Throwable) {
+                temporary.delete()
+                throw when (error) {
+                    is ComicOpenException,
+                    is CancellationException -> error
+                    is SecurityException ->
+                        ComicOpenException("没有权限读取该文件，无法导入", error)
+                    is FileNotFoundException -> ComicOpenException("找不到原文件，无法导入", error)
+                    is IOException -> ComicOpenException("保存漫画副本失败：${error.message}", error)
+                    else -> error
+                }
+            }
+        }
+
     suspend fun saveProgress(
         id: Long,
         sourceType: BookSourceType,
@@ -377,7 +514,7 @@ class ComicRepository(context: Context) {
         }
     }
 
-    /** Removes one shelf entry without deleting the user's source file. */
+    /** Removes a shelf entry and only deletes bytes owned by the app. */
     suspend fun deleteComic(comic: ComicEntity) {
         if (comic.sourceType == BookSourceType.CREATED_ALBUM) {
             albumFileMutex.withLock {
@@ -404,11 +541,13 @@ class ComicRepository(context: Context) {
                 }
                 dao.deleteById(comic.id)
             }
-            runCatching {
-                appContext.contentResolver.releasePersistableUriPermission(
-                    comic.uri.toUri(),
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
-                )
+            if (comic.sourceType != BookSourceType.IMPORTED_ARCHIVE) {
+                runCatching {
+                    appContext.contentResolver.releasePersistableUriPermission(
+                        comic.uri.toUri(),
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                    )
+                }
             }
         }
         deleteComicArtifacts(comic)
@@ -1072,6 +1211,8 @@ class ComicRepository(context: Context) {
         comic.coverPath?.let { File(it).delete() }
         if (comic.sourceType == BookSourceType.CREATED_ALBUM) {
             File(appContext.filesDir, "albums/${comic.id}").deleteRecursively()
+        } else if (comic.sourceType == BookSourceType.IMPORTED_ARCHIVE) {
+            importedComicFile(comic.fileKey).delete()
         }
         ReaderCache.wipeBook(appContext, comic.id)
     }
