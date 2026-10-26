@@ -15,7 +15,7 @@
 //     them, so a mirror the reader has not signed in on answers with a login wall; the stored
 //     credentials are replayed there once, exactly when that happens.
 //
-// plugin.build.json asks .scripts/plugin.py to prepend the shared runtime while packaging, so
+// plugin.build.json asks .scripts/plugin.ps1 to prepend the shared runtime while packaging, so
 // text(), asObject(), asArray(), finiteNumber(), dedupeBy(), responseText() and pluginError() are
 // already in scope.
 

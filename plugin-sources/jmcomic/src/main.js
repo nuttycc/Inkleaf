@@ -4,7 +4,7 @@
 // The strip-split descrambling itself is the host's job (JmSegmentation.kt); this file only declares
 // where it applies.
 //
-// plugin.build.json asks .scripts/plugin.py to prepend the shared runtime while packaging, so
+// plugin.build.json asks .scripts/plugin.ps1 to prepend the shared runtime while packaging, so
 // text(), asObject(), asArray(), finiteNumber(), queryString(), dedupeBy(), responseText(),
 // decodeBase64(), decodeUtf8() and pluginError() are already in scope.
 

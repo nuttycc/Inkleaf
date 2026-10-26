@@ -13,8 +13,6 @@ local.properties
 !app/debug.keystore
 /app/release/
 /plugin-sources/dist/
-__pycache__/
-*.py[cod]
 
 .tmp/
 
