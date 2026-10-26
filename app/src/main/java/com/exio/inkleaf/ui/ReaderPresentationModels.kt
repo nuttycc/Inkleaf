@@ -170,6 +170,8 @@ internal data class ReaderPresentationActions(
     val onToggleFavorite: ((Int) -> Unit)?,
     val onSetCover: ((Int) -> Unit)?,
     val onSaveToGallery: ((Int) -> Unit)? = null,
+    val onImport: (() -> Unit)? = null,
+    val isImporting: Boolean = false,
     val onPageChanged: (ComicVolume, Int) -> Unit,
     val onPageDirectionChanged: (ReaderPageDirection) -> Unit,
     val onStageBackgroundChanged: (ReaderStageBackground) -> Unit,

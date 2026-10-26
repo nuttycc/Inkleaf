@@ -28,7 +28,13 @@ class ReadingPositionResolverTest {
 
     @Test
     fun `zip and album remap surviving identity`() {
-        for (type in listOf(BookSourceType.EXTERNAL_ARCHIVE, BookSourceType.CREATED_ALBUM)) {
+        val archiveTypes =
+            listOf(
+                BookSourceType.EXTERNAL_ARCHIVE,
+                BookSourceType.IMPORTED_ARCHIVE,
+                BookSourceType.CREATED_ALBUM,
+            )
+        for (type in archiveTypes) {
             val result =
                 ReadingPositionResolver.resolve(
                     sourceType = type,

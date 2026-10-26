@@ -3,7 +3,6 @@ package com.exio.inkleaf
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
@@ -57,7 +56,6 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
-import com.exio.inkleaf.data.ComicRepository
 import com.exio.inkleaf.data.ThemeSettings
 import com.exio.inkleaf.data.ThemeSettingsRepository
 import com.exio.inkleaf.plugin.PluginContentCodec
@@ -96,6 +94,8 @@ import timber.log.Timber
 @Serializable data object ShelfRoute
 
 @Serializable data class ReaderRoute(val comicId: Long, val initialPage: Int? = null)
+
+@Serializable data class ComicPreviewRoute(val uri: String)
 
 @Serializable data class AlbumEditorRoute(val comicId: Long? = null)
 
@@ -428,25 +428,8 @@ class MainActivity : AppCompatActivity() {
                 val pendingExternalOpen = externalOpenRequest
                 LaunchedEffect(pendingExternalOpen) {
                     val request = pendingExternalOpen ?: return@LaunchedEffect
-                    val comicId =
-                        try {
-                            ComicRepository(this@MainActivity).addOrGetComic(request.uri).comic.id
-                        } catch (error: CancellationException) {
-                            throw error
-                        } catch (error: Exception) {
-                            Timber.w(error, "Failed to open external comic")
-                            if (consumeExternalOpenRequest(request)) {
-                                Toast.makeText(
-                                        this@MainActivity,
-                                        "无法打开该漫画文件",
-                                        Toast.LENGTH_SHORT,
-                                    )
-                                    .show()
-                            }
-                            return@LaunchedEffect
-                        }
                     if (!consumeExternalOpenRequest(request)) return@LaunchedEffect
-                    outerNavController.navigate(ReaderRoute(comicId)) {
+                    outerNavController.navigate(ComicPreviewRoute(request.uri.toString())) {
                         launchSingleTop = true
                     }
                 }
@@ -618,6 +601,20 @@ class MainActivity : AppCompatActivity() {
                             AlbumEditorScreen(
                                 comicId = route.comicId,
                                 onBack = { outerNavController.popBackStack() },
+                            )
+                        }
+                        composable<ComicPreviewRoute> { entry ->
+                            val route = entry.toRoute<ComicPreviewRoute>()
+                            ReaderScreen(
+                                comicId = 0,
+                                previewUri = Uri.parse(route.uri),
+                                onBack = { outerNavController.popBackStack() },
+                                onImported = { comicId, page ->
+                                    outerNavController.navigate(ReaderRoute(comicId, page)) {
+                                        popUpTo(entry.destination.id) { inclusive = true }
+                                        launchSingleTop = true
+                                    }
+                                },
                             )
                         }
                         composable<ReaderRoute> { entry ->

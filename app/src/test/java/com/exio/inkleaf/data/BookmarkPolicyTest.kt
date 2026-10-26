@@ -60,7 +60,13 @@ class BookmarkPolicyTest {
 
     @Test
     fun `edited album and zip remap a surviving identity automatically`() {
-        for (sourceType in listOf(BookSourceType.CREATED_ALBUM, BookSourceType.EXTERNAL_ARCHIVE)) {
+        val archiveTypes =
+            listOf(
+                BookSourceType.CREATED_ALBUM,
+                BookSourceType.EXTERNAL_ARCHIVE,
+                BookSourceType.IMPORTED_ARCHIVE,
+            )
+        for (sourceType in archiveTypes) {
             val result =
                 resolveBookmarkLocation(
                     comicId = 42,

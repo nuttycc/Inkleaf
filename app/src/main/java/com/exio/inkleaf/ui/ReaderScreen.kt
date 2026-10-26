@@ -1,6 +1,7 @@
 package com.exio.inkleaf.ui
 
 import android.app.Activity
+import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.annotation.DrawableRes
@@ -157,15 +158,21 @@ fun ReaderScreen(
     modifier: Modifier = Modifier,
     initialPage: Int? = null,
     resumeFromPersistedPosition: Boolean = false,
+    previewUri: Uri? = null,
+    onImported: (Long, Int) -> Unit = { _, _ -> },
 ) {
     val viewModel: ReaderViewModel = viewModel {
         val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY]!!
         ReaderViewModel(
             app = app,
             comicId = comicId,
+            previewUri = previewUri,
             initialPageOverride = initialPage,
             resumeFromPersistedPosition = resumeFromPersistedPosition,
         )
+    }
+    LaunchedEffect(viewModel.importedComicId) {
+        viewModel.importedComicId?.let { onImported(it, viewModel.currentPage) }
     }
     val settingsViewModel: ReaderSettingsViewModel = viewModel()
     val readerSettings by settingsViewModel.settings.collectAsStateWithLifecycle()
@@ -207,15 +214,22 @@ fun ReaderScreen(
     val actions =
         ReaderPresentationActions(
             onNeedThumbnail = viewModel::requestThumbnail,
-            onToggleBookmark = viewModel::toggleBookmark,
-            onRemoveBookmark = { item ->
-                val bookmark = requireNotNull(bookmarksByKey[item.key]) { "Unknown bookmark" }
-                viewModel.removeBookmark(bookmark)
-                ReaderBookmarkUndo { viewModel.restoreBookmark(bookmark) }
-            },
-            onToggleFavorite = viewModel::toggleFavorite,
-            onSetCover = viewModel::setCurrentPageAsCover,
+            onToggleBookmark = if (viewModel.isPreview) null else viewModel::toggleBookmark,
+            onRemoveBookmark =
+                if (viewModel.isPreview) {
+                    null
+                } else {
+                    { item ->
+                        val bookmark = requireNotNull(bookmarksByKey[item.key]) { "Unknown bookmark" }
+                        viewModel.removeBookmark(bookmark)
+                        ReaderBookmarkUndo { viewModel.restoreBookmark(bookmark) }
+                    }
+                },
+            onToggleFavorite = if (viewModel.isPreview) null else viewModel::toggleFavorite,
+            onSetCover = if (viewModel.isPreview) null else viewModel::setCurrentPageAsCover,
             onSaveToGallery = viewModel::saveCurrentPageToGallery,
+            onImport = if (viewModel.isPreview) viewModel::importPreview else null,
+            isImporting = viewModel.isImporting,
             onPageChanged = { _, page -> viewModel.saveProgress(page) },
             onPageDirectionChanged = settingsViewModel::setPageDirection,
             onStageBackgroundChanged = settingsViewModel::setStageBackground,
@@ -234,9 +248,10 @@ fun ReaderScreen(
             viewModel.endReadingSession()
             onBack()
         },
-        onErrorAction = { onDone -> viewModel.removeFromShelf(onDone) },
-        errorBackLabel = "返回书架",
-        errorActionLabel = "从书架移除",
+        onErrorAction =
+            if (viewModel.isPreview) null else { onDone -> viewModel.removeFromShelf(onDone) },
+        errorBackLabel = if (viewModel.isPreview) "返回" else "返回书架",
+        errorActionLabel = if (viewModel.isPreview) null else "从书架移除",
         modifier = modifier,
     )
 }
@@ -809,6 +824,8 @@ private fun ComicPager(
                 zoomResetPage = currentPageStateKey
                 zoomResetRequest++
             },
+            onImport = actions.onImport,
+            isImporting = actions.isImporting,
             modifier = Modifier.align(Alignment.TopCenter),
         )
 
@@ -997,6 +1014,8 @@ private fun ReaderTopBar(
     isZoomed: Boolean,
     onBack: () -> Unit,
     onResetZoom: () -> Unit,
+    onImport: (() -> Unit)?,
+    isImporting: Boolean,
     modifier: Modifier = Modifier,
 ) {
     AnimatedVisibility(
@@ -1016,7 +1035,7 @@ private fun ReaderTopBar(
             IconButton(onClick = onBack) {
                 Icon(
                     Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "返回书架",
+                    contentDescription = "返回",
                     tint = Color.White,
                 )
             }
@@ -1028,6 +1047,11 @@ private fun ReaderTopBar(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f).padding(end = 8.dp),
             )
+            if (onImport != null) {
+                TextButton(onClick = onImport, enabled = !isImporting) {
+                    Text(text = if (isImporting) "导入中…" else "导入到书架", color = Color.White)
+                }
+            }
             if (isZoomed) {
                 TextButton(onClick = onResetZoom) {
                     Text(text = "100%", color = Color.White)

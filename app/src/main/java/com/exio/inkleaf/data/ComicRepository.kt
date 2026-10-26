@@ -247,20 +247,14 @@ class ComicRepository(context: Context) {
             }
         }
 
-    /**
-     * 手动添加单个漫画；同一文件已在书架时直接返回已有记录，失效记录会恢复。
-     *
-     * takePersistableUriPermission 把 SAF 的"本次会话可读"升级为 "重启后仍可读"。个别文档提供方不支持持久化授权，失败也不阻断添加。
-     */
+    /** Adds a durable SAF link; callers must provide a persistable document grant. */
     suspend fun addOrGetComic(uri: Uri): AddComicOutcome {
         val uriString = uri.toString()
         return syncMutex.withLock {
-            runCatching {
-                appContext.contentResolver.takePersistableUriPermission(
-                    uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
-                )
-            }
+            appContext.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION,
+            )
             val fileKey = withContext(Dispatchers.IO) { ComicIdentity.fileKey(appContext, uri) }
             db.withTransaction {
                 exclusionDao.deleteByFileKey(fileKey)
@@ -1247,3 +1241,6 @@ class ComicRepository(context: Context) {
         private const val APPROVAL_GROWTH_FACTOR = 2L
     }
 }
+
+internal fun importedComicFileName(fileKey: String): String =
+    "${ReaderPageCacheKey.sha256Hex(fileKey.toByteArray(Charsets.UTF_8))}.cbz"

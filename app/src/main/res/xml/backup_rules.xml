@@ -10,6 +10,9 @@
     <exclude
         domain="file"
         path="albums/" />
+    <exclude
+        domain="file"
+        path="imported/" />
     <!-- Retired enhancement artifacts are removed on cold start and must not be restored. -->
     <exclude
         domain="file"

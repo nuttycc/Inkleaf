@@ -1,6 +1,7 @@
 package com.exio.inkleaf.ui
 
 import android.app.Application
+import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -69,6 +70,7 @@ sealed interface ReaderUiState {
 class ReaderViewModel(
     app: Application,
     private val comicId: Long,
+    private val previewUri: Uri? = null,
     private val initialPageOverride: Int? = null,
     private val resumeFromPersistedPosition: Boolean = false,
 ) : AndroidViewModel(app) {
@@ -79,6 +81,14 @@ class ReaderViewModel(
     private val applicationScope = getApplication<InkleafApplication>().applicationScope
 
     var state by mutableStateOf<ReaderUiState>(ReaderUiState.Loading)
+        private set
+
+    val isPreview = previewUri != null
+
+    var isImporting by mutableStateOf(false)
+        private set
+
+    var importedComicId by mutableStateOf<Long?>(null)
         private set
 
     /**
@@ -152,7 +162,10 @@ class ReaderViewModel(
         viewModelScope.launch {
             state =
                 try {
-                    val comic = repo.getComic(comicId) ?: throw ComicOpenException("书架记录不存在")
+                    val comic =
+                        previewUri?.let { repo.previewComic(it) }
+                            ?: repo.getComic(comicId)
+                            ?: throw ComicOpenException("书架记录不存在")
                     this@ReaderViewModel.comic = comic
                     // Identify the comic before open; source revision arrives on Ready.
                     dispatchSessionEvent(
@@ -168,10 +181,9 @@ class ReaderViewModel(
                     val opened = withContext(Dispatchers.IO) { repo.openBook(comic) }
                     volume = opened
                     observeBookmarks(opened)
-                    // 首次打开回填页数和封面；Room Flow 会自动刷新书架。
-                    // openBook 内部 PdfComicVolume 的 PDF 解析走 IO，这里包一层
-                    // withContext 兜底，避免某些路径在主线程做 native 打开。
-                    withContext(Dispatchers.IO) { repo.backfillMetadata(comic, opened) }
+                    if (!isPreview) {
+                        withContext(Dispatchers.IO) { repo.backfillMetadata(comic, opened) }
+                    }
                     // 全章都打不开（损坏/加密/权限全失效）→ 给清晰提示而非崩在
                     // coerceIn(0, -1)。spec：corrupt/encrypted PDF 不崩溃。
                     if (opened.totalPageCount <= 0) {
@@ -210,6 +222,12 @@ class ReaderViewModel(
                     )
                 } catch (e: ComicOpenException) {
                     ReaderUiState.Error(e.message ?: "打开失败")
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: SecurityException) {
+                    ReaderUiState.Error("没有权限读取该文件，可能已失效")
+                } catch (e: Exception) {
+                    ReaderUiState.Error(e.message?.let { "打开漫画失败：$it" } ?: "打开漫画失败")
                 }
         }
     }
@@ -229,7 +247,24 @@ class ReaderViewModel(
             )
         }
         val progress = opened?.globalToChapterPage(globalPage) ?: ChapterProgress(0, globalPage)
-        progressWriteQueue.submit(progress)
+        if (!isPreview) progressWriteQueue.submit(progress)
+    }
+
+    fun importPreview() {
+        val uri = previewUri ?: return
+        if (isImporting) return
+        isImporting = true
+        viewModelScope.launch {
+            try {
+                importedComicId = repo.importComic(uri).comic.id
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                readerMessage = e.message?.let { "导入失败：$it" } ?: "导入失败"
+            } finally {
+                isImporting = false
+            }
+        }
     }
 
     /**
@@ -246,7 +281,7 @@ class ReaderViewModel(
     }
 
     fun toggleFavorite(page: Int) {
-        if (page in favoriteInFlight) return
+        if (isPreview || page in favoriteInFlight) return
         val opened = volume ?: return
         val source = comic ?: return
         if (page !in 0 until opened.totalPageCount) return
@@ -272,7 +307,7 @@ class ReaderViewModel(
     }
 
     fun toggleBookmark(page: Int) {
-        if (!bookmarkInFlight.add(page)) return
+        if (isPreview || !bookmarkInFlight.add(page)) return
         val opened = volume
         val source = comic
         if (opened == null || source == null || page !in 0 until opened.totalPageCount) {
@@ -317,7 +352,7 @@ class ReaderViewModel(
     }
 
     fun setCurrentPageAsCover(page: Int) {
-        if (coverInFlight) return
+        if (isPreview || coverInFlight) return
         val opened = volume ?: return
         if (page !in 0 until opened.totalPageCount) return
 
@@ -384,7 +419,7 @@ class ReaderViewModel(
     }
 
     private fun observeFavorites(sourceFileKey: String) {
-        if (observedFavoriteSource == sourceFileKey) return
+        if (isPreview || observedFavoriteSource == sourceFileKey) return
         observedFavoriteSource = sourceFileKey
         viewModelScope.launch {
             favoriteRepo.observeForSource(sourceFileKey).collect { favorites ->
@@ -395,6 +430,7 @@ class ReaderViewModel(
     }
 
     private fun observeBookmarks(opened: ComicVolume) {
+        if (isPreview) return
         viewModelScope.launch {
             bookmarkRepo.observeForComic(comicId).collect { bookmarks ->
                 refreshBookmarkPages(opened, bookmarks)
@@ -511,11 +547,12 @@ class ReaderViewModel(
         volume = null
         applicationScope.launch {
             closingVolume?.close()
+            if (isPreview) ReaderCache.wipeBook(getApplication(), comicId)
         }
     }
 
     private fun attachProcessLifecycle() {
-        if (processLifecycleAttached || sessionEnded) return
+        if (isPreview || processLifecycleAttached || sessionEnded) return
         processLifecycleAttached = true
         ProcessLifecycleOwner.get().lifecycle.addObserver(processLifecycleObserver)
         // ProcessLifecycleOwner replays current state, but default machine
@@ -538,6 +575,7 @@ class ReaderViewModel(
     }
 
     private fun persistCurrentProgressInApplicationScope() {
+        if (isPreview) return
         val opened = volume ?: return
         val latest = opened.globalToChapterPage(currentPage)
         val sourceType = comic?.sourceType ?: BookSourceType.EXTERNAL_ARCHIVE
@@ -572,7 +610,7 @@ class ReaderViewModel(
     }
 
     private fun dispatchSessionEvent(event: ReadingSessionEvent) {
-        if (sessionEnded && event !is ReadingSessionEvent.LeaveReader) return
+        if (isPreview || (sessionEnded && event !is ReadingSessionEvent.LeaveReader)) return
         viewModelScope.launch {
             try {
                 sessionRepo.dispatch(event)
@@ -585,6 +623,7 @@ class ReaderViewModel(
     }
 
     private fun dispatchTerminalSessionEvent(event: ReadingSessionEvent) {
+        if (isPreview) return
         // Start immediately so the terminal event is queued before navigation creates another
         // Reader.
         applicationScope.launch(start = CoroutineStart.UNDISPATCHED) {

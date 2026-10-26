@@ -596,22 +596,30 @@ fun ShelfScreen(
 
     pendingDelete?.let { comic ->
         val isAlbum = comic.sourceType == BookSourceType.CREATED_ALBUM
+        val isImported = comic.sourceType == BookSourceType.IMPORTED_ARCHIVE
         val rescanHint =
             when {
-                isAlbum -> ""
+                isAlbum || isImported -> ""
                 comic.sourceType == BookSourceType.PDF_SERIES ->
                     "\n注意：移除后将停止同步该 PDF 章节目录。"
                 else -> "\n移除后目录扫描不会自动恢复；再次手动添加可恢复。"
             }
         ConfirmDialog(
-            title = if (isAlbum) "删除图册" else "从书架移除",
-            text =
-                if (isAlbum) {
-                    "删除《${comic.title}》？\n应用内复制的图片会被彻底删除，已导出的 CBZ 不受影响。"
-                } else {
-                    "移除《${comic.title}》？\n原文件不会被删除。$rescanHint"
+            title =
+                when {
+                    isAlbum -> "删除图册"
+                    isImported -> "删除导入副本"
+                    else -> "从书架移除"
                 },
-            confirmLabel = if (isAlbum) "删除" else "移除",
+            text =
+                when {
+                    isAlbum ->
+                        "删除《${comic.title}》？\n应用内复制的图片会被彻底删除，已导出的 CBZ 不受影响。"
+                    isImported ->
+                        "删除《${comic.title}》？\n应用内的漫画副本会被彻底删除，原分享文件不受影响。"
+                    else -> "移除《${comic.title}》？\n原文件不会被删除。$rescanHint"
+                },
+            confirmLabel = if (isAlbum || isImported) "删除" else "移除",
             onConfirm = {
                 viewModel.deleteComic(comic)
                 pendingDelete = null
