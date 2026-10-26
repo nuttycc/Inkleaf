@@ -68,6 +68,17 @@ function Resolve-AdbCommand([string]$Explicit) {
     throw 'adb was not found on PATH or in ANDROID_HOME/ANDROID_SDK_ROOT'
 }
 
+function Write-PendingBuildOutput([string[]]$SourceIdentifiers) {
+    foreach ($sourceIdentifier in $SourceIdentifiers) {
+        foreach ($event in @(Get-Event -SourceIdentifier $sourceIdentifier -ErrorAction SilentlyContinue)) {
+            if ($null -eq $event) { continue }
+            $data = $event.SourceEventArgs.Data
+            if ($null -ne $data) { Write-Host $data }
+            Remove-Event -EventIdentifier $event.EventIdentifier -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 function Build-DebugApk([string]$Root, [double]$TimeoutSeconds) {
     $gradlew = Join-Path $Root $(if ($IsWindows) { 'gradlew.bat' } else { 'gradlew' })
     if (-not (Test-Path -LiteralPath $gradlew -PathType Leaf)) {
@@ -98,19 +109,38 @@ function Build-DebugApk([string]$Root, [double]$TimeoutSeconds) {
     } catch {
         throw "could not start gradle build: $($_.Exception.Message)"
     }
-    $process.add_OutputDataReceived({ param($sender, $eventArgs) if ($null -ne $eventArgs.Data) { Write-Host $eventArgs.Data } })
-    $process.add_ErrorDataReceived({ param($sender, $eventArgs) if ($null -ne $eventArgs.Data) { Write-Host $eventArgs.Data } })
-    $process.BeginOutputReadLine()
-    $process.BeginErrorReadLine()
-
-    $exited = $process.WaitForExit([int]($TimeoutSeconds * 1000))
-    if (-not $exited) {
-        try { $process.Kill($true) } catch { }
-        throw "gradle build timed out after ${TimeoutSeconds}s"
+    # OutputDataReceived callbacks run on a threadpool thread with no runspace, so queue
+    # the lines as events and print them from this thread instead of using a scriptblock.
+    $stdoutSubscription = 'inkleaf-gradle-stdout-' + [guid]::NewGuid().ToString('N')
+    $stderrSubscription = 'inkleaf-gradle-stderr-' + [guid]::NewGuid().ToString('N')
+    $null = Register-ObjectEvent -InputObject $process -EventName OutputDataReceived -SourceIdentifier $stdoutSubscription
+    $null = Register-ObjectEvent -InputObject $process -EventName ErrorDataReceived -SourceIdentifier $stderrSubscription
+    $subscriptions = @($stdoutSubscription, $stderrSubscription)
+    $exitCode = -1
+    try {
+        $process.BeginOutputReadLine()
+        $process.BeginErrorReadLine()
+        $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+        while (-not $process.HasExited) {
+            Write-PendingBuildOutput $subscriptions
+            if ([DateTime]::UtcNow -gt $deadline) {
+                try { $process.Kill($true) } catch { }
+                throw "gradle build timed out after ${TimeoutSeconds}s"
+            }
+            Start-Sleep -Milliseconds 100
+        }
+        $process.WaitForExit()
+        Write-PendingBuildOutput $subscriptions
+        $exitCode = $process.ExitCode
+    } finally {
+        foreach ($subscription in $subscriptions) {
+            Unregister-Event -SourceIdentifier $subscription -ErrorAction SilentlyContinue
+            Remove-Event -SourceIdentifier $subscription -ErrorAction SilentlyContinue
+        }
+        $process.Dispose()
     }
-    $process.WaitForExit()
-    if ($process.ExitCode -ne 0) {
-        throw "gradle build failed with exit code $($process.ExitCode)"
+    if ($exitCode -ne 0) {
+        throw "gradle build failed with exit code $exitCode"
     }
     Write-Host '[INFO] debug APK 构建成功'
 }
