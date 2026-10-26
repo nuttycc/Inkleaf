@@ -4,7 +4,7 @@
 // document first -- it records what two independent implementations agreed on and where they did
 // not, which is the only reason we know which parts of this file are load-bearing.
 //
-// plugin.build.json asks .scripts/plugin.ps1 to prepend the shared runtime while packaging, so
+// The plugin packaging tool (.scripts/plugin-toolkit.psm1) prepends the runtime named by plugin.build.json, so
 // helpers such as text(), asObject(), requestText() and pluginError() are already in scope.
 
 const DEFAULT_API_BASE = "https://v4api.zaimanhua.com/app/v1";
