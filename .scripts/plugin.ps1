@@ -25,14 +25,11 @@ $Utf8NoBom = [Text.UTF8Encoding]::new($false)
 # Native tools (git, adb) emit UTF-8; without this the console decodes them as the ANSI code page.
 try { [Console]::OutputEncoding = $Utf8NoBom } catch { }
 
-$DefaultPackageId = 'com.exio.inkleaf'
 $DebugPackageId = 'com.exio.inkleaf.debug'
-$DefaultDeviceDirectory = '/sdcard/Download/Inkleaf'
 $PluginNamePattern = '^[A-Za-z0-9][A-Za-z0-9._-]*$'
 $PackageIdPattern = '^[A-Za-z][A-Za-z0-9_.]*$'
 $PackageVersionPattern = '^[A-Za-z0-9][A-Za-z0-9._+-]*$'
 $PackageNamePattern = '^[A-Za-z0-9._+-]+\.zip$'
-$DeviceDirectoryPattern = '^/sdcard/[A-Za-z0-9._/-]+$'
 $BroadcastResultPattern = 'Broadcast completed: result=(?<code>-?\d+)(?:, data="(?<data>[^"]*)")?'
 
 # Releases live in a separate repository, and the app reads only its main branch
@@ -61,11 +58,10 @@ Commands:
         --output PATH     ZIP path for one plugin (must stay below plugin-sources/dist).
         --output-dir DIR  Output directory for multiple versioned ZIPs.
 
-  deploy <plugin>         Package, push, install, and activate over ADB.
+  deploy <plugin>         Package, install, and activate over ADB (debug app only).
         --serial SERIAL   ADB device serial; required when several are ready.
-        --device-directory DIR   (default: /sdcard/Download/Inkleaf)
         --output PATH     ZIP path below plugin-sources/dist.
-        --package-id ID   (default: com.exio.inkleaf)
+        --package-id ID   (default: com.exio.inkleaf.debug)
 
   publish <plugin...>     Build plugins, update index.json, optionally push.
         --repo-dir DIR    Clone of nuttycc/inkleaf-plugins.
@@ -918,17 +914,6 @@ function Select-AdbDevice([string]$Adb, [string]$Preferred) {
     throw "Multiple ADB devices are ready. Re-run with --serial. Devices: $serials"
 }
 
-function Resolve-DeviceDirectory([string]$Value) {
-    if ($Value -notmatch $DeviceDirectoryPattern) {
-        throw 'Device directory must be an absolute path below /sdcard'
-    }
-    $parts = @($Value.Substring('/sdcard'.Length).Split('/') | Where-Object { $_ -ne '' -and $_ -ne '.' })
-    if ($parts -contains '..') {
-        throw 'Device directory contains an unsafe path segment'
-    }
-    return '/sdcard/' + ($parts -join '/')
-}
-
 function Get-ReceiverComponent([string]$PackageId) {
     return "$PackageId/com.exio.inkleaf.plugin.AdbPluginInstallReceiver"
 }
@@ -1007,24 +992,18 @@ function Send-InstallBroadcast(
     return $detail
 }
 
-function Deploy-Plugin($Plugin, [string]$Serial, [string]$DeviceDirectory, [string]$Output, [string]$PackageId) {
+function Deploy-Plugin($Plugin, [string]$Serial, [string]$Output, [string]$PackageId) {
     if ($PackageId -notmatch $PackageIdPattern) {
         throw "Invalid Android package id: $PackageId"
     }
-    $DeviceDirectory = Resolve-DeviceDirectory $DeviceDirectory
     $adb = Get-AdbPath
     Write-Host "[info] Using adb at $adb"
     $device = Select-AdbDevice $adb $Serial
     Write-Host "[info] Using ADB device $device"
     $package = New-PluginPackage $Plugin $Output
-    $devicePath = "$($DeviceDirectory.TrimEnd('/'))/$(Split-Path -Leaf $package)"
 
     Assert-InstallReceiver $adb $device $PackageId
     Start-InkleafApp $adb $device $PackageId
-    Write-Host "[info] Uploading $(Split-Path -Leaf $package) to ${device}:$devicePath"
-    Invoke-Adb $adb @('-s', $device, 'shell', 'mkdir', '-p', $DeviceDirectory) | Out-Null
-    Invoke-Adb $adb @('-s', $device, 'push', $package, $devicePath) | Out-Null
-    Write-Host "[ok] Package pushed to $devicePath"
 
     # Command-line-safe chunks stay below both Windows and Binder limits.
     $session = [guid]::NewGuid().ToString('N')
@@ -1063,7 +1042,7 @@ if ($args.Count -gt 0) {
 
 $OptionValues = @{
     'package' = @('output', 'output-dir')
-    'deploy'  = @('serial', 'device-directory', 'output', 'package-id')
+    'deploy'  = @('serial', 'output', 'package-id')
     'publish' = @('repo-dir', 'message')
 }
 $OptionFlags = @{
@@ -1148,17 +1127,12 @@ function Invoke-Main {
                 throw 'a plugin name is required'
             }
             $plugin = Find-Plugin $positional[0]
-            $deviceDirectory = if ($options.ContainsKey('device-directory')) {
-                $options['device-directory']
-            } else {
-                $DefaultDeviceDirectory
-            }
             $packageId = if ($options.ContainsKey('package-id')) {
                 $options['package-id']
             } else {
-                $DefaultPackageId
+                $DebugPackageId
             }
-            Deploy-Plugin $plugin $options['serial'] $deviceDirectory $options['output'] $packageId
+            Deploy-Plugin $plugin $options['serial'] $options['output'] $packageId
         }
     }
 }
