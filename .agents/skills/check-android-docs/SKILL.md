@@ -1,6 +1,6 @@
 ---
-name: android-docs-search
-description: Use when you need to search/fetch android developer docs.
+name: check-android-docs
+description: Use when you need to check android developer docs. e.g. verify api behaviors.
 ---
 
 Use the docs subcommand in Android Cli: `android docs`
