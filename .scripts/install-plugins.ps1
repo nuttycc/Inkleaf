@@ -2,8 +2,8 @@
 
 [CmdletBinding()]
 param(
-    [Parameter(Position = 0)]
-    [string]$Plugin,
+    [Parameter(Position = 0, ValueFromRemainingArguments = $true)]
+    [string[]]$Plugins,
 
     [Parameter()]
     [string]$Serial,
@@ -175,18 +175,8 @@ function Send-InstallBroadcast(
     return $detail
 }
 
-function Deploy-Plugin($Plugin, [string]$Serial, [string]$Output, [string]$PackageId) {
-    if ($PackageId -notmatch $PackageIdPattern) {
-        throw "Invalid Android package id: $PackageId"
-    }
-    $adb = Get-AdbPath
-    Write-Host "[info] Using adb at $adb"
-    $device = Select-AdbDevice $adb $Serial
-    Write-Host "[info] Using ADB device $device"
+function Install-PluginPackage([string]$Adb, [string]$Device, [string]$PackageId, $Plugin, [string]$Output) {
     $package = New-PluginPackage $Plugin $Output
-
-    Assert-InstallReceiver $adb $device $PackageId
-    Start-InkleafApp $adb $device $PackageId
 
     # Command-line-safe chunks stay below both Windows and Binder limits.
     $session = [guid]::NewGuid().ToString('N')
@@ -197,30 +187,61 @@ function Deploy-Plugin($Plugin, [string]$Serial, [string]$Output, [string]$Packa
     $chunkCount = [int][Math]::Ceiling($encoded.Length / [double]$chunkSize)
     Write-Host "[info] Starting ADB installation in $PackageId"
     Write-Host "[info] Sending payload in $chunkCount chunk(s)"
-    Send-InstallBroadcast $adb $device $PackageId (@($common) + @('--es', 'operation', 'begin')) | Out-Null
+    Send-InstallBroadcast $Adb $Device $PackageId (@($common) + @('--es', 'operation', 'begin')) | Out-Null
     for ($offset = 0; $offset -lt $encoded.Length; $offset += $chunkSize) {
         $length = [Math]::Min($chunkSize, $encoded.Length - $offset)
-        Send-InstallBroadcast $adb $device $PackageId (@($common) + @(
+        Send-InstallBroadcast $Adb $Device $PackageId (@($common) + @(
             '--es', 'operation', 'append', '--es', 'payload', $encoded.Substring($offset, $length)
         )) | Out-Null
     }
-    $installResult = Send-InstallBroadcast $adb $device $PackageId (@($common) + @(
+    $installResult = Send-InstallBroadcast $Adb $Device $PackageId (@($common) + @(
         '--es', 'operation', 'commit',
         '--es', 'expectedPluginId', $Plugin.Id,
         '--es', 'expectedVersion', $Plugin.Version
     ))
-    Write-Host "[ok] Plugin installed and activated: $installResult"
+    Write-Host "[ok] $($Plugin.Name) installed and activated: $installResult"
+}
+
+function Deploy-Plugins([object[]]$Plugins, [string]$Serial, [string]$Output, [string]$PackageId) {
+    if ($PackageId -notmatch $PackageIdPattern) {
+        throw "Invalid Android package id: $PackageId"
+    }
+    if ($Output -and $Plugins.Count -ne 1) {
+        throw '-Output can only be used when installing one plugin'
+    }
+    $adb = Get-AdbPath
+    Write-Host "[info] Using adb at $adb"
+    $device = Select-AdbDevice $adb $Serial
+    Write-Host "[info] Using ADB device $device"
+
+    Assert-InstallReceiver $adb $device $PackageId
+    Start-InkleafApp $adb $device $PackageId
+
+    Write-Host "[info] Installing $($Plugins.Count) plugin(s) in $PackageId"
+    $failures = [System.Collections.Generic.List[string]]::new()
+    foreach ($plugin in $Plugins) {
+        try {
+            Install-PluginPackage $adb $device $PackageId $plugin $Output
+        } catch {
+            $failures.Add("$($plugin.Name): $($_.Exception.Message)")
+        }
+    }
+    if ($failures.Count -gt 0) {
+        throw "Some plugins failed to install:`n  - " + ($failures -join "`n  - ")
+    }
 }
 
 try {
-    if ([string]::IsNullOrWhiteSpace($Plugin)) {
-        throw 'Specify a plugin name, for example: ./.scripts/install-plugins.ps1 jmcomic'
-    }
     if (-not $PSBoundParameters.ContainsKey('PackageId') -or [string]::IsNullOrWhiteSpace($PackageId)) {
         $PackageId = $DebugPackageId
     }
-    $selected = Find-Plugin $Plugin
-    Deploy-Plugin $selected $Serial $Output $PackageId
+    $available = Get-Plugins
+    $selected = if ($null -ne $Plugins -and $Plugins.Count -gt 0) {
+        @(Select-Plugins $Plugins $available)
+    } else {
+        @($available)
+    }
+    Deploy-Plugins $selected $Serial $Output $PackageId
 } catch {
     [Console]::Error.WriteLine("error: $($_.Exception.Message)")
     exit 1
@@ -228,24 +249,24 @@ try {
 
 <#
 .SYNOPSIS
-    Package a plugin and install it on the debug app over ADB.
+    Package plugins and install them on the debug app over ADB.
 .DESCRIPTION
-    Plugin source lives at plugin-sources/<name>/src/main.js. The ZIP is built by
+    Plugin source lives at plugin-sources/<name>/src/main.js. Each ZIP is built by
     plugin-toolkit.psm1 and streamed to the debug app's ADB install receiver, which
     exists only in debug builds.
 
     Packaging writes below plugin-sources/dist; ADB installs go to
     com.exio.inkleaf.debug unless -PackageId says otherwise.
-.PARAMETER Plugin
-    Directory name below plugin-sources.
+.PARAMETER Plugins
+    Directory names below plugin-sources. Defaults to every discovered plugin.
 .PARAMETER Serial
     ADB device serial; required when several devices are ready.
 .PARAMETER Output
-    ZIP path below plugin-sources/dist. Defaults to the versioned name.
+    ZIP path below plugin-sources/dist. Only valid when installing one plugin.
 .PARAMETER PackageId
     Android package to install into. Defaults to the debug app.
 .EXAMPLE
-    ./.scripts/install-plugins.ps1 jmcomic
+    ./.scripts/install-plugins.ps1
 .EXAMPLE
-    ./.scripts/install-plugins.ps1 wnacg -Serial 192.168.1.5:5555
+    ./.scripts/install-plugins.ps1 jmcomic wnacg -Serial 192.168.1.5:5555
 #>
