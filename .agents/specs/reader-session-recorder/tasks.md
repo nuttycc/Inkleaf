@@ -1,0 +1,26 @@
+# Tasks：ReaderSessionRecorder（阶段 C）
+
+- [x] T1 新增 `app/src/main/java/com/exio/inkleaf/ui/ReaderSessionRecorder.kt`
+  - [x] 定义泛型接口（isEnded / begin / pageVisible / foregroundChanged / checkpoint / end）
+  - [x] `OfflineReaderSessionRecorder`：映射五类 `ReadingSessionEvent`，持有检查点循环与 ended 守卫
+  - [x] `OnlineReaderSessionRecorder`：映射 `OnlineReadingSession`，结束经 `OnlineReadingSessions.record` 回调
+- [x] T2 接线 `ReaderViewModel`
+  - [x] 删除事件派发辅助方法与检查点 Job
+  - [x] 在 init / saveProgress / 生命周期观察者 / endReadingSession / onCleared 调用 recorder
+- [x] T3 接线 `OnlineReaderViewModel`
+  - [x] 用 `chapterOpened` 替代 `readingSession.hasStarted`
+  - [x] loadActiveChapter / 切章提交 / 提交失败 / saveProgress / 生命周期 / finishSession 改调 recorder
+- [x] T4 契约测试
+  - [x] 新增 `ReaderSessionRecorderContractTest`（在线内存适配器，覆盖章节未就绪不计时等 11 条）
+  - [x] 删除 `OnlineReadingSessionTest.kt`
+  - [x] 从 `OnlineReadingSessionsTest.kt` 移除已迁移的断言
+- [x] T5 相簿文件名纯函数
+  - [x] `GalleryExport.kt` 新增 `galleryDisplayName` 重载并替换两处拼接
+  - [x] `GalleryExportTest` 补用例
+- [x] T6 进度写队列测试
+  - [x] 新增 `ReaderProgressWriteQueueTest.kt`（延迟窗口合并、边界 flush、close 拒绝迟到提交）
+  - [x] 从 `ReaderProgressRestorePolicyTest.kt` 移除重复用例
+- [x] T7 验证与提交
+  - [x] `.\gradlew.bat testDebugUnitTest` 全绿
+  - [x] `.\gradlew.bat spotlessApply` + `.\gradlew.bat spotlessCheck`
+  - [x] 按 Conventional Commits 分批提交
