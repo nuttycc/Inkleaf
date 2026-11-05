@@ -1,7 +1,6 @@
 package com.exio.inkleaf.ui
 
 import android.app.Application
-import android.graphics.BitmapFactory
 import android.net.ConnectivityManager
 import android.os.SystemClock
 import androidx.compose.runtime.getValue
@@ -34,15 +33,10 @@ import com.exio.inkleaf.plugin.OnlineChapterRevalidation
 import com.exio.inkleaf.plugin.OnlineChapterSource
 import com.exio.inkleaf.plugin.OnlineChapterVolume
 import com.exio.inkleaf.plugin.OnlinePageBookmark
+import com.exio.inkleaf.plugin.OnlinePageFavorite
 import com.exio.inkleaf.plugin.PluginContentCodec
 import com.exio.inkleaf.plugin.VersionedChapterPages
-import java.io.File
-import java.io.FileOutputStream
-import java.nio.file.AtomicMoveNotSupportedException
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
 import java.util.TimeZone
-import java.util.UUID
 import kotlin.time.Duration.Companion.minutes
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
@@ -126,12 +120,31 @@ internal class OnlineReaderViewModel(
     private var currentTitle: String = "在线漫画"
     private var currentPage by mutableIntStateOf(0)
     private var bookmarkEntriesByKey = emptyMap<String, OnlinePageBookmark>()
+    private var favoriteEntriesByKey = emptyMap<String, OnlinePageFavorite>()
     private val thumbnailInFlight = mutableSetOf<Int>()
     private val thumbnailJobs = mutableSetOf<Job>()
     private val thumbnailMutex = Mutex()
     private val bookmarkMutationMutex = Mutex()
-    private val favoriteMutationMutex = Mutex()
     private var galleryExportInFlight = false
+
+    private val readerMarks: ReaderMarks by lazy {
+        OnlineReaderMarks(
+            repository = repository,
+            locationAt = ::markLocation,
+            bookmarkAt = { identity ->
+                bookmarkEntriesByKey.values.firstOrNull { it.location.identity == identity }
+            },
+            favoriteAt = { identity ->
+                favoriteEntriesByKey.values.firstOrNull { it.location.identity == identity }
+            },
+            chapterTitleAt = { currentChapterTitle },
+            refreshRecords = { refreshUserRecords() },
+            pageBytesAt = { page ->
+                requireNotNull(volume) { "Reader is not ready" }.loadPageBytes(page)
+            },
+            bookmarkMutationMutex = bookmarkMutationMutex,
+        )
+    }
 
     private val progressWriteQueue =
         ReaderProgressWriteQueue<OnlinePageLocation>(
@@ -155,8 +168,7 @@ internal class OnlineReaderViewModel(
     private var preloadedNext: PreloadedChapter? = null
     private var preloadedPrevious: PreloadedChapter? = null
 
-    private val readingSession =
-        OnlineReadingSession(elapsedMs = SystemClock::elapsedRealtime)
+    private val readingSession = OnlineReadingSession(elapsedMs = SystemClock::elapsedRealtime)
     private var processLifecycleAttached = false
 
     private val processLifecycleObserver =
@@ -459,36 +471,14 @@ internal class OnlineReaderViewModel(
     fun isActiveVolume(candidate: ComicVolume): Boolean = candidate === volume
 
     fun toggleBookmark(page: Int) {
-        val location = locationForOrNull(page) ?: return
-        val chapterTitle = currentChapterTitle
+        val opened = volume ?: return
+        if (page !in opened.pages.indices) return
+        val chapter = chapterIdentity
+        val ref = chapterPageRef(opened, page)
+
         viewModelScope.launch {
-            try {
-                var added = false
-                bookmarkMutationMutex.withLock {
-                    withContext(Dispatchers.IO) {
-                        val existing =
-                            repository.get(pluginId, sourceId)?.pageBookmarks?.firstOrNull {
-                                it.location.identity == location.identity
-                            }
-                        if (existing == null) {
-                            repository.addPageBookmark(location, chapterTitle)
-                            added = true
-                        } else {
-                            repository.removePageBookmark(existing.location.identity)
-                        }
-                    }
-                    refreshUserRecords()
-                }
-                if (location.identity.chapter == chapterIdentity) {
-                    readerMessage = if (added) "已添加书签" else "已移除书签"
-                }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Exception) {
-                if (location.identity.chapter == chapterIdentity) {
-                    readerMessage = error.message?.let { "书签操作失败：$it" } ?: "书签操作失败"
-                }
-            }
+            val outcome = readerMarks.toggleBookmark(ref)
+            if (chapter == chapterIdentity) readerMessage = outcome.message()
         }
     }
 
@@ -513,39 +503,16 @@ internal class OnlineReaderViewModel(
     }
 
     fun toggleFavorite(page: Int) {
-        val location = locationForOrNull(page) ?: return
         val opened = volume ?: return
-        val chapterTitle = currentChapterTitle
+        if (page !in opened.pages.indices) return
+        val chapter = chapterIdentity
+        val ref = chapterPageRef(opened, page)
+
         viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
             if (!acquireVolumeTask(opened)) return@launch
             try {
-                var added = false
-                favoriteMutationMutex.withLock {
-                    val existing =
-                        withContext(Dispatchers.IO) {
-                            repository.get(pluginId, sourceId)?.pageFavorites?.firstOrNull {
-                                it.location.identity == location.identity
-                            }
-                        }
-                    if (existing != null) {
-                        withContext(Dispatchers.IO) {
-                            repository.removePageFavorite(existing.location.identity)
-                        }
-                    } else {
-                        createFavoriteSnapshot(page, location, opened, chapterTitle)
-                        added = true
-                    }
-                    refreshUserRecords()
-                }
-                if (location.identity.chapter == chapterIdentity) {
-                    readerMessage = if (added) "已收藏" else "已取消收藏"
-                }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Exception) {
-                if (location.identity.chapter == chapterIdentity) {
-                    readerMessage = error.message?.let { "收藏失败：$it" } ?: "收藏失败"
-                }
+                val outcome = readerMarks.toggleFavorite(ref)
+                if (chapter == chapterIdentity) readerMessage = outcome.message()
             } finally {
                 releaseVolumeTask(opened)
             }
@@ -698,8 +665,8 @@ internal class OnlineReaderViewModel(
 
     /**
      * Loads the destination page before committing a chapter switch, reusing [prebuilt] when
-     * possible.
-     * Abandons the candidate if the active chapter or revision changed while it was loading.
+     * possible. Abandons the candidate if the active chapter or revision changed while it was
+     * loading.
      */
     private suspend fun prepareAndCommitChapter(
         chapter: ChapterSummary,
@@ -1193,7 +1160,11 @@ internal class OnlineReaderViewModel(
         opened: OnlineChapterVolume,
     ): RestoredOnlinePage {
         val rememberedPage = lastPageByChapterId[activeChapterId]
-        if (readingSession.hasStarted && rememberedPage != null && rememberedPage in opened.pages.indices) {
+        if (
+            readingSession.hasStarted &&
+                rememberedPage != null &&
+                rememberedPage in opened.pages.indices
+        ) {
             return RestoredOnlinePage(rememberedPage, stale = false)
         }
         val explicitPage =
@@ -1303,6 +1274,7 @@ internal class OnlineReaderViewModel(
             record?.pageFavorites.orEmpty().filter {
                 it.location.identity.chapter == chapterIdentity
             }
+        favoriteEntriesByKey = chapterFavorites.associateBy { bookmarkKey(it.location.identity) }
         favoritePages.clear()
         favoritePageKeys.clear()
         chapterFavorites.forEach { favorite ->
@@ -1332,50 +1304,6 @@ internal class OnlineReaderViewModel(
             page = location.pageIndex.coerceIn(0, opened.totalPageCount - 1),
             stale = true,
         )
-    }
-
-    private suspend fun createFavoriteSnapshot(
-        page: Int,
-        location: OnlinePageLocation,
-        opened: OnlineChapterVolume,
-        chapterTitle: String,
-    ) {
-        withContext(Dispatchers.IO) {
-            val bytes = opened.loadPageBytes(page)
-            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
-            if (options.outWidth <= 0 || options.outHeight <= 0) {
-                throw ComicOpenException("本页图像无法解码")
-            }
-            val mimeType = options.outMimeType ?: "application/octet-stream"
-            val destination =
-                repository.pageFavoriteSnapshotFile(
-                    location.identity,
-                    snapshotExtension(mimeType),
-                )
-            val temporary =
-                destination.resolveSibling("${destination.name}.tmp-${UUID.randomUUID()}")
-            var published = false
-            try {
-                FileOutputStream(temporary).use { output ->
-                    output.write(bytes)
-                    output.fd.sync()
-                }
-                moveSnapshot(temporary, destination)
-                repository.recordPageFavoriteSnapshot(
-                    location = location,
-                    snapshotFile = destination,
-                    mimeType = mimeType,
-                    width = options.outWidth,
-                    height = options.outHeight,
-                    chapterTitleSnapshot = chapterTitle,
-                )
-                published = true
-            } finally {
-                if (temporary.exists()) temporary.delete()
-                if (!published && destination.exists()) destination.delete()
-            }
-        }
     }
 
     private suspend fun loadThumbnail(page: Int) {
@@ -1458,6 +1386,23 @@ internal class OnlineReaderViewModel(
         return locationFor(page)
     }
 
+    /** The page reference a mark action points at; the same shape the reader's page badges use. */
+    private fun chapterPageRef(opened: OnlineChapterVolume, page: Int): ReaderPageRef =
+        ReaderPageRef(
+            namespace = PageIdentity.chapterNamespace(activeChapterId, opened.sourceRevision),
+            pageIdentity = PageIdentity.pageIdentity(opened, page),
+            anchorPage = page,
+        )
+
+    /**
+     * Resolves a page reference back to its plugin location, rejecting it if the chapter moved on.
+     */
+    private fun markLocation(ref: ReaderPageRef): OnlinePageLocation? {
+        val opened = volume ?: return null
+        if (ref.anchorPage !in opened.pages.indices) return null
+        return locationFor(ref.anchorPage).takeIf { chapterPageRef(opened, ref.anchorPage) == ref }
+    }
+
     private fun locationFor(page: Int): OnlinePageLocation {
         val opened = requireNotNull(volume) { "Reader is not ready" }
         val descriptor = opened.pages[page]
@@ -1506,8 +1451,7 @@ internal class OnlineReaderViewModel(
 
     /**
      * Ends the session once and queues final position and eligible history writes in application
-     * scope.
-     * Waits for pending progress writes before persisting the final location.
+     * scope. Waits for pending progress writes before persisting the final location.
      */
     private fun finishSession() {
         if (readingSession.isEnded) return
@@ -1582,28 +1526,6 @@ internal class OnlineReaderViewModel(
         const val SPECULATIVE_DOWNLOADS = 2
         const val THUMB_TARGET_WIDTH = 168
         const val PROGRESS_WRITE_INTERVAL_MS = 500L
-
-        fun snapshotExtension(mimeType: String): String =
-            when (mimeType.lowercase()) {
-                "image/jpeg" -> "jpg"
-                "image/png" -> "png"
-                "image/webp" -> "webp"
-                "image/gif" -> "gif"
-                "image/avif" -> "avif"
-                else -> "img"
-            }
-
-        fun moveSnapshot(source: File, destination: File) {
-            try {
-                Files.move(
-                    source.toPath(),
-                    destination.toPath(),
-                    StandardCopyOption.ATOMIC_MOVE,
-                )
-            } catch (_: AtomicMoveNotSupportedException) {
-                Files.move(source.toPath(), destination.toPath())
-            }
-        }
     }
 }
 

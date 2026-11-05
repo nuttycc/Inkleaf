@@ -28,10 +28,11 @@ internal data class ReaderPageStateKey(
 }
 
 internal fun ReaderChapterPageKey.toReaderPageStateKey(): ReaderPageStateKey =
-    ReaderPageStateKey(
-        namespace = "$chapterId\u0000$chapterRevision",
-        pageIdentity = pageIdentity,
-    )
+    toReaderPageRef(anchorPage = 0).stateKey()
+
+/** The page reference reader actions point at for a page inside a chapter window. */
+internal fun ReaderChapterPageKey.toReaderPageRef(anchorPage: Int): ReaderPageRef =
+    PageIdentity.refOf(chapterPageKey = this, anchorPage = anchorPage)
 
 /**
  * One owner for every reader key derived from "which page is this".
@@ -59,6 +60,20 @@ internal object PageIdentity {
      */
     fun volumeNamespace(volume: ComicVolume): String = "$LOCAL_NAMESPACE${volume.sourceRevision}"
 
+    /** The page reference reader actions point at when the page comes from a chapter window. */
+    fun refOf(chapterPageKey: ReaderChapterPageKey, anchorPage: Int): ReaderPageRef =
+        ReaderPageRef(
+            namespace = chapterNamespace(chapterPageKey.chapterId, chapterPageKey.chapterRevision),
+            pageIdentity = chapterPageKey.pageIdentity,
+            anchorPage = anchorPage,
+        )
+
+    /**
+     * Namespace for every key of a chapter, qualified by the revision its pages were fetched at.
+     */
+    fun chapterNamespace(chapterId: String, chapterRevision: String): String =
+        "$chapterId\u0000$chapterRevision"
+
     /** The page reference reader actions point at when the reader holds a volume open. */
     fun refOf(volume: ComicVolume, page: Int): ReaderPageRef =
         ReaderPageRef(
@@ -78,7 +93,7 @@ internal object PageIdentity {
         pageIdentity: String,
     ): ReaderPageStateKey =
         ReaderPageStateKey(
-            namespace = "$chapterId\u0000$chapterRevision",
+            namespace = chapterNamespace(chapterId, chapterRevision),
             pageIdentity = pageIdentity,
         )
 
