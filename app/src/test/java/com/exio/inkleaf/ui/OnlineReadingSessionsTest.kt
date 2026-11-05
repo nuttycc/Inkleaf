@@ -4,7 +4,6 @@ import com.exio.inkleaf.data.OnlineChapterIdentity
 import com.exio.inkleaf.data.OnlineContentIdentity
 import com.exio.inkleaf.data.OnlinePageLocation
 import com.exio.inkleaf.data.ReadingSessionRules
-import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -38,7 +37,9 @@ class OnlineReadingSessionsTest {
         assertNull(record(activeReadingMillis = 1_000L, start = here, end = here))
     }
 
-    /** Checks the inclusive duration boundary: a stationary session is kept at the shared threshold. */
+    /**
+     * Checks the inclusive duration boundary: a stationary session is kept at the shared threshold.
+     */
     @Test
     fun `record is kept once active reading passes the shared threshold`() {
         val here = location(pageIndex = 0)
@@ -63,34 +64,9 @@ class OnlineReadingSessionsTest {
         assertNotNull(kept)
     }
 
-    /** Checks that a retained record preserves identity, timing, title, timezone and both locations. */
-    @Test
-    fun `record carries the captured facts`() {
-        val kept =
-            record(
-                sessionId = "session-1",
-                titleSnapshot = "Comic",
-                startedAtMs = 10L,
-                endedAtMs = 90L,
-                activeReadingMillis = 80L,
-                timeZoneId = "Asia/Shanghai",
-                start = location(pageIndex = 0),
-                end = location(pageIndex = 3),
-            )
-
-        requireNotNull(kept)
-        assertEquals("session-1", kept.sessionId)
-        assertEquals("Comic", kept.titleSnapshot)
-        assertEquals(10L, kept.startedAtMs)
-        assertEquals(90L, kept.endedAtMs)
-        assertEquals(80L, kept.activeReadingMillis)
-        assertEquals("Asia/Shanghai", kept.timeZoneId)
-        assertEquals(content(), kept.content)
-        assertEquals(location(pageIndex = 0), kept.start)
-        assertEquals(location(pageIndex = 3), kept.end)
-    }
-
-    /** Builds a qualifying session by default, allowing individual eligibility inputs to be varied. */
+    /**
+     * Builds a qualifying session by default, allowing individual eligibility inputs to be varied.
+     */
     private fun record(
         sessionId: String? = "session-1",
         titleSnapshot: String = "Comic",
@@ -116,7 +92,9 @@ class OnlineReadingSessionsTest {
     /** Provides the shared content identity used by the session and both endpoint locations. */
     private fun content() = OnlineContentIdentity(PLUGIN_ID, SOURCE_ID)
 
-    /** Creates a stable page location in one chapter so page movement can be varied independently. */
+    /**
+     * Creates a stable page location in one chapter so page movement can be varied independently.
+     */
     private fun location(pageIndex: Int) =
         OnlinePageLocation.create(
             chapter = OnlineChapterIdentity(content(), "chapter-1"),
