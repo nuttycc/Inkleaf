@@ -76,6 +76,10 @@ class LibraryScanner(context: Context) {
     /**
      * Recursively lists archive comics. This retains the existing archive-library semantics while
      * sharing the cancellable, one-query-per-directory traversal used by PDF scanning.
+     *
+     * Rows scanned this way keep a SAF document key instead of a `stat:` key: the device number
+     * embedded in a `stat:` key changes when the storage mount is re-created (e.g. after a
+     * restart), which would make every archived comic look like a new file.
      */
     suspend fun scanFolder(treeUri: Uri): List<ScannedFile> =
         withContext(Dispatchers.IO) {
@@ -106,14 +110,8 @@ class LibraryScanner(context: Context) {
                                 }
                             }
                         } else if (COMIC_EXT.matches(child.name)) {
-                            val fileUri =
-                                DocumentsContract.buildDocumentUriUsingTree(treeUri, child.docId)
                             found.add(
-                                child.toScannedFile(
-                                    treeUri = treeUri,
-                                    relativePath = relativePath,
-                                    fileKey = ComicIdentity.fileKey(appContext, fileUri),
-                                )
+                                child.toScannedFile(treeUri = treeUri, relativePath = relativePath)
                             )
                         }
                         true
