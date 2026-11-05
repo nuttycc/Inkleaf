@@ -25,7 +25,8 @@ import com.exio.inkleaf.data.OnlineContentIdentity
 import com.exio.inkleaf.data.OnlinePageIdentity
 import com.exio.inkleaf.data.OnlinePageLocation
 import com.exio.inkleaf.data.ReaderCache
-import com.exio.inkleaf.data.sanitizeFileName
+import com.exio.inkleaf.data.ReadingSessionEndReason
+import com.exio.inkleaf.data.galleryDisplayName
 import com.exio.inkleaf.data.saveImageBytesToGallery
 import com.exio.inkleaf.plugin.ChapterSummary
 import com.exio.inkleaf.plugin.OnlineAvailability
@@ -36,7 +37,6 @@ import com.exio.inkleaf.plugin.OnlinePageBookmark
 import com.exio.inkleaf.plugin.OnlinePageFavorite
 import com.exio.inkleaf.plugin.PluginContentCodec
 import com.exio.inkleaf.plugin.VersionedChapterPages
-import java.util.TimeZone
 import kotlin.time.Duration.Companion.minutes
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
@@ -168,17 +168,29 @@ internal class OnlineReaderViewModel(
     private var preloadedNext: PreloadedChapter? = null
     private var preloadedPrevious: PreloadedChapter? = null
 
-    private val readingSession = OnlineReadingSession(elapsedMs = SystemClock::elapsedRealtime)
+    private val sessionRecorder =
+        OnlineReaderSessionRecorder(
+            session = OnlineReadingSession(elapsedMs = SystemClock::elapsedRealtime),
+            content = contentIdentity,
+            title = { currentTitle },
+            pageAt = { locationForOrNull(currentPage) },
+            onRecord = { record ->
+                applicationScope.launch {
+                    runCatching { repository.recordReadingSession(record) }
+                }
+            },
+        )
+    private var chapterOpened = false
     private var processLifecycleAttached = false
 
     private val processLifecycleObserver =
         object : DefaultLifecycleObserver {
             override fun onResume(owner: LifecycleOwner) {
-                readingSession.resumeSegment()
+                sessionRecorder.foregroundChanged(true)
             }
 
             override fun onPause(owner: LifecycleOwner) {
-                readingSession.pauseSegment()
+                sessionRecorder.foregroundChanged(false)
                 progressWriteQueue.flushBestEffort()
             }
         }
@@ -446,7 +458,7 @@ internal class OnlineReaderViewModel(
         schedulePagePrefetch(opened, page, direction)
         lastPageByChapterId[activeChapterId] = page
         val location = locationFor(page)
-        readingSession.moveTo(location)
+        sessionRecorder.pageVisible(location)
         progressWriteQueue.submit(location)
     }
 
@@ -535,7 +547,7 @@ internal class OnlineReaderViewModel(
                 saveImageBytesToGallery(
                     application,
                     bytes,
-                    "${sanitizeFileName(currentTitle)}_${sanitizeFileName(currentChapterTitle)}_p${page + 1}",
+                    galleryDisplayName(currentTitle, currentChapterTitle, page),
                 )
                 readerMessage = "已保存到相册"
             } catch (error: CancellationException) {
@@ -613,12 +625,10 @@ internal class OnlineReaderViewModel(
             currentPage = startPage
             lastPageByChapterId[activeChapterId] = startPage
             val initialLocation = locationFor(startPage)
-            if (!readingSession.hasStarted) {
-                readingSession.begin(initialLocation)
-                attachProcessLifecycle()
-            } else {
-                readingSession.moveTo(initialLocation)
-            }
+            sessionRecorder.begin()
+            chapterOpened = true
+            sessionRecorder.pageVisible(initialLocation)
+            attachProcessLifecycle()
             withContext(Dispatchers.IO) {
                 repository.setAvailability(pluginId, sourceId, OnlineAvailability.AVAILABLE)
             }
@@ -633,8 +643,6 @@ internal class OnlineReaderViewModel(
             transitionStatuses.clear()
             revealedAdjacentChapters.clear()
             publishReaderWindow()
-            readingSession.setChapterReady(true)
-            resumeActiveSegmentIfProcessResumed()
             prewarmThumbnails(opened, startPage)
             scheduleDescriptorRevalidation(chapter, opened)
             schedulePagePrefetch(opened, startPage, direction = 1)
@@ -644,7 +652,7 @@ internal class OnlineReaderViewModel(
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
-            readingSession.setChapterReady(false)
+            sessionRecorder.pageVisible(null)
             volume?.let(::closeVolumeWhenUnused)
             volume = null
             withContext(Dispatchers.IO) {
@@ -740,8 +748,7 @@ internal class OnlineReaderViewModel(
                 return
             }
 
-            readingSession.pauseSegment()
-            readingSession.setChapterReady(false)
+            sessionRecorder.pageVisible(null)
             flushCurrentProgress()
             lastPageByChapterId[activeChapterId] = currentPage
             cancelPagePrefetch()
@@ -778,7 +785,7 @@ internal class OnlineReaderViewModel(
             currentPage = startPage
             lastPageByChapterId[activeChapterId] = startPage
             val committedLocation = locationFor(startPage)
-            readingSession.moveTo(committedLocation)
+            sessionRecorder.pageVisible(committedLocation)
             state =
                 ReaderPresentationState.Ready(
                     volume = candidate,
@@ -791,8 +798,6 @@ internal class OnlineReaderViewModel(
             withContext(NonCancellable + Dispatchers.IO) {
                 runCatching { persistPositionOnIo(committedLocation) }
             }
-            readingSession.setChapterReady(true)
-            resumeActiveSegmentIfProcessResumed()
             prewarmThumbnails(candidate, startPage)
             scheduleDescriptorRevalidation(chapter, candidate)
             schedulePagePrefetch(
@@ -814,8 +819,7 @@ internal class OnlineReaderViewModel(
             throw error
         } catch (error: Exception) {
             if (!committed) {
-                readingSession.setChapterReady(volume != null)
-                resumeActiveSegmentIfProcessResumed()
+                sessionRecorder.pageVisible(locationForOrNull(currentPage))
             }
             if (
                 direction == ChapterSwitchDirection.NEXT ||
@@ -1160,15 +1164,11 @@ internal class OnlineReaderViewModel(
         opened: OnlineChapterVolume,
     ): RestoredOnlinePage {
         val rememberedPage = lastPageByChapterId[activeChapterId]
-        if (
-            readingSession.hasStarted &&
-                rememberedPage != null &&
-                rememberedPage in opened.pages.indices
-        ) {
+        if (chapterOpened && rememberedPage != null && rememberedPage in opened.pages.indices) {
             return RestoredOnlinePage(rememberedPage, stale = false)
         }
         val explicitPage =
-            if (!readingSession.hasStarted && activeChapterId == initialChapterId) {
+            if (!chapterOpened && activeChapterId == initialChapterId) {
                 initialPageId?.let { pageId ->
                     val exact = opened.pages.indexOfFirst { it.pageId == pageId }
                     if (exact >= 0) RestoredOnlinePage(exact, stale = false)
@@ -1426,20 +1426,20 @@ internal class OnlineReaderViewModel(
     }
 
     private fun attachProcessLifecycle() {
-        if (processLifecycleAttached || readingSession.isEnded) return
+        if (processLifecycleAttached || sessionRecorder.isEnded) return
         processLifecycleAttached = true
         ProcessLifecycleOwner.get().lifecycle.addObserver(processLifecycleObserver)
-        resumeActiveSegmentIfProcessResumed()
+        foregroundIfProcessResumed()
     }
 
-    private fun resumeActiveSegmentIfProcessResumed() {
+    private fun foregroundIfProcessResumed() {
         if (
             ProcessLifecycleOwner.get()
                 .lifecycle
                 .currentState
                 .isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)
         ) {
-            readingSession.resumeSegment()
+            sessionRecorder.foregroundChanged(true)
         }
     }
 
@@ -1454,28 +1454,15 @@ internal class OnlineReaderViewModel(
      * scope. Waits for pending progress writes before persisting the final location.
      */
     private fun finishSession() {
-        if (readingSession.isEnded) return
-        val finished = readingSession.finish(locationForOrNull(currentPage))
+        if (sessionRecorder.isEnded) return
+        sessionRecorder.end(ReadingSessionEndReason.LEFT_READER, locationForOrNull(currentPage))
         detachProcessLifecycle()
+        val finalLocation = locationForOrNull(currentPage)
         val queuedJob = progressWriteQueue.close()
         applicationScope.launch {
             queuedJob?.join()
-            if (finished == null) return@launch
-            runCatching { persistPositionOnIo(finished.end) }
-            val record =
-                OnlineReadingSessions.record(
-                    sessionId = finished.sessionId,
-                    content = contentIdentity,
-                    titleSnapshot = currentTitle,
-                    startedAtMs = finished.startedAtMs,
-                    endedAtMs = finished.endedAtMs,
-                    activeReadingMillis = finished.activeReadingMillis,
-                    timeZoneId = TimeZone.getDefault().id,
-                    start = finished.start,
-                    end = finished.end,
-                )
-            if (record != null) {
-                runCatching { repository.recordReadingSession(record) }
+            if (finalLocation != null) {
+                runCatching { persistPositionOnIo(finalLocation) }
             }
         }
     }

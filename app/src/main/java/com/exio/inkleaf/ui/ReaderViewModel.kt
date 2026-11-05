@@ -27,21 +27,16 @@ import com.exio.inkleaf.data.ReaderCache
 import com.exio.inkleaf.data.ReadingPositionSnapshot
 import com.exio.inkleaf.data.ReadingSessionComicRef
 import com.exio.inkleaf.data.ReadingSessionEndReason
-import com.exio.inkleaf.data.ReadingSessionEvent
 import com.exio.inkleaf.data.ReadingSessionRepository
-import com.exio.inkleaf.data.ReadingSessionRules
 import com.exio.inkleaf.data.db.BookSourceType
 import com.exio.inkleaf.data.db.BookmarkEntity
 import com.exio.inkleaf.data.db.ComicEntity
 import com.exio.inkleaf.data.db.FavoritePageEntity
-import com.exio.inkleaf.data.sanitizeFileName
+import com.exio.inkleaf.data.galleryDisplayName
 import com.exio.inkleaf.data.saveImageBytesToGallery
-import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -139,19 +134,17 @@ class ReaderViewModel(
 
     /** True after LeaveReader was dispatched; prevents double-complete on dispose. */
     private var sessionEnded = false
-    private var checkpointJob: Job? = null
+    private var sessionRecorder: ReaderSessionRecorder<ReadingPositionSnapshot>? = null
     private var processLifecycleAttached = false
 
     private val processLifecycleObserver =
         object : DefaultLifecycleObserver {
             override fun onResume(owner: LifecycleOwner) {
-                dispatchSessionEvent(ReadingSessionEvent.EnteredInteractiveForeground)
-                startCheckpointLoop()
+                sessionRecorder?.foregroundChanged(true)
             }
 
             override fun onPause(owner: LifecycleOwner) {
-                stopCheckpointLoop()
-                dispatchSessionEvent(ReadingSessionEvent.LeftInteractiveForeground)
+                sessionRecorder?.foregroundChanged(false)
                 progressWriteQueue.flushBestEffort()
             }
         }
@@ -165,16 +158,23 @@ class ReaderViewModel(
                             ?: repo.getComic(comicId)
                             ?: throw ComicOpenException("书架记录不存在")
                     this@ReaderViewModel.comic = comic
-                    // Identify the comic before open; source revision arrives on Ready.
-                    dispatchSessionEvent(
-                        ReadingSessionEvent.OpenComic(
+                    // Identify the comic before open; source revision arrives with the first page.
+                    if (!isPreview) {
+                        val comicRef =
                             ReadingSessionComicRef(
                                 fileKey = comic.fileKey,
                                 titleSnapshot = comic.title.ifBlank { "未命名漫画" },
                                 sourceType = comic.sourceType,
                             )
-                        )
-                    )
+                        sessionRecorder =
+                            OfflineReaderSessionRecorder(
+                                    repository = sessionRepo,
+                                    comic = comicRef,
+                                    openScope = viewModelScope,
+                                    terminalScope = applicationScope,
+                                )
+                                .also { it.begin() }
+                    }
                     observeFavorites(comic.fileKey)
                     val opened = withContext(Dispatchers.IO) { repo.openBook(comic) }
                     volume = opened
@@ -215,9 +215,7 @@ class ReaderViewModel(
                         )
                     val safeStartPage = startPage.coerceIn(0, opened.totalPageCount - 1)
                     currentPage = safeStartPage
-                    dispatchSessionEvent(
-                        ReadingSessionEvent.ReaderReady(positionSnapshot(opened, safeStartPage))
-                    )
+                    sessionRecorder?.pageVisible(positionSnapshot(opened, safeStartPage))
                     attachProcessLifecycle()
                     // 后台预热胶片缩略图：呼出工具栏时大概率已全部就绪
                     prewarmThumbnails(opened, safeStartPage)
@@ -249,9 +247,7 @@ class ReaderViewModel(
         currentPage = globalPage
         val opened = volume
         if (opened != null && globalPage in 0 until opened.totalPageCount) {
-            dispatchSessionEvent(
-                ReadingSessionEvent.PageVisible(positionSnapshot(opened, globalPage))
-            )
+            sessionRecorder?.pageVisible(positionSnapshot(opened, globalPage))
         }
         val progress = opened?.globalToChapterPage(globalPage) ?: ChapterProgress(0, globalPage)
         if (!isPreview) progressWriteQueue.submit(progress)
@@ -281,10 +277,9 @@ class ReaderViewModel(
     fun endReadingSession(reason: ReadingSessionEndReason = ReadingSessionEndReason.LEFT_READER) {
         if (sessionEnded) return
         sessionEnded = true
-        stopCheckpointLoop()
         detachProcessLifecycle()
         persistCurrentProgressInApplicationScope()
-        dispatchTerminalSessionEvent(ReadingSessionEvent.LeaveReader(reason))
+        sessionRecorder?.end(reason, null)
     }
 
     fun toggleFavorite(page: Int) {
@@ -352,7 +347,7 @@ class ReaderViewModel(
                 saveImageBytesToGallery(
                     getApplication(),
                     bytes,
-                    "${sanitizeFileName(source.title)}_p${page + 1}",
+                    galleryDisplayName(source.title, page),
                 )
                 readerMessage = "已保存到相册"
             } catch (e: CancellationException) {
@@ -506,12 +501,11 @@ class ReaderViewModel(
 
     /** ViewModel 真正销毁时调用（返回书架弹出导航栈、或 App 退出）。 注意旋转屏幕不会走到这里——这正是资源不被重复释放/创建的关键。 */
     override fun onCleared() {
-        stopCheckpointLoop()
         detachProcessLifecycle()
         // Unexpected disposal pauses the reading session; explicit Back already completed it.
         if (!sessionEnded) {
             persistCurrentProgressInApplicationScope()
-            dispatchTerminalSessionEvent(ReadingSessionEvent.LeftInteractiveForeground)
+            sessionRecorder?.foregroundChanged(false)
         }
         val closingVolume = volume
         volume = null
@@ -533,8 +527,7 @@ class ReaderViewModel(
                 .currentState
                 .isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)
         ) {
-            dispatchSessionEvent(ReadingSessionEvent.EnteredInteractiveForeground)
-            startCheckpointLoop()
+            sessionRecorder?.foregroundChanged(true)
         }
     }
 
@@ -559,50 +552,6 @@ class ReaderViewModel(
                     latest.chapterIndex,
                     latest.pageIndex,
                 )
-            }
-        }
-    }
-
-    private fun startCheckpointLoop() {
-        if (checkpointJob?.isActive == true || sessionEnded) return
-        checkpointJob = viewModelScope.launch {
-            while (true) {
-                delay(ReadingSessionRules.CHECKPOINT_INTERVAL_MS.milliseconds)
-                if (sessionEnded) break
-                sessionRepo.dispatch(ReadingSessionEvent.CheckpointTick)
-            }
-        }
-    }
-
-    private fun stopCheckpointLoop() {
-        checkpointJob?.cancel()
-        checkpointJob = null
-    }
-
-    private fun dispatchSessionEvent(event: ReadingSessionEvent) {
-        if (isPreview || (sessionEnded && event !is ReadingSessionEvent.LeaveReader)) return
-        viewModelScope.launch {
-            try {
-                sessionRepo.dispatch(event)
-            } catch (error: CancellationException) {
-                throw error
-            } catch (_: Exception) {
-                // Session tracking must not break reading.
-            }
-        }
-    }
-
-    private fun dispatchTerminalSessionEvent(event: ReadingSessionEvent) {
-        if (isPreview) return
-        // Start immediately so the terminal event is queued before navigation creates another
-        // Reader.
-        applicationScope.launch(start = CoroutineStart.UNDISPATCHED) {
-            try {
-                sessionRepo.dispatch(event)
-            } catch (error: CancellationException) {
-                throw error
-            } catch (_: Exception) {
-                // Session tracking must not break navigation or process-owned cleanup.
             }
         }
     }
