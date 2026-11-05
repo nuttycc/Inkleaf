@@ -2,7 +2,6 @@ package com.exio.inkleaf.ui
 
 import com.exio.inkleaf.data.ComicVolume
 import com.exio.inkleaf.data.PageRenderRequest
-import com.exio.inkleaf.data.ReaderPageCacheKey
 
 /** Key identifying one page of one chapter revision. */
 internal data class ReaderChapterPageKey(
@@ -60,12 +59,17 @@ internal object PageIdentity {
      */
     fun volumeNamespace(volume: ComicVolume): String = "$LOCAL_NAMESPACE${volume.sourceRevision}"
 
-    /** State key for a page of a volume the reader holds open. */
-    fun stateKey(volume: ComicVolume, page: Int): ReaderPageStateKey =
-        ReaderPageStateKey(
+    /** The page reference reader actions point at when the reader holds a volume open. */
+    fun refOf(volume: ComicVolume, page: Int): ReaderPageRef =
+        ReaderPageRef(
             namespace = volumeNamespace(volume),
             pageIdentity = pageIdentity(volume, page),
+            anchorPage = page,
         )
+
+    /** State key for a page of a volume the reader holds open. */
+    fun stateKey(volume: ComicVolume, page: Int): ReaderPageStateKey =
+        refOf(volume, page).stateKey()
 
     /** State key for a page identified by an online chapter revision rather than a volume. */
     fun stateKey(
@@ -95,9 +99,7 @@ internal data class ReaderPageContentKeys(
         val cacheKeyPrefix: String,
     )
 
-    internal data class ProducerRestart(
-        val pageRenderRequest: PageRenderRequest?,
-    )
+    internal data class ProducerRestart(val pageRenderRequest: PageRenderRequest?)
 }
 
 internal fun readerPageContentKeys(
@@ -115,7 +117,5 @@ internal fun readerPageContentKeys(
             ),
         // Current-page status changes presentation only; render requests carry real work changes.
         producerRestart =
-            ReaderPageContentKeys.ProducerRestart(
-                pageRenderRequest = pageRenderRequest,
-            ),
+            ReaderPageContentKeys.ProducerRestart(pageRenderRequest = pageRenderRequest),
     )

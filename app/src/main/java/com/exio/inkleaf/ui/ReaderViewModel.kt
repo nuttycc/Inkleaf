@@ -18,7 +18,6 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.viewModelScope
 import com.exio.inkleaf.InkleafApplication
 import com.exio.inkleaf.data.BookmarkRepository
-import com.exio.inkleaf.data.BookmarkToggleResult
 import com.exio.inkleaf.data.ChapterProgress
 import com.exio.inkleaf.data.ComicOpenException
 import com.exio.inkleaf.data.ComicRepository
@@ -35,8 +34,8 @@ import com.exio.inkleaf.data.db.BookSourceType
 import com.exio.inkleaf.data.db.BookmarkEntity
 import com.exio.inkleaf.data.db.ComicEntity
 import com.exio.inkleaf.data.db.FavoritePageEntity
-import com.exio.inkleaf.data.saveImageBytesToGallery
 import com.exio.inkleaf.data.sanitizeFileName
+import com.exio.inkleaf.data.saveImageBytesToGallery
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
@@ -116,9 +115,7 @@ class ReaderViewModel(
     /** 正在加载中的页码集合，配合 Mutex 实现去重 */
     private val thumbInFlight = mutableSetOf<Int>()
     private val thumbMutex = Mutex()
-    private val bookmarkInFlight = mutableSetOf<Int>()
     private val bookmarkMutationMutex = Mutex()
-    private val favoriteInFlight = mutableSetOf<Int>()
     private var coverInFlight = false
     private var galleryExportInFlight = false
 
@@ -137,6 +134,7 @@ class ReaderViewModel(
 
     private var volume: ComicVolume? = null
     private var comic: ComicEntity? = null
+    private var readerMarks: ReaderMarks? = null
     private var observedFavoriteSource: String? = null
 
     /** True after LeaveReader was dispatched; prevents double-complete on dispose. */
@@ -181,6 +179,15 @@ class ReaderViewModel(
                     val opened = withContext(Dispatchers.IO) { repo.openBook(comic) }
                     volume = opened
                     observeBookmarks(opened)
+                    readerMarks =
+                        OfflineReaderMarks(
+                            bookmarks = bookmarkRepo,
+                            favorites = favoriteRepo,
+                            comic = comic,
+                            volume = opened,
+                            favoriteAt = { favoritePages[it] },
+                            bookmarkMutationMutex = bookmarkMutationMutex,
+                        )
                     if (!isPreview) {
                         withContext(Dispatchers.IO) { repo.backfillMetadata(comic, opened) }
                     }
@@ -281,61 +288,24 @@ class ReaderViewModel(
     }
 
     fun toggleFavorite(page: Int) {
-        if (isPreview || page in favoriteInFlight) return
         val opened = volume ?: return
-        val source = comic ?: return
-        if (page !in 0 until opened.totalPageCount) return
+        val marks = readerMarks ?: return
+        if (isPreview || page !in 0 until opened.totalPageCount) return
 
         viewModelScope.launch {
-            favoriteInFlight += page
-            try {
-                val existing = favoritePages[page]
-                if (existing != null) {
-                    favoriteRepo.remove(existing)
-                    readerMessage = "已取消收藏"
-                } else {
-                    val bytes = opened.loadPageBytes(page)
-                    favoriteRepo.addSnapshot(source, page, opened.totalPageCount, bytes)
-                    readerMessage = "已收藏"
-                }
-            } catch (e: Exception) {
-                readerMessage = e.message?.let { "收藏失败：$it" } ?: "收藏失败"
-            } finally {
-                favoriteInFlight -= page
-            }
+            readerMessage = marks.toggleFavorite(PageIdentity.refOf(opened, page)).message()
         }
     }
 
     fun toggleBookmark(page: Int) {
-        if (isPreview || !bookmarkInFlight.add(page)) return
-        val opened = volume
-        val source = comic
-        if (opened == null || source == null || page !in 0 until opened.totalPageCount) {
-            bookmarkInFlight -= page
-            return
-        }
+        val opened = volume ?: return
+        val marks = readerMarks ?: return
+        if (isPreview || page !in 0 until opened.totalPageCount) return
 
         viewModelScope.launch {
-            try {
-                val result = bookmarkMutationMutex.withLock {
-                    bookmarkRepo.toggle(source, opened, page)
-                }
-                when (result) {
-                    is BookmarkToggleResult.Added -> {
-                        loadThumbnail(page)
-                        readerMessage = "已添加书签"
-                    }
-
-                    is BookmarkToggleResult.Removed -> {
-                        readerMessage = "已移除书签"
-                    }
-                }
-            } catch (e: Exception) {
-                if (e is CancellationException) throw e
-                readerMessage = e.message?.let { "书签操作失败：$it" } ?: "书签操作失败"
-            } finally {
-                bookmarkInFlight -= page
-            }
+            val outcome = marks.toggleBookmark(PageIdentity.refOf(opened, page))
+            if (outcome is ReaderMarkOutcome.Added) loadThumbnail(page)
+            readerMessage = outcome.message()
         }
     }
 
