@@ -6,16 +6,17 @@ import org.junit.Test
 class GalleryExportTest {
     @Test
     fun `image extension detected from magic bytes with jpeg fallback`() {
-        assertEquals("jpg", imageExtension(byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0)))
+        assertEquals(
+            "jpg",
+            imageExtension(byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0)),
+        )
         assertEquals(
             "png",
-            imageExtension(
-                byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
-            )
+            imageExtension(byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)),
         )
         assertEquals(
             "webp",
-            imageExtension("RIFFxxxxWEBP".toByteArray())
+            imageExtension("RIFFxxxxWEBP".toByteArray()),
         )
         assertEquals("gif", imageExtension("GIF89a".toByteArray()))
         assertEquals("jpg", imageExtension(byteArrayOf(0, 1, 2, 3)))
@@ -28,5 +29,22 @@ class GalleryExportTest {
         assertEquals("Inkleaf", sanitizeFileName(""))
         assertEquals("Inkleaf", sanitizeFileName("  \t "))
         assertEquals(48, sanitizeFileName("长".repeat(100)).length)
+    }
+
+    @Test
+    fun `offline gallery name uses the one-based page number`() {
+        assertEquals("旅行_p1", galleryDisplayName("旅行", 0))
+        assertEquals("a_b_p12", galleryDisplayName("a/b", 11))
+    }
+
+    @Test
+    fun `online gallery name includes a sanitized chapter title`() {
+        assertEquals("旅行_夏天_p1", galleryDisplayName("旅行", "夏天", 0))
+        assertEquals("a_b_c_d_p4", galleryDisplayName("a/b", "c:d", 3))
+    }
+
+    @Test
+    fun `blank chapter title falls back to the shared default`() {
+        assertEquals("旅行_Inkleaf_p2", galleryDisplayName("旅行", " ", 1))
     }
 }

@@ -91,3 +91,11 @@ internal fun mimeTypeFor(extension: String): String =
 /** 文件名安全化：替换非法字符、截断、空串兜底 */
 internal fun sanitizeFileName(value: String): String =
     value.replace(Regex("""[\\/:*?"<>|]"""), "_").take(48).ifBlank { "Inkleaf" }
+
+/** 离线页面的相册文件名：漫画标题 + 从 1 开始的页序号。 */
+internal fun galleryDisplayName(title: String, page: Int): String =
+    "${sanitizeFileName(title)}_p${page + 1}"
+
+/** 在线页面的相册文件名：漫画标题 + 章节标题 + 从 1 开始的页序号。 */
+internal fun galleryDisplayName(title: String, chapterTitle: String, page: Int): String =
+    "${sanitizeFileName(title)}_${sanitizeFileName(chapterTitle)}_p${page + 1}"
