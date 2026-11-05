@@ -51,6 +51,22 @@ class ReaderMarksTest {
     }
 
     @Test
+    fun `a chapter page reference carries the chapter namespace`() {
+        val key =
+            ReaderChapterPageKey(
+                chapterId = "ch-1",
+                chapterRevision = "rev-2",
+                pageIdentity = "page-7",
+            )
+        val ref = key.toReaderPageRef(anchorPage = 3)
+
+        assertEquals(PageIdentity.chapterNamespace("ch-1", "rev-2"), ref.namespace)
+        assertEquals("page-7", ref.pageIdentity)
+        assertEquals(3, ref.anchorPage)
+        assertEquals(key.toReaderPageStateKey(), ref.stateKey())
+    }
+
+    @Test
     fun `the state key derives from the page reference`() {
         val ref = PageIdentity.refOf(volume, page = 0)
 
