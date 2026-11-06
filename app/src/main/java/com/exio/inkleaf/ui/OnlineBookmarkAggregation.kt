@@ -63,8 +63,13 @@ internal fun onlineBookmarkItems(
                 pageCount = currentChapterPageCount,
             )
         } else {
-            val knownPage = identity.fallback?.pageIndex
-            BookmarkPage(page = knownPage, stale = revisionChanged)
+            // Only a revision-bound fallback index can go stale; a page ID still identifies its
+            // page.
+            val fallback = identity.fallback
+            BookmarkPage(
+                page = fallback?.pageIndex,
+                stale = fallback != null && revisionChanged,
+            )
         }
 
     ReaderBookmarkItem(

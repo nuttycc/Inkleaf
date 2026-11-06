@@ -135,12 +135,22 @@ class OnlineBookmarkAggregationTest {
     }
 
     @Test
-    fun `changed chapter revision requires confirmation`() {
-        val bookmark = pageIdBookmark("c2", "p1", 1, 70L, chapterRevision = "r1")
+    fun `changed revision on a fallback index requires confirmation`() {
+        val bookmark = fallbackBookmark("c2", 1, "r1", 70L)
 
         val item = singleItem(bookmark, currentChapterId = "c1", currentRevision = "r1")
 
         assertTrue(item.stale)
+        assertEquals(1, item.pageIndex)
+    }
+
+    @Test
+    fun `page id bookmark in another chapter ignores a changed revision`() {
+        val bookmark = pageIdBookmark("c2", "p1", 1, 90L, chapterRevision = "r1")
+
+        val item = singleItem(bookmark, currentChapterId = "c1", currentRevision = "r1")
+
+        assertFalse(item.stale)
         assertNull(item.pageIndex)
     }
 
