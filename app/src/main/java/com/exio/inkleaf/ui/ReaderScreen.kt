@@ -897,37 +897,29 @@ private fun ComicPager(
                             },
                             onSelect = { item ->
                                 activePanel = null
-                                val pageIndex = item.pageIndex
-                                val onlineTarget = item.target as? ReaderBookmarkTarget.Online
-                                val routedSelection = actions.onBookmarkSelected
-                                if (
-                                    onlineTarget != null &&
-                                        pageIndex != null &&
-                                        onlineTarget.chapterId ==
-                                            currentWindowPage?.chapter?.chapterId
-                                ) {
-                                    val target = windowIndexForCurrentChapterPage(pageIndex)
-                                    if (target >= 0) {
-                                        scope.launch { pagerState.scrollToPage(target) }
-                                    } else {
+                                val target =
+                                    when (val bookmarkTarget = item.target) {
+                                        is ReaderBookmarkTarget.Local ->
+                                            windowIndexForCurrentChapterPage(
+                                                bookmarkTarget.globalPage
+                                            )
+                                        is ReaderBookmarkTarget.Online ->
+                                            onlineBookmarkWindowIndex(
+                                                target = bookmarkTarget,
+                                                chapterOrder = item.chapterOrder,
+                                                window = pagerChapterWindow,
+                                                currentChapterIndex =
+                                                    chapterNavigation?.currentChapterIndex,
+                                            )
+                                    }
+                                val onBookmarkSelected = actions.onBookmarkSelected
+                                when {
+                                    target >= 0 -> scope.launch { pagerState.scrollToPage(target) }
+                                    onBookmarkSelected != null -> onBookmarkSelected(item)
+                                    else ->
                                         scope.launch {
                                             snackbarHostState.showSnackbar("无法定位到该书签所在页面")
                                         }
-                                    }
-                                } else if (routedSelection != null) {
-                                    routedSelection(item)
-                                } else {
-                                    val globalPage =
-                                        (item.target as? ReaderBookmarkTarget.Local)?.globalPage
-                                    val target =
-                                        globalPage?.let(windowIndexForCurrentChapterPage) ?: -1
-                                    if (target >= 0) {
-                                        scope.launch { pagerState.scrollToPage(target) }
-                                    } else {
-                                        scope.launch {
-                                            snackbarHostState.showSnackbar("无法定位到该书签所在页面")
-                                        }
-                                    }
                                 }
                             },
                             removalsInFlight = bookmarkRemovalsInFlight,
@@ -983,6 +975,21 @@ private fun ComicPager(
             modifier = Modifier.align(Alignment.BottomCenter),
         )
     }
+}
+
+/** Window index of an online bookmark's page; -1 when the pager does not hold that page. */
+internal fun onlineBookmarkWindowIndex(
+    target: ReaderBookmarkTarget.Online,
+    chapterOrder: Int,
+    window: ReaderChapterWindow<*>?,
+    currentChapterIndex: Int?,
+): Int {
+    val pageIndex = target.chapterPageIndex ?: return -1
+    if (window != null) {
+        return readerWindowIndexForChapterPage(window, target.chapterId, pageIndex)
+    }
+    // A windowless pager holds only the active chapter, so its page index is the target.
+    return if (chapterOrder == currentChapterIndex) pageIndex else -1
 }
 
 @Composable

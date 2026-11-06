@@ -228,10 +228,6 @@ internal class OnlineReaderViewModel(
             readerMessage = "正在切换章节，请稍后再试"
             return
         }
-        if (index == currentChapterIndex) {
-            readerMessage = "无法定位到该书签所在页面"
-            return
-        }
         pendingBookmarkTarget = target
         chapterLoadJob = viewModelScope.launch {
             prepareAndCommitChapter(chapter, index, ChapterSwitchDirection.MANUAL)
@@ -754,32 +750,27 @@ internal class OnlineReaderViewModel(
             prepared = candidate
             val bookmarkJump =
                 if (direction == ChapterSwitchDirection.MANUAL) {
-                    pendingBookmarkTarget
-                        ?.let { target ->
-                            resolveOnlineBookmarkJump(target, revision, candidate.pages)
-                        }
-                        ?.takeIf { it.page in candidate.pages.indices }
+                    pendingBookmarkTarget?.let { target ->
+                        resolveOnlineBookmarkJump(target, revision, candidate.pages)
+                    }
                 } else {
                     null
                 }
             val startPage =
-                bookmarkJump?.page
-                    ?: settledPage?.takeIf { it in candidate.pages.indices }
-                    ?: when (direction) {
-                        ChapterSwitchDirection.NEXT -> 0
-                        // Enter a previous chapter on its last page to preserve reading direction.
-                        ChapterSwitchDirection.PREVIOUS ->
-                            (candidate.totalPageCount - 1).coerceAtLeast(0)
-                        ChapterSwitchDirection.MANUAL ->
-                            restorePageForChapter(
-                                chapter.chapterId,
-                                revision,
-                                savedPosition,
-                                candidate,
-                            )
-                        ChapterSwitchDirection.REFRESH ->
-                            currentPage.coerceIn(0, candidate.totalPageCount - 1)
-                    }
+                onlineChapterStartPage(
+                    bookmarkJump = bookmarkJump,
+                    settledPage = settledPage,
+                    direction = direction,
+                    restoredPage =
+                        restorePageForChapter(
+                            chapter.chapterId,
+                            revision,
+                            savedPosition,
+                            candidate,
+                        ),
+                    currentPage = currentPage,
+                    pageCount = candidate.totalPageCount,
+                )
             candidate.loadPageBytes(startPage)
             if (activeChapterId != previousChapterId || currentRevision != previousRevision) {
                 closeVolumeWhenUnused(candidate)
@@ -1531,13 +1522,6 @@ internal class OnlineReaderViewModel(
 
     private data class RestoredOnlinePage(val page: Int, val stale: Boolean)
 
-    private enum class ChapterSwitchDirection {
-        MANUAL,
-        NEXT,
-        PREVIOUS,
-        REFRESH,
-    }
-
     private class PreloadedChapter(
         val volume: OnlineChapterVolume,
         val index: Int,
@@ -1595,4 +1579,44 @@ internal fun previousReadableOnlineChapter(
     val index =
         (currentChapterIndex - 1 downTo 0).firstOrNull { chapters[it].available } ?: return null
     return chapters[index] to index
+}
+
+internal enum class ChapterSwitchDirection {
+    MANUAL,
+    NEXT,
+    PREVIOUS,
+    REFRESH,
+}
+
+/**
+ * Page a chapter switch opens on: a bookmark jump wins, then the page the swiping pager settled on,
+ * then the direction's default. Pages outside [pageCount] are ignored so a stale index cannot land
+ * past the end.
+ */
+internal fun onlineChapterStartPage(
+    bookmarkJump: OnlineBookmarkJump?,
+    settledPage: Int?,
+    direction: ChapterSwitchDirection,
+    restoredPage: Int,
+    currentPage: Int,
+    pageCount: Int,
+): Int {
+    val lastPage = (pageCount - 1).coerceAtLeast(0)
+    bookmarkJump
+        ?.page
+        ?.takeIf { it in 0..lastPage }
+        ?.let {
+            return it
+        }
+    settledPage
+        ?.takeIf { it in 0..lastPage }
+        ?.let {
+            return it
+        }
+    return when (direction) {
+        ChapterSwitchDirection.NEXT -> 0
+        ChapterSwitchDirection.PREVIOUS -> lastPage
+        ChapterSwitchDirection.MANUAL -> restoredPage
+        ChapterSwitchDirection.REFRESH -> currentPage.coerceIn(0, lastPage)
+    }
 }
