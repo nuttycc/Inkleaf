@@ -202,11 +202,15 @@ fun ReaderScreen(
                     val bookmark = resolved.bookmark
                     ReaderBookmarkItem(
                         key = "local:${bookmark.id}",
-                        globalPage = resolved.globalPage,
-                        chapterIndex = bookmark.chapterIndex,
+                        target = ReaderBookmarkTarget.Local(resolved.globalPage),
+                        chapterOrder = bookmark.chapterIndex,
                         pageIndex = bookmark.pageIndex,
+                        globalPage = resolved.globalPage,
                         chapterTitle = bookmark.chapterTitle,
                         stale = resolved.stale,
+                        available = true,
+                        addedAtMs = bookmark.addedAt,
+                        thumbnailPage = resolved.globalPage,
                     )
                 },
             favoritePages = viewModel.favoritePages.keys.toSet(),
@@ -220,7 +224,8 @@ fun ReaderScreen(
                     null
                 } else {
                     { item ->
-                        val bookmark = requireNotNull(bookmarksByKey[item.key]) { "Unknown bookmark" }
+                        val bookmark =
+                            requireNotNull(bookmarksByKey[item.key]) { "Unknown bookmark" }
                         viewModel.removeBookmark(bookmark)
                         ReaderBookmarkUndo { viewModel.restoreBookmark(bookmark) }
                     }
@@ -890,10 +895,40 @@ private fun ComicPager(
                                 if (actions.isVolumeActive(currentVolume))
                                     actions.onNeedThumbnail(page)
                             },
-                            onSelect = { page ->
+                            onSelect = { item ->
                                 activePanel = null
-                                val target = windowIndexForCurrentChapterPage(page)
-                                if (target >= 0) scope.launch { pagerState.scrollToPage(target) }
+                                val pageIndex = item.pageIndex
+                                val onlineTarget = item.target as? ReaderBookmarkTarget.Online
+                                val routedSelection = actions.onBookmarkSelected
+                                if (
+                                    onlineTarget != null &&
+                                        pageIndex != null &&
+                                        onlineTarget.chapterId ==
+                                            currentWindowPage?.chapter?.chapterId
+                                ) {
+                                    val target = windowIndexForCurrentChapterPage(pageIndex)
+                                    if (target >= 0) {
+                                        scope.launch { pagerState.scrollToPage(target) }
+                                    } else {
+                                        scope.launch {
+                                            snackbarHostState.showSnackbar("无法定位到该书签所在页面")
+                                        }
+                                    }
+                                } else if (routedSelection != null) {
+                                    routedSelection(item)
+                                } else {
+                                    val globalPage =
+                                        (item.target as? ReaderBookmarkTarget.Local)?.globalPage
+                                    val target =
+                                        globalPage?.let(windowIndexForCurrentChapterPage) ?: -1
+                                    if (target >= 0) {
+                                        scope.launch { pagerState.scrollToPage(target) }
+                                    } else {
+                                        scope.launch {
+                                            snackbarHostState.showSnackbar("无法定位到该书签所在页面")
+                                        }
+                                    }
+                                }
                             },
                             removalsInFlight = bookmarkRemovalsInFlight,
                             onRemove =

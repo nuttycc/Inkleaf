@@ -53,14 +53,14 @@ internal fun ColumnScope.ReaderBookmarksPanelContent(
     isCurrentBookmarked: Boolean,
     onToggleBookmark: (() -> Unit)?,
     onNeedThumbnail: (Int) -> Unit,
-    onSelect: (Int) -> Unit,
+    onSelect: (ReaderBookmarkItem) -> Unit,
     removalsInFlight: Set<String>,
     onRemove: ((ReaderBookmarkItem) -> Unit)?,
 ) {
     var pendingStaleSelection by remember {
         mutableStateOf<ReaderBookmarkItem?>(null)
     }
-    val orderedBookmarks = bookmarks.sortedBy { it.globalPage }
+    val orderedBookmarks = sortedReaderBookmarks(bookmarks)
 
     ReaderAttachedPanelHeader(
         title =
@@ -119,17 +119,16 @@ internal fun ColumnScope.ReaderBookmarksPanelContent(
                     items = orderedBookmarks,
                     key = { it.key },
                 ) { item ->
-                    val globalPage = item.globalPage
                     ReaderBookmarkRow(
                         bookmark = item,
-                        thumbnail = thumbnails[globalPage],
+                        thumbnail = item.thumbnailPage?.let { thumbnails[it] },
                         removalInFlight = item.key in removalsInFlight,
                         onNeedThumbnail = onNeedThumbnail,
                         onClick = {
-                            if (item.stale) {
-                                pendingStaleSelection = item
-                            } else {
-                                onSelect(globalPage)
+                            when {
+                                !item.available -> Unit
+                                item.stale -> pendingStaleSelection = item
+                                else -> onSelect(item)
                             }
                         },
                         onRemove = onRemove?.let { remove -> { remove(item) } },
@@ -140,18 +139,17 @@ internal fun ColumnScope.ReaderBookmarksPanelContent(
     }
 
     pendingStaleSelection?.let { bookmark ->
-        val globalPage = bookmark.globalPage
         AlertDialog(
             onDismissRequest = { pendingStaleSelection = null },
             title = { Text("源内容已变化") },
             text = {
-                Text("漫画内容或页面顺序在添加书签后发生了变化。" + "当前只能打开推测的全书第 ${globalPage + 1} 页，仍要打开吗？")
+                Text("书签添加后章节内容可能已变化，将尝试打开最接近的位置，仍要打开吗？")
             },
             confirmButton = {
                 TextButton(
                     onClick = {
                         pendingStaleSelection = null
-                        onSelect(globalPage)
+                        onSelect(bookmark)
                     }
                 ) {
                     Text("仍然打开")
@@ -175,13 +173,16 @@ private fun ReaderBookmarkRow(
     onClick: () -> Unit,
     onRemove: (() -> Unit)?,
 ) {
-    if (!bookmark.stale && thumbnail == null) {
-        LaunchedEffect(bookmark.globalPage) { onNeedThumbnail(bookmark.globalPage) }
+    if (!bookmark.stale) {
+        val thumbnailPage = bookmark.thumbnailPage
+        LaunchedEffect(thumbnailPage) {
+            if (thumbnailPage != null) onNeedThumbnail(thumbnailPage)
+        }
     }
 
     Surface(
         onClick = onClick,
-        enabled = !removalInFlight,
+        enabled = !removalInFlight && bookmark.available,
         shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         tonalElevation = 1.dp,
@@ -203,7 +204,7 @@ private fun ReaderBookmarkRow(
                 if (!bookmark.stale && thumbnail != null) {
                     Image(
                         bitmap = thumbnail,
-                        contentDescription = "全书第 ${bookmark.globalPage + 1} 页缩略图",
+                        contentDescription = bookmark.thumbnailPage?.let { "第 ${it + 1} 页缩略图" },
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize(),
                     )
@@ -231,16 +232,24 @@ private fun ReaderBookmarkRow(
                     )
                 }
 
-                Text(
-                    text =
-                        "全书第 ${bookmark.globalPage + 1} 页 · " + "章节第 ${bookmark.pageIndex + 1} 页",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                readerBookmarkPageLabel(bookmark)?.let { label ->
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
 
-                if (bookmark.stale) {
+                if (!bookmark.available) {
+                    Text(
+                        text = "章节已不可用，无法定位",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                        maxLines = 1,
+                    )
+                } else if (bookmark.stale) {
                     Text(
                         text = "源内容已变化，当前页码为近似位置",
                         style = MaterialTheme.typography.labelSmall,

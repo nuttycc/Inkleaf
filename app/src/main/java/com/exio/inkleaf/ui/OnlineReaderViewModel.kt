@@ -121,6 +121,7 @@ internal class OnlineReaderViewModel(
     private var currentPage by mutableIntStateOf(0)
     private var bookmarkEntriesByKey = emptyMap<String, OnlinePageBookmark>()
     private var favoriteEntriesByKey = emptyMap<String, OnlinePageFavorite>()
+    private var pendingBookmarkTarget: ReaderBookmarkTarget.Online? = null
     private val thumbnailInFlight = mutableSetOf<Int>()
     private val thumbnailJobs = mutableSetOf<Job>()
     private val thumbnailMutex = Mutex()
@@ -208,6 +209,33 @@ internal class OnlineReaderViewModel(
             selectableOnlineChapter(chapterSummaries, currentChapterIndex, index) ?: return
         if (chapterLoadJob?.isActive == true) return
         chapterLoadJob = viewModelScope.launch { prepareAndCommitChapter(chapter, index) }
+    }
+
+    /** Opens a bookmark anywhere in the book, switching chapters when necessary. */
+    fun openBookmark(item: ReaderBookmarkItem) {
+        val target = item.target as? ReaderBookmarkTarget.Online ?: return
+        val index = chapterSummaries.indexOfFirst { it.chapterId == target.chapterId }
+        if (index < 0) {
+            readerMessage = "该书签所在章节已不存在，无法跳转"
+            return
+        }
+        val chapter = chapterSummaries[index]
+        if (!chapter.available) {
+            readerMessage = "该书签所在章节当前不可用，无法跳转"
+            return
+        }
+        if (chapterLoadJob?.isActive == true) {
+            readerMessage = "正在切换章节，请稍后再试"
+            return
+        }
+        if (index == currentChapterIndex) {
+            readerMessage = "无法定位到该书签所在页面"
+            return
+        }
+        pendingBookmarkTarget = target
+        chapterLoadJob = viewModelScope.launch {
+            prepareAndCommitChapter(chapter, index, ChapterSwitchDirection.MANUAL)
+        }
     }
 
     fun onBoundarySettled(direction: ReaderTransitionDirection) {
@@ -724,8 +752,19 @@ internal class OnlineReaderViewModel(
                 revision = openedChapter.revision
             }
             prepared = candidate
+            val bookmarkJump =
+                if (direction == ChapterSwitchDirection.MANUAL) {
+                    pendingBookmarkTarget
+                        ?.let { target ->
+                            resolveOnlineBookmarkJump(target, revision, candidate.pages)
+                        }
+                        ?.takeIf { it.page in candidate.pages.indices }
+                } else {
+                    null
+                }
             val startPage =
-                settledPage?.takeIf { it in candidate.pages.indices }
+                bookmarkJump?.page
+                    ?: settledPage?.takeIf { it in candidate.pages.indices }
                     ?: when (direction) {
                         ChapterSwitchDirection.NEXT -> 0
                         // Enter a previous chapter on its last page to preserve reading direction.
@@ -813,7 +852,12 @@ internal class OnlineReaderViewModel(
                 // User-record refresh never invalidates an otherwise readable prepared chapter.
             }
             if (direction == ChapterSwitchDirection.MANUAL) {
-                readerMessage = null
+                readerMessage =
+                    if (bookmarkJump?.approximate == true) {
+                        "无法精确定位该书签，已打开最接近的页面"
+                    } else {
+                        null
+                    }
             }
         } catch (error: CancellationException) {
             throw error
@@ -838,6 +882,7 @@ internal class OnlineReaderViewModel(
                 readerMessage = error.message?.let { "无法切换章节：$it" } ?: "无法切换章节"
             }
         } finally {
+            pendingBookmarkTarget = null
             if (!committed) prepared?.let(::closeVolumeWhenUnused)
         }
     }
@@ -1241,33 +1286,28 @@ internal class OnlineReaderViewModel(
     private suspend fun refreshUserRecords() {
         val opened = volume ?: return
         val record = withContext(Dispatchers.IO) { repository.get(pluginId, sourceId) }
-        val chapterBookmarks =
-            record?.pageBookmarks.orEmpty().filter {
-                it.location.identity.chapter == chapterIdentity
-            }
-        val resolvedBookmarks = chapterBookmarks.map { bookmark ->
-            val resolution = resolvePage(bookmark.location, opened)
-            val key = bookmarkKey(bookmark.location.identity)
-            key to
-                ReaderBookmarkItem(
-                    key = key,
-                    globalPage = resolution.page,
-                    chapterIndex = currentChapterIndex.coerceAtLeast(0),
-                    pageIndex = bookmark.location.pageIndex,
-                    chapterTitle = bookmark.chapterTitleSnapshot ?: currentChapterTitle,
-                    stale = resolution.stale,
-                )
-        }
-        bookmarkEntriesByKey = chapterBookmarks.associateBy { bookmarkKey(it.location.identity) }
+        val allBookmarks = record?.pageBookmarks.orEmpty()
+        val bookmarkItems =
+            onlineBookmarkItems(
+                bookmarks = allBookmarks,
+                chapters = chapterSummaries,
+                currentChapterId = activeChapterId,
+                currentChapterRevision = currentRevision,
+                currentChapterPageCount = opened.totalPageCount,
+                currentPageDescriptors = opened.pages,
+                keyOf = ::bookmarkKey,
+            )
+        bookmarkEntriesByKey = allBookmarks.associateBy { bookmarkKey(it.location.identity) }
         bookmarks.clear()
-        bookmarks.addAll(resolvedBookmarks.map { it.second }.sortedBy { it.globalPage })
+        bookmarks.addAll(sortedReaderBookmarks(bookmarkItems))
         bookmarkPages.clear()
         bookmarkPageKeys.clear()
-        resolvedBookmarks
-            .filterNot { it.second.stale }
-            .forEach {
-                bookmarkPages[it.second.globalPage] = Unit
-                bookmarkPageKeys[opened.readerPageStateKey(it.second.globalPage)] = Unit
+        bookmarkItems
+            .filter { it.available && !it.stale && it.thumbnailPage != null }
+            .forEach { item ->
+                val page = checkNotNull(item.thumbnailPage)
+                bookmarkPages[page] = Unit
+                bookmarkPageKeys[opened.readerPageStateKey(page)] = Unit
             }
 
         val chapterFavorites =

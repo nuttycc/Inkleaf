@@ -51,6 +51,7 @@ fun OnlineReaderScreen(
             onNeedThumbnail = viewModel::requestThumbnail,
             onToggleBookmark = viewModel::toggleBookmark,
             onRemoveBookmark = viewModel::removeBookmark,
+            onBookmarkSelected = viewModel::openBookmark,
             onToggleFavorite = viewModel::toggleFavorite,
             onSetCover = null,
             onSaveToGallery = viewModel::saveCurrentPageToGallery,

@@ -152,14 +152,62 @@ internal data class ReaderChapterNavigation(
     val onWindowPageSettled: ((ReaderChapterPageKey) -> Unit)? = null,
 )
 
+/** Where a bookmark points, independent of the chapter that is currently open. */
+internal sealed interface ReaderBookmarkTarget {
+    data class Local(val globalPage: Int) : ReaderBookmarkTarget
+
+    data class Online(
+        val chapterId: String,
+        val chapterPageIndex: Int?,
+        val pageId: String?,
+    ) : ReaderBookmarkTarget
+}
+
 internal data class ReaderBookmarkItem(
     val key: String,
-    val globalPage: Int,
-    val chapterIndex: Int,
-    val pageIndex: Int,
+    val target: ReaderBookmarkTarget,
+    /** Chapter order within the book; [Int.MAX_VALUE] when the chapter no longer exists. */
+    val chapterOrder: Int,
+    /** Page index within its chapter; null means the page number is not known yet. */
+    val pageIndex: Int?,
+    /** Book-global page index, available for local content only. */
+    val globalPage: Int?,
     val chapterTitle: String,
+    /** Source changed; confirm before opening an approximate location. */
     val stale: Boolean,
+    /** False when the target chapter is missing or unavailable. */
+    val available: Boolean,
+    val addedAtMs: Long,
+    /** Page that can be thumbnailed in the current context; null for cross-chapter entries. */
+    val thumbnailPage: Int?,
 )
+
+/**
+ * Book-wide ordering: chapter order, then chapter page, then insertion time. Entries whose chapter
+ * is unavailable sort last, and unknown page numbers follow known ones within their chapter.
+ */
+internal fun sortedReaderBookmarks(bookmarks: List<ReaderBookmarkItem>): List<ReaderBookmarkItem> =
+    bookmarks.sortedWith(
+        compareBy<ReaderBookmarkItem>(
+            { if (it.available) it.chapterOrder else Int.MAX_VALUE },
+            { it.pageIndex ?: Int.MAX_VALUE },
+            { it.addedAtMs },
+            { it.key },
+        )
+    )
+
+/** Page line for a bookmark row; null means there is no trustworthy page number to show. */
+internal fun readerBookmarkPageLabel(bookmark: ReaderBookmarkItem): String? {
+    val globalPage = bookmark.globalPage
+    val pageIndex = bookmark.pageIndex
+    return when {
+        globalPage != null && pageIndex != null ->
+            "全书第 ${globalPage + 1} 页 · 章节第 ${pageIndex + 1} 页"
+        pageIndex != null -> "章节第 ${pageIndex + 1} 页"
+        globalPage != null -> "全书第 ${globalPage + 1} 页"
+        else -> null
+    }
+}
 
 internal data class ReaderBookmarkUndo(val restore: suspend () -> Unit)
 
@@ -167,6 +215,8 @@ internal data class ReaderPresentationActions(
     val onNeedThumbnail: (Int) -> Unit,
     val onToggleBookmark: ((Int) -> Unit)?,
     val onRemoveBookmark: (suspend (ReaderBookmarkItem) -> ReaderBookmarkUndo)?,
+    /** Handles bookmarks that cannot be resolved by the current pager (online cross-chapter). */
+    val onBookmarkSelected: ((ReaderBookmarkItem) -> Unit)? = null,
     val onToggleFavorite: ((Int) -> Unit)?,
     val onSetCover: ((Int) -> Unit)?,
     val onSaveToGallery: ((Int) -> Unit)? = null,
