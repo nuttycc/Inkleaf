@@ -132,8 +132,6 @@ class ComicRepository(context: Context) {
         data class Failed(val message: String?) : SeriesFolderSyncOutcome
     }
 
-    // ===== 漫画条目 =====
-
     fun observeAll(): Flow<List<ComicEntity>> = dao.observeAll()
 
     fun observeAllChapters(): Flow<List<ChapterEntity>> = db.chapterDao().observeAll()
@@ -172,8 +170,6 @@ class ComicRepository(context: Context) {
             ZipComicVolume(book, comic.title)
         }
     }
-
-    // ===== 自定义分组 =====
 
     fun observeGroups(): Flow<List<GroupWithCount>> = groupDao.observeGroupsWithCount()
 
@@ -545,8 +541,6 @@ class ComicRepository(context: Context) {
         }
         deleteComicArtifacts(comic)
     }
-
-    // ===== 漫画库目录 =====
 
     fun observeFolders(): Flow<List<FolderWithCount>> = folderDao.observeFoldersWithCount()
 

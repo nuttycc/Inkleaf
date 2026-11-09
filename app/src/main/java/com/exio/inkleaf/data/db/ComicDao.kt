@@ -56,8 +56,6 @@ interface ComicDao {
 
     @Query("DELETE FROM comics WHERE id = :id") suspend fun deleteById(id: Long)
 
-    // ===== 以下为目录扫描同步专用 =====
-
     @Query("SELECT * FROM comics WHERE folderId = :folderId")
     suspend fun getByFolderId(folderId: Long): List<ComicEntity>
 
