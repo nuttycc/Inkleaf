@@ -32,12 +32,14 @@ sealed interface BookmarkResolution {
     data class Unavailable(val message: String) : BookmarkResolution
 }
 
-class BookmarkRepository(context: Context) {
+class BookmarkRepository(
+    context: Context,
+    private val comicRepository: ComicRepository = ComicRepository(context.applicationContext),
+) {
     private val appContext = context.applicationContext
     private val db = AppDatabase.getInstance(appContext)
     private val bookmarkDao = db.bookmarkDao()
     private val comicDao = db.comicDao()
-    private val comicRepository = ComicRepository(appContext)
 
     fun observeAll(): Flow<List<BookmarkWithComic>> = bookmarkDao.observeAll()
 

@@ -69,7 +69,7 @@ class ReaderViewModel(
     private val resumeFromPersistedPosition: Boolean = false,
 ) : AndroidViewModel(app) {
     private val repo = ComicRepository(app)
-    private val bookmarkRepo = BookmarkRepository(app)
+    private val bookmarkRepo = BookmarkRepository(app, repo)
     private val favoriteRepo = FavoriteRepository(app)
     private val sessionRepo = ReadingSessionRepository.getInstance(app)
     private val applicationScope = getApplication<InkleafApplication>().applicationScope
