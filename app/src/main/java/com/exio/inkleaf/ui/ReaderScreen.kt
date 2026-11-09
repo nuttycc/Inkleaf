@@ -215,12 +215,13 @@ fun ReaderScreen(
                 },
             favoritePages = viewModel.favoritePages.keys.toSet(),
         )
+    val isPreview = viewModel.isPreview
     val actions =
         ReaderPresentationActions(
             onNeedThumbnail = viewModel::requestThumbnail,
-            onToggleBookmark = if (viewModel.isPreview) null else viewModel::toggleBookmark,
+            onToggleBookmark = if (isPreview) null else viewModel::toggleBookmark,
             onRemoveBookmark =
-                if (viewModel.isPreview) {
+                if (isPreview) {
                     null
                 } else {
                     { item ->
@@ -230,10 +231,10 @@ fun ReaderScreen(
                         ReaderBookmarkUndo { viewModel.restoreBookmark(bookmark) }
                     }
                 },
-            onToggleFavorite = if (viewModel.isPreview) null else viewModel::toggleFavorite,
-            onSetCover = if (viewModel.isPreview) null else viewModel::setCurrentPageAsCover,
+            onToggleFavorite = if (isPreview) null else viewModel::toggleFavorite,
+            onSetCover = if (isPreview) null else viewModel::setCurrentPageAsCover,
             onSaveToGallery = viewModel::saveCurrentPageToGallery,
-            onImport = if (viewModel.isPreview) viewModel::importPreview else null,
+            onImport = if (isPreview) viewModel::importPreview else null,
             isImporting = viewModel.isImporting,
             onPageChanged = { _, page -> viewModel.saveProgress(page) },
             onPageDirectionChanged = settingsViewModel::setPageDirection,
@@ -254,9 +255,9 @@ fun ReaderScreen(
             onBack()
         },
         onErrorAction =
-            if (viewModel.isPreview) null else { onDone -> viewModel.removeFromShelf(onDone) },
-        errorBackLabel = if (viewModel.isPreview) "返回" else "返回书架",
-        errorActionLabel = if (viewModel.isPreview) null else "从书架移除",
+            if (isPreview) null else { onDone -> viewModel.removeFromShelf(onDone) },
+        errorBackLabel = if (isPreview) "返回" else "返回书架",
+        errorActionLabel = if (isPreview) null else "从书架移除",
         modifier = modifier,
     )
 }
