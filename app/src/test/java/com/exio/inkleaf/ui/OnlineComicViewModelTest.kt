@@ -2,10 +2,12 @@ package com.exio.inkleaf.ui
 
 import com.exio.inkleaf.plugin.ComicDetail
 import com.exio.inkleaf.plugin.ComicSummary
+import com.exio.inkleaf.plugin.ChapterSummary
 import com.exio.inkleaf.plugin.OnlineComicRecord
 import com.exio.inkleaf.plugin.OnlineContentKey
 import com.exio.inkleaf.plugin.OnlineAvailability
 import com.exio.inkleaf.plugin.OnlineContentRepository
+import com.exio.inkleaf.plugin.OnlineReadingPosition
 import com.exio.inkleaf.plugin.PageImage
 import com.exio.inkleaf.plugin.PluginChaptersResponse
 import java.nio.file.Files
@@ -16,6 +18,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -127,6 +130,53 @@ class OnlineComicViewModelTest {
         assertEquals(null, detail.description)
         assertEquals(null, detail.status)
     }
+
+    @Test
+    fun `stored position resumes reading even without loaded chapters`() {
+        val position =
+            OnlineReadingPosition(
+                chapterId = "chapter-2",
+                pageIndex = 4,
+                updatedAtMs = 100L,
+            )
+
+        assertEquals(
+            OnlineComicReadingEntry.Continue(position),
+            onlineComicReadingEntry(position, emptyList()),
+        )
+    }
+
+    @Test
+    fun `no position starts first available chapter`() {
+        val locked = chapter("chapter-1", available = false)
+        val firstAvailable = chapter("chapter-2")
+        val later = chapter("chapter-3")
+
+        assertEquals(
+            OnlineComicReadingEntry.Start(firstAvailable),
+            onlineComicReadingEntry(null, listOf(locked, firstAvailable, later)),
+        )
+    }
+
+    @Test
+    fun `start chapter follows source order not chapter numbers`() {
+        val declaredFirst = chapter("chapter-later", number = 3.0)
+        val declaredLater = chapter("chapter-earlier", number = 1.0)
+
+        assertEquals(
+            OnlineComicReadingEntry.Start(declaredFirst),
+            onlineComicReadingEntry(null, listOf(declaredFirst, declaredLater)),
+        )
+    }
+
+    @Test
+    fun `no readable chapter offers no reading entry`() {
+        assertNull(onlineComicReadingEntry(null, emptyList()))
+        assertNull(onlineComicReadingEntry(null, listOf(chapter("chapter-1", available = false))))
+    }
+
+    private fun chapter(id: String, number: Double? = null, available: Boolean = true) =
+        ChapterSummary(chapterId = id, title = id, number = number, available = available)
 
     private fun record(detailFetchedAtMs: Long, chaptersFetchedAtMs: Long) =
         OnlineComicRecord(

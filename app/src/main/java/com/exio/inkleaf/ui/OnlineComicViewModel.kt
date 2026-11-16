@@ -53,6 +53,23 @@ internal data class OnlineComicUiState(
     val errorMessage: String? = null,
 )
 
+/**
+ * The reading entry an online comic detail screen offers: resume a stored position, or start at
+ * the first available chapter in the source's declared order.
+ */
+internal sealed interface OnlineComicReadingEntry {
+    data class Continue(val position: OnlineReadingPosition) : OnlineComicReadingEntry
+    data class Start(val chapter: ChapterSummary) : OnlineComicReadingEntry
+}
+
+/** Returns null while no chapter can be opened, so the screen shows no reading entry. */
+internal fun onlineComicReadingEntry(
+    position: OnlineReadingPosition?,
+    chapters: List<ChapterSummary>,
+): OnlineComicReadingEntry? =
+    position?.let(OnlineComicReadingEntry::Continue)
+        ?: chapters.firstOrNull { it.available }?.let(OnlineComicReadingEntry::Start)
+
 /** Transient result of a comic action, shown once and then consumed by the screen. */
 internal data class OnlineComicActionFeedback(val message: String, val isError: Boolean)
 

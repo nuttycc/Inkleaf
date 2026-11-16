@@ -369,26 +369,56 @@ fun OnlineComicScreen(
                         }
                     }
 
-                    // 继续阅读：有阅读位置时显示，点击直接跳到上次阅读的章节和页码
-                    val position = state.position
-                    if (position != null && onContinueReading != null) {
-                        item(span = { GridItemSpan(maxLineSpan) }) {
-                            val chapterTitle =
-                                chapters.firstOrNull { it.chapterId == position.chapterId }?.title
-                            val label =
-                                buildString {
-                                    append("继续阅读")
-                                    if (chapterTitle != null) append(" · $chapterTitle")
-                                    append(" · 第 ${position.pageIndex + 1} 页")
+                    // 阅读入口：有进度则继续阅读，否则从第一章开始
+                    when (
+                        val readingEntry = onlineComicReadingEntry(state.position, chapters)
+                    ) {
+                        is OnlineComicReadingEntry.Continue -> {
+                            val continueReading = onContinueReading
+                            if (continueReading != null) {
+                                item(span = { GridItemSpan(maxLineSpan) }) {
+                                    val position = readingEntry.position
+                                    val chapterTitle =
+                                        chapters.firstOrNull { it.chapterId == position.chapterId }
+                                            ?.title
+                                    val label =
+                                        buildString {
+                                            append("继续阅读")
+                                            if (chapterTitle != null) append(" · $chapterTitle")
+                                            append(" · 第 ${position.pageIndex + 1} 页")
+                                        }
+                                    Button(
+                                        onClick = { continueReading(position) },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        shape = RoundedCornerShape(10.dp),
+                                    ) {
+                                        Text(
+                                            text = label,
+                                            style = MaterialTheme.typography.labelLarge,
+                                        )
+                                    }
                                 }
-                            Button(
-                                onClick = { onContinueReading(position) },
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(10.dp),
-                            ) {
-                                Text(text = label, style = MaterialTheme.typography.labelLarge)
                             }
                         }
+                        is OnlineComicReadingEntry.Start ->
+                            item(span = { GridItemSpan(maxLineSpan) }) {
+                                Button(
+                                    onClick = {
+                                        onOpenChapter(
+                                            readingEntry.chapter,
+                                            viewModel.chapterContext(readingEntry.chapter),
+                                        )
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(10.dp),
+                                ) {
+                                    Text(
+                                        text = "立即阅读",
+                                        style = MaterialTheme.typography.labelLarge,
+                                    )
+                                }
+                            }
+                        null -> Unit
                     }
 
                     // Metadata Tag Chips
